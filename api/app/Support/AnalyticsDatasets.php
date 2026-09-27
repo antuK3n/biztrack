@@ -33,9 +33,8 @@ final class AnalyticsDatasets
     /**
      * The six offices side by side, rather than one office at a time.
      *
-     * Its own dataset and not more keys on PROCESSING_TIME, for the reason that
-     * keeps RENEWAL_MODEL apart from RENEWAL_RISK: the two are different KINDS
-     * of claim. Processing Time asks whether an office is behaving the way that
+     * Its own dataset and not more keys on PROCESSING_TIME, because the two are
+     * different KINDS of claim. Processing Time asks whether an office is behaving the way that
      * office normally behaves, which every office answers in its own fitted
      * units; this asks how the offices compare, which needs one unit for all of
      * them. Sharing a payload would put two answers to two questions under one
@@ -43,21 +42,12 @@ final class AnalyticsDatasets
      */
     public const OFFICE_PERFORMANCE = 'office_performance';
 
-    public const RENEWAL_RISK = 'renewal_risk';
-
-    public const BUSINESS_GROWTH = 'business_growth';
-
-    /**
-     * The fitted companion to RENEWAL_RISK, kept as its own dataset.
-     *
-     * Not extra keys on the renewal-risk payload, because the two are different
-     * KINDS of claim and a reader has to be able to tell which is which. The
-     * rule score is a transparent weighted ranking that never needed evidence;
-     * the fitted figure is a claim about the world that is worthless without the
-     * AUC, Brier and calibration readings attached. They are shown side by side
-     * and stored apart. See RenewalModelAnalytics.
+    /*
+     * RENEWAL_RISK, RENEWAL_MODEL and BUSINESS_GROWTH were registered here and
+     * went with their screens (checklist 2026-09-27, item 6). Their stored
+     * snapshots are not deleted by this change; nothing reads them, and the
+     * refresh no longer rewrites them.
      */
-    public const RENEWAL_MODEL = 'renewal_model';
 
     /**
      * @return array<string, array{
@@ -74,9 +64,11 @@ final class AnalyticsDatasets
                 'label' => 'Analytics Dashboard',
                 'dataset' => static fn (array $p): array => DashboardAnalytics::dataset(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                    $p['office'] ?? null,
                 ),
                 'build' => static fn (array $p): array => DashboardAnalytics::build(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                    $p['office'] ?? null,
                 ),
                 'defaults' => ['months' => DashboardAnalytics::DEFAULT_WINDOW_MONTHS],
             ],
@@ -109,73 +101,6 @@ final class AnalyticsDatasets
                 ),
                 'defaults' => ['weeks' => OfficePerformanceAnalytics::DEFAULT_WINDOW_WEEKS],
             ],
-
-            self::RENEWAL_RISK => [
-                'label' => 'Renewal Risk Prediction',
-                'dataset' => static fn (array $p): array => RenewalRiskAnalytics::dataset(
-                    $p['days'] ?? RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
-                    $p['limit'] ?? RenewalRiskAnalytics::DEFAULT_LIMIT,
-                ),
-                'build' => static fn (array $p): array => RenewalRiskAnalytics::build(
-                    $p['days'] ?? RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
-                    $p['limit'] ?? RenewalRiskAnalytics::DEFAULT_LIMIT,
-                ),
-                'defaults' => [
-                    'days' => RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
-                    'limit' => RenewalRiskAnalytics::DEFAULT_LIMIT,
-                ],
-            ],
-
-            self::RENEWAL_MODEL => [
-                'label' => 'Renewal Risk — fitted model',
-                'dataset' => static fn (array $p): array => RenewalModelAnalytics::dataset(
-                    $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
-                    $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
-                ),
-                /*
-                 * The only `local` in this registry that does not compute the
-                 * statistics, because there is no honest way for it to. Fitting a
-                 * generalised linear model a second time in PHP so the two copies
-                 * can disagree is not a fallback, and reporting the rule score
-                 * under a probability heading when R is down would be the one
-                 * outright lie this feature is capable of telling. It returns the
-                 * same keys with `available => false` and a reason instead.
-                 */
-                'build' => static fn (array $p): array => RenewalModelAnalytics::build(
-                    $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
-                    $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
-                ),
-                'defaults' => [
-                    'days' => RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
-                    'limit' => RenewalModelAnalytics::DEFAULT_LIMIT,
-                ],
-            ],
-
-            self::BUSINESS_GROWTH => [
-                /*
-                 * "Business Growth Analysis" is the spec's §4 heading and the
-                 * client's explicit instruction: 'Proper follow terms (e.g.,
-                 * "Lifecycle" should be "Business Growth Analysis")'.
-                 *
-                 * This label said "Business Lifecycle Monitoring", taken from
-                 * mockup 122 on the reasoning that the mockup was the newer
-                 * document. That reasoning simply expired — the spec carrying
-                 * "Business Growth Analysis" is newer still, and the client
-                 * settled it directly. The constant stays BUSINESS_GROWTH.
-                 *
-                 * This label is not decoration: an e2e test asserts the screen's
-                 * h1 matches what this sends back, because a half-applied rename
-                 * is how a screen and its own payload drift apart.
-                 */
-                'label' => 'Business Growth Analysis',
-                'dataset' => static fn (array $p): array => BusinessGrowthAnalytics::dataset(
-                    $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
-                ),
-                'build' => static fn (array $p): array => BusinessGrowthAnalytics::build(
-                    $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
-                ),
-                'defaults' => ['months' => BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS],
-            ],
         ];
     }
 
@@ -201,12 +126,32 @@ final class AnalyticsDatasets
     /**
      * The parameter combinations `analytics:refresh` precomputes for a dataset.
      *
-     * @return list<array<string, int>>
+     * @return list<array<string, int|string>>
      */
     public static function variants(string $dataset): array
     {
         $variants = (array) config("analytics.variants.{$dataset}", []);
+        $variants = $variants === [] ? [self::get($dataset)['defaults']] : array_values($variants);
 
-        return $variants === [] ? [self::get($dataset)['defaults']] : array_values($variants);
+        /*
+         * The dashboard is also offered per office (checklist 2026-09-27, item 1),
+         * and the rule in config/analytics.php — if a screen offers it, it is
+         * precomputed — applies to the office menu as much as to the window
+         * menu. The offices are read from the register, not listed in config, so
+         * every window is multiplied out here: the whole city, then each office.
+         */
+        if ($dataset === self::DASHBOARD) {
+            $expanded = [];
+            foreach ($variants as $variant) {
+                $expanded[] = $variant;
+                foreach (AnalyticsOffice::codes() as $office) {
+                    $expanded[] = $variant + ['office' => $office];
+                }
+            }
+
+            return $expanded;
+        }
+
+        return $variants;
     }
 }

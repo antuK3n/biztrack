@@ -249,19 +249,15 @@ test.describe('who may open Office Performance', () => {
   test.describe('as the super admin', () => {
     test.use({ storageState: SUPER_ADMIN_SESSION })
 
-    test('the rail lands on it and the tab strip reaches Processing Time', async ({ page }) => {
-      await page.goto('/staff/dashboard')
-
-      const analytics = page.locator('aside').getByRole('link', { name: 'Analytics', exact: true })
-      await expect(analytics).toHaveAttribute('href', SCREEN.path)
-      await analytics.click()
+    test('the tab strip reaches it, and from it Processing Time', async ({ page }) => {
+      /*
+       * The rail used to land here. Since checklist 2026-09-27 item 1 the super
+       * admin reads the one dashboard every office reads, and lands on that;
+       * Office Performance is a tab away, and Processing Time one more.
+       */
+      await page.goto(SCREEN.path)
       await waitForAnalytics(page, SCREEN.title)
 
-      /*
-       * The second screen is one tab away, which is the arrangement that
-       * justifies the rail pointing here rather than there: this answers "which
-       * office", Processing Time answers "what has that office been doing".
-       */
       const strip = page.getByRole('navigation', { name: 'Analytics sections' })
       await strip.getByRole('link', { name: 'Processing Time' }).click()
       await waitForAnalytics(page, 'Permit Processing Time Monitoring')

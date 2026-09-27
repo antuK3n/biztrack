@@ -211,9 +211,9 @@ class Business extends Model
     /**
      * The moderation status that also reads as a closure.
      *
-     * Named rather than spelled out because BusinessGrowthAnalytics now counts
-     * it as one, and a typo in a string literal over there would quietly empty
-     * the Business Closure Trend instead of failing. Suspension deliberately
+     * Named rather than spelled out because DashboardAnalytics counts it as one
+     * (New and Closed Businesses), and a typo in a string literal over there
+     * would quietly empty the closures line instead of failing. Suspension deliberately
      * gets no such constant: it is temporary and is not a closure.
      */
     public const STATUS_BLACKLISTED = 'blacklisted';

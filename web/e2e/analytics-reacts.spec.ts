@@ -161,7 +161,13 @@ function numeric(text: string): number {
 
 const DECISIONS = 'Decision outcomes for applications filed this month, with the approval rate'
 const VOLUME = 'Applications filed this month by transaction type'
-const BARANGAYS = 'Top Growing Barangays'
+/*
+ * The control panel: registrations and closures per month. It was Business
+ * Growth's Top Growing Barangays until that screen was removed (checklist
+ * 2026-09-27, item 6); this is the same register-of-businesses question and
+ * now sits on the dashboard itself.
+ */
+const BARANGAYS = 'Businesses registered and businesses closed, month by month'
 
 /**
  * The Decision Outcomes donut as a plain count per outcome.
@@ -199,7 +205,13 @@ function kpi(page: Page, label: string) {
 
 /** Open a BPLO analytics screen and wait for its charts to have drawn. */
 async function openDashboard(page: Page) {
-  await page.goto('/staff/analytics')
+  /*
+   * All offices, not BPLO's own: the filing this test rejects may not have been
+   * routed to any office yet (routing follows payment), and only the whole-city
+   * view counts an unrouted filing. The office rides in the URL so the reload
+   * after the refresh keeps it.
+   */
+  await page.goto('/staff/analytics?office=all')
   await waitForAnalytics(page, 'Analytics Dashboard')
   // The frame renders after the payload resolves, so the table is the ready
   // signal for the figures specifically rather than for the page.
@@ -242,21 +254,17 @@ test.describe('the dashboard answers to the register', () => {
     await waitForAnalytics(page, 'Analytics Dashboard')
     await expect(page.getByRole('table', { name: DECISIONS })).toHaveCount(1)
 
+    const barangaysBefore = await figures(page, BARANGAYS)
     const before = await decisions(page)
     const volumeBefore = await figures(page, VOLUME)
     const allTimeBefore = numeric(await kpi(page, 'Applications (all time)').innerText())
     const thisMonthBefore = numeric(await kpi(page, 'This Month').innerText())
 
     /*
-     * A second dataset entirely, read from the second screen. The refresh
-     * recomputes all five datasets in one pass, so a dashboard that "responds"
-     * by re-deriving noise would show up here as barangay registration counts
-     * shifting under a decision that touched no business. This is the control.
+     * The control, read above: registrations and closures per month. A
+     * dashboard that "responds" by re-deriving noise would show up there as
+     * counts shifting under a decision that touched no business.
      */
-    await page.goto('/staff/analytics/business-growth')
-    await waitForAnalytics(page, 'Business Growth Analysis')
-    await expect(page.getByRole('table', { name: BARANGAYS })).toHaveCount(1)
-    const barangaysBefore = await figures(page, BARANGAYS)
 
     /*
      * ── The action ─────────────────────────────────────────────────────────
@@ -276,9 +284,9 @@ test.describe('the dashboard answers to the register', () => {
      *    `month_start` (DashboardAnalytics::decisionFacts). A July filing would
      *    be rejected for real and correctly change nothing on this panel, which
      *    would read exactly like the bug being hunted.
-     *  - TYPE `new`, never a renewal. Business Renewal Performance on the growth
-     *    screen is fitted on renewal outcomes, so rejecting a renewal could
-     *    legitimately move the dataset being held fixed as the control.
+     *  - TYPE `new`, never a renewal. (Kept from when the control was the
+     *    renewal-fitted growth screen; harmless now, and it keeps the case
+     *    simple.)
      *
      * Every live status is searched rather than one status alone, and that is
      * about the test not running out of register. This is a one-way action —
@@ -400,12 +408,10 @@ test.describe('the dashboard answers to the register', () => {
       'Application Volume counts filings by type and cannot know a decision was made',
     ).toEqual(volumeBefore)
 
-    await page.goto('/staff/analytics/business-growth')
-    await waitForAnalytics(page, 'Business Growth Analysis')
     await expect(page.getByRole('table', { name: BARANGAYS })).toHaveCount(1)
     expect(
       await figures(page, BARANGAYS),
-      'a decision on one filing moved business registration counts in every barangay',
+      'a decision on one filing moved the monthly registration and closure counts',
     ).toEqual(barangaysBefore)
   })
 })
@@ -841,12 +847,11 @@ test.describe('rejection is deliberately not gated', () => {
 /**
  * Every screen states its numbers somewhere a reader can get at.
  *
- * Any <table>, not `figure table`: the three screens do not agree on the
- * container and they are right not to. The dashboard and the growth screen wrap
- * a drawing and its sr-only twin in a <figure>; Renewal Risk's watchlist and
- * review list are tables in their own right with nothing drawn beside them, so
- * there is no figure to be inside. Both are the reading a screen reader gets,
- * which is the only property this assertion is about.
+ * Any <table>, not `figure table`: the screens do not agree on the container
+ * and they are right not to. A chart wraps a drawing and its sr-only twin in a
+ * <figure>; the expiry table is a table in its own right with nothing drawn
+ * beside it. Both are the reading a screen reader gets, which is the only
+ * property this assertion is about.
  */
 async function assertStatesFigures(page: Page, path: string, heading: string) {
   await page.goto(path)
@@ -860,20 +865,12 @@ async function assertStatesFigures(page: Page, path: string, heading: string) {
   expect(numbers.length, `${path} renders tables but not one figure in them`).toBeGreaterThan(0)
 }
 
-test.describe('the three screens BPLO is allowed, and the one it is not', () => {
+test.describe('the screens BPLO is allowed, and the one it is not', () => {
   test.use({ storageState: BPLO_SESSION })
 
-  const SCREENS = [
-    { path: '/staff/analytics', title: 'Analytics Dashboard' },
-    { path: '/staff/analytics/renewal-risk', title: 'Renewal Risk Prediction' },
-    { path: '/staff/analytics/business-growth', title: 'Business Growth Analysis' },
-  ] as const
-
-  for (const screen of SCREENS) {
-    test(`${screen.title} arrives with figures on it`, async ({ page }) => {
-      await assertStatesFigures(page, screen.path, screen.title)
-    })
-  }
+  test('the Analytics Dashboard arrives with figures on it', async ({ page }) => {
+    await assertStatesFigures(page, '/staff/analytics', 'Analytics Dashboard')
+  })
 
   test('Permit Processing Time Monitoring is not BPLO’s to open', async ({ page }) => {
     await page.goto('/staff/analytics/processing-time')
@@ -884,7 +881,12 @@ test.describe('the three screens BPLO is allowed, and the one it is not', () => 
   })
 })
 
-test.describe('the one screen the super admin is allowed, and the three they are not', () => {
+/*
+ * The super admin used to be kept out of the dashboard. Since checklist
+ * 2026-09-27 item 1 the dashboard is every office's and the super admin, like
+ * BPLO, may view all offices — so both screens arrive with figures now.
+ */
+test.describe('the super admin reads the oversight screen and the dashboard', () => {
   test.use({ storageState: SUPER_ADMIN_SESSION })
 
   test('Permit Processing Time Monitoring arrives with figures on it', async ({ page }) => {
@@ -895,16 +897,7 @@ test.describe('the one screen the super admin is allowed, and the three they are
     )
   })
 
-  test('the three BPLO dashboards are out of reach', async ({ page }) => {
-    for (const path of [
-      '/staff/analytics',
-      '/staff/analytics/renewal-risk',
-      '/staff/analytics/business-growth',
-    ]) {
-      await page.goto(path)
-      await expect(page, `${path} let the super admin in`).toHaveURL(/\/staff\/dashboard$/, {
-        timeout: 30_000,
-      })
-    }
+  test('the Analytics Dashboard arrives with figures on it', async ({ page }) => {
+    await assertStatesFigures(page, '/admin/analytics', 'Analytics Dashboard')
   })
 })

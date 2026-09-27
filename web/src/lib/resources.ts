@@ -2,6 +2,11 @@ import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
 import type {
+  LguReport,
+  ReportKey,
+  ReportListItem,
+  AnalyticsScope,
+  ScopedComputed,
   AdminBusiness,
   AdminCaseload,
   AdminRole,
@@ -22,7 +27,6 @@ import type {
   Business,
   AnalyticsProvenance,
   AnalyticsRefreshResult,
-  BusinessGrowthReport,
   Computed,
   BusinessStatus,
   BusinessPayload,
@@ -57,14 +61,9 @@ import type {
   PrefillResult,
   ProcessingTimeReport,
   PsicCode,
-  RenewalReminderResult,
-  RenewalModelReport,
-  RenewalRiskReport,
   CreateRequirementPayload,
   OfficeStatusOption,
   RequestStatus,
-  RiskAction,
-  RiskBand,
   TimelineEntry,
   User,
   ReleasedCaseload,
@@ -1274,44 +1273,13 @@ export const notifications = {
 
 /* ── Analytics ────────────────────────────────────────────────────────── */
 
-/**
- * The Renewal Risk table's server-side filter and page.
- *
- * Every field is optional and omitted when unset, which is load-bearing rather
- * than tidy: the analytics snapshots are keyed on the parameters, so an
- * unfiltered request has to send exactly `days` and `limit` or it stops matching
- * the precomputed snapshot and the default screen pays to recompute on every
- * load. axios omits `undefined` params, so leaving a field out is how that is
- * expressed.
- */
-export interface RenewalRiskQuery {
-  /** Barangay name, exactly as the payload's `barangays` list spells it. */
-  barangay?: string
-  band?: RiskBand
-  action?: RiskAction
-  /**
-   * Free text over business name and permit number, matched server-side.
-   *
-   * Sent rather than applied here for the same reason as the filters below,
-   * only more sharply: the browser holds one page of a set that runs to
-   * thousands, so a term filtered in the browser would search 25 rows and
-   * answer "no such business" about a register that has it on page ninety.
-   *
-   * Unlike the selects, "all" is a real term here — a text box says "no filter"
-   * by being empty, so send `undefined` rather than a sentinel.
-   */
-  search?: string
-  /** First row of the page, counted over the filtered set. */
-  offset?: number
-}
-
 export const analytics = {
   summary: () => unwrap<AnalyticsSummary>(api.get('/analytics/summary')),
   /** Download the summary as a CSV report (Bearer blob; v2). */
   export: (filename = 'biztrack-analytics.csv') => downloadBlob('/analytics/export', filename),
 
   /*
-   * The three precomputed screens. Each resolves to { data, meta }: the
+   * The precomputed screens. Each resolves to { data, meta }: the
    * statistics plus when they were computed, and whether that was a stored
    * refresh or this very request. Read the meta onto the screen — these are
    * batch figures, as fresh as the last `analytics:refresh` and no fresher,
@@ -1325,10 +1293,44 @@ export const analytics = {
    * decision outcomes all describe the same month and have to reconcile, which
    * they cannot be relied on to do if each arrives from a different refresh.
    */
-  dashboard: (months: number) =>
-    unwrapComputed<DashboardReport>(api.get('/analytics/dashboard', { params: { months } })),
-  dashboardReport: (months: number) =>
-    downloadBlob(`/analytics/dashboard/report?months=${months}`, 'analytics-dashboard.pdf'),
+  /*
+   * `office` is a department code, 'all', or undefined for "the server's
+   * default for me" — the reader's own office, or every office for the super
+   * admin. It is a request, not a filter: an office account asking for another
+   * office gets a 403, and the answer's `scope` says whose figures came back.
+   */
+  dashboard: async (months: number, office?: string): Promise<ScopedComputed<DashboardReport>> => {
+    const res = await api.get<{ data: DashboardReport; meta: AnalyticsProvenance; scope: AnalyticsScope }>(
+      '/analytics/dashboard',
+      { params: { months, office } },
+    )
+    return { data: res.data.data, meta: res.data.meta, scope: res.data.scope }
+  },
+  dashboardReport: (months: number, office?: string) =>
+    downloadBlob(
+      `/analytics/dashboard/report?months=${months}${office ? `&office=${encodeURIComponent(office)}` : ''}`,
+      `analytics-dashboard${office && office !== 'all' ? `-${office.toLowerCase()}` : ''}.pdf`,
+    ),
+
+  /*
+   * Report Generation. `office` follows the dashboard's rule: a request, not a
+   * filter — the server answers an office account with its own office and
+   * refuses any other.
+   */
+  reports: async (office?: string): Promise<{ data: ReportListItem[]; scope: AnalyticsScope }> => {
+    const res = await api.get<{ data: ReportListItem[]; scope: AnalyticsScope }>('/analytics/reports', {
+      params: { office },
+    })
+    return res.data
+  },
+  report: (key: ReportKey, from: string, to: string, office?: string) =>
+    unwrap<LguReport>(api.get(`/analytics/reports/${key}`, { params: { from, to, office } })),
+  reportCsv: (key: ReportKey, from: string, to: string, office?: string) => {
+    const query = new URLSearchParams({ from, to })
+    if (office) query.set('office', office)
+    const suffix = office && office !== 'all' ? `-${office.toLowerCase()}` : ''
+    return downloadBlob(`/analytics/reports/${key}/csv?${query.toString()}`, `${key}${suffix}-${from}-to-${to}.csv`)
+  },
 
   /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>
@@ -1356,68 +1358,6 @@ export const analytics = {
       `/analytics/processing-time/report?weeks=${weeks}`,
       'processing-time-monitoring.pdf',
     ),
-
-  businessGrowth: (months: number) =>
-    unwrapComputed<BusinessGrowthReport>(
-      api.get('/analytics/business-growth', { params: { months } }),
-    ),
-  businessGrowthReport: (months: number) =>
-    downloadBlob(
-      `/analytics/business-growth/report?months=${months}`,
-      'business-growth-analysis.pdf',
-    ),
-
-  /**
-   * Renewal Risk: permits near expiry ranked by a weighted rule score.
-   * `score` is out of 100 and is not a probability — see RenewalRiskReport.
-   *
-   * The filters go to the server rather than being applied to the rows that
-   * come back, and here that is not a preference. The payload is the leading
-   * `limit` rows BY SCORE; on this register the leading twenty-five are all
-   * High, so filtering them in the browser for "Low risk" would return nothing
-   * and report that the city has no low-risk businesses. It has thousands. The
-   * same reasoning as the officer queue — see the note in QueuePage.
-   */
-  renewalRisk: (days: number, limit?: number, view?: RenewalRiskQuery) =>
-    unwrapComputed<RenewalRiskReport>(
-      api.get('/analytics/renewal-risk', { params: { days, limit, ...view } }),
-    ),
-  renewalRiskReport: (days: number) =>
-    downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
-
-  /**
-   * The fitted model shown beside that watchlist.
-   *
-   * Takes no arguments, and that is deliberate rather than an omission. The
-   * horizon and the filters narrow which permits a reader is looking at; they do
-   * not refit a regression, and the training set is the whole of permit history
-   * either way. Passing them through would key to snapshots that can never exist
-   * and serve the "no model" fallback for every filtered view, which a reader
-   * would correctly read as an outage. See AnalyticsController::renewalModel().
-   *
-   * Resolves to `available: false` with a reason when the register holds too
-   * little settled history to fit on, or when the fit itself found nothing. The
-   * screen renders that state rather than a number, because there is no honest
-   * number to render.
-   */
-  renewalModel: () => unwrapComputed<RenewalModelReport>(api.get('/analytics/renewal-model')),
-
-  /**
-   * Send one renewal follow-up to a business owner, now.
-   *
-   * Keyed on the permit and not the business: a business commonly holds three
-   * permits expiring on three dates and the watchlist has a row per permit, so
-   * the row the officer pressed is the fact that has to travel.
-   *
-   * The server refuses a second send on the same permit the same day and says
-   * so through `already_sent` — the guard is a unique index rather than a flag
-   * in this tab, so it survives a reload, a second officer, and a replayed
-   * request. Callers must still keep the button from firing twice while one is
-   * in flight; that is about not making two requests, not about not sending two
-   * messages.
-   */
-  sendRenewalReminder: (permitId: number) =>
-    unwrap<RenewalReminderResult>(api.post(`/analytics/renewal-risk/${permitId}/remind`)),
 
   /**
    * Recompute and re-store every figure set now, rather than waiting for 03:00.

@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
@@ -379,72 +380,50 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/summary', [AnalyticsController::class, 'summary']);
         Route::get('analytics/export', [AnalyticsController::class, 'export']);
         /*
-         * Features 6/7 moved out of the standalone r/ project and into the site.
-         * They stay on analytics.view because they aggregate every office's
-         * assignments — an office reviewer reading these would see round the
-         * scoping in ApplicationVisibility. Checklist #78 added BPLO to that
-         * permission; BPLO is the one office role that already holds
-         * application.view_any_office, so the boundary is not new to it.
-         */
-        /*
-         * The Analytics Dashboard (spec §1). Same permission and the same reason:
-         * these panels count every office's filings, decisions, inspections and
-         * permits, and the barangay and line-of-business rankings amount to a
-         * register-wide summary.
+         * The Analytics Dashboard (spec §1), one screen for every office
+         * (checklist 2026-09-27, item 1).
+         *
+         * `analytics.view` is on every office admin, BPLO and the super admin.
+         * It is NOT a register-wide read any more: the controller asks
+         * App\Support\AnalyticsOffice which office the request is answered for,
+         * and an office account gets its own office or a 403. Only readers with
+         * `application.view_any_office` may name another office or "all".
+         * summary/export above are register-wide and refuse everyone else.
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
-        Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
-        Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
         /*
-         * Renewal Risk reads every business's permits, filings, findings and
-         * payments to rank them, so it belongs on the same permission as the
-         * rest — a barangay-level watchlist of who is about to fall out of
-         * compliance is not an ordinary office reviewer's business.
+         * Report Generation (checklist 2026-09-27, item 7): five LGU-format
+         * reports over a chosen period, as JSON for the printable screen and as
+         * CSV. Same permission and the same office boundary as the dashboard —
+         * ReportController asks AnalyticsOffice, as AnalyticsController does.
          */
-        Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
-        Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
+        Route::get('analytics/reports', [ReportController::class, 'index']);
+        Route::get('analytics/reports/{report}', [ReportController::class, 'show'])
+            ->where('report', '[a-z-]+');
+        Route::get('analytics/reports/{report}/csv', [ReportController::class, 'csv'])
+            ->where('report', '[a-z-]+');
         /*
-         * The fitted model shown beside that watchlist. Same permission and the
-         * same reader, deliberately: it is the same screen, and a reader trusted
-         * with the rule score is the reader who needs to see how far the fitted
-         * figure beside it can be trusted.
+         * Business Growth Analysis and Renewal Risk Prediction lived here, with
+         * their PDF reports, the fitted renewal model and the per-permit
+         * follow-up button. All six routes went with the two screens
+         * (checklist 2026-09-27, "Manage Approved Permits", item 6). What was
+         * worth keeping moved onto the dashboard payload — permits approaching
+         * expiry and new-versus-closed businesses per month — so it is served
+         * by `analytics/dashboard` above. To bring a screen back, restore its
+         * route, controller method, AnalyticsDatasets entry and Support class
+         * from git history together; none of them works alone.
          */
-        Route::get('analytics/renewal-model', [AnalyticsController::class, 'renewalModel']);
-        /*
-         * The Send Reminder / Immediate Follow-up button on that screen. The
-         * only route in this file that sends a message to a citizen on an
-         * officer's say-so, which is why three things are true of it:
-         *
-         *  - **It sits on `analytics.view`, not on a notification permission.**
-         *    The authority being exercised is "I have read the watchlist and
-         *    this business needs chasing", and the watchlist is what
-         *    analytics.view opens. Nobody who cannot see the row should be able
-         *    to act on it — and the super admin, which no longer holds this
-         *    permission, must not acquire it here by the back door.
-         *  - **Keyed on the permit, not the business.** A business commonly
-         *    holds three permits expiring on three dates and the watchlist has
-         *    a row per permit; the message quotes a permit number and an expiry
-         *    date, so a business-keyed route would have to guess which row the
-         *    officer was looking at.
-         *  - **Throttled.** Not for load — one send is one notification row —
-         *    but because the far end is a real person's phone. Twenty a minute
-         *    is more follow-ups than an office makes in an hour and still stops
-         *    a stuck key becoming a hundred messages. The per-permit-per-day
-         *    ledger guard in the controller is the real protection against a
-         *    double send; this is the blunt outer one.
-         */
-        Route::post('analytics/renewal-risk/{permit}/remind', [AnalyticsController::class, 'remindRenewal'])
-            ->middleware('throttle:20,1');
 
         /*
          * Manual refresh, for when waiting for the nightly run will not do — a
          * demo, or an officer who has just filed something and wants the figures
          * to include it.
          *
-         * Throttled because one call recomputes the whole register: a year of
-         * review history, the full renewal watchlist and a fitted model, over
-         * twenty dataset variants and a second or two of query and arithmetic.
+         * Throttled because one call recomputes the whole register: every
+         * dashboard window for the city and for each office, plus the two
+         * oversight screens — a few dozen variants and a few seconds of query
+         * and arithmetic.
          * It used to push all of that to a separate R service over HTTP; the
          * work is now in-process, which removes the network but not the cost.
          * Holding it to a few calls a minute stops a held-down button turning
