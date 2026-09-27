@@ -1,9 +1,7 @@
 <?php
 
-use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
 use App\Support\ProcessingTimeAnalytics;
-use App\Support\RenewalRiskAnalytics;
 
 /*
  * ── WHAT THIS FILE USED TO BE, AND WHY IT IS STILL HERE ─────────────────────
@@ -56,9 +54,7 @@ function goldenDatasets(): array
 {
     return [
         ['processing-time', ProcessingTimeAnalytics::compute(...)],
-        ['renewal-risk', RenewalRiskAnalytics::compute(...)],
         ['dashboard', DashboardAnalytics::compute(...)],
-        ['growth-lifecycle', BusinessGrowthAnalytics::compute(...)],
     ];
 }
 
@@ -168,33 +164,6 @@ it('covers charted, thin, unchartable and flagged departments', function () {
     expect($byCode['CHO']['trend']['drift_flagged'])->toBeTrue();
 });
 
-it('covers every renewal-risk band and scores every permit it lists', function () {
-    $report = goldenComputed('renewal-risk');
-
-    expect(count($report['at_risk']))->toBe($report['scored_permits']);
-
-    foreach (['high', 'moderate', 'low'] as $band) {
-        expect($report['counts'][$band])->toBeGreaterThan(0, "No {$band}-band permit in the fixture.");
-    }
-
-    $byBusiness = array_column($report['at_risk'], null, 'business');
-
-    // A permit not yet due must not be scored on renewal progress: there is
-    // nothing it has failed to start.
-    $notDue = collect($byBusiness['Not yet due']['drivers'])->firstWhere('rule', 'progress');
-    expect($notDue)->toBeNull('A permit not yet due must not score on renewal progress.');
-
-    $punctuality = collect($byBusiness['Punctuality 1/8']['drivers'])->firstWhere('rule', 'punctuality');
-    expect($punctuality['points'])->toBe(2);
-
-    expect($byBusiness['Unknown stage']['renewal_stage'])->toBe('cancelled');
-    expect(collect($byBusiness['Unknown stage']['drivers'])->firstWhere('rule', 'progress')['points'])->toBe(25);
-
-    // The rule score is a weighted ranking and is never presented as a
-    // probability. Only the fitted model may claim that word.
-    expect($report['methodology'])->toContain('not a probability');
-});
-
 it('covers the dashboard branches where a null and a zero are different things', function () {
     $report = goldenComputed('dashboard');
 
@@ -270,53 +239,4 @@ it('covers the dashboard branches where a null and a zero are different things',
     expect($report['map']['points'][3]['barangay'])->toBeNull();
     expect($report['map']['plotted'])->toBe(4);
     expect(array_sum(array_column($report['map']['by_barangay'], 'businesses')))->toBe(3);
-});
-
-it('covers cohort survival including a cohort with nothing yet to measure', function () {
-    $survival = goldenComputed('growth-lifecycle')['cohort_survival'];
-
-    $cohorts = array_column($survival['cohorts'], null, 'cohort');
-
-    expect($cohorts['2023']['points'][0]['survival'])->toEqual(80.0);
-    expect($cohorts['2023']['points'][1]['at_risk'])->toBe(6);
-    expect($cohorts['2023']['points'][1]['survival'])->toEqual(53.3);
-    expect($cohorts['2024']['points'][0]['survival'])->toEqual(75.0);
-
-    // A cohort too young to have reached its first renewal has no survival
-    // figure at all — not 100%, which would read as everyone having renewed.
-    expect($cohorts['2026']['max_cycle'])->toBe(0);
-    expect($cohorts['2026']['survival'])->toBeNull();
-    expect($cohorts['2026']['points'])->toBe([]);
-
-    // Survival is cumulative and can only fall.
-    $previous = 100.0;
-    foreach ($survival['points'] as $point) {
-        expect($point['survival'])->toBeLessThanOrEqual($previous);
-        $previous = $point['survival'];
-    }
-
-    expect($survival['methodology'])->toContain('not a forecast');
-});
-
-it('covers the lifecycle branches that rank by change rather than by size', function () {
-    $report = goldenComputed('growth-lifecycle');
-
-    expect($report['growth_rate'])->toEqual(25.0);
-
-    $barangays = array_column($report['top_barangays'], 'barangay');
-    expect(array_slice($barangays, 0, 2))->toBe(['Acacia', 'Bulacan']);
-    expect(array_column($report['top_barangays'], 'delta')[0])->toBe(6);
-
-    // Growth from a prior of zero is undefined — not infinite, not 100%. The
-    // barangay still ranks on its delta, which is the whole reason this ranking
-    // is by change rather than by rate.
-    $flores = collect($report['top_barangays'])->firstWhere('barangay', 'Flores');
-    expect($flores['prior'])->toBe(0);
-    expect($flores['growth_rate'])->toBeNull();
-    expect($flores['delta'])->toBe(4);
-
-    $directions = array_column($report['industry_growth'], 'direction');
-    expect($directions)->toContain('growing');
-    expect($directions)->toContain('declining');
-    expect($directions)->toContain('steady');
 });

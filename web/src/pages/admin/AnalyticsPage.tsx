@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -7,17 +8,23 @@ import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { HorizontalBars, VerticalBars } from '../../components/charts/Bars'
 import type { BarDatum } from '../../components/charts/Bars'
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   CHART_AMBER,
+  CHART_AXIS_TICK,
+  CHART_GRID,
   CHART_MUTED,
   CHART_PURPLE,
   CHART_ROYAL,
   CHART_SLATE,
   CHART_TEAL,
+  CHART_TOOLTIP,
+  ChartFrame,
 } from '../../components/charts/ChartFrame'
 import { ShareChart } from '../../components/charts/ShareChart'
 import type { ShareSlice } from '../../components/charts/ShareChart'
 import { StackedBars } from '../../components/charts/StackedBars'
+import { activePortal, portalPath } from '../../lib/api'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type {
@@ -31,7 +38,7 @@ import type {
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
-import { GenerateReportButton } from './GenerateReportButton'
+import { OfficeScope } from './OfficeScope'
 
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
@@ -694,24 +701,189 @@ function CompliancePanel({ report }: { report: DashboardReport }) {
   )
 }
 
+/* ── Permits Approaching Expiry ────────────────────────────────────────── */
+
 /*
- * ── "Permits Approaching Expiry" is not on this screen any more ─────────────
+ * Back from Renewal Risk Prediction, which was removed (checklist 2026-09-27,
+ * item 6). It is a table rather than a chart because an office reads it as a
+ * worklist — "how many sanitary permits fall due in the next 30 days" is a
+ * number to copy into a plan, not a shape to compare.
  *
- * It moved to Renewal Risk Prediction (web/src/pages/admin/RenewalRiskPage.tsx,
- * PermitLifecyclePanel), where the client asked for it, and its first column
- * became four named states — Active / Compliant, Near Expiry, Pending Renewal,
- * Overdue / Expired — instead of three overlapping 30/60/90 day windows.
- *
- * The move is the right one and it is worth saying why, because this is the sort
- * of panel that drifts back. This screen is about volumes, processing times and
- * where the city's businesses are; the expiry table is a WORKLIST, read by the
- * officer chasing renewals, and that officer already has a screen which is
- * nothing but permits running out. Two screens were describing one population.
- *
- * The dashboard payload still carries an `expiry` key. It is not read here and
- * it is not on the DashboardReport type — see the note there for why the type,
- * not the payload, is where this is enforced.
+ * The windows nest (30 ⊂ 60 ⊂ 90), exactly as the payload computes them, and the
+ * footnote says so, because a reader adding the three rows gets a figure that
+ * counts the nearest permits three times.
  */
+const PERMIT_TYPE_HEADINGS: Record<string, string> = {
+  BUSINESS: "Mayor's",
+  SANITARY: 'Sanitary',
+  FSIC: 'Fire',
+  ZONING: 'Zoning',
+  OCCUPANCY: 'Occupancy',
+  CEC: 'Environmental',
+}
+
+function ExpiryPanel({ report }: { report: DashboardReport }) {
+  const { columns, rows } = report.expiry
+
+  if (columns.length === 0) {
+    return (
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
+        No permit has been issued in this scope yet, so nothing can fall due.
+      </ProtoCard>
+    )
+  }
+
+  return (
+    <ProtoCard className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <caption className="sr-only">
+            Permits approaching expiry by window and permit type. The windows nest, so the 90-day
+            row includes the 30- and 60-day ones.
+          </caption>
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="px-4 py-2.5 font-semibold">
+                Window
+              </th>
+              {columns.map((column) => (
+                <th
+                  key={column.code}
+                  scope="col"
+                  className="px-3 py-2.5 text-right font-semibold"
+                  title={column.label}
+                >
+                  {PERMIT_TYPE_HEADINGS[column.code] ?? column.code}
+                </th>
+              ))}
+              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+                Total
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.window} className="border-b border-line/60 last:border-0">
+                <th scope="row" className="whitespace-nowrap px-4 py-2 text-[14px] font-normal text-ink">
+                  {row.expired ? 'Already expired' : `Within ${row.days} days`}
+                </th>
+                {columns.map((column) => (
+                  <td key={column.code} className="tnum px-3 py-2 text-right text-[14px] text-ink">
+                    {num(row.counts[column.code] ?? 0)}
+                  </td>
+                ))}
+                <td className="tnum px-4 py-2 text-right text-[14px] font-bold text-ink">
+                  {num(row.total)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-line px-4 py-2 text-[11px] leading-snug text-ink-muted">
+        The windows nest: a permit 20 days out is in all three. Expired permits are counted once,
+        in their own row.
+      </p>
+    </ProtoCard>
+  )
+}
+
+/* ── New and Closed Businesses ─────────────────────────────────────────── */
+
+/*
+ * From Business Growth Analysis's Closure Trend, with registrations drawn
+ * beside the closures so the line has something to be read against.
+ *
+ * Two series, told apart by more than colour: registrations are a solid royal
+ * line, closures a dashed purple one, and the legend under the chart names both
+ * with their window totals. Purple, not red — a closure is not an error
+ * (DESIGN.md, Red Means Stop).
+ */
+function monthTick(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' })
+}
+
+function MovementPanel({ report }: { report: DashboardReport }) {
+  const movement = report.business_movement
+
+  if (!movement || movement.rows.length === 0) {
+    return (
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
+        Nothing to draw yet. These figures arrive with the next refresh.
+      </ProtoCard>
+    )
+  }
+
+  const data = movement.rows.map((row) => ({ ...row, label: monthTick(row.month) }))
+
+  return (
+    <ProtoCard className="px-4 pb-3 pt-4">
+      <ChartFrame
+        title="Businesses registered and businesses closed, month by month"
+        height={190}
+        columns={['Month', 'Registered', 'Closed', 'Net']}
+        rows={data.map((row) => ({
+          header: row.label,
+          cells: [num(row.registered), num(row.closed), num(row.net)],
+        }))}
+        legend={[
+          {
+            key: 'registered',
+            label: 'Registered (solid line)',
+            value: num(movement.registered),
+            color: CHART_ROYAL,
+          },
+          {
+            key: 'closed',
+            label: 'Closed (dashed line)',
+            value: num(movement.closed),
+            color: CHART_PURPLE,
+          },
+        ]}
+        footer="A closure is a removal from the register or a blacklisting, dated when it was recorded."
+      >
+        <LineChart data={data} margin={{ top: 8, right: 14, bottom: 4, left: 0 }}>
+          <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={CHART_AXIS_TICK}
+            tickLine={false}
+            axisLine={{ stroke: CHART_GRID }}
+            minTickGap={14}
+          />
+          <YAxis
+            tick={CHART_AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            width={34}
+          />
+          <Tooltip {...CHART_TOOLTIP} />
+          <Line
+            type="monotone"
+            dataKey="registered"
+            name="Registered"
+            stroke={CHART_ROYAL}
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: CHART_ROYAL }}
+            isAnimationActive={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="closed"
+            name="Closed"
+            stroke={CHART_PURPLE}
+            strokeWidth={2.5}
+            strokeDasharray="6 4"
+            dot={{ r: 3, fill: CHART_PURPLE, strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ChartFrame>
+    </ProtoCard>
+  )
+}
 
 /* ── Ranked panels ─────────────────────────────────────────────────────── */
 
@@ -1229,16 +1401,34 @@ function LoadingState() {
 
 export function AnalyticsPage() {
   const [months, setMonths] = useState('12')
+  /*
+   * Undefined until the reader picks one: the first request asks for "my
+   * default" and the server answers with the reader's own office (or every
+   * office for the super admin). See OfficeScope for why the label is read off
+   * the response and not off this state.
+   */
+  /*
+   * In the URL, so a reload, a bookmark or the Generate Report link keeps the
+   * office. Still only a request: the server decides (AnalyticsOffice).
+   */
+  const [params, setParams] = useSearchParams()
+  const office = params.get('office') ?? undefined
+  const setOffice = (value: string) => {
+    const next = new URLSearchParams(params)
+    next.set('office', value)
+    setParams(next, { replace: true })
+  }
 
   const {
     data: result,
     loading,
     error,
     reload,
-  } = useAsync(() => analytics.dashboard(Number(months)), [months])
+  } = useAsync(() => analytics.dashboard(Number(months), office), [months, office])
 
   const data = result?.data
   const meta = result?.meta
+  const scope = result?.scope
 
   const monthWindow = data
     ? new Date(`${data.month_start}T00:00:00`).toLocaleDateString('en-PH', {
@@ -1253,7 +1443,8 @@ export function AnalyticsPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-3 pb-1">
+          <span className="flex flex-wrap items-center gap-3 pb-1">
+            {scope && <OfficeScope scope={scope} onChange={setOffice} />}
             <FilterMenu
               label="Filter the dashboard"
               fields={[
@@ -1265,7 +1456,20 @@ export function AnalyticsPage() {
                 },
               ]}
             />
-            <GenerateReportButton onGenerate={() => analytics.dashboardReport(Number(months))} />
+            {/*
+              "Generate Report" opens Report Generation (checklist 2026-09-27,
+              item 7) for the office on screen, rather than downloading this
+              dashboard as a PDF. The five LGU reports are what an office files;
+              the dashboard PDF is still there, as one option on that screen.
+            */}
+            <Link
+              to={`${portalPath(activePortal(), '/analytics/reports')}${
+                scope?.can_switch ? `?office=${scope.office ?? 'all'}` : ''
+              }`}
+              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+            >
+              Generate Report
+            </Link>
           </span>
         }
       >
@@ -1382,14 +1586,31 @@ export function AnalyticsPage() {
           </section>
 
           {/*
-            Five sections in a two-column grid, not six.
+            Full width, both: the expiry table carries a column per permit type
+            (six on this register) and was unreadable squeezed into half a row.
+          */}
+          <div className="mt-5 grid gap-y-5 *:min-w-0">
+            <section>
+              <SectionHeading note={asOf} metric="expiry">
+                Permits Approaching Expiry
+              </SectionHeading>
+              <ExpiryPanel report={data} />
+            </section>
 
-            "Permits Approaching Expiry" used to lead this block and moved to
-            Renewal Risk Prediction. Nothing was left in its place and nothing
-            needs to be: this is a plain two-column grid, so the five remaining
-            sections reflow and the last one runs to the full width. The
-            alternative — a spacer, or a panel promoted out of order to keep the
-            count even — is how a layout ends up with a hole in it.
+            <section>
+              <SectionHeading note={trailing} metric="business_movement">
+                New and Closed Businesses
+              </SectionHeading>
+              <MovementPanel report={data} />
+            </section>
+          </div>
+
+          {/*
+            Five sections in a two-column grid: a plain grid, so the last one
+            runs to the full width rather than leaving a hole. "Permits
+            Approaching Expiry" used to lead this block; it came back from
+            Renewal Risk Prediction (checklist 2026-09-27, item 6) and sits in its
+            own row above, beside New and Closed Businesses.
           */}
           <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
             <section>

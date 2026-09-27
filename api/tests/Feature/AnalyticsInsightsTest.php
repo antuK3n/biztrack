@@ -2,16 +2,13 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
-use App\Models\Barangay;
 use App\Models\Business;
-use App\Models\BusinessAddress;
 use App\Models\Department;
-use App\Models\User;
 use App\Support\Spc;
 use Carbon\CarbonImmutable;
 
 /*
- * Feature 7 (Permit Processing Time Monitoring) and Business Growth Analysis,
+ * Feature 7 (Permit Processing Time Monitoring) and the Analytics Dashboard,
  * now served by the site instead of the standalone r/ project.
  *
  * The point of these tests is that the endpoints compute from the register and
@@ -87,40 +84,7 @@ it('serves the processing time monitor to the super admin and to nobody else, BP
 it('refuses both analytics feeds to a caller with no session', function () {
     // No authAs() anywhere in this test: Sanctum::actingAs would outlive it.
     test()->getJson('/api/v1/analytics/processing-time')->assertUnauthorized();
-    test()->getJson('/api/v1/analytics/business-growth')->assertUnauthorized();
     test()->get('/api/v1/analytics/processing-time/report')->assertUnauthorized();
-    test()->get('/api/v1/analytics/business-growth/report')->assertUnauthorized();
-});
-
-it('serves business growth analysis to BPLO and not to the super admin', function () {
-    /*
-     * Spec §4 "Business Growth Analysis (Admin - BPLO)". BPLO is the issuing
-     * office that coordinates every other office's clearance and the one office
-     * role already holding application.view_any_office, so the aggregate
-     * summarises nothing it could not already open one filing at a time.
-     */
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk();
-
-    /*
-     * The super admin does NOT get this, which reads like a mistake and is not:
-     * the three operational screens (dashboard, renewal risk, business growth)
-     * were assigned to BPLO and the one oversight screen to the super admin.
-     * "Full system access" stops at a separation of duties the client asked for
-     * in writing, so the negative is asserted rather than assumed.
-     */
-    test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertForbidden();
-
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertForbidden();
-
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertForbidden();
 });
 
 it('refuses each report download to whoever does not hold that screen permission', function () {
@@ -130,7 +94,7 @@ it('refuses each report download to whoever does not hold that screen permission
         ->assertForbidden();
 
     test()->withHeaders(authAs('owner@biztrack.local'))
-        ->get('/api/v1/analytics/business-growth/report')
+        ->get('/api/v1/analytics/dashboard/report')
         ->assertForbidden();
 
     // And the two roles that each hold one of them: the PDF is the same figures
@@ -140,9 +104,6 @@ it('refuses each report download to whoever does not hold that screen permission
         ->get('/api/v1/analytics/processing-time/report')
         ->assertForbidden();
 
-    test()->withHeaders(authAs('admin@biztrack.local'))
-        ->get('/api/v1/analytics/business-growth/report')
-        ->assertForbidden();
 });
 
 /* ── Feature 7: the injected slowdown must be caught ──────────────────── */
@@ -243,172 +204,6 @@ it('ignores completions outside the requested window', function () {
     expect(collect($wide['departments'])->pluck('code'))->toContain('CENRO');
 });
 
-/* ── Business growth ──────────────────────────────────────────────────── */
-
-it('counts business lifecycle status from permits and soft deletes', function () {
-    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data');
-
-    $summary = collect($body['status_summary'])->keyBy('status');
-    expect($summary->keys()->sort()->values()->all())
-        ->toBe(['active', 'closed', 'expired', 'inactive']);
-
-    $total = Business::withTrashed()->count();
-    expect($summary->sum('count'))->toBe($total);
-    expect(round($summary->sum('share')))->toBe(100.0);
-
-    // The seeded demo register issues at least one permit that is valid today.
-    expect($summary['active']['count'])->toBeGreaterThan(0);
-});
-
-it('counts a closure in the period it happened in', function () {
-    /*
-     * assertOk() on both reads, and a null check on the month row, because this
-     * test used to take the payload straight off ->json() and index into it. When
-     * the analytics split moved this screen off the super admin, the 403 body had
-     * no `data` key, `$after` came back null, and the suite reported "Trying to
-     * access array offset on null" from a line about closure counting — an error
-     * that named neither the endpoint nor the status that caused it. A response
-     * that is read for its shape has to be asserted for its status first, or the
-     * next permission change costs another debugging pass.
-     */
-    $before = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data.closures');
-
-    Business::firstOrFail()->delete();
-
-    $after = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data');
-
-    expect($after['closures'])->toBe($before + 1);
-
-    $month = CarbonImmutable::now()->format('Y-m');
-    $currentMonth = collect($after['closure_trend'])->firstWhere('month', $month);
-    // The closure just made falls in this month, so the trend must carry a row
-    // for it. Saying so here means a dropped bucket reads as a dropped bucket.
-    expect($currentMonth)->not->toBeNull("The closure trend has no row for {$month}.");
-    expect($currentMonth['closures'])->toBeGreaterThan(0);
-});
-
-it('ranks barangays by the change in new registrations', function () {
-    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
-    $longos = Barangay::where('name', 'Longos')->firstOrFail();
-
-    foreach (range(1, 3) as $i) {
-        $business = Business::create([
-            'owner_user_id' => $owner->id,
-            'name' => "Growth Test Store {$i}",
-            'registration_type' => 'DTI',
-        ]);
-        BusinessAddress::create([
-            'business_id' => $business->id,
-            'line1' => "{$i} Test Street",
-            'barangay_id' => $longos->id,
-        ]);
-    }
-
-    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data');
-
-    $longosRow = collect($body['top_barangays'])->firstWhere('barangay', 'Longos');
-    expect($longosRow)->not->toBeNull();
-    expect($longosRow['registrations'])->toBeGreaterThanOrEqual(3);
-    expect($longosRow['delta'])->toBe($longosRow['registrations'] - $longosRow['prior']);
-});
-
-it('leaves the growth rate null when there is no prior period to compare against', function () {
-    // Everything the seeder creates is registered "now", so a one-month window
-    // has an empty prior month. A percentage change from zero is not a number.
-    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth?months=1')
-        ->assertOk()
-        ->json('data');
-
-    expect($body['registrations_prior'])->toBe(0);
-    expect($body['growth_rate'])->toBeNull();
-});
-
-it('reports renewal performance as a cohort survival curve, not a single ratio', function () {
-    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data.cohort_survival');
-
-    expect($body)->toHaveKeys([
-        'methodology', 'grace_days', 'businesses', 'renewals_observed',
-        'lapses', 'max_cycle', 'survival', 'points', 'cohorts',
-    ]);
-
-    // The measure must never be sold as a forecast: it describes a cohort that
-    // has already been observed.
-    expect($body['methodology'])->toContain('not a forecast');
-
-    if ($body['points'] === []) {
-        // Nothing has reached a first renewal, so there is no rate — and null is
-        // the only honest answer. A 0% here would read as total failure to renew.
-        expect($body['survival'])->toBeNull();
-        expect($body['max_cycle'])->toBe(0);
-
-        return;
-    }
-
-    // A survival curve is monotonically non-increasing by construction: it is a
-    // running product of terms that are each at most 1. A rise would mean
-    // businesses came back from a lapse, which the estimator cannot express.
-    $previous = 100.0;
-    foreach ($body['points'] as $point) {
-        expect($point['survival'])->toBeLessThanOrEqual($previous);
-        expect($point['at_risk'])->toBeGreaterThan(0);
-        expect($point['lapses'])->toBeLessThanOrEqual($point['at_risk']);
-        $previous = (float) $point['survival'];
-    }
-
-    // The headline is the last point, so the card and the curve cannot disagree.
-    expect((float) $body['survival'])->toBe((float) end($body['points'])['survival']);
-});
-
-it('leaves a cohort that has not reached a renewal without a survival rate', function () {
-    // The divide-by-zero guard the spec asks for, at cohort level: a business
-    // registered this year has had no renewal to miss, so its cohort has no rate
-    // rather than a fabricated 0% or a flattering 100%.
-    $cohorts = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data.cohort_survival.cohorts');
-
-    foreach ($cohorts as $cohort) {
-        if ($cohort['max_cycle'] === 0) {
-            expect($cohort['survival'])->toBeNull(
-                "Cohort {$cohort['cohort']} reached no renewal cycle but still reported a rate.",
-            );
-        } else {
-            expect($cohort['survival'])->not->toBeNull();
-        }
-    }
-});
-
-it('groups industry growth by PSIC line of business', function () {
-    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk()
-        ->json('data.industry_growth');
-
-    expect($body)->not->toBeEmpty();
-    foreach ($body as $row) {
-        expect($row)->toHaveKeys(['industry', 'psic_code', 'count', 'registrations', 'prior', 'delta', 'direction']);
-        expect($row['delta'])->toBe($row['registrations'] - $row['prior']);
-        expect($row['direction'])->toBeIn(['growing', 'declining', 'steady']);
-    }
-});
-
 /* ── Generate Report ──────────────────────────────────────────────────── */
 
 it('generates a processing time PDF that carries the flagged weeks', function () {
@@ -424,54 +219,6 @@ it('generates a processing time PDF that carries the flagged weeks', function ()
     expect($response->headers->get('content-type'))->toBe('application/pdf');
     expect($response->getContent())->toStartWith('%PDF-');
     expect(strlen($response->getContent()))->toBeGreaterThan(2000);
-});
-
-it('generates a business growth PDF', function () {
-    $response = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->get('/api/v1/analytics/business-growth/report')
-        ->assertOk();
-
-    expect($response->headers->get('content-type'))->toBe('application/pdf');
-    expect($response->getContent())->toStartWith('%PDF-');
-    expect(strlen($response->getContent()))->toBeGreaterThan(2000);
-});
-
-/* ── Analytics Dashboard (spec §1) ─────────────────────────────────────── */
-
-it('serves the analytics dashboard to BPLO and not to the super admin', function () {
-    /*
-     * Spec §1 "Analytics Dashboard (Admin - BPLO)", and checklist item 78 asked
-     * for exactly this screen: "the dashboard should be transferred to BPLO
-     * admin, not super admin." Transferred, not shared — BPLO gets the panels
-     * and the PDF, and the two boundaries below are what make that different
-     * from "opened to everyone above a reviewer".
-     */
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/dashboard')
-        ->assertOk();
-
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->get('/api/v1/analytics/dashboard/report')
-        ->assertOk();
-
-    // These panels count every office's filings, decisions, inspections and
-    // permits, and the barangay ranking is a register-wide summary. An ordinary
-    // office reviewer holds application.view_all but not analytics.view; letting
-    // them read this would hand them an aggregate of filings
-    // ApplicationVisibility deliberately keeps out of their queue.
-    //
-    // The super admin is on the same list, for a different reason: it holds
-    // `analytics.processing_time` only, so that the office being measured and
-    // the office measuring it do not read from the same screens.
-    foreach (['admin@biztrack.local', 'sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
-        test()->withHeaders(authAs($email))
-            ->getJson('/api/v1/analytics/dashboard')
-            ->assertForbidden();
-
-        test()->withHeaders(authAs($email))
-            ->get('/api/v1/analytics/dashboard/report')
-            ->assertForbidden();
-    }
 });
 
 it('refuses the dashboard and its report to a caller with no session', function () {

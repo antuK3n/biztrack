@@ -1564,6 +1564,73 @@ export interface Computed<T> {
   meta: AnalyticsProvenance
 }
 
+/**
+ * Whose figures an analytics response carries (checklist 2026-09-27, item 1).
+ *
+ * Decided on the server (App\Support\AnalyticsOffice): an office account is
+ * answered with its own office whatever it asks for, so `office` here is the
+ * truth about the figures and the screen must label them from it rather than
+ * from its own state. `offices` is empty unless the reader may switch.
+ */
+export interface AnalyticsScope {
+  /** Department code, or null for every office. */
+  office: string | null
+  office_name: string
+  can_switch: boolean
+  offices: { code: string; name: string }[]
+}
+
+export interface ScopedComputed<T> extends Computed<T> {
+  scope: AnalyticsScope
+}
+
+/* ── Reports (checklist 2026-09-27, item 7) ───────────────────────────────
+ *
+ * One shape for all five LGU reports (App\Support\LguReports): sections of
+ * typed columns and raw rows. The screen renders it and the CSV writes it, so
+ * neither knows which report it holds. Values are raw; null is "no figure".
+ */
+export type ReportKey =
+  | 'permits-issued'
+  | 'collections'
+  | 'businesses-by-area'
+  | 'clearances'
+  | 'pending-processing'
+
+export interface ReportListItem {
+  key: ReportKey
+  title: string
+  summary: string
+}
+
+export interface ReportColumn {
+  key: string
+  label: string
+  format: 'text' | 'count' | 'money' | 'decimal' | 'percent'
+}
+
+export type ReportRow = Record<string, string | number | null>
+
+export interface ReportSection {
+  heading: string
+  columns: ReportColumn[]
+  rows: ReportRow[]
+  total: ReportRow | null
+  note: string | null
+}
+
+export interface LguReport {
+  key: ReportKey
+  title: string
+  sections: ReportSection[]
+  period: { from: string; to: string }
+  scope: AnalyticsScope
+  generated_at: string
+  prepared_by: { name: string; position: string }
+  /** From Office Signatories; null when the office has none, or for all offices. */
+  noted_by: { name: string; position: string } | null
+}
+
 /** One dataset variant's outcome from a manual refresh. */
 export interface AnalyticsRefreshRow {
   key: string
@@ -1902,18 +1969,30 @@ export interface DashboardReport {
   }
   compliance: ComplianceIndicator[]
   /*
-   * No `expiry`, and the payload still carries one — same reasoning as the three
-   * meetings fields on OfficerActivity above.
-   *
-   * "Permits Approaching Expiry" moved to Renewal Risk Prediction and its first
-   * column became four named states (see PermitLifecycle below). The dashboard
-   * key stayed behind: it was once pinned by a parity check against a second
-   * implementation, and now it is simply an unused key on a payload nobody has
-   * got round to trimming. Leaving it off this type is what stops a screen
-   * reading a panel that is no longer anywhere in the design — the compiler
-   * refuses it, which is the guarantee that matters whether or not the key ever
-   * goes.
+   * Back on the dashboard since Renewal Risk Prediction was removed (checklist
+   * 2026-09-27, item 6). Three cumulative forward windows (30 ⊂ 60 ⊂ 90) and a
+   * separate Expired row, per permit type.
    */
+  expiry: {
+    columns: { code: string; label: string }[]
+    rows: {
+      window: string
+      label: string
+      days: number | null
+      expired: boolean
+      counts: Record<string, number>
+      total: number
+    }[]
+  }
+  /*
+   * Moved from Business Growth Analysis's Closure Trend, with registrations
+   * beside it. Optional because a snapshot stored before the move lacks it.
+   */
+  business_movement?: {
+    rows: { month: string; registered: number; closed: number; net: number }[]
+    registered: number
+    closed: number
+  }
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
   top_lines_of_business: {
     rows: LineOfBusinessRow[]
@@ -1940,477 +2019,6 @@ export interface DashboardReport {
       share: number | null
     }[]
   }
-}
-
-/* Business Growth Analysis (spec §4; mockup 122 renames it from the
- * paper's "Business Growth Analysis" and the mockup wins on naming). */
-
-export interface BusinessStatusRow {
-  status: 'active' | 'expired' | 'inactive' | 'closed'
-  label: string
-  count: number
-  /** Null only when the register holds no businesses at all. */
-  share: number | null
-}
-
-export interface BarangayGrowthRow {
-  barangay: string
-  registrations: number
-  prior: number
-  delta: number
-  /** Null when the prior period was empty: a change from zero is not a rate. */
-  growth_rate: number | null
-}
-
-export interface IndustryGrowthRow {
-  industry: string
-  psic_code: string
-  count: number
-  registrations: number
-  prior: number
-  delta: number
-  direction: 'growing' | 'declining' | 'steady'
-}
-
-/**
- * One of the three questions the Business Industry Growth Trend can answer.
- *
- * Six slots, three rankings. The register holds 135 PSIC codes and the chart's
- * palette keeps six series apart without relying on colour, so six is a ceiling
- * rather than a shortlist — which makes "which six" the whole question, and the
- * reason the reader is given the choice instead of being handed one answer.
- */
-export interface IndustryLens {
-  key: 'largest' | 'growing' | 'declining'
-  label: string
-  /**
-   * Whether `min_businesses` was applied. False only for `largest`, which ranks
-   * by the very count a floor would test.
-   */
-  floored: boolean
-  /**
-   * How many lines this lens COULD have drawn, before the six slots cut it.
-   * Under six means fewer lines are drawn, and the screen must say so — the
-   * server does not pad, because a steady line has not declined.
-   */
-  qualifying: number
-  rows: IndustryGrowthRow[]
-}
-
-export interface IndustryLenses {
-  slots: number
-  /** Minimum businesses on record before a line may be ranked by change. */
-  min_businesses: number
-  lines_on_record: number
-  /** Lines at or above `min_businesses`: the pool the change lenses rank. */
-  above_floor: number
-  lenses: IndustryLens[]
-}
-
-/** One point on a Kaplan-Meier curve, at one renewal cycle. */
-export interface SurvivalPoint {
-  cycle: number
-  /** Businesses that reached this cycle. Small values mean a thin estimate. */
-  at_risk: number
-  lapses: number
-  /** Survival through this cycle, as a percentage. */
-  survival: number | null
-}
-
-export interface SurvivalCurve {
-  businesses: number
-  /** Total renewal cycles the group lived through: the sample behind the curve. */
-  renewals_observed: number
-  lapses: number
-  max_cycle: number
-  /**
-   * Survival through `max_cycle`. Null when no business in the group has reached
-   * a first renewal — a cohort too new to have survived anything has no rate, and
-   * rendering 0% or 100% there would both be inventions.
-   */
-  survival: number | null
-  points: SurvivalPoint[]
-}
-
-/**
- * Cohort survival over renewal cycles.
- *
- * A Kaplan-Meier estimate, computed server-side in
- * App\Support\BusinessGrowthAnalytics. It is descriptive, not predictive: it
- * reports what an observed
- * cohort did, and businesses still inside their current permit are censored rather
- * than counted as failures. It is not a probability that any given business will
- * renew, and `methodology` is the sentence that has to travel with it.
- */
-export type CohortSurvival = SurvivalCurve & {
-  methodology: string
-  grace_days: number
-  cohorts: (SurvivalCurve & { cohort: string })[]
-}
-
-export interface BusinessGrowthReport {
-  generated_at: string
-  period_months: number
-  period_start: string
-  period_end: string
-  prior_period_start: string
-  registrations: number
-  registrations_prior: number
-  growth_rate: number | null
-  closures: number
-  cohort_survival: CohortSurvival
-  status_summary: BusinessStatusRow[]
-  top_barangays: BarangayGrowthRow[]
-  closure_trend: { month: string; closures: number }[]
-  industry_growth: IndustryGrowthRow[]
-  /**
-   * The lens toggle's three rankings, spliced on by AnalyticsController at serve
-   * time rather than computed into the dataset. See the note on that controller
-   * method; the short of it is that the rankings are a presentation of
-   * `industry_growth` rather than a new measurement, so they are derived where
-   * the response is assembled and never stored in a snapshot.
-   *
-   * Optional because `industry_growth` is what the dataset actually carries, and
-   * a snapshot stored before the splice existed must still draw the panel.
-   * The page falls back to it, which is exactly the Largest lens.
-   */
-  industry_lenses?: IndustryLenses
-}
-
-/*
- * Renewal Risk.
- *
- * A weighted rule score over the register, computed in
- * App\Support\RenewalRiskScoring. Deliberately NOT a probability: there is no
- * fitted model behind it, so nothing in the UI may render `score` as a
- * percentage or call it a prediction, a likelihood, or a confidence. The revised
- * mockup labelled this column "PROB. DELAY RISK" with percentages; that wording
- * is not used. `score` is out of 100 and `drivers` says what produced it.
- */
-
-export type RiskBand = 'high' | 'moderate' | 'low'
-export type RiskAction = 'immediate_follow_up' | 'send_reminder' | 'monitor'
-
-/** One rule's contribution to a permit's score, with its reason in plain words. */
-export interface RiskDriver {
-  rule: string
-  label: string
-  points: number
-  max: number
-  detail: string
-}
-
-/** The published rule book, rendered on screen so the weights cannot drift. */
-export interface RiskRule {
-  rule: string
-  label: string
-  max: number
-  description: string
-}
-
-export interface RenewalRiskRow {
-  permit_id: number
-  permit_number: string
-  business_id: number
-  business: string
-  barangay: string | null
-  permit_type: string
-  valid_until: string
-  /** Negative when the permit has already lapsed. */
-  days_to_expiry: number
-  /** Out of 100. Not a percentage of anything. */
-  score: number
-  band: RiskBand
-  band_label: string
-  action: RiskAction
-  action_label: string
-  renewal_stage: string
-  renewal_tracking_id: string | null
-  /**
-   * Scheduled expiry notices only — the nightly scan's reminders and the
-   * renewal-due nudge. Officer-initiated follow-ups are deliberately not pooled
-   * in; see `manual_reminders`.
-   */
-  reminders_sent: number
-  /** Follow-ups an officer sent from this screen. At most one per day. */
-  manual_reminders: number
-  /** When the last one went, ISO-8601. Null when none has. */
-  manual_reminder_at: string | null
-  /** Only the rules that cost points, heaviest first. */
-  drivers: RiskDriver[]
-}
-
-/**
- * What the server actually filtered on — its answer, not the request.
- *
- * Rendered rather than the state the selects hold, because the two can differ:
- * an unknown band is dropped server-side rather than rejected, and a screen
- * that labelled an unfiltered table with the filter it failed to apply would be
- * worse than one that had 500'd.
- */
-export interface RenewalRiskFilters {
-  barangay: string | null
-  band: RiskBand | null
-  action: RiskAction | null
-  /**
-   * The term the server matched on, in the casing the officer typed it. Folded
-   * to lower case to compare against rows, never to echo — a box that answered
-   * "Mercado" with "mercado" reads as having corrected the reader.
-   */
-  search: string | null
-}
-
-/**
- * The four states a watchlisted permit can be in, in reading order.
- *
- * These are NOT risk bands and the screen has to keep saying so. `RiskBand`
- * above ranks how much is wrong with a permit; this says where the permit
- * stands. A permit can be `low` risk and `near_expiry`, or `high` risk and
- * `pending_renewal` — two axes over one population.
- */
-export type PermitLifecycleState = 'active' | 'near_expiry' | 'pending_renewal' | 'overdue'
-
-export interface PermitLifecycleRow {
-  state: PermitLifecycleState
-  label: string
-  /** Keyed by permit type code, one key per column. */
-  counts: Record<string, number>
-  total: number
-}
-
-/**
- * Permits Approaching Expiry, as the client asked for it: four named states in
- * the first column instead of three overlapping 30/60/90 day windows.
- *
- * The states partition the watchlist — every permit is in exactly one, and
- * `total` equals the report's `scored_permits`, which is what lets this table
- * and the risk-level cards above it be read against each other.
- *
- * Added by the server at serve time rather than stored in the snapshot: it is a
- * re-cut of permits the report already scored, so it has to answer to whatever
- * filter the request carried. See RenewalRiskAnalytics::lifecycle().
- */
-export interface PermitLifecycle {
-  columns: { code: string; label: string }[]
-  rows: PermitLifecycleRow[]
-  /** Equals `scored_permits` for the same filter. */
-  total: number
-  /** Days before expiry at which a permit becomes Near Expiry. */
-  near_expiry_days: number
-  /** How far back Overdue reaches before a permit leaves the watchlist. */
-  lapsed_grace_days: number
-}
-
-export interface RenewalRiskReport {
-  generated_at: string
-  horizon_days: number
-  lapsed_grace_days: number
-  window_start: string
-  window_end: string
-  /**
-   * Every permit scored in the window. The denominator the three band counts
-   * are out of — NOT the number of rows the current filter has, which is
-   * `matching`. Conflating the two is how a table footer starts lying.
-   */
-  scored_permits: number
-  counts: Record<RiskBand, number>
-  /**
-   * Real sends from the expiry-notice ledger, not an estimate. Scheduled
-   * notices only — see `RenewalRiskRow.reminders_sent`.
-   */
-  reminders_sent: number
-  /** Rows the current filter has, of which `at_risk` is one page. */
-  matching: number
-  /** Where that page starts. */
-  offset: number
-  filters: RenewalRiskFilters
-  /** The barangays the filter may offer: those with a permit in the window. */
-  barangays: string[]
-  at_risk: RenewalRiskRow[]
-  /** The same permits as `scored_permits`, split four ways by state. */
-  lifecycle: PermitLifecycle
-  actions: {
-    action: RiskAction
-    label: string
-    band: RiskBand
-    count: number
-  }[]
-  rulebook: RiskRule[]
-  thresholds: { high: number; moderate: number }
-  /** The honesty statement. Rendered verbatim; never paraphrased on screen. */
-  methodology: string
-}
-
-/**
- * What came back from pressing Send reminder.
- *
- * `already_sent` is a success, not a failure: the officer's intent — this owner
- * should have been told — is satisfied either way, and what they need to know
- * is when it happened rather than that their press did nothing.
- */
-export interface RenewalReminderResult {
-  permit_id: number
-  already_sent: boolean
-  sent_at: string | null
-  message: string
-}
-
-/* ── The fitted model that sits beside the rule score ──────────────────────── */
-
-/**
- * One signal's fitted effect. `odds_ratio` above 1 raises the chance of a late
- * renewal, below 1 lowers it; `interpretation` is that sentence written out by
- * the engine, because the wording depends on the sign and a template here would
- * be wrong for half the rows.
- */
-export interface RenewalModelCoefficient {
-  term: string
-  label: string
-  estimate: number
-  std_error: number
-  z_value: number
-  p_value: number
-  odds_ratio: number
-  significant: boolean
-  interpretation: string
-}
-
-/** A signal that could not be estimated, and why. Shown, never swallowed. */
-export interface RenewalModelDropped {
-  term: string
-  label: string
-  reason: string
-}
-
-/**
- * Why a permit has no figure. Only `open` gets one — a lapsed permit's renewal
- * IS late (a fact, not an estimate) and an approved renewal has nothing left to
- * wait for.
- */
-export type RenewalModelState = 'open' | 'lapsed' | 'renewed'
-
-export interface RenewalModelEstimate {
-  permit_id: number
-  business: string
-  permit_type: string
-  barangay: string | null
-  valid_until: string
-  days_to_expiry: number
-  renewal_stage: string
-  /** Null wherever `state` is not 'open'. */
-  probability: number | null
-  state: RenewalModelState
-  state_label: string
-  /**
-   * The rule score for the same permit, from the same facts at the same moment.
-   * Carried on this payload rather than joined in the browser so the two numbers
-   * shown side by side cannot end up describing different permits or days.
-   */
-  rule_score: number
-  rule_band: RiskBand
-  rule_band_label: string
-}
-
-export interface RenewalModelMetrics {
-  /** Ordering quality on the held-out period. Pooled, so read `horizon_auc` too. */
-  auc: number | null
-  /** Mean squared error of the figures themselves. Lower is better. */
-  brier: number | null
-  /** The same, for always guessing the training period's own late rate. */
-  baseline_brier: number | null
-  skill_score: number | null
-  calibration_intercept: number | null
-  /** 1.00 is ideal. Below it the figures are spread too wide. */
-  calibration_slope: number | null
-  /**
-   * Whether the figures can currently be read as rates. When false the screen
-   * stops calling them probabilities and calls them a ranking, which is what an
-   * uncalibrated score is.
-   */
-  calibrated: boolean
-  observations: number
-  unfitted_levels: number
-}
-
-/** Discrimination with the clock held still — see `horizon_auc` on the screen. */
-export interface RenewalModelHorizon {
-  days_to_expiry: number
-  observations: number
-  late: number
-  late_rate: number
-  /** Null where every cycle at that distance went the same way. */
-  auc: number | null
-}
-
-export interface RenewalModelCalibrationBin {
-  bin: number
-  observations: number
-  predicted: number
-  observed: number
-  lower: number
-  upper: number
-}
-
-export interface RenewalModelPeriod {
-  cycles: number
-  observations: number
-  late: number
-  late_rate: number | null
-}
-
-export interface RenewalModelReport {
-  /** False when no model could be fitted — see `unavailable_reason` for which. */
-  available: boolean
-  unavailable_reason: string | null
-  generated_at: string
-  engine: string
-
-  label: {
-    definition: string
-    grace_days: number
-    settle_days: number
-    lead_days: number[]
-  }
-  split: {
-    cutoff: string | null
-    basis: string
-    train_from: string | null
-    train_to: string | null
-    test_from: string | null
-    test_to: string | null
-    /** Always false. A random split would let the future explain the past. */
-    random: boolean
-  }
-  training: RenewalModelPeriod
-  evaluation: RenewalModelPeriod
-  counts: {
-    businesses: number
-    cycles_found: number
-    cycles_unsettled: number
-    cycles_labelled: number
-    late: number
-    late_rate: number
-    observations: number
-    train_observations: number
-    test_observations: number
-  }
-
-  coefficients: RenewalModelCoefficient[]
-  dropped: RenewalModelDropped[]
-  metrics: RenewalModelMetrics
-  horizon_auc: RenewalModelHorizon[]
-  calibration: RenewalModelCalibrationBin[]
-  /** The calibration finding in a sentence. Rendered verbatim. */
-  calibration_statement: string
-  estimates: RenewalModelEstimate[]
-  estimate_note: string
-
-  /**
-   * The sentence that outranks every figure on the panel. Rendered above them,
-   * in plain sight, never in a tooltip.
-   */
-  training_data: { synthetic: boolean; notice: string }
-  methodology: string
 }
 
 /*

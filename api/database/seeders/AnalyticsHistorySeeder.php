@@ -1828,7 +1828,7 @@ class AnalyticsHistorySeeder extends Seeder
 
     /**
      * Closures, dated by `deleted_at` — the only honest closure date in the
-     * schema (see BusinessGrowthAnalytics). Spread across the window so both
+     * schema (see DashboardAnalytics' New and Closed Businesses). Spread across the window so both
      * the reported period and the one before it have a trend to draw.
      */
     private function closeBusinesses(): void

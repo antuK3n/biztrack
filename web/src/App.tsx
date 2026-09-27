@@ -32,10 +32,9 @@ import { PermitDetailPage } from './pages/applicant/PermitDetailPage'
 import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
+import { ReportsPage } from './pages/admin/ReportsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
-import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
-import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
@@ -114,7 +113,7 @@ function MovedToStaff({ path }: { path: string }) {
  * The analytics shim, which unlike the others has subpaths under it.
  *
  * It used to be a bare `<Navigate to="/staff/analytics">`, so every deep link
- * — /analytics/renewal-risk, /analytics/processing-time — landed on the
+ * — /analytics/processing-time, /analytics/offices — landed on the
  * Overview instead. That is not just a stale-bookmark problem: it is how the
  * tab strip's own broken links stayed invisible, because the tabs pointed here
  * and the redirect quietly answered every one of them with the dashboard.
@@ -431,21 +430,15 @@ export default function App() {
             }
           />
           {/*
-            Processing Time is the ONE analytics screen that is not BPLO's.
+            Processing Time is not BPLO's, nor any office's.
 
-            All four used to sit on `analytics.view`, which meant whoever could
-            open the dashboard could open this too. The client drew the line the
-            other way round: "BPLO side should only have the 3 dashboards
-            (Processing Time should not exist here) — Super admin side should
-            only have Processing Time dashboard". The R INTEGRATION DRAFTS
-            headings say the same thing — §1/§2/§4 are "(Admin - BPLO)", §6 is
-            "(Super Admin)" — so the permission was split to match: `analytics.view`
-            for the three, `analytics.processing_time` for this one.
-
-            The two are deliberately disjoint. Neither role holds both, so this
-            route is unreachable for BPLO and the other three are unreachable for
-            the super admin. Granting a role both permissions would quietly undo
-            the separation the client asked for, and nothing here would fail.
+            The dashboard above is every office's since checklist 2026-09-27
+            item 1 (`analytics.view` on every office admin, BPLO and the super
+            admin, scoped server-side). This screen stays on
+            `analytics.processing_time`, which only the super admin holds: it
+            measures the departments, BPLO among them, and the office being
+            measured does not hold the measuring screen. That half of the old
+            split is the half that survives.
           */}
           <Route
             path="/staff/analytics/processing-time"
@@ -479,27 +472,24 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/*
+            Report Generation (checklist 2026-09-27, item 7). Same permission as
+            the dashboard, and the same server-side office boundary.
+          */}
           <Route
-            path="/staff/analytics/business-growth"
+            path="/staff/analytics/reports"
             element={
               <RequirePermission permission="analytics.view">
-                <BusinessGrowthPage />
+                <ReportsPage />
               </RequirePermission>
             }
           />
           {/*
-            Renewal Risk ranks every business's permits by a weighted rule score,
-            so it sits on `analytics.view` alongside the other two BPLO screens
-            rather than being visible to every office reviewer.
+            /staff/analytics/business-growth and /staff/analytics/renewal-risk
+            were here. Both screens were removed (checklist 2026-09-27, item 6);
+            their useful panels moved onto the dashboard above. An old link to
+            either now reaches the 404, which is the honest answer.
           */}
-          <Route
-            path="/staff/analytics/renewal-risk"
-            element={
-              <RequirePermission permission="analytics.view">
-                <RenewalRiskPage />
-              </RequirePermission>
-            }
-          />
           <Route
             path="/staff/admin/users"
             element={
@@ -663,15 +653,27 @@ export default function App() {
           <Route path="/admin/profile" element={<ProfilePage />} />
           <Route path="/admin/settings" element={<SettingsPage />} />
           {/*
-            Processing Time and nothing else under /admin/analytics.
-
-            The super admin holds `analytics.processing_time` and not
-            `analytics.view` — the split is deliberate (AGENTS.md §10): that
-            screen measures the departments, BPLO among them, so the office
-            being measured does not hold it and the measurer does not hold
-            BPLO's three dashboards. Mounting /admin/analytics as well would be
-            a screen this portal's only occupant is forbidden from opening.
+            The analytics dashboard, in the admin tree. The super admin holds
+            `analytics.view` since checklist 2026-09-27 item 1 and, like BPLO,
+            may switch office or view all. It used to be absent here because
+            the admin was forbidden from it; that reason is gone.
           */}
+          <Route
+            path="/admin/analytics"
+            element={
+              <RequirePermission permission="analytics.view">
+                <AnalyticsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/analytics/reports"
+            element={
+              <RequirePermission permission="analytics.view">
+                <ReportsPage />
+              </RequirePermission>
+            }
+          />
           <Route
             path="/admin/analytics/processing-time"
             element={

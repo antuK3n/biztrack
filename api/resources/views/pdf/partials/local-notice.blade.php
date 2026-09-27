@@ -15,10 +15,10 @@
     changes during the working day, those are different claims about how current
     the figures are. So the document says which it was.
 
-    Deliberately not styled as a warning. Renewal Risk's filtered and paginated
-    views can never be precomputed (see config/analytics.php), so this notice is
-    permanent and routine for them; shaping it like a fault would flag correct
-    operation as a defect on every export.
+    Deliberately not styled as a warning. A view outside the precomputed set
+    (see config/analytics.php) is computed on request by design, so this notice
+    is routine for it; shaping it like a fault would flag correct operation as a
+    defect on every export.
 
     Expects: $meta (AnalyticsResolver provenance).
 --}}
