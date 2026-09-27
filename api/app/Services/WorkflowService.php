@@ -12,10 +12,10 @@ use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
-use App\Models\Business;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
 use App\Models\ApplicationStatusHistory;
+use App\Models\Business;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\OfficerRequest;
@@ -778,8 +778,8 @@ class WorkflowService
     /** BPLO returns the main form for revision. for_approval → returned. */
     /**
      * @param  string|null  $target  Which field the applicant must fix, as a
-     *   code the system owns. Null is a perfectly good return — the prose is
-     *   never parsed to derive one, the same rule `returnClearance` follows.
+     *                               code the system owns. Null is a perfectly good return — the prose is
+     *                               never parsed to derive one, the same rule `returnClearance` follows.
      */
     public function returnMainForm(Application $app, string $remarks, ?string $target = null): void
     {
@@ -1649,6 +1649,8 @@ class WorkflowService
         }
 
         if ($permit->status === PermitStatus::Active) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
@@ -1657,7 +1659,7 @@ class WorkflowService
                 'because_permit_type_id' => $refused->id,
                 'because_permit_type' => $refused->name,
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
@@ -1751,13 +1753,15 @@ class WorkflowService
         $permits = $business->permits()->where('status', PermitStatus::Active->value)->get();
 
         foreach ($permits as $permit) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
                 'cause' => 'business_status',
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         return $permits->count();
@@ -3063,6 +3067,7 @@ class WorkflowService
 
         $this->rejectClearance($row, $reason, $remedy);
     }
+
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
     public function returnAssignment(
         ApplicationAssignment $assignment,

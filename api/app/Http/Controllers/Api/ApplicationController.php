@@ -723,7 +723,9 @@ class ApplicationController extends Controller
             'Documents can only be removed while the application is a draft or has been returned to you.'
         );
 
-        Audit::log('document.removed', $document);
+        // The row itself goes into the audit log (Audit Log 1): once deleted,
+        // the file name, requirement and upload date exist nowhere else.
+        Audit::removed('document.removed', $document);
 
         if ($document->stored_path && Storage::disk('local')->exists($document->stored_path)) {
             Storage::disk('local')->delete($document->stored_path);
@@ -782,10 +784,14 @@ class ApplicationController extends Controller
 
         // Logged BEFORE the delete, so the audit row is written while the thing
         // it describes is still there to be described.
-        Audit::log('application.draft_deleted', $application, [
+        //
+        // With the whole draft copied in (Audit Log 1) — its permit types and
+        // the documents it held — because a soft-deleted draft is hidden from
+        // every reader, and "what was in it" should not need a database shell.
+        Audit::removed('application.draft_deleted', $application, [
             'application_type' => $application->application_type?->value,
             'business_id' => $application->business_id,
-        ]);
+        ], with: ['permitTypes', 'documents']);
 
         $application->delete();
 
