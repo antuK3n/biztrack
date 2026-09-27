@@ -229,7 +229,7 @@ function StaffHome({ permissions }: { permissions: string[] }) {
    */
   const portal = activePortal()
   const cards: Card[] = [
-    { to: '/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
+    { to: '/queue', icon: InboxIcon, label: 'Manage Applications', permission: 'application.review' },
     {
       to: '/analytics',
       icon: ChartIcon,
@@ -276,7 +276,7 @@ function StaffHome({ permissions }: { permissions: string[] }) {
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
-      <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Application Verification</h1>
+      <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Manage Applications</h1>
       <div className="mt-4">
         <Logo height={56} />
       </div>

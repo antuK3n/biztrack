@@ -6,7 +6,7 @@ import { sessionFor } from './helpers'
  * Runs as a clearance office, not as the super admin.
  *
  * Recording a visit needs BOTH `application.review`, to open the filing from
- * Application Verification, and `inspection.manage`, to set the result. The
+ * Manage Applications, and `inspection.manage`, to set the result. The
  * super admin holds neither any more — the client's ruling was that Messages,
  * Track, Inspections and Other Requirements are "not his role to do those
  * things" — and the default chromium project hands every spec the admin
@@ -41,7 +41,7 @@ import { sessionFor } from './helpers'
 test.use({ storageState: sessionFor('zoning') })
 
 /*
- * Opening a For Inspection filing from Application Verification.
+ * Opening a For Inspection filing from Manage Applications.
  *
  * The regression this guards is the one the client reported in full:
  *
@@ -915,18 +915,20 @@ test('the rail no longer offers an Inspections screen', async ({ page }) => {
    * Scoped to the <aside> for the reason analytics.spec.ts gives: the mobile tab
    * bar carries the same labels and would trip strict mode.
    *
-   * Track must still be there. Asserting only the absence would pass just as
+   * Manage Applications must still be there. Asserting only the absence would pass just as
    * happily on a rail that failed to render at all.
    */
   await expect(page.locator('aside').getByRole('link', { name: 'Inspections' })).toHaveCount(0)
-  await expect(page.locator('aside').getByRole('link', { name: 'Track', exact: true })).toBeVisible()
+  await expect(
+    page.locator('aside').getByRole('link', { name: 'Manage Applications', exact: true }),
+  ).toBeVisible()
 })
 
 test('the old Inspections list address lands on Track', async ({ page }) => {
   await page.goto('/staff/inspections')
   await expect(page).toHaveURL(/\/staff\/queue$/)
   // Track itself, not a redirect loop or the login door.
-  await expect(page.getByRole('heading', { name: 'Application Verification' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Manage Applications' })).toBeVisible()
 })
 
 test('an old inspection deep link opens the filing it named', async ({ page }) => {

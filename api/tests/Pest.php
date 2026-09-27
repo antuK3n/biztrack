@@ -243,3 +243,72 @@ function choAssignmentId(int $applicationId): int
         ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
         ->value('id');
 }
+
+/*
+ * ── Fixtures for the returned-fields work, 27 September 2026 ───────────
+ *
+ * Here rather than in the test files that first needed them, because a
+ * helper declared inside a test file does not exist until that file loads:
+ * a second file reusing it passes in a whole-suite run and fails the moment
+ * anyone runs that second file alone.
+ */
+
+/** A new filing for a business with no TIN, sitting at For Approval. */
+function filingWithoutTin(string $tin = ''): Application
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $payload = [
+        'name' => 'No TIN Trading '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'address' => ['line1' => '9 Blank Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
+    ];
+    if ($tin !== '') {
+        $payload['tin'] = $tin;
+    }
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', $payload)
+        ->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    return Application::findOrFail($appId)->fresh();
+}
+
+/** A filing returned by BPLO about the given field codes. */
+function filingReturnedAbout(string $targets): Application
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => 'Returned Fields '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'trade_name' => 'Old Trade Name',
+        'address' => ['line1' => '3 Correction Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 300000]],
+    ])->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $app = Application::findOrFail($appId);
+    app(WorkflowService::class)->returnMainForm($app, 'Please correct these.', $targets);
+
+    return $app->fresh();
+}

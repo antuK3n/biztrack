@@ -11,6 +11,7 @@ use App\Models\BusinessOwner;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\Numbering;
+use App\Support\Tin;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -417,7 +418,7 @@ class BusinessController extends Controller
          * ran. Left alone, the `string` rule below rejects it with a 422.
          */
         if (is_scalar($request->input('tin')) && filled($request->input('tin'))) {
-            $request->merge(['tin' => self::normalizeTin((string) $request->input('tin'))]);
+            $request->merge(['tin' => Tin::normalize((string) $request->input('tin'))]);
         }
 
         return $request->validate([
@@ -769,21 +770,14 @@ class BusinessController extends Controller
      * that is not a recognisable TIN comes back untouched so the regex rule
      * reports it instead of us silently mangling it.
      */
-    private static function normalizeTin(string $raw): string
-    {
-        $trimmed = trim($raw);
-        if (! preg_match('/^[\d\s.\-]+$/', $trimmed)) {
-            return $trimmed;
-        }
-        $digits = preg_replace('/\D/', '', $trimmed);
-        $length = strlen($digits);
-        if ($length !== 9 && ($length < 12 || $length > 14)) {
-            return $trimmed;
-        }
-        $tin = substr($digits, 0, 3).'-'.substr($digits, 3, 3).'-'.substr($digits, 6, 3);
-
-        return $length > 9 ? $tin.'-'.substr($digits, 9) : $tin;
-    }
+    /*
+     * Moved to App\Support\Tin on 27 September 2026.
+     *
+     * A second route now accepts a typed TIN — the automatic requirement
+     * raised when item 3 is left blank, answered in a requirement reply
+     * and written back by OfficerRequestController. Two callers, so the
+     * shaping stopped being this controller's private business.
+     */
 
     /**
      * The named person on the paper — BPLO item 11 / item 12.

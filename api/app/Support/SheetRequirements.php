@@ -38,6 +38,8 @@ final class SheetRequirements
         return match ($permitTypeCode) {
             'ZONING' => ZoningRequirements::forApplication($application),
             'CEC' => CecRequirements::forApplication($application),
+            'FSIC' => FsicRequirements::forApplication($application),
+            'OCCUPANCY' => OccupancyRequirements::forApplication($application),
             default => null,
         };
     }
@@ -48,6 +50,8 @@ final class SheetRequirements
         return match ($permitTypeCode) {
             'ZONING' => ZoningRequirements::accepts($code),
             'CEC' => CecRequirements::accepts($code),
+            'FSIC' => FsicRequirements::accepts($code),
+            'OCCUPANCY' => OccupancyRequirements::accepts($code),
             default => false,
         };
     }
@@ -57,6 +61,8 @@ final class SheetRequirements
     {
         return match ($permitTypeCode) {
             'CEC' => CecRequirements::documentType($code),
+            'FSIC' => FsicRequirements::documentType($code),
+            'OCCUPANCY' => OccupancyRequirements::documentType($code),
             default => ZoningRequirements::documentType($code),
         };
     }

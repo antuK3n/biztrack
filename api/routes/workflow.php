@@ -108,6 +108,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('applications/{application}', [ApplicationController::class, 'update']);
         Route::post('applications/{application}/submit', [ApplicationController::class, 'submit']);
         Route::post('applications/{application}/resubmit', [ApplicationController::class, 'resubmit']);
+        /*
+         * The narrow door for a returned filing: write only the fields BPLO
+         * ticked, record what changed, resubmit. Beside `resubmit` because it
+         * ends in one — see ApplicationController::corrections.
+         */
+        Route::post('applications/{application}/corrections', [ApplicationController::class, 'corrections']);
         Route::post('applications/{application}/cancel', [ApplicationController::class, 'cancel']);
         /*
          * Throw a DRAFT away. Distinct from `cancel` above, which is the right

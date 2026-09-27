@@ -134,16 +134,56 @@ it('does not accept the zoning checklist’s slots on the CENRO sheet', function
     )->assertNotFound();
 });
 
-it('offers nothing on the three sheets whose papers ask for nothing', function () {
+it('offers nothing on the one sheet whose paper asks for nothing', function () {
     /*
-     * The client, 9 September 2026: *"For the CHO, BFP, and OBO, just copy
-     * what's in the application form currently."* Null rather than an empty
-     * array, and the difference reaches the screen: an empty list renders as
-     * "this office asks for nothing", which is a claim none of them has made.
+     * Null rather than an empty array, and the difference reaches the screen:
+     * an empty list renders as "this office asks for nothing", which is a
+     * claim CHO has not made — its paper simply has no attachment list.
+     *
+     * This covered BFP and OBO too, on a client instruction of 9 September
+     * 2026 that was about the FIELDS on those sheets. Both of their papers do
+     * print documentary requirements, which the client had re-read against the
+     * system on 27 September — so they have checklists now and are asserted
+     * below instead.
      */
     $app = cecFiling('renewal', false);
 
-    foreach (['SANITARY', 'FSIC', 'OCCUPANCY'] as $code) {
-        expect(SheetRequirements::for($app, $code))->toBeNull();
-    }
+    expect(SheetRequirements::for($app, 'SANITARY'))->toBeNull();
+});
+
+it('gives BFP the branch of its checklist this filing is on', function () {
+    /*
+     * BFP-QSF-FSED-002 prints three lists behind three checkboxes, and the
+     * branch is decided by the same expression that writes the sheet's
+     * "Certificate Applied For" box — so the checklist and the answer printed
+     * above it cannot disagree.
+     *
+     * A renewal with no Occupancy permit on it is the renewal branch: the
+     * maintenance report and the hot-work clearance, not the occupancy
+     * endorsement and the certificate of completion.
+     */
+    $app = cecFiling('renewal', false);
+    $keys = collect(SheetRequirements::for($app, 'FSIC'))->pluck('key');
+
+    expect($keys)->toContain('FSMR')
+        ->and($keys)->toContain('HOT_WORK')
+        ->and($keys)->not->toContain('OBO_ENDORSEMENT')
+        ->and($keys)->not->toContain('VALID_COO');
+});
+
+it('gives OBO the City Engineering checklist, with the sheet ticking itself', function () {
+    $app = cecFiling('renewal', false);
+    $rows = collect(SheetRequirements::for($app, 'OCCUPANCY'));
+
+    expect($rows->pluck('key'))->toContain('COMPLETION')
+        ->and($rows->pluck('key'))->toContain('RELOCATION_SURVEY');
+
+    /*
+     * The application form row is the sheet itself, not an upload — so it
+     * carries no document code and is satisfied by submitting, exactly as
+     * CPDD's equivalent row is.
+     */
+    $form = $rows->firstWhere('key', 'FORM');
+    expect($form['source'])->toBe('sheet')
+        ->and($form['code'])->toBeNull();
 });

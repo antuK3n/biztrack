@@ -228,7 +228,7 @@ async function openFromQueue(
   { trackingId, businessName }: Narrative,
 ): Promise<string> {
   await page.goto('/staff/queue')
-  await expect(page.getByRole('heading', { name: 'Application Verification', level: 1 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Manage Applications', level: 1 })).toBeVisible({
     timeout: 30_000,
   })
   await page.getByRole('button', { name: TAB_BUTTON[stage] }).click()
@@ -928,7 +928,7 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
     await asOffice(browser, office.account, async (page) => {
       await page.goto('/staff/queue')
       await expect(
-        page.getByRole('heading', { name: 'Application Verification', level: 1 }),
+        page.getByRole('heading', { name: 'Manage Applications', level: 1 }),
       ).toBeVisible({ timeout: 30_000 })
 
       await expect(
@@ -943,8 +943,8 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
        * wider one had failed to include.
        */
       await expect(
-        page.getByRole('button', { name: 'Awaiting Other Permits' }),
-        `${office.code} is offered Awaiting Other Permits, which is BPLO's seat on that stage`,
+        page.getByRole('button', { name: 'Approved' }),
+        `${office.code} is offered Permit Released, which is BPLO's seat on that stage`,
       ).toHaveCount(0)
 
       /*
@@ -1383,7 +1383,7 @@ test('the officer’s queue row names the filing that was searched for', async (
   await asOffice(browser, 'sanitary', async (page) => {
     await page.goto('/staff/queue')
     await expect(
-      page.getByRole('heading', { name: 'Application Verification', level: 1 }),
+      page.getByRole('heading', { name: 'Manage Applications', level: 1 }),
     ).toBeVisible({ timeout: 30_000 })
     await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
 
@@ -1443,7 +1443,7 @@ test('a queue search says how many filings actually matched it', async ({ browse
   await asOffice(browser, 'sanitary', async (page) => {
     await page.goto('/staff/queue')
     await expect(
-      page.getByRole('heading', { name: 'Application Verification', level: 1 }),
+      page.getByRole('heading', { name: 'Manage Applications', level: 1 }),
     ).toBeVisible({ timeout: 30_000 })
     await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
 
@@ -1593,7 +1593,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
    * the filing really is out with the other offices.
    */
   await expect(
-    page.getByText('Permit Released', { exact: true }).first(),
+    page.getByText('Approved', { exact: true }).first(),
     'the applicant’s status card should read Permit Released',
   ).toBeVisible()
 
@@ -1632,7 +1632,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
   await asOffice(browser, 'bplo', async (bploPage) => {
     await bploPage.goto('/staff/queue')
     await expect(
-      bploPage.getByRole('heading', { name: 'Application Verification', level: 1 }),
+      bploPage.getByRole('heading', { name: 'Manage Applications', level: 1 }),
     ).toBeVisible({ timeout: 30_000 })
 
     await expect(
@@ -1640,7 +1640,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
       'BPLO is offered a For Inspection tab, which its own permit can never enter',
     ).toHaveCount(0)
 
-    const gathering = bploPage.getByRole('button', { name: 'Awaiting Other Permits' })
+    const gathering = bploPage.getByRole('button', { name: 'Approved' })
     await expect(gathering, 'BPLO has no tab for the stage it waits through').toHaveCount(1)
 
     /*
@@ -1659,7 +1659,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
     await bploPage.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
     await expect(
       bploPage.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId }),
-      'a filing out with the other offices is missing from BPLO’s Awaiting Other Permits tab',
+      'a filing out with the other offices is missing from BPLO’s Permit Released tab',
     ).toHaveCount(1, { timeout: 20_000 })
   })
 
@@ -1716,7 +1716,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
     await expect(
       inspRow,
       `${first.code}'s row still reports the FILING's stage, which is four other offices' work`,
-    ).not.toContainText('Awaiting Other Permits')
+    ).not.toContainText('Approved')
 
     await officePage.goto('/staff/queue')
     // An office's caption, and exact: 'For Approval' is a substring of BPLO's.

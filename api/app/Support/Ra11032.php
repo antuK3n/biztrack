@@ -81,30 +81,20 @@ final class Ra11032
      */
     public static function tierFor(Application $application): string
     {
-        if ($application->application_type !== ApplicationType::New) {
-            return 'simple';
-        }
-
-        $profile = $application->fee_profile;
-        $profile = is_array($profile) ? $profile : [];
-        $lines = is_array($profile['lines'] ?? null) ? $profile['lines'] : [];
-
-        foreach ($lines as $line) {
-            if (! is_array($line)) {
-                continue;
-            }
-
-            $category = $line['category'] ?? null;
-            $capital = (float) ($line['capitalization'] ?? 0);
-
-            if (is_string($category)
-                && in_array($category, self::HIGH_TECH_CATEGORIES, true)
-                && $capital >= self::HIGH_TECH_CAPITAL_FLOOR) {
-                return 'highly_technical';
-            }
-        }
-
-        return 'complex';
+        /*
+         * Every transaction BizTrack runs is Simple on Malabon's charter —
+         * new permit, renewal and amendment alike. See the note at the head
+         * of this class for the citation and for what this replaced.
+         *
+         * A `match` on the type rather than a bare return, because the
+         * charter DOES distinguish — Termination/Retirement is Highly
+         * Technical — and the next transaction added here needs to look up
+         * its own line rather than inherit this one.
+         */
+        return match ($application->application_type) {
+            ApplicationType::New, ApplicationType::Renewal, ApplicationType::Amendment => 'simple',
+            default => 'simple',
+        };
     }
 
     /**
