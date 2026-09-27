@@ -137,10 +137,10 @@ class RowValidator
             $from = $this->date($raw['valid_from']);
             $until = $this->date($raw['valid_until']);
             if ($raw['valid_from'] !== null && $from === null) {
-                $fail('bad_date', "valid_from “{$raw['valid_from']}” is not a date. Use YYYY-MM-DD or MM/DD/YYYY.");
+                $fail('bad_date', "valid_from “{$raw['valid_from']}” is not a date. Use YYYY-MM-DD, or MM/DD/YYYY with the month first.");
             }
             if ($raw['valid_until'] !== null && $until === null) {
-                $fail('bad_date', "valid_until “{$raw['valid_until']}” is not a date. Use YYYY-MM-DD or MM/DD/YYYY.");
+                $fail('bad_date', "valid_until “{$raw['valid_until']}” is not a date. Use YYYY-MM-DD, or MM/DD/YYYY with the month first.");
             }
             if ($from !== null && $until !== null && $until->lt($from)) {
                 $fail('bad_date', "valid_until ({$until->toDateString()}) is before valid_from ({$from->toDateString()}).");

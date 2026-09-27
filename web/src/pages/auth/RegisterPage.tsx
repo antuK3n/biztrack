@@ -29,6 +29,8 @@ interface FormValues {
   password: string
   password_confirmation: string
   data_privacy_consent: boolean
+  /** Optional: a number from before BizTrack, to claim an imported business. */
+  claim_number: string
 }
 
 type FieldName = keyof FormValues
@@ -45,6 +47,7 @@ const initialValues: FormValues = {
   password: '',
   password_confirmation: '',
   data_privacy_consent: false,
+  claim_number: '',
 }
 
 const ALL_FIELDS = Object.keys(initialValues) as FieldName[]
@@ -174,6 +177,7 @@ export function RegisterPage() {
         password: values.password,
         password_confirmation: values.password_confirmation,
         data_privacy_consent: values.data_privacy_consent,
+        claim_number: values.claim_number.trim() || undefined,
       })
       // Self-registration is always a business owner, so always the public portal.
       setSession(data.data.token, data.data.user, 'public')
@@ -334,6 +338,34 @@ export function RegisterPage() {
               invalid={!!errors.password_confirmation}
               describedBy={errors.password_confirmation ? 'reg-confirm-error' : undefined}
             />
+          </Field>
+          {/*
+            Claiming a business the city licensed before BizTrack (Ken's
+            checklist, "Migration 1"). Optional and last, because most people
+            registering have nothing to claim. The server checks the number
+            against the surname above (LegacyClaim), so the hint names both.
+          */}
+          <Field
+            label="Business account or permit number from before BizTrack"
+            error={errors.claim_number}
+            errorId="reg-claim-error"
+            controlId="reg-claim"
+            className="sm:col-span-2"
+          >
+            <input
+              id="reg-claim"
+              autoComplete="off"
+              value={values.claim_number}
+              onChange={(e) => setValue('claim_number', e.target.value)}
+              aria-invalid={errors.claim_number ? true : undefined}
+              aria-describedby={errors.claim_number ? 'reg-claim-error reg-claim-hint' : 'reg-claim-hint'}
+              className={inputCls}
+            />
+            <p id="reg-claim-hint" className="mt-1.5 text-xs text-ink-secondary">
+              Optional. If the city already licensed your business, enter the number on your paper
+              permit and we will link the business to this account — your last name must match the
+              one on the city’s record.
+            </p>
           </Field>
         </div>
 

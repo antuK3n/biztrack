@@ -2547,6 +2547,64 @@ export interface AuditLog {
   created_at: string
 }
 
+/* ── Importing the old register (Ken's checklist, 27 Sept 2026) ───────── */
+
+/** Why a row was rejected. `kind` is one of LegacyImporter's fixed list. */
+export type LegacyRejectKind =
+  | 'bad_date'
+  | 'unknown_barangay'
+  | 'unknown_permit_type'
+  | 'missing_owner'
+  | 'duplicate'
+  | 'missing'
+  | 'invalid'
+
+export interface LegacyImportReject {
+  row: number
+  legacy_business_id: string | null
+  business_name: string | null
+  reasons: { kind: LegacyRejectKind; message: string }[]
+}
+
+export type LegacyImportStatus = 'previewed' | 'queued' | 'running' | 'completed' | 'failed'
+
+export interface LegacyImport {
+  id: number
+  source: 'csv' | 'odbc'
+  file_name: string | null
+  status: LegacyImportStatus
+  total_rows: number
+  will_create: number
+  will_update: number
+  rejected: number
+  created_count: number
+  updated_count: number
+  processed_rows: number
+  breakdown: {
+    businesses_new: number
+    businesses_updated: number
+    permits_new: number
+    permits_updated: number
+    owners_linked: number
+    owners_unclaimed: number
+    reject_kinds: Record<LegacyRejectKind, number>
+  } | null
+  /** Null on the history list; the first 500 on a single import. */
+  rejects: LegacyImportReject[] | null
+  error: string | null
+  user: { name: string } | null
+  created_at: string | null
+  finished_at: string | null
+}
+
+export interface LegacyImportGuide {
+  columns: { column: string; required: 'always' | 'with a permit' | 'no'; description: string }[]
+  barangays: string[]
+  permit_types: { code: string; name: string }[]
+  odbc: { available: boolean; message: string | null }
+  queue_above: number
+}
+
 /* ── Messaging (per-application thread; v2 CONTRACT) ──────────────────── */
 
 export interface MessageAttachment {
