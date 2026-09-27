@@ -38,6 +38,7 @@ import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
 import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
+import { OfficerCaseloadPage } from './pages/admin/OfficerCaseloadPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
@@ -507,6 +508,24 @@ export default function App() {
             }
           />
           <Route
+            path="/staff/admin/users/:userId/reassign"
+            element={
+              /*
+                One officer's caseload, in the Officer in Charge format.
+
+                Guarded on `oic.assign` rather than the `user.manage` that
+                opens the directory it is reached from: moving a filing
+                between officers is the OIC act, and the two permissions come
+                apart — the Reassign link itself is already hidden without it
+                (see UsersPage), and a route that trusted the link would be a
+                guard that only exists in the markup.
+              */
+              <RequirePermission permission="oic.assign">
+                <OfficerCaseloadPage />
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/staff/admin/owners"
             element={
               <RequirePermission permission="owner.manage_status">
@@ -695,6 +714,24 @@ export default function App() {
             element={
               <RequirePermission permission="user.manage">
                 <UsersPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/users/:userId/reassign"
+            element={
+              /*
+                One officer's caseload, in the Officer in Charge format.
+
+                Guarded on `oic.assign` rather than the `user.manage` that
+                opens the directory it is reached from: moving a filing
+                between officers is the OIC act, and the two permissions come
+                apart — the Reassign link itself is already hidden without it
+                (see UsersPage), and a route that trusted the link would be a
+                guard that only exists in the markup.
+              */
+              <RequirePermission permission="oic.assign">
+                <OfficerCaseloadPage />
               </RequirePermission>
             }
           />

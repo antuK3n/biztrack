@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { admin } from '../../lib/resources'
+import type { AdminBusinessFilters } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
@@ -11,6 +12,7 @@ import {
   ProtoCard,
   FilterPills,
   ProtoModal,
+  SortFilter,
   StatusChip,
   inputCls,
   useDialogKeyboard,
@@ -40,107 +42,19 @@ const REASON_CODES = [
   'Other (see details)',
 ]
 
-/* ── Transfer of ownership (MCG-BPLO-FO-003 section II) ──────────────── */
-
-/**
- * Move a business to another owner account.
+/*
+ * ── Transfer of ownership is not on this screen ────────────────────
  *
- * ── Why this screen and not the amendment's approval ──────────────────
+ * The dialog that lived here moved a business to another owner account, for
+ * MCG-BPLO-FO-003 section II. The endpoint still exists and an approved CHANGE
+ * OF OWNERSHIP still has to land somewhere — but not here [client,
+ * 27 September 2026: *"sa owner status page, delete transfer ownership"*].
  *
- * An approved CHANGE OF OWNERSHIP states a NAME. An account is a different
- * thing: it may not exist, and matching a person to one by name is how a
- * business ends up with the wrong Maria Reyes. So the applicant states the
- * name, BPLO reads the Deed of Transfer, and the judgement about which
- * account that is gets made here by a person — client's decision,
- * 21 September 2026.
- *
- * Until this existed the decision had nowhere to land: `owner_user_id` was
- * written in exactly one place, from the session, when a business was first
- * registered.
+ * They are right that it did not belong. This page is where an admin bars
+ * somebody from trading; handing a business to a different person is an
+ * amendment being carried out, not a sanction, and the two sitting side by
+ * side on one row invited the wrong button on the worst possible screen.
  */
-function TransferOwnerModal({
-  row,
-  onClose,
-  onTransferred,
-}: {
-  row: AdminBusiness
-  onClose: () => void
-  onTransferred: (owner: { id: number; name: string }) => void
-}) {
-  const [email, setEmail] = useState('')
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function confirm() {
-    setBusy(true)
-    setError(null)
-    try {
-      const moved = await admin.transferBusinessOwner(row.id, email.trim(), reason.trim())
-      onTransferred({ id: moved.owner_user_id, name: moved.owner_name })
-    } catch (err) {
-      setError(toApiError(err).message)
-      setBusy(false)
-    }
-  }
-
-  return (
-    <ProtoModal
-      title="Transfer Ownership"
-      cancelLabel="Cancel"
-      confirmLabel="Transfer"
-      onCancel={onClose}
-      onConfirm={confirm}
-      confirmDisabled={busy || email.trim() === '' || reason.trim() === ''}
-    >
-      <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
-        {row.name}
-        {row.owner && (
-          <>
-            {' · currently '}
-            <span className="font-semibold text-ink">{row.owner.name}</span>
-          </>
-        )}
-      </p>
-      <div className="space-y-4">
-        <label className="block">
-          <FieldLabel required>New owner’s BizTrack email</FieldLabel>
-          <input
-            type="email"
-            className={inputCls}
-            placeholder="the address they registered with"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          {/*
-            Said before the attempt, not only after it fails. The commonest
-            dead end here is a new owner who has never registered, and an
-            officer who knows that up front can tell them on the phone
-            instead of discovering it at the counter.
-          */}
-          <span className="mt-1.5 block text-xs text-ink-secondary">
-            They must already have a BizTrack account. Filings, permits and deferred fees all move
-            with the business, and the previous owner loses access to it.
-          </span>
-        </label>
-        <label className="block">
-          <FieldLabel required>Reason</FieldLabel>
-          <textarea
-            className={`${inputCls} min-h-20`}
-            placeholder="e.g. Deed of Sale attached to amendment MCB-2026-000012"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </label>
-        {error !== null && (
-          <p role="alert" className="text-sm font-medium text-s-red">
-            {error}
-          </p>
-        )}
-      </div>
-    </ProtoModal>
-  )
-}
 
 /* ── Changing Status (p100) ───────────────────────────────────────────── */
 
@@ -159,6 +73,44 @@ function ChangeStatusModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /*
+   * -- The second step ----------------------------------------------------
+   *
+   * This dialog wrote on one press, and what it writes is somebody's
+   * livelihood: a suspension stops a business trading, and a blacklisting
+   * bars its owner and every other business they hold. The reason code is a
+   * dropdown whose neighbouring entries are "Compliance restored" and
+   * "Non-payment of assessed fees", one row apart [client, 27 September 2026:
+   * *"sa lahat ng major decision ... dapat modal na confirmation"*].
+   *
+   * One dialog, two views, rather than a second overlay on top: stacked
+   * dialogs mean two focus traps and an Escape whose meaning depends on which
+   * you believe is in front. Back returns to the form with everything still
+   * typed.
+   */
+  const [review, setReview] = useState(false)
+
+  const moving = status !== row.status
+  const sanction = status === 'suspended' || status === 'blacklisted'
+
+  /*
+   * How many OTHER businesses this owner holds. A blacklisting reaches all of
+   * them, so the dialog can only state the size of what it is about to do if
+   * it knows - and asking is cheap next to getting this wrong.
+   *
+   * Only fetched for the one status that needs it.
+   */
+  const { data: siblings } = useAsync(
+    () =>
+      status === 'blacklisted' && row.owner
+        ? admin.businessesPage({ q: row.owner.name, per_page: 100 })
+        : Promise.resolve(null),
+    [status, row.owner?.name],
+  )
+  const alsoAffected = (siblings?.data ?? []).filter(
+    (b) => b.owner?.id === row.owner?.id && b.id !== row.id && b.status !== 'blacklisted',
+  )
+
   async function confirm() {
     setBusy(true)
     setError(null)
@@ -168,22 +120,150 @@ function ChangeStatusModal({
       const updated = await admin.setBusinessStatus(row.id, status, reason)
       onChanged(updated)
     } catch (err) {
+      /*
+       * The dialog stays open, carrying the message. Closing it would put the
+       * reader back on a roster with an error above it and no sign that what
+       * they typed survived.
+       */
       setError(toApiError(err).message)
+      setReview(false)
       setBusy(false)
     }
   }
 
   return (
     <ProtoModal
-      title="Changing Status"
-      cancelLabel="Cancel"
-      confirmLabel="Confirm"
-      onCancel={onClose}
-      onConfirm={confirm}
-      confirmDisabled={busy || !reasonCode}
+      title={review ? confirmQuestion(status, row) : 'Changing Status'}
+      /*
+        -- The colour is the decision's, not the screen's ------------------
+
+        RED for a suspension or a blacklisting, because those are the two acts
+        that stop somebody trading - the definition DESIGN.md gives red under
+        "Red Means Stop". BLUE for Active and Flagged: restoring a business is
+        good news and flagging one is a note to watch it, and dressing either
+        in the danger colour spends the one signal this app has on something
+        that stops nobody.
+
+        It follows the CHOSEN status, so the dialog changes colour as the
+        reader moves down the list. That is the point: the warning belongs to
+        what they are about to do, not to the screen they did it from.
+      */
+      tone={sanction ? 'red' : 'blue'}
+      cancelLabel={review ? 'Back' : 'Cancel'}
+      confirmLabel={
+        review
+          ? busy
+            ? 'Saving…'
+            : confirmVerb(status)
+          : 'Review this change'
+      }
+      onCancel={review ? () => setReview(false) : onClose}
+      onConfirm={review ? confirm : () => setReview(true)}
+      confirmDisabled={busy || (!review && (!reasonCode || !moving))}
+      confirmDescribedBy={!review && (!reasonCode || !moving) ? 'status-blocker' : undefined}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">{row.name}</p>
-      <div className="space-y-4">
+
+      {review && (
+        <div className="space-y-4">
+          <p className="text-sm text-ink">
+            <span className="font-bold">{row.name}</span> moves from{' '}
+            <span className="font-semibold">{STATUS_META[row.status]?.label ?? row.status}</span> to{' '}
+            <span className="font-bold">{STATUS_META[status]?.label ?? status}</span>.
+          </p>
+
+          {/*
+            What the status MEANS, in the reader's terms, at the moment they
+            commit. The word alone does not say whether the owner can still
+            file, and that is the whole question a sanction turns on.
+          */}
+          <p className="rounded-lg border border-line bg-canvas px-4 py-3 text-sm text-ink-secondary">
+            {CONSEQUENCE[status]}
+          </p>
+
+          {status === 'blacklisted' && (
+            /*
+              The size of it. A blacklisting is a finding against the PERSON,
+              so it reaches every business they hold - and an admin clicking
+              one row is entitled to know that before they do, rather than
+              discovering it on the roster afterwards.
+            */
+            <div className="rounded-lg bg-s-red-tint px-4 py-3 text-sm text-s-red">
+              <p className="font-bold">
+                {row.owner?.name ?? 'This owner'} will be blacklisted, not just this business.
+              </p>
+              {alsoAffected.length > 0 ? (
+                <>
+                  <p className="mt-1.5 text-xs leading-relaxed">
+                    {alsoAffected.length} other{' '}
+                    {alsoAffected.length === 1 ? 'business' : 'businesses'} registered to them will
+                    be blacklisted in the same act, and their permits suspended:
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {alsoAffected.slice(0, 6).map((b) => (
+                      <li key={b.id} className="text-xs font-semibold">
+                        {b.name}
+                      </li>
+                    ))}
+                    {alsoAffected.length > 6 && (
+                      <li className="text-xs">and {alsoAffected.length - 6} more</li>
+                    )}
+                  </ul>
+                </>
+              ) : (
+                <p className="mt-1.5 text-xs leading-relaxed">
+                  This is the only business registered to them today. Any they register from now on
+                  is barred too, while the blacklisting stands.
+                </p>
+              )}
+            </div>
+          )}
+
+          {status === 'active' && row.owner?.blacklisted && (
+            <div className="rounded-lg bg-s-green-tint px-4 py-3 text-sm text-s-green">
+              <p className="font-bold">
+                This also lifts the blacklisting from {row.owner.name}.
+              </p>
+              <p className="mt-1.5 text-xs leading-relaxed">
+                Every business barred by it comes back with them, and their suspended permits are
+                restored. Reinstating one business of a blacklisted owner cannot mean anything less
+                — the bar is on the person.
+              </p>
+            </div>
+          )}
+
+          <dl className="divide-y divide-line rounded-lg border border-line">
+            <div className="grid grid-cols-3 gap-3 px-4 py-3">
+              <dt className="text-xs font-semibold text-ink-muted">Reason</dt>
+              <dd className="col-span-2 text-sm text-ink">{reasonCode}</dd>
+            </div>
+            {details.trim() && (
+              <div className="grid grid-cols-3 gap-3 px-4 py-3">
+                <dt className="text-xs font-semibold text-ink-muted">Details</dt>
+                <dd className="col-span-2 text-sm text-ink">{details.trim()}</dd>
+              </div>
+            )}
+          </dl>
+
+          <p className="text-xs text-ink-muted">
+            {/*
+              Both facts the reader needs after the fact: it is on the record,
+              and the owner is told. An owner finding out by being refused a
+              renewal is the failure this sentence exists to rule out.
+            */}
+            Written to the status history, and {row.owner?.name ?? 'the owner'} is notified with
+            this reason and told to message the City BPLO.
+          </p>
+
+          {error && (
+            <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className={review ? 'hidden' : 'space-y-4'} aria-hidden={review || undefined}>
         <label className="block">
           <FieldLabel required>New status</FieldLabel>
           <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as BusinessStatus)}>
@@ -212,10 +292,57 @@ function ChangeStatusModal({
             onChange={(e) => setDetails(e.target.value)}
           />
         </label>
-        {error && <p className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{error}</p>}
+        {(!reasonCode || !moving) && (
+          <p id="status-blocker" className="text-xs text-ink-muted">
+            {!moving
+              ? `${row.name} is already ${(STATUS_META[status]?.label ?? status).toLowerCase()}. Choose a different status to change anything.`
+              : 'Choose a reason code — it goes on the record and the owner is shown it.'}
+          </p>
+        )}
+
+        {!review && error && (
+          <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+            {error}
+          </p>
+        )}
       </div>
     </ProtoModal>
   )
+}
+
+/** The question the confirmation asks, named for the act rather than "Confirm?". */
+function confirmQuestion(status: BusinessStatus, row: AdminBusiness): string {
+  if (status === 'blacklisted') return `Blacklist ${row.owner?.name ?? 'this owner'}?`
+  if (status === 'suspended') return `Suspend ${row.name}?`
+  if (status === 'flagged') return `Flag ${row.name} for watching?`
+  return `Restore ${row.name} to active?`
+}
+
+/** The verb on the button, so the last thing read is what will happen. */
+function confirmVerb(status: BusinessStatus): string {
+  if (status === 'blacklisted') return 'Blacklist this owner'
+  if (status === 'suspended') return 'Suspend this business'
+  if (status === 'flagged') return 'Flag this business'
+  return 'Restore to active'
+}
+
+/**
+ * What each status DOES, said at the moment of deciding.
+ *
+ * The four words are not self-explanatory and the difference between two of
+ * them is whether a family stops earning this month. An admin choosing from a
+ * dropdown of labels is choosing between consequences, so the consequences are
+ * on screen.
+ */
+const CONSEQUENCE: Record<BusinessStatus, string> = {
+  active:
+    'The business can file and renew as normal, and any permits suspended by an earlier sanction are restored.',
+  flagged:
+    'A note to watch this business. Nothing is blocked — it can still file and renew, and its permits are untouched.',
+  suspended:
+    'This business cannot file or renew, and its permits are suspended, so the QR check at the counter will read them as not valid. Its owner’s other businesses are unaffected.',
+  blacklisted:
+    'The OWNER is barred, not just this business: none of the businesses registered to them can file or renew, all of their permits are suspended, and anything they register from now on is barred too.',
 }
 
 /* ── Status History (p101) — audit-fed ────────────────────────────────── */
@@ -347,7 +474,7 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
 
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
-type ModalState = { kind: 'change' | 'transfer' | 'history' | 'fees'; row: AdminBusiness } | null
+type ModalState = { kind: 'change' | 'history' | 'fees'; row: AdminBusiness } | null
 
 /**
  * What a business has been issued and not yet paid for, itemised.
@@ -411,6 +538,276 @@ function FeesModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }
   )
 }
 
+/**
+ * Who is barred, and everything they hold.
+ *
+ * ── This IS the Blacklisted pill ──────────────────────────────────────────
+ *
+ * It began as a second tab beside "Businesses", which was one register too
+ * many: the roster already had a Blacklisted pill, so the screen offered two
+ * doors to the same subject and the reader had to know which one answered
+ * their question [client, 27 September 2026: *"theres blacklisted owners
+ * seperated section just remove that at kung pano yung laman nya ilagay mo na
+ * lang sa Businesses, Blacklisted section"*].
+ *
+ * They are right, and the reason the two existed is worth keeping in view: a
+ * blacklisting falls on the PERSON, so a list of blacklisted shopfronts is
+ * three rows repeating one name, saying nothing about the finding or who made
+ * it. So the pill keeps its place in the row — where a reader looks for it —
+ * and renders people instead of rows.
+ *
+ * Cards rather than a table. Each entry is one person with a reason, a date, a
+ * signature and a business list of a variable length — a table would give five
+ * columns of which one is a nested list, and the reason (the thing worth
+ * reading) would be squeezed into whatever width was left.
+ */
+function BlacklistedOwners({
+  query,
+  refreshKey,
+  onChangeStatus,
+  onHistory,
+}: {
+  query: string
+  /*
+   * Bumped by the page when a status change lands.
+   *
+   * This list fetches on its own, so lifting a bar from one of its cards left
+   * the card sitting there: the page reloaded the BUSINESS roster it was not
+   * showing, and the register of people kept the owner it had just released.
+   * The reader's only clue was that pressing Change Status again offered to
+   * restore a business that was already active.
+   */
+  refreshKey: number
+  /*
+   * The two acts every other row on this screen offers. A card that shows a
+   * barred business but cannot lift the bar sends the reader back to the
+   * Businesses pill to find the same row again — see the note on the buttons
+   * below.
+   */
+  onChangeStatus: (business: AdminBusiness) => void
+  onHistory: (business: AdminBusiness) => void
+}) {
+  const [page, setPage] = useState(1)
+  useEffect(() => setPage(1), [query])
+
+  const { data, loading, error, reload } = useAsync(
+    () => admin.blacklistedOwners({ q: query || undefined, page, per_page: 20 }),
+    [query, page, refreshKey],
+  )
+
+  const rows = data?.data ?? []
+  const total = data?.meta.total ?? 0
+  const lastPage = data?.meta.last_page ?? 1
+
+  if (loading) return <SkeletonList rows={4} />
+  if (error) return <ErrorState error={error} onRetry={reload} />
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={BuildingIcon}
+        title={query ? 'Nobody blacklisted matches your search' : 'Nobody is blacklisted'}
+        description={
+          query
+            ? 'Try another owner, email or business name.'
+            : 'An owner appears here when one of their businesses is set to Blacklisted. The bar covers every business registered to them.'
+        }
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <p role="status" className="text-sm text-ink-muted">
+        {total.toLocaleString()} {total === 1 ? 'owner is' : 'owners are'} barred from filing
+        {query && ' and match your search'}. Each one&apos;s businesses are listed with them.
+      </p>
+
+      {rows.map((owner) => (
+        <ProtoCard key={owner.id} className="overflow-hidden rounded-xl">
+          {/*
+            A red left edge rather than a red card. The sanction is the
+            heading's business; tinting the whole surface would drown the
+            reason and the list, which are what an admin came to read.
+          */}
+          <div className="border-l-4 border-s-red px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-ink">{owner.name}</h3>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {owner.email}
+                  {owner.mobile_number && <span className="tnum"> · {owner.mobile_number}</span>}
+                </p>
+              </div>
+              <StatusChip tone="tint-red">Blacklisted</StatusChip>
+            </div>
+
+            <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-3">
+              <div className="sm:col-span-3">
+                <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  Reason
+                </dt>
+                {/*
+                  The reason in full, not truncated. It is the one field that
+                  has to survive being read back to an owner on the phone, and
+                  a card that ends it in an ellipsis makes the admin open the
+                  audit log to finish a sentence they are already reading.
+                */}
+                <dd className="mt-0.5 text-sm text-ink">
+                  {owner.reason ?? (
+                    <span className="italic text-ink-muted">
+                      No reason on record — this bar predates the register keeping one.
+                    </span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  Blacklisted
+                </dt>
+                <dd className="mt-0.5 text-sm text-ink">{formatDate(owner.blacklisted_at)}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  By
+                </dt>
+                <dd className="mt-0.5 text-sm text-ink">
+                  {/* A sanction nobody signed is one nobody can follow up. */}
+                  {owner.blacklisted_by ?? <span className="italic text-ink-muted">Not recorded</span>}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  Businesses barred
+                </dt>
+                <dd className="tnum mt-0.5 text-sm font-bold text-ink">
+                  {owner.businesses.length}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="border-t border-line bg-canvas/40 px-5 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+              Registered to {owner.name}
+            </p>
+            <ul className="mt-2 divide-y divide-line/70">
+              {owner.businesses.map((business) => {
+                /*
+                  The card's business list carries enough to open either
+                  dialog, but not a whole roster row — the blacklisted-owners
+                  payload has no tracking id, no fee breakdown, no
+                  registration date, because a sanctions register has no use
+                  for them.
+
+                  So the object handed to the dialogs is built here and is
+                  honestly partial: `created_at` empty and the optional fields
+                  absent. ChangeStatusModal reads the id, the name, the status
+                  and the owner; HistoryModal reads the id and the name. Both
+                  are here. Inventing a tracking id to satisfy the type would
+                  be worse than leaving it out.
+                */
+                const asRow: AdminBusiness = {
+                  id: business.id,
+                  name: business.name,
+                  status: business.status,
+                  status_label: business.status_label,
+                  owner: { id: owner.id, name: owner.name, blacklisted: true },
+                  created_at: '',
+                }
+
+                return (
+                  <li
+                    key={business.id}
+                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2.5"
+                  >
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="text-sm font-semibold text-ink">{business.name}</span>
+                      <StatusChip tone={STATUS_META[business.status]?.tone ?? 'tint-gray'}>
+                        {business.status_label}
+                      </StatusChip>
+                      {business.registered_after && (
+                        /*
+                          The one row that needs explaining. A business
+                          registered AFTER the bar was imposed was never
+                          touched by the cascade, so its own status reads
+                          Active while every filing attempt is refused. Left
+                          unsaid, an admin reading "Active" under a
+                          blacklisted owner would reasonably conclude the bar
+                          had a hole in it.
+                        */
+                        <span className="rounded-full bg-s-yellow-tint px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                          Registered after the bar — barred by the owner&apos;s blacklisting
+                        </span>
+                      )}
+                    </span>
+
+                    {/*
+                      The same two acts every other row on this screen offers,
+                      and the same words for them [client, 27 September 2026:
+                      *"lalagayan mo pa ng change status, at view status
+                      history tulad sa iba"*].
+
+                      Without them this card was read-only, so lifting a bar
+                      meant going back to the Businesses pill and finding the
+                      row again — on the one screen where the reader is already
+                      looking straight at it.
+                    */}
+                    <span className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onChangeStatus(asRow)}
+                        className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                        aria-label={`Change the status of ${business.name}`}
+                      >
+                        Change Status
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onHistory(asRow)}
+                        className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                        aria-label={`Status history for ${business.name}`}
+                      >
+                        View Status History
+                      </button>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </ProtoCard>
+      ))}
+
+      {lastPage > 1 && (
+        <div className="flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            aria-label="Previous page"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            aria-disabled={page <= 1 || undefined}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+          >
+            ‹
+          </button>
+          <span className="text-xs text-ink-muted">
+            Page {page.toLocaleString()} of {lastPage.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            aria-label="Next page"
+            onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+            aria-disabled={page >= lastPage || undefined}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+          >
+            ›
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Rows per request. The roster is 705 businesses and grows with the city. */
 const PAGE_SIZE = 25
 
@@ -425,12 +822,111 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'blacklisted', label: 'Blacklisted' },
 ]
 
+/**
+ * The orders this roster can be read in.
+ *
+ * ── Named by the question each one answers ────────────────────────────────
+ *
+ * Not "created_at desc". Every label is a sentence an admin would say out
+ * loud — "who owes the most" is why somebody sorts by fees, and "sort by
+ * unbilled_fees descending" is the same instruction with the reason taken out.
+ *
+ * The `value` carries both halves, split on the way to the query, so the menu
+ * can offer a column in one direction only where the other direction answers
+ * nothing: nobody wants the smallest debt first.
+ */
+const SORT_OPTIONS = [
+  { value: 'registered:desc', label: 'Newest registration' },
+  { value: 'registered:asc', label: 'Oldest registration' },
+  { value: 'name:asc', label: 'Business name A–Z' },
+  { value: 'name:desc', label: 'Business name Z–A' },
+  { value: 'owner:asc', label: 'Owner name A–Z' },
+  { value: 'fees:desc', label: 'Owes the most' },
+  { value: 'status_changed:desc', label: 'Status changed most recently' },
+]
+
+/*
+ * ── What the Filter panel holds, and what it deliberately does not ────────
+ *
+ * NOT the status. Active / Flagged / Suspended / Blacklisted are pills, on
+ * their own row, one press away — repeating them inside a menu would give the
+ * screen two controls for one question, which then have to be kept agreeing
+ * with each other [client, 27 September 2026, pointing at the pills].
+ *
+ * What is left is the three facts an admin acts on that a status does not
+ * carry, and the one span of time they are usually asked about:
+ *
+ *   MONEY      Who owes us something. The commonest reason to open this page
+ *              when nobody is being sanctioned, so it takes the main slot.
+ *   THE OWNER  Whether the bar is the PERSON's. A blacklisting reaches every
+ *              business they hold, so most blacklisted rows are not being
+ *              judged on their own conduct — this separates the two.
+ *   PAPERWORK  A registration nothing was ever filed against.
+ *   REGISTERED A date range. "Everything registered this quarter" is the shape
+ *              of half the questions asked of this register, and sorting by
+ *              date does not answer it — it puts the quarter at the top of
+ *              seven hundred rows and leaves the reader to find where it ends.
+ *
+ * The first option of each is the neutral one, which is the convention
+ * `SortFilter` relies on to decide whether to colour the Filter button.
+ */
+const FEE_OPTIONS = [
+  { value: '', label: 'Any fees' },
+  { value: 'owing', label: 'Has unbilled fees' },
+  { value: 'clear', label: 'Nothing outstanding' },
+]
+
+const OWNER_OPTIONS = [
+  { value: '', label: 'Any owner' },
+  { value: '1', label: 'Owner is blacklisted' },
+  { value: '0', label: 'Owner is not blacklisted' },
+]
+
+const FILED_OPTIONS = [
+  { value: '', label: 'Filed or not' },
+  { value: 'yes', label: 'Has filed at least once' },
+  { value: 'never', label: 'Never filed' },
+]
+
 export function OwnersPage() {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [page, setPage] = useState(1)
   const [modal, setModal] = useState<ModalState>(null)
+
+  /*
+   * The order and the two extra narrowings, both asked of the server.
+   *
+   * Browser-side would be wrong for the same reason the search is not: this
+   * list is paged at twenty-five out of seven hundred, so sorting what happens
+   * to be on screen would put the largest debt on page one of the rows already
+   * fetched, and call it the largest debt in the city.
+   */
+  const [sort, setSort] = useState('registered:desc')
+  const [ownerFilter, setOwnerFilter] = useState('')
+  const [feeFilter, setFeeFilter] = useState('')
+  const [filedFilter, setFiledFilter] = useState('')
+  const [registeredFrom, setRegisteredFrom] = useState('')
+  const [registeredTo, setRegisteredTo] = useState('')
+
+  /*
+   * -- The Blacklisted pill shows PEOPLE --------------------------------
+   *
+   * Everywhere else on this screen a row is a shopfront. A blacklisting is a
+   * finding against the owner and reaches every business they hold, so listing
+   * it as shopfronts gives three rows repeating one name with no room for the
+   * reason, the date or who signed it. Same pill, same place in the row; a
+   * different thing under it, because it is a different question.
+   */
+  const showingOwners = status === 'blacklisted'
+
+  /*
+   * A status change can empty a card, so the register of people has to be told
+   * one happened. It fetches separately from the business roster — see the
+   * note on the prop.
+   */
+  const [ownersRefresh, setOwnersRefresh] = useState(0)
 
   /*
    * Searched and paged on the server. Both used to happen in the browser over
@@ -440,16 +936,44 @@ export function OwnersPage() {
    * footer called that the whole roster.
    */
   const { data, loading, error, reload, setData } = useAsync(
-    () =>
-      admin.businessesPage({
+    () => {
+      /*
+       * One string in state, two parameters on the wire. The menu needs a
+       * single value to tick and the endpoint takes a column and a direction,
+       * so the split happens here — at the boundary, rather than by keeping
+       * two pieces of state that can disagree with each other.
+       */
+      const [by, dir] = sort.split(':') as [
+        NonNullable<AdminBusinessFilters['sort']>,
+        'asc' | 'desc',
+      ]
+      return admin.businessesPage({
         q: query || undefined,
         // The endpoint has always accepted this and nothing ever sent it, so
         // "show me the suspended ones" meant paging the whole register by eye.
         status: status === 'all' ? undefined : status,
+        sort: by,
+        dir,
+        owner_blacklisted: ownerFilter === '' ? undefined : ownerFilter === '1',
+        fees: (feeFilter || undefined) as 'owing' | 'clear' | undefined,
+        filed: (filedFilter || undefined) as 'yes' | 'never' | undefined,
+        registered_from: registeredFrom || undefined,
+        registered_to: registeredTo || undefined,
         page,
         per_page: PAGE_SIZE,
-      }),
-    [query, status, page],
+      })
+    },
+    [
+      query,
+      status,
+      sort,
+      ownerFilter,
+      feeFilter,
+      filedFilter,
+      registeredFrom,
+      registeredTo,
+      page,
+    ],
   )
 
   // Let the admin finish typing before asking the server.
@@ -476,12 +1000,58 @@ export function OwnersPage() {
    * does not carry is correct whatever the endpoint returns.
    */
   function applyChange(updated: AdminBusiness) {
+    /*
+     * -- One press can move rows nobody clicked -------------------------
+     *
+     * Blacklisting an owner blacklists every business they hold, and lifting
+     * it brings them all back. Patching only the clicked row would leave the
+     * roster showing two of the three as Active while the endpoint refuses
+     * every filing for them - a screen quietly disagreeing with the register
+     * it is a view of, and the admin's only clue would be a reload they had
+     * no reason to perform.
+     *
+     * So: patch when the change was local, refetch when it reached further.
+     * The reply says which (`others_blacklisted` / `others_restored`), which
+     * is why those fields exist.
+     */
+    const reached = (updated.others_blacklisted ?? 0) + (updated.others_restored ?? 0) > 0
+
+    setModal(null)
+    // Always, whether or not it reached further: the change may have been the
+    // one that put this owner on the sanctions book, or took them off it.
+    setOwnersRefresh((n) => n + 1)
+
+    if (reached) {
+      reload()
+      return
+    }
+
+    /*
+     * Merged, not replaced. POST /admin/businesses/{id}/status answers with a
+     * handful of fields - no name, no owner, no created_at - so swapping the
+     * whole row in blanked the Business column and turned Owner into an
+     * em dash the moment an admin changed a status.
+     */
     setData((prev) =>
       prev
-        ? { ...prev, data: prev.data.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)) }
+        ? {
+            ...prev,
+            data: prev.data.map((r) =>
+              r.id === updated.id
+                ? {
+                    ...r,
+                    ...updated,
+                    // The owner object is not in the reply, so its own
+                    // blacklisted flag has to be carried across by hand.
+                    owner: r.owner
+                      ? { ...r.owner, blacklisted: updated.owner_blacklisted ?? r.owner.blacklisted }
+                      : r.owner,
+                  }
+                : r,
+            ),
+          }
         : prev!,
     )
-    setModal(null)
   }
 
   return (
@@ -493,8 +1063,12 @@ export function OwnersPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search business or owner…"
-              aria-label="Search businesses or owners"
+              placeholder={
+                showingOwners ? 'Search owner, email or business…' : 'Search business or owner…'
+              }
+              aria-label={
+                showingOwners ? 'Search blacklisted owners' : 'Search businesses or owners'
+              }
               className="w-56 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </span>
@@ -508,8 +1082,18 @@ export function OwnersPage() {
         whole point of this screen is finding the businesses under sanction, and
         they were indistinguishable from the 700 that are not without paging the
         register and reading chips.
+
+        The Sort and Filter menus sit on the same line, to its right: the pills
+        answer "which state", and the menus answer "in what order" and "owing
+        or not" — three questions about one list, so they belong together
+        rather than stacked into three rows of controls.
+
+        They are hidden while the Blacklisted pill is showing people. Ordering
+        by "Newest registration" means nothing on a list of owners, and a
+        control that stays on screen doing nothing is worse than one that steps
+        out of the way.
       */}
-      <div className="mb-5">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <FilterPills
           options={STATUS_FILTERS}
           value={status}
@@ -518,8 +1102,67 @@ export function OwnersPage() {
             setPage(1)
           }}
         />
+
+        {!showingOwners && (
+          <SortFilter
+            sort={{
+              value: sort,
+              options: SORT_OPTIONS,
+              onChange: (next) => {
+                setSort(next)
+                setPage(1)
+              },
+            }}
+            filter={{
+              value: feeFilter,
+              options: FEE_OPTIONS,
+              onChange: (next) => {
+                setFeeFilter(next)
+                setPage(1)
+              },
+            }}
+            filterFields={[
+              {
+                label: 'Owner',
+                value: ownerFilter,
+                options: OWNER_OPTIONS,
+                onChange: (next: string) => {
+                  setOwnerFilter(next)
+                  setPage(1)
+                },
+              },
+              {
+                label: 'Filings',
+                value: filedFilter,
+                options: FILED_OPTIONS,
+                onChange: (next: string) => {
+                  setFiledFilter(next)
+                  setPage(1)
+                },
+              },
+            ]}
+            dateRange={{
+              from: registeredFrom,
+              to: registeredTo,
+              onChange: (from, to) => {
+                setRegisteredFrom(from)
+                setRegisteredTo(to)
+                setPage(1)
+              },
+            }}
+          />
+        )}
       </div>
 
+      {showingOwners ? (
+        <BlacklistedOwners
+          query={query}
+          refreshKey={ownersRefresh}
+          onChangeStatus={(business) => setModal({ kind: 'change', row: business })}
+          onHistory={(business) => setModal({ kind: 'history', row: business })}
+        />
+      ) : (
+        <>
       {loading ? (
         <SkeletonList rows={7} />
       ) : error ? (
@@ -609,7 +1252,23 @@ export function OwnersPage() {
                           {row.tracking_id ?? <span className="italic">No filing yet</span>}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-ink-secondary">{row.owner?.name ?? '—'}</td>
+                      <td className="px-5 py-3.5 text-ink-secondary">
+                        {row.owner?.name ?? '—'}
+                        {row.owner?.blacklisted && (
+                          /*
+                            Whose bar it is.
+
+                            After a blacklisting cascades, three rows of one
+                            owner all read "Blacklisted" with nothing to say
+                            they are ONE sanction rather than three - and an
+                            admin looking for the finding would have opened
+                            three status histories to learn it.
+                          */
+                          <span className="mt-0.5 block text-xs font-semibold text-s-red">
+                            Owner blacklisted
+                          </span>
+                        )}
+                      </td>
                       <td className="px-5 py-3.5">
                         <StatusChip tone={meta.tone}>{meta.label}</StatusChip>
                       </td>
@@ -641,24 +1300,32 @@ export function OwnersPage() {
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'change', row })}
-                            // Transparent border, not no border: its outlined
-                            // neighbour carries a 1px one, so without this the
-                            // filled button stands 2px shorter than its row.
-                            className="rounded-full border border-transparent bg-s-red px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                            /*
+                              Royal, not red.
+
+                              Every row carried a red Change Status button -
+                              seven hundred of them, on a register that is
+                              almost entirely businesses trading normally. Red
+                              is this app's one "stop" signal (DESIGN.md), and
+                              spending it on the control that OPENS a dialog
+                              leaves nothing to say with when the dialog is
+                              about to suspend somebody. The act may be red;
+                              the door to it is not.
+
+                              Transparent border, not no border: its outlined
+                              neighbour carries a 1px one, so without this the
+                              filled button stands 2px shorter than its row.
+                            */
+                            className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                            aria-label={`Change the status of ${row.name}`}
                           >
                             Change Status
                           </button>
                           <button
                             type="button"
-                            onClick={() => setModal({ kind: 'transfer', row })}
-                            className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
-                          >
-                            Transfer Ownership
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => setModal({ kind: 'history', row })}
                             className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                            aria-label={`Status history for ${row.name}`}
                           >
                             View Status History
                           </button>
@@ -710,27 +1377,14 @@ export function OwnersPage() {
           </div>
         </ProtoCard>
       )}
+        </>
+      )}
 
       {modal?.kind === 'change' && (
         <ChangeStatusModal
           row={modal.row}
           onClose={() => setModal(null)}
           onChanged={applyChange}
-        />
-      )}
-      {modal?.kind === 'transfer' && (
-        <TransferOwnerModal
-          row={modal.row}
-          onClose={() => setModal(null)}
-          onTransferred={(owner) => {
-            /*
-             * The roster row is patched in place rather than refetched. The
-             * owner is the only thing that moved, and a refetch would reset
-             * the page and the filter the admin is working through.
-             */
-            applyChange({ ...modal.row, owner })
-            setModal(null)
-          }}
         />
       )}
       {modal?.kind === 'history' && <HistoryModal row={modal.row} onClose={() => setModal(null)} />}

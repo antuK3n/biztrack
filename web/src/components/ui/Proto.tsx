@@ -237,13 +237,19 @@ export function ProtoModal({
 export function AccountRestrictedModal({
   variant,
   referenceId,
+  businessName,
+  covers,
   onClose,
 }: {
   variant: 'blacklisted' | 'suspended'
   referenceId?: string | null
+  /** The business a SUSPENSION is about; a blacklisting is about the reader. */
+  businessName?: string | null
+  /** How many businesses the reader holds, for a bar that reaches all of them. */
+  covers?: number
   onClose: () => void
 }) {
-  const title = variant === 'suspended' ? 'Account Suspended' : 'Account Blacklisted'
+  const title = variant === 'suspended' ? 'Business Suspended' : 'Account Blacklisted'
   const word = variant === 'suspended' ? 'suspended' : 'blacklisted'
   return (
     <div
@@ -255,11 +261,39 @@ export function AccountRestrictedModal({
       <div className="w-full max-w-lg overflow-hidden rounded-md bg-white shadow-overlay">
         <div className="bg-s-red px-6 py-3.5 text-lg font-bold tracking-wide text-white">{title}</div>
         <div className="space-y-4 px-7 py-7 text-ink">
+          {/*
+            -- Which of the two this is, and how far it reaches -------------
+
+            It read "This account has been suspended" for both. A suspension
+            is about ONE premises - the reader's other businesses carry on
+            trading - and saying "this account" told them their whole
+            livelihood had stopped. A blacklisting genuinely is about the
+            account, and there the old wording was true but silent about
+            scope: somebody with three shops had no way to learn from this
+            screen that all three were barred [client, 27 September 2026].
+          */}
+          {variant === 'suspended' ? (
+            <p className="text-base leading-relaxed">
+              <span className="font-bold">{businessName ?? 'One of your businesses'}</span> has been
+              suspended. It cannot file or renew while this stands, and its permits are not valid at
+              the counter. Your other businesses are not affected.
+            </p>
+          ) : (
+            <p className="text-base leading-relaxed">
+              This account has been {word}.{' '}
+              {covers && covers > 1
+                ? `All ${covers} of your businesses are barred from filing and renewing, and their permits are suspended.`
+                : 'Your businesses are barred from filing and renewing, and their permits are suspended.'}
+            </p>
+          )}
           <p className="text-base leading-relaxed">
-            This account has been {word} and access to the platform has been restricted.
-          </p>
-          <p className="text-base leading-relaxed">
-            If you believe this action was taken in error, please contact support for further review.
+            {/*
+              A destination, not "contact support". There is no support desk;
+              there is a BPLO thread in this app, and the button below opens
+              it. Naming the wrong door is the same as naming none.
+            */}
+            If you believe this is a mistake, or you want to know what is needed to have it lifted,
+            message the City BPLO below. Your notifications carry the reason that was recorded.
           </p>
           {referenceId && (
             <p className="text-base">
@@ -614,9 +648,38 @@ export function SortFilter({
    * there is no neutral state to fall back to.
    */
   const sortLabel = sort?.options.find((o) => o.value === sort.value)?.label
-  const filterLabel = filterActive
-    ? filter?.options.find((o) => o.value === filter.value)?.label
-    : undefined
+
+  /*
+   * ── It names whichever control is actually narrowing ───────────────────
+   *
+   * This read the PRIMARY filter's label and nothing else, so a panel whose
+   * only active control was one of `filterFields` printed "Filter: Any owner"
+   * — the neutral label, on a button coloured to say a filter was on, while
+   * the list was narrowed by something the button did not mention. It said
+   * the opposite of what was true.
+   *
+   * So the narrowed controls are collected and the button names them: one by
+   * its own label, several by their count, because "Filter: Has unbilled
+   * fees, Never filed, Owner is blacklisted" is wider than the button and
+   * stops being readable at two.
+   */
+  const narrowedLabels = [
+    filter && filter.value !== filter.options[0]?.value
+      ? filter.options.find((o) => o.value === filter.value)?.label
+      : undefined,
+    ...(filterFields ?? []).map((f) =>
+      f.value !== f.options[0]?.value
+        ? f.options.find((o) => o.value === f.value)?.label
+        : undefined,
+    ),
+    dateRange && (dateRange.from || dateRange.to) ? 'Dated' : undefined,
+  ].filter(Boolean) as string[]
+
+  const filterLabel = !filterActive
+    ? undefined
+    : narrowedLabels.length === 1
+      ? narrowedLabels[0]
+      : `${narrowedLabels.length} filters`
 
   const sortInner = (
     <>

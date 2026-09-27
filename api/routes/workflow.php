@@ -525,6 +525,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('permission:owner.manage_status')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
             Route::get('businesses', [BusinessStatusController::class, 'index']);
+            /*
+             * Who is barred, rather than which shopfronts are. A blacklisting
+             * is a finding against a person and it bars every business they
+             * hold, so the register that lists it is a register of people.
+             */
+            Route::get('blacklisted-owners', [BusinessStatusController::class, 'blacklistedOwners']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
             /*
              * The other half of FO-003's section II. Same permission as the

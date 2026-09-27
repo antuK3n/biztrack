@@ -116,9 +116,21 @@ function OwnerHome() {
   // include `status`, so `b.status` may be undefined — the modal only fires
   // when a restricted status is actually present. Purely informational.
   const { data } = useAsync(() => businesses.list(), [])
-  const restricted = (data ?? []).find(
-    (b) => b.status === 'blacklisted' || b.status === 'suspended',
-  )
+
+  /*
+   * -- Blacklisted wins over suspended --------------------------------------
+   *
+   * This took whichever came first in the list. An owner with a suspended shop
+   * AND a blacklisted account got the suspension notice about half the time -
+   * the lesser of the two findings, and the one whose advice ("your other
+   * businesses are fine") is false when the account itself is barred.
+   *
+   * A blacklisting is about the person and reaches everything they hold, so it
+   * is the news that has to be delivered when both are true.
+   */
+  const held = data ?? []
+  const restricted =
+    held.find((b) => b.status === 'blacklisted') ?? held.find((b) => b.status === 'suspended')
   const showModal = !dismissed && Boolean(restricted)
 
   /*
@@ -151,7 +163,15 @@ function OwnerHome() {
       {showModal && restricted && (
         <AccountRestrictedModal
           variant={restricted.status === 'suspended' ? 'suspended' : 'blacklisted'}
-          referenceId={restricted.ban}
+          /*
+            The reference only makes sense for a SUSPENSION, which is about
+            one premises. Quoting one business's BAN against an account-wide
+            blacklisting would invite the reader to ring up about that shop
+            and be told the finding is not about it.
+          */
+          referenceId={restricted.status === 'suspended' ? restricted.ban : null}
+          businessName={restricted.name}
+          covers={held.length}
           onClose={() => setDismissed(true)}
         />
       )}

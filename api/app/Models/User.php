@@ -36,6 +36,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'email', 'mobile_number', 'password', 'department_id', 'is_active',
         'data_privacy_consent_at', 'email_verified_at',
         'last_login_at', 'failed_login_attempts', 'locked_until',
+        'blacklisted_at', 'blacklist_reason', 'blacklisted_by',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -49,7 +50,35 @@ class User extends Authenticatable implements MustVerifyEmail
             'locked_until' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'blacklisted_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Is this owner barred from the register altogether?
+     *
+     * ── Why the question is asked of the person ──────────────────────────────
+     *
+     * Blacklisting used to be a status on ONE business, so an owner barred for
+     * falsified documents could file for their other two the same afternoon,
+     * and register a fourth. A suspension is about a premises; a blacklisting
+     * is a judgement about whoever is filing, and it only means anything if it
+     * follows them [client, 27 September 2026: *"once na naka blacklist,
+     * mismong owner na tlga yan"*].
+     *
+     * Every business they own is set to `blacklisted` in the same act, so the
+     * roster, the certificates and the counter's QR check keep reading one
+     * column. This is the cause; that is its consequence.
+     */
+    public function isBlacklisted(): bool
+    {
+        return $this->blacklisted_at !== null;
+    }
+
+    /** The officer who imposed the bar, for the register that lists it. */
+    public function blacklistedBy(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'blacklisted_by');
     }
 
     // --- relationships -------------------------------------------------------
@@ -76,6 +105,20 @@ class User extends Authenticatable implements MustVerifyEmail
     public function inspections(): HasMany
     {
         return $this->hasMany(Inspection::class, 'inspector_user_id');
+    }
+
+    /**
+     * The office reviews this officer is named on — held AND finished.
+     *
+     * Deliberately unfiltered. "What is this officer holding" is a narrower
+     * question than "which assignments carry their name", and the narrowing
+     * lives in `App\Support\Caseload` where one rule serves every screen that
+     * asks. A relation that pre-filtered would be a second answer to the same
+     * question, and the two would drift.
+     */
+    public function assignments(): HasMany
+    {
+        return $this->hasMany(ApplicationAssignment::class, 'officer_user_id');
     }
 
     // --- RBAC helpers --------------------------------------------------------
