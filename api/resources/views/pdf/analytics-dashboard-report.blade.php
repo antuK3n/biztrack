@@ -32,6 +32,7 @@
 
     <h1>ANALYTICS DASHBOARD</h1>
     <div class="meta">
+        {{ $scope['office_name'] ?? 'All offices' }} &middot;
         @include('pdf.partials.computed-by') &middot;
         As of {{ $report['today'] }} &middot;
         Trailing window: {{ $report['window_start'] }} to {{ $report['today'] }}
