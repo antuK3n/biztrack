@@ -13,10 +13,15 @@ use Illuminate\Support\Facades\Request;
  */
 class Audit
 {
-    public static function log(string $action, ?Model $entity = null, array $changes = []): void
+    /**
+     * `$actorId` is for the one moment nobody is signed in yet but we know who
+     * is acting: the sign-in itself. Without it a sign-in row carries a null
+     * actor and the audit screen shows it as the system's doing.
+     */
+    public static function log(string $action, ?Model $entity = null, array $changes = [], ?int $actorId = null): void
     {
         AuditLog::create([
-            'user_id' => Auth::id(),
+            'user_id' => $actorId ?? Auth::id(),
             'action' => $action,
             'auditable_type' => $entity ? $entity::class : null,
             'auditable_id' => $entity?->getKey(),

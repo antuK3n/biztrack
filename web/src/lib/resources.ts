@@ -1722,3 +1722,57 @@ export interface OicPageMeta extends PageMeta {
   /** The offices to filter by, off the register rather than retyped here. */
   departments: { id: number; code: string; name: string }[]
 }
+
+/* ── Six-digit e-mail codes [checklist 2026-09-27, Register 1 and Login 5] ── */
+
+/**
+ * What the password step answers when a code is needed. Only returned while
+ * the API has a real mailer; with mail off, /auth/login answers with the token
+ * as it always has, so the sign-in page checks for `code_required` rather than
+ * assuming either shape.
+ */
+export interface SignInCodeChallenge {
+  code_required: true
+  challenge: string
+  /** Masked, e.g. `o••••@biztrack.local`: which inbox to open. */
+  email: string
+  expires_in_minutes: number
+  /** Seconds before the resend button works. */
+  resend_after: number
+}
+
+export const emailCodes = {
+  verifySignIn: (challenge: string, code: string) =>
+    unwrap<{ token: string; user: User }>(api.post('/auth/login/code', { challenge, code })),
+  resendSignIn: async (challenge: string): Promise<{ message: string; resend_after: number }> => {
+    const res = await api.post<{ message: string; data: { resend_after: number } }>('/auth/login/code/resend', {
+      challenge,
+    })
+    return { message: res.data.message, resend_after: res.data.data.resend_after }
+  },
+  /** Confirm the signed-in owner's address; answers with the refreshed account. */
+  confirmEmail: async (code: string): Promise<{ message: string; user: User }> => {
+    const res = await api.post<{ message: string; data: User }>('/auth/email/verify-code', { code })
+    return { message: res.data.message, user: res.data.data }
+  },
+  resendConfirm: async (): Promise<string> => {
+    const res = await api.post<{ message: string }>('/auth/email/resend')
+    return res.data.message
+  },
+}
+
+/* ── Office hours [checklist 2026-09-27, Login 6] ─────────────────────────── */
+
+export interface OfficeHoursStatus {
+  open: boolean
+  /** The server's clock, in Manila time. Never the browser's. */
+  now: string
+  timezone: string
+  opens: string
+  closes: string
+  days: number[]
+}
+
+export const officeHours = {
+  get: () => unwrap<OfficeHoursStatus>(api.get('/office-hours')),
+}
