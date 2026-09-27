@@ -15,6 +15,8 @@ class Permit extends Model
         'prior_permit_id',
         'status', 'valid_from', 'valid_until', 'pdf_path', 'issued_at',
         'issued_by_user_id',
+        // Written by WorkflowService::revokePermit and nothing else.
+        'revoked_at', 'revoked_reason',
     ];
 
     protected $casts = [
@@ -22,6 +24,13 @@ class Permit extends Model
         'valid_from' => 'date',
         'valid_until' => 'date',
         'issued_at' => 'datetime',
+        /*
+         * Cast since the column gained a writer. It sat uncast while nothing
+         * wrote it, and PermitRegisterResource's `optional($this->revoked_at)
+         * ->toIso8601String()` would have thrown on the first revoked row —
+         * a raw string has no such method.
+         */
+        'revoked_at' => 'datetime',
         /*
          * The business details as they were when this certificate was signed.
          * See `App\Support\PermitFace` for the builder and the migration for

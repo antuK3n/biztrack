@@ -59,7 +59,7 @@ const users: MockUser[] = [
     roles: ['bplo_staff'],
     // analytics.view: checklist #78 moved the dashboard to BPLO. This list has to
     // track RbacSeeder's bplo_staff row or mock mode disagrees with the live API.
-    permissions: ['application.view_all', 'application.review', 'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create', 'message.participate', 'compliance.view', 'zoning.evaluate', 'analytics.view'],
+    permissions: ['application.view_all', 'application.review', 'fee.adjust', 'permit.view_all', 'permit.issue', 'permit.revoke', 'request.create', 'message.participate', 'compliance.view', 'zoning.evaluate', 'analytics.view'],
   }),
   makeUser({
     email: 'admin@biztrack.local',
@@ -74,6 +74,7 @@ const users: MockUser[] = [
       'inspection.manage',
       'permit.view_all',
       'permit.issue',
+      'permit.revoke',
       'request.create',
       'message.participate',
       'compliance.view',

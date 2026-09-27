@@ -12,10 +12,10 @@ use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
-use App\Models\Business;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
 use App\Models\ApplicationStatusHistory;
+use App\Models\Business;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\OfficerRequest;
@@ -778,8 +778,8 @@ class WorkflowService
     /** BPLO returns the main form for revision. for_approval → returned. */
     /**
      * @param  string|null  $target  Which field the applicant must fix, as a
-     *   code the system owns. Null is a perfectly good return — the prose is
-     *   never parsed to derive one, the same rule `returnClearance` follows.
+     *                               code the system owns. Null is a perfectly good return — the prose is
+     *                               never parsed to derive one, the same rule `returnClearance` follows.
      */
     public function returnMainForm(Application $app, string $remarks, ?string $target = null): void
     {
@@ -1865,6 +1865,77 @@ class WorkflowService
         if ($app !== null) {
             $this->notify->outcomePermitReinstated($app, $permit, $reason);
         }
+
+        return $permit;
+    }
+
+    /**
+     * Take a permit away (checklist item 23, question A26).
+     *
+     * ── Who, and what may be revoked ─────────────────────────────────────────
+     *
+     * BPLO and the super admin, through `permit.revoke` on the route; Ken's
+     * decision for the checklist. Any certificate type, because both roles read
+     * the whole register and the screen offers it wherever they can see a row —
+     * whether BFP should be the one to revoke its own FSIC is still open in A26.
+     *
+     * Only a certificate that is in force can be revoked: Active, or Suspended
+     * (a suspension is the lighter version of the same act, and escalating it
+     * is a real case). Expired and superseded certificates have already stopped
+     * being valid, and revoking one would write an enforcement act onto a paper
+     * nobody can trade on — a record that says something happened for no
+     * effect. A revoked permit is refused too, so a double submit cannot
+     * overwrite the first reason and date.
+     *
+     * ── What it writes ───────────────────────────────────────────────────────
+     *
+     * The status, `revoked_at` and `revoked_reason` on the permit, in one
+     * update, so the register table's two revocation columns and the status
+     * chip cannot disagree. Then an audit row naming the permit, the business
+     * and the reason — Audit::log records the acting officer. Then the owner's
+     * notice, which push() also e-mails.
+     *
+     * Final. There is no un-revoke: whether a revocation can be reversed at all
+     * is A26's third question, and until it is answered the remedy is a fresh
+     * application. `reconsiderSuspension` only ever moves a Suspended permit,
+     * so it cannot quietly revive this one either.
+     */
+    public function revokePermit(Permit $permit, string $reason): Permit
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Say why this permit is being revoked. The owner is told, and it is audited.'],
+            ]);
+        }
+
+        if (! in_array($permit->status, [PermitStatus::Active, PermitStatus::Suspended], true)) {
+            throw ValidationException::withMessages([
+                'permit' => [
+                    "Permit {$permit->permit_number} is {$permit->status->label()}, so there is nothing in force to revoke.",
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($permit, $reason) {
+            $from = $permit->status;
+
+            $permit->update([
+                'status' => PermitStatus::Revoked,
+                'revoked_at' => now(),
+                'revoked_reason' => $reason,
+            ]);
+
+            Audit::log('permit.revoked', $permit, [
+                'permit_number' => $permit->permit_number,
+                'business_id' => $permit->business_id,
+                'application_id' => $permit->application_id,
+                'from' => $from->value,
+                'reason' => $reason,
+            ]);
+
+            $this->notify->permitRevoked($permit, $reason);
+        });
 
         return $permit;
     }
@@ -3063,6 +3134,7 @@ class WorkflowService
 
         $this->rejectClearance($row, $reason, $remedy);
     }
+
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
     public function returnAssignment(
         ApplicationAssignment $assignment,

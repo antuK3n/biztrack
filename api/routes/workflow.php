@@ -341,6 +341,15 @@ Route::middleware('auth:sanctum')->group(function () {
      */
     Route::middleware('permission:permit.issue')
         ->post('permits/{permit}/lift-suspension', [PermitController::class, 'liftSuspension']);
+    /*
+     * Revoking a permit — BPLO and the super admin (checklist item 23). Its own
+     * permission rather than `permit.issue`, which the lift above uses: A26
+     * named `permit.revoke` as the thing to add, and taking a certificate away
+     * is a different act from minting one even while the same two roles hold
+     * both.
+     */
+    Route::middleware('permission:permit.revoke')
+        ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);
 
     // Chatbot (rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
