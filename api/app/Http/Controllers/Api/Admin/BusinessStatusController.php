@@ -196,6 +196,17 @@ class BusinessStatusController extends Controller
          * and left it alone, for this reason" is a fact worth keeping, it is
          * just not a status change.
          */
+        /*
+         * Blacklisting closes a business and suspending takes it out of
+         * operation — both retire the record, so the audit row keeps the
+         * business as it stood, with its address and lines of business, before
+         * the change (Audit Log 1). Only when the status actually moves there:
+         * re-saving a blacklisting retires nothing new.
+         */
+        $snapshot = $data['status'] !== $from && in_array($data['status'], ['blacklisted', 'suspended'], true)
+            ? Audit::snapshot($business, ['address', 'lines'])
+            : null;
+
         $changes = ['status' => $data['status']];
         if ($data['status'] !== $from) {
             $changes['status_changed_at'] = now();
@@ -206,7 +217,7 @@ class BusinessStatusController extends Controller
             'from' => $from,
             'to' => $data['status'],
             'reason' => $data['reason'],
-        ]);
+        ], $snapshot);
 
         /*
          * ── The certificates follow the business ──────────────────────────
