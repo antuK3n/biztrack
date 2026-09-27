@@ -2886,6 +2886,12 @@ export interface AdminBusiness {
   status_label: string
   created_at: string
   /**
+   * When the business was removed from the register ("retired"), or null.
+   * Only the Retired filter lists such rows, and nothing can be done to one —
+   * every action route binds the business, and binding skips removed rows.
+   */
+  retired_at?: string | null
+  /**
    * Permit fees this business has been issued and not yet paid for.
    *
    * A clearance renewed outside January is issued unbilled — its fee is
