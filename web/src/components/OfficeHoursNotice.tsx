@@ -50,7 +50,7 @@ function hoursLabel(status: OfficeHoursStatus): string {
   return `${dayText}, ${clock(status.opens)} to ${clock(status.closes)}`
 }
 
-export function OfficeHoursNotice({ audience }: { audience: 'owner' | 'staff' }) {
+export function OfficeHoursNotice({ audience, className = '' }: { audience: 'owner' | 'staff'; className?: string }) {
   const [status, setStatus] = useState<OfficeHoursStatus | null>(null)
   const [dismissed, setDismissed] = useState(() => {
     try {
@@ -90,7 +90,7 @@ export function OfficeHoursNotice({ audience }: { audience: 'owner' | 'staff' })
   return (
     <div
       role="status"
-      className="mb-5 flex items-start gap-2.5 rounded-md border border-line bg-white px-3.5 py-3 text-sm text-ink"
+      className={`mb-5 flex items-start gap-2.5 rounded-md border border-line bg-white px-3.5 py-3 text-sm text-ink ${className}`}
     >
       <ClockIcon size={20} className="mt-px shrink-0 text-ink-secondary" />
       <p className="min-w-0 flex-1">
