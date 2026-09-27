@@ -1649,6 +1649,8 @@ class WorkflowService
         }
 
         if ($permit->status === PermitStatus::Active) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
@@ -1657,7 +1659,7 @@ class WorkflowService
                 'because_permit_type_id' => $refused->id,
                 'because_permit_type' => $refused->name,
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
@@ -1751,13 +1753,15 @@ class WorkflowService
         $permits = $business->permits()->where('status', PermitStatus::Active->value)->get();
 
         foreach ($permits as $permit) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
                 'cause' => 'business_status',
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         return $permits->count();
@@ -1919,6 +1923,9 @@ class WorkflowService
 
         DB::transaction(function () use ($permit, $reason) {
             $from = $permit->status;
+            // Revoking retires the certificate for good; keep it as it stood
+            // (Audit Log 1). Taken before the update, like suspension's.
+            $snapshot = Audit::snapshot($permit);
 
             $permit->update([
                 'status' => PermitStatus::Revoked,
@@ -1932,7 +1939,7 @@ class WorkflowService
                 'application_id' => $permit->application_id,
                 'from' => $from->value,
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
 
             $this->notify->permitRevoked($permit, $reason);
         });

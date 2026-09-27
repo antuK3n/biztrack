@@ -48,6 +48,14 @@ class Business extends Model
         // a column for it sat on the table.
         'capital_investment',
         'has_tax_incentives',
+        /*
+         * The old register's own key, and who it says owns the business when
+         * nobody has claimed it yet. Written only by the legacy import (see the
+         * 2026_09_27_000100_let_the_register_hold_what_the_old_system_issued
+         * migration); every business BizTrack registers
+         * itself leaves both null.
+         */
+        'legacy_id', 'legacy_owner_id',
     ];
 
     /**
@@ -287,9 +295,20 @@ class Business extends Model
             .'restored as soon as that office approves it.';
     }
 
+    /**
+     * The ACCOUNT that holds this business. Null for an imported business
+     * nobody has claimed yet — see `legacyOwner()` for who the old register
+     * says owns it — as well as for a soft-deleted account (AGENTS.md §11).
+     */
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /** The owner as the old register names them; null for BizTrack's own businesses. */
+    public function legacyOwner(): BelongsTo
+    {
+        return $this->belongsTo(LegacyOwner::class);
     }
 
     public function address(): HasOne

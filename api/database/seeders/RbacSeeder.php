@@ -222,6 +222,14 @@ class RbacSeeder extends Seeder
                      */
                     'analytics.processing_time', 'zoning.evaluate', 'user.manage',
                     'owner.manage_status', 'oic.assign', 'reference.manage', 'audit.view',
+                    /*
+                     * Importing the old register (Ken's checklist, 27 Sept
+                     * 2026). The super admin's alone: an import writes owners'
+                     * personal data into the register in bulk, and no office
+                     * needs to. The 2026_09_27_000110 migration grants it on a
+                     * database that is not re-seeded.
+                     */
+                    'data.import',
                 ],
             ],
             /*

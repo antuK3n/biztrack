@@ -691,7 +691,15 @@ class UserController extends Controller
         }
 
         $released = null;
-        if ($user->is_active) {
+        $deactivating = $user->is_active;
+        /*
+         * Deactivating retires the account, so the audit row carries the
+         * account as it stood — with its roles — before the switch (Audit Log
+         * 1). Taken first: after the update it would record the retired state.
+         * Reactivation is not a removal and keeps its plain row.
+         */
+        $snapshot = $deactivating ? Audit::snapshot($user, ['roles']) : null;
+        if ($deactivating) {
             $released = $this->releaseCaseload($user, 'user.deactivated');
         }
 
@@ -699,7 +707,7 @@ class UserController extends Controller
         if (! $user->is_active) {
             $user->tokens()->delete();
         }
-        Audit::log('user.toggle_active', $user, ['is_active' => $user->is_active] + ($released ?? []));
+        Audit::log('user.toggle_active', $user, ['is_active' => $user->is_active] + ($released ?? []), $snapshot);
 
         return response()->json([
             'data' => new UserResource($user->fresh()->load('department', 'roles.permissions')),
