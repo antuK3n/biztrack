@@ -340,6 +340,48 @@ class NotificationService
             "BizTrack: Business Permit {$permit->permit_number} is active again.",
         );
     }
+
+    /**
+     * BPLO or the super admin took a permit away (checklist item 23).
+     *
+     * To the business's OWNER, found through the permit rather than through a
+     * filing: a revocation is about the certificate, and a permit whose filing
+     * was deleted is still one somebody holds. Soft-deleted businesses and
+     * owners resolve to null and the notice is skipped — there is nobody left
+     * to tell, and the audit row the caller writes is the record.
+     *
+     * The reason is included. A26 asked whether it should be; the officer typed
+     * it knowing it is audited, and an owner told only "revoked" has nothing to
+     * contest or correct. If the City answers otherwise, this sentence is the
+     * one place it changes.
+     *
+     * `disapproval: true` gives the e-mail copy the same treatment a rejected
+     * application's gets. push() queues that copy itself; nothing here mails.
+     */
+    public function permitRevoked(Permit $permit, string $reason): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+
+        $permit->loadMissing('permitType');
+        $name = $permit->permitType?->name ?? 'Permit';
+
+        $this->push(
+            $owner,
+            'decision',
+            "{$name} revoked",
+            "Your {$name} {$permit->permit_number} has been revoked and is no longer valid. "
+                ."Reason: {$reason} Contact the Business Permits and Licensing Office if you "
+                .'believe this is wrong.',
+            '/permits',
+            $permit,
+            disapproval: true,
+        );
+        $this->fanOut($owner, "BizTrack: {$name} {$permit->permit_number} has been revoked.");
+    }
+
     // --- Messaging -----------------------------------------------------------
     public function newMessage(Application $app, User $recipient): void
     {
