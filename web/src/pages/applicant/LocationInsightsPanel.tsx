@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { Skeleton } from '../../components/ui/primitives'
 import { useAsync } from '../../lib/useAsync'
 import { plainZoneName } from '../../lib/zoningNames'
+import { CheckCircleIcon, InfoCircleIcon } from '../../components/icons'
 
 /*
  * Business Location Insights (docs/r-integration-spec.md §5) — the panel under
@@ -534,13 +535,30 @@ export function LocationInsightsPanel({
  * about dairy SHOPS — so the clause is put in front of the applicant, who knows
  * their own trade and can see the mismatch. A bare "conforming" would hide it.
  *
- * ── Colour ────────────────────────────────────────────────────────────────
+ * ── Colour, size, and why it is loud now ──────────────────────────────────
  *
- * `not_listed` is amber, never `#bd0000`. It is not an error and not a refusal:
- * the applicant has done nothing wrong and the filing is not blocked. Red here
- * would say "stop", which is the one thing this screen has no authority to say
- * (DESIGN.md, Red Means Stop). Tone never carries the meaning alone — the
- * sentence says it in words in all three states.
+ * Checklist Zoning 8: the note was being overlooked. It was 14px in a pale
+ * royal (listed) or pale yellow (not listed) box, the same weight as the
+ * captions around the map, so it read as one more caption. It now opens with
+ * a tag in words ("Allowed here" / "Not on the zoning list") and an icon, the
+ * sentence is 18px bold, and the box has a 2px border in its own tone.
+ *
+ * Listed is green, a clear positive: the zoning rules name this trade in this
+ * barangay. Not listed is amber, never `#bd0000`. It is not an error and not a
+ * refusal: the applicant has done nothing wrong and the filing is not
+ * blocked. Red here would say "stop", which is the one thing this screen has
+ * no authority to say (DESIGN.md, Red Means Stop). Tone never carries the
+ * meaning alone: the tag, the icon's shape (tick / "i") and the sentence all
+ * say it in words.
+ *
+ * ── Not listed: the way forward (Zoning 13) ───────────────────────────────
+ *
+ * An amber "not on the list" with nothing after it leaves the owner holding a
+ * worry and no next step. So the last line, which already names the City's
+ * zoning office as the one that decides, also says the owner may appeal to
+ * that office in person. Said in that one line so CPDO is still named once on
+ * the step (client's lead, 24 September 2026). The appeal route itself is an
+ * open question for CPDO; see docs/questions-for-malabon.md.
  */
 export function ZoningConformanceNote({
   zoning,
@@ -569,10 +587,24 @@ export function ZoningConformanceNote({
        * about is a change a screen-reader user never learns happened.
        */
       aria-live="polite"
-      className={`rounded-xl border p-4 ${
-        listed ? 'border-royal/30 bg-royal/5' : 'border-s-yellow bg-s-yellow/10'
+      data-testid="zoning-note"
+      data-verdict={zoning.verdict}
+      className={`rounded-xl border-2 p-4 sm:p-5 ${
+        listed ? 'border-[#12724a] bg-s-green-tint' : 'border-s-yellow bg-s-yellow-tint'
       }`}
     >
+      <p
+        className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] ${
+          listed ? 'text-[#12724a]' : 'text-s-yellow-ink'
+        }`}
+      >
+        {listed ? (
+          <CheckCircleIcon size={16} aria-hidden="true" />
+        ) : (
+          <InfoCircleIcon size={16} aria-hidden="true" />
+        )}
+        {listed ? 'Allowed here' : 'Not on the zoning list'}
+      </p>
       {/*
         * Plain, and still only what the rules say.
         *
@@ -584,7 +616,7 @@ export function ZoningConformanceNote({
         * Art. V §2). It is a statement about the zone, not about the pin —
         * whether their exact spot is in that zone is the last line's point.
         */}
-      <p className="text-sm font-semibold text-ink">
+      <p className="mt-1.5 text-lg font-bold leading-snug text-ink">
         {listed
           ? matched
             ? `Your type of business is allowed in ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
@@ -602,7 +634,7 @@ export function ZoningConformanceNote({
          * which is the ordinance's filing, not the activity. `title` keeps the
          * full text one hover away.
          */
-        <p className="mt-1.5 text-sm text-ink-secondary" title={matched.matched_use}>
+        <p className="mt-2 text-base text-ink-secondary" title={matched.matched_use}>
           The rules list: “{firstClause(matched.matched_use)}”
         </p>
       )}
@@ -613,7 +645,7 @@ export function ZoningConformanceNote({
          * open, so absence from one is not prohibition. The zones are named so
          * the applicant can see what the barangay is for.
          */
-        <p className="mt-1.5 text-sm text-ink-secondary">
+        <p className="mt-2 text-base text-ink-secondary">
           {where} has these zones: {zoneNames.join('; ')}. A business not on the list can still
           be approved.
         </p>
@@ -629,9 +661,20 @@ export function ZoningConformanceNote({
         * spelled out as the City's zoning office because the public does not
         * know the acronym, and kept in brackets so they can match it on the
         * clearance later. Do not trim it; if it moves, move it whole.
+        *
+        * Not listed adds the appeal (Zoning 13) to the same sentence, so the
+        * office is still named once.
         */}
-      <p className="mt-2 text-sm text-ink-muted">
+      <p className="mt-3 text-sm text-ink">
         The City&rsquo;s zoning office (CPDO) checks your exact spot and makes the final call.
+        {!listed && (
+          <>
+            {' '}
+            <strong className="font-semibold">
+              If it says no, you may appeal in person at that office.
+            </strong>
+          </>
+        )}
       </p>
     </section>
   )
