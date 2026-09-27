@@ -216,7 +216,23 @@ test.describe('the office Track page', () => {
      * the paid stage), so the two narrow together — which is the useful
      * question: the filings I hold that are waiting on my review.
      */
-    const stages = ['For Approval', 'Pending Payment', 'For Inspection', 'Final Approval']
+    /*
+     * BPLO's stages, which are not every stage.
+     *
+     * This listed 'For Inspection' and 'Final Approval' and was written from
+     * a clearance office's row. Both are wrong for this seat:
+     *
+     *  - For Inspection is a CLEARANCE's stage, read from the office that
+     *    inspects. BPLO holds no clearance, so the tab was removed from its
+     *    row — it could never hold a line. See the note by `BPLO_ONLY_TABS`.
+     *  - the tab is labelled 'For Final Approval', not 'Final Approval'.
+     *
+     * The test went red on the dev merge that made both true, asserting a
+     * control that had been deliberately taken away. The claim it is here to
+     * make is unchanged: whatever stages this seat HAS, choosing a holder
+     * section does not take them away.
+     */
+    const stages = ['For Approval', 'Pending Payment', 'Awaiting Other Permits', 'For Final Approval']
 
     const hints: Record<string, RegExp> = {
       Unassigned: /for approval — filings nobody has taken yet/i,
