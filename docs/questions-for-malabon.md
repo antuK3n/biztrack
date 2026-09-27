@@ -1247,6 +1247,52 @@ verification + ₱345 processing.
 **Why it matters.** It is the only clearance fee we derive entirely from the
 2016 ordinance with no counter confirmation at all.
 
+## C11. Five barangay sheets show zones our traced map leaves out. Which is right?
+
+When the map picker draws a barangay's zones, it draws our tracing of CPDO's
+sheet (C2, C4). Checking the tracings against the sheets, five barangays have a
+zone on the sheet that our tracing does not have at all:
+
+| Barangay | On the sheet, missing from our tracing | Rough area on the sheet |
+|---|---|---|
+| Maysilo | I-1 (light industrial) | about 28.6 ha |
+| Dampalit | I-1 | about 23.7 ha |
+| Panghulo | I-1 and I-2 | about 18.5 ha each |
+| Catmon | I-1, and R-3 Max | I-1 about 17 ha; R-3 Max not measured |
+| Tinajeros | Utilities | about 13 ha |
+
+The areas are measured off the sheet images, so they are approximate.
+
+**Why it matters.** These are not slivers. An applicant whose shop is inside one
+of these areas sees the wrong zone under their pin, and for Maysilo, Dampalit,
+Panghulo and Catmon the missing zone is industrial, so a factory or warehouse
+there may be told its trade is "not on the zoning list" for that barangay when
+the sheet says the barangay has an industrial zone. The "Zones in <barangay>" card
+lists from the same readings, so it may be missing them too.
+
+**What we assumed meanwhile.** Nothing was added by hand. A zone drawn from our
+guess at a boundary would look exactly as authoritative as one traced from the
+sheet, and nobody could tell them apart. The step already says CPDO checks the
+exact spot and makes the final call. **Please confirm, for each of the five,
+whether the zone is really there and where it runs** (a marked-up sheet is
+enough), or send the vector data asked for in C2, which would settle all five at
+once. If the sheets are right, we re-trace these five and the map and the zone
+list change with them.
+
+## C12. How does a business owner appeal a zoning decision, and where?
+
+**Why it matters.** When a business type is not on the zoning list for its
+barangay, the note under the map now tells the owner that if CPDO says no, they
+may appeal in person at the City's zoning office (checklist Zoning 13). We
+wrote "at that office" because it is the office the note already names. Under
+the usual set-up an appeal goes to a zoning board (the Local Zoning Board of
+Adjustment and Appeals) rather than to CPDO itself, often filed through the
+Zoning Administrator.
+
+**What we assumed meanwhile.** That the owner starts in person at CPDO and is
+told the rest there. Tell us the real route (which office receives it, whether
+there is a form or a fee, and any deadline) and the sentence changes to say it.
+
 ---
 
 # D. For the adviser and panel — academic and reporting
