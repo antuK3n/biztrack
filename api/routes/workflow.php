@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
+use App\Http\Controllers\Api\Admin\LegacyImportController;
 use App\Http\Controllers\Api\Admin\OicAssignmentController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AmendmentController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\ClearanceController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\InspectionController;
+use App\Http\Controllers\Api\LegacyClaimController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
@@ -56,6 +58,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('businesses', [BusinessController::class, 'index']);
         Route::post('businesses', [BusinessController::class, 'store']);
         Route::put('businesses/{business}', [BusinessController::class, 'update']);
+        // Claim businesses the old register holds under this owner's name
+        // (legacy import; see LegacyClaim). Same check as the sign-up field.
+        Route::post('businesses/claim', [LegacyClaimController::class, 'store']);
     });
     // Show allowed for owner OR officer with application.view_all (checked in controller)
     Route::get('businesses/{business}', [BusinessController::class, 'show']);
@@ -537,5 +542,18 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);
+        /*
+         * Importing the old register (Ken's checklist, 27 September 2026).
+         * `data.import` is the super admin's alone — see RbacSeeder.
+         */
+        Route::middleware('permission:data.import')->group(function () {
+            Route::get('legacy-imports', [LegacyImportController::class, 'index']);
+            Route::get('legacy-imports/guide', [LegacyImportController::class, 'guide']);
+            Route::get('legacy-imports/template', [LegacyImportController::class, 'template']);
+            Route::post('legacy-imports/csv', [LegacyImportController::class, 'previewCsv']);
+            Route::post('legacy-imports/odbc', [LegacyImportController::class, 'previewOdbc']);
+            Route::get('legacy-imports/{legacyImport}', [LegacyImportController::class, 'show']);
+            Route::post('legacy-imports/{legacyImport}/run', [LegacyImportController::class, 'run']);
+        });
     });
 });
