@@ -84,6 +84,7 @@ const users: MockUser[] = [
       'oic.assign',
       'reference.manage',
       'audit.view',
+      'data.import',
     ],
   }),
   makeUser({

@@ -15,6 +15,9 @@ class Permit extends Model
         'prior_permit_id',
         'status', 'valid_from', 'valid_until', 'pdf_path', 'issued_at',
         'issued_by_user_id',
+        // The old register's key for a certificate it issued on paper; null on
+        // every permit BizTrack mints (2026_09_27_000100 migration).
+        'legacy_id',
     ];
 
     protected $casts = [
