@@ -13,6 +13,7 @@ import { useAuth } from '../stores/auth'
 import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
 import { BellIcon } from './icons'
+import { OfficeHoursNotice } from './OfficeHoursNotice'
 
 const ROLE_LABELS: Record<string, string> = {
   business_owner: 'Business owner',
@@ -361,6 +362,7 @@ export function AppShell() {
    * the badge lit on notifications the reader is looking at.
    */
   const unreadNotifications = useNotifications((s) => s.unread)
+  const portal = useAuth((s) => s.portal)
   if (!user) return null
   const isOwner = user.permissions.includes('application.view_own')
 
@@ -380,6 +382,13 @@ export function AppShell() {
           * that needs it — don't put the nag back on top of every page.
           */}
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16">
+          {/*
+            The one notice that does sit over every page [Login 6], and it earns
+            the place item 99 took from the verification banner: it is true
+            (the server's clock, the City's hours), it asks nothing, it closes
+            for the visit, and it disappears on its own at 8 AM.
+          */}
+          <OfficeHoursNotice audience={portal === 'public' ? 'owner' : 'staff'} />
           <Outlet />
         </div>
       </main>
