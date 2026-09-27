@@ -107,6 +107,8 @@ test('the home tiles address the admin site too, and each one actually opens', a
 
   await page.goto('/admin/dashboard')
   await page.getByRole('main').getByRole('link', { name: /^analytics$/i }).click()
-  await expect(page.getByRole('heading', { name: /office performance/i, level: 1 })).toBeVisible()
-  await expect(page).toHaveURL(/\/admin\/analytics\/offices$/)
+  // The dashboard since checklist 2026-09-27 item 1: the super admin reads it,
+  // for all offices, and reaches Office Performance from the tab strip.
+  await expect(page.getByRole('heading', { name: /analytics dashboard/i, level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/analytics$/)
 })

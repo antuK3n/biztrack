@@ -459,5 +459,29 @@
         "share": 25
       }
     ]
+  },
+  "business_movement": {
+    "rows": [
+      {
+        "month": "2026-05",
+        "registered": 7,
+        "closed": 2,
+        "net": 5
+      },
+      {
+        "month": "2026-06",
+        "registered": 1,
+        "closed": 3,
+        "net": -2
+      },
+      {
+        "month": "2026-07",
+        "registered": 0,
+        "closed": 0,
+        "net": 0
+      }
+    ],
+    "registered": 8,
+    "closed": 5
   }
 }

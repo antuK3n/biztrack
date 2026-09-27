@@ -58,8 +58,17 @@ class RbacSeeder extends Seeder
          * `zoning_officer` keeps its own entry further down because it also
          * holds `zoning.evaluate`; the other three share this list.
          */
+        /*
+         * `analytics.view` is on every office role since checklist 2026-09-27
+         * item 1 ("one analytics dashboard for all offices"). Holding it no
+         * longer means reading the whole register: App\Support\AnalyticsOffice
+         * answers an office account with its own office's figures and refuses a
+         * request for anyone else's. Only the two readers with
+         * `application.view_any_office` (BPLO, the super admin) may switch.
+         */
         $review = ['application.view_all', 'application.review', 'inspection.manage',
-            'permit.view_all', 'request.create', 'message.participate', 'compliance.view'];
+            'permit.view_all', 'request.create', 'message.participate', 'compliance.view',
+            'analytics.view'];
 
         $matrix = [
             'business_owner' => [
@@ -85,9 +94,13 @@ class RbacSeeder extends Seeder
              * office role that already holds `application.view_any_office` — the
              * permission that lifts the departmental boundary. The aggregates
              * therefore expose nothing BPLO cannot already open one filing at a
-             * time; they only save it the counting. The other office roles
-             * (sanitary, fire, zoning, OBO, CENRO, market) still do not get it,
-             * and for them the original reasoning stands unchanged.
+             * time; they only save it the counting.
+             *
+             * The other offices now hold it too (checklist 2026-09-27, item 1),
+             * and the original reasoning still holds for them in a different
+             * form: they read their OWN office's aggregate, which is the
+             * aggregate of filings their queue already shows them. The scoping
+             * is server-side, in App\Support\AnalyticsOffice.
              */
             'bplo_staff' => [
                 'display_name' => 'BPLO Staff',
@@ -112,7 +125,7 @@ class RbacSeeder extends Seeder
                 'permissions' => [
                     'application.view_all', 'application.review', 'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
-                    'compliance.view',
+                    'compliance.view', 'analytics.view',
                 ],
             ],
             'fire_inspector' => [
@@ -121,7 +134,7 @@ class RbacSeeder extends Seeder
                 'permissions' => [
                     'application.view_all', 'application.review', 'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
-                    'compliance.view',
+                    'compliance.view', 'analytics.view',
                 ],
             ],
             'obo_staff' => [
@@ -198,28 +211,25 @@ class RbacSeeder extends Seeder
                     'permit.revoke',
                     'compliance.view',
                     /*
-                     * The super admin holds `analytics.processing_time` and NOT
-                     * `analytics.view`, which reads like a mistake and is not.
+                     * The super admin holds `analytics.processing_time` AND, since
+                     * checklist 2026-09-27 item 1, `analytics.view`.
                      *
-                     * "R INTEGRATION DRAFTS" assigns each analytics feature an
-                     * owner in its own heading: §1 Analytics Dashboard (Admin -
-                     * BPLO), §2 Renewal Risk Prediction (Admin - BPLO), §4
-                     * Business Growth Analysis (Admin - BPLO), and §6 Permit
-                     * Processing Time Monitoring (Super Admin). Three screens
-                     * belong to BPLO and exactly one to the super admin, and the
-                     * client confirmed it in those words: "BPLO side should only
-                     * have the 3 dashboards (Processing Time should not exist
-                     * here) — Super admin side should only have Processing Time
-                     * dashboard."
+                     * It used to hold only the first, on the "R INTEGRATION
+                     * DRAFTS" split: §1 Analytics Dashboard, §2 Renewal Risk and
+                     * §4 Business Growth were "(Admin - BPLO)" and §6 Processing
+                     * Time "(Super Admin)". Renewal Risk and Business Growth are
+                     * gone, and the checklist now asks for ONE dashboard every
+                     * office reads, which "BPLO and super admin can switch office
+                     * or view all". So the super admin reads the dashboard like
+                     * BPLO does.
                      *
-                     * That is a real separation of duties rather than a display
-                     * preference. The three BPLO screens are operational: they
-                     * count filings, rank businesses by renewal risk and drive
-                     * follow-up. Processing Time is oversight — it watches the
-                     * DEPARTMENTS, including BPLO itself, for genuine slowdowns.
-                     * Handing the office being measured the same view as the
-                     * office measuring it is what this split avoids.
+                     * What is unchanged is the half of the split that mattered:
+                     * BPLO still does NOT hold `analytics.processing_time`.
+                     * Processing Time and Office Performance measure the
+                     * departments, BPLO among them, and stay with the office
+                     * doing the oversight.
                      */
+                    'analytics.view',
                     'analytics.processing_time', 'zoning.evaluate', 'user.manage',
                     'owner.manage_status', 'oic.assign', 'reference.manage', 'audit.view',
                     /*
@@ -251,7 +261,7 @@ class RbacSeeder extends Seeder
                     // see the note on `$review` above.
                     'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
-                    'compliance.view',
+                    'compliance.view', 'analytics.view',
                 ],
             ],
         ];

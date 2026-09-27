@@ -126,9 +126,12 @@ export function ChartFrame({
         </ResponsiveContainer>
       </div>
 
+      {/* grid-cols-1, not the implicit auto column: an auto track grows to its
+          longest label and pushed a PSIC name 60px past a phone's edge, where
+          `truncate` could never engage. */}
       {legend && legend.length > 0 && (
         <ul
-          className={`mt-2 grid gap-x-4 gap-y-1 ${
+          className={`mt-2 grid grid-cols-1 gap-x-4 gap-y-1 ${
             legendColumns === 1 ? '' : legendColumns === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'
           }`}
         >
@@ -149,28 +152,37 @@ export function ChartFrame({
         </ul>
       )}
 
-      <table className="sr-only">
-        <caption>{title}</caption>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column} scope="col">
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.header}>
-              <th scope="row">{row.header}</th>
-              {row.cells.map((cell, i) => (
-                <td key={i}>{cell}</td>
+      {/*
+        The sr-only class is on a wrapper, not on the <table>. A table does not
+        honour `width: 1px` — it sizes to its content — so an sr-only TABLE was
+        an invisible box as wide as its columns, and the dashboard scrolled
+        sideways by over 300px on a 390px phone (found by e2e/analytics.spec.ts).
+        A block wrapper does clip.
+      */}
+      <div className="sr-only">
+        <table>
+          <caption>{title}</caption>
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column} scope="col">
+                  {column}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.header}>
+                <th scope="row">{row.header}</th>
+                {row.cells.map((cell, i) => (
+                  <td key={i}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {/*
         A <p>, not a second <figcaption>: HTML allows exactly one figcaption per

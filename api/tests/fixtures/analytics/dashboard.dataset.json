@@ -424,5 +424,22 @@
                 "permit_state": "active"
             }
         ]
-    }
+    },
+    "business_movement": [
+        {
+            "month": "2026-05",
+            "registered": 7,
+            "closed": 2
+        },
+        {
+            "month": "2026-06",
+            "registered": 1,
+            "closed": 3
+        },
+        {
+            "month": "2026-07",
+            "registered": 0,
+            "closed": 0
+        }
+    ]
 }

@@ -224,8 +224,9 @@ function StaffHome({ permissions }: { permissions: string[] }) {
    * /staff/login. Reported as "Records crashes". The rail beside these tiles
    * never had the bug, because it has always gone through portalPath.
    *
-   * The super admin's Analytics destination matches the rail's: Office
-   * Performance, not Processing Time (issue #102).
+   * The super admin's Analytics destination matches the rail's: the one
+   * dashboard every office reads (checklist 2026-09-27, item 1). Office
+   * Performance and Processing Time are a tab away.
    */
   const portal = activePortal()
   const cards: Card[] = [
