@@ -994,6 +994,55 @@ mailer on turns all of it on (`App\Support\EmailSwitch`). The way back from a
 relay outage is to set `MAIL_MAILER=log` again. There is no "trust this device
 for 30 days" option yet; every sign-in asks for a code.
 
+## B28. What does the old register's export look like — and can dates come as YYYY-MM-DD?
+
+BizTrack can now import the city's existing businesses and permits, from a CSV
+in BizTrack's own template or straight from the old database over ODBC. We
+have never seen the old data (misd-questions.md Q10): its columns, how it
+spells barangays, its permit type names, or its date format.
+
+**Why it matters.** Rows whose barangay, permit type or date cannot be read are
+rejected, with the reason, in the dry run — nothing is guessed. But one case
+cannot be caught: a date written 03/04/2025. BizTrack reads a slashed date
+MONTH first (the Philippine spreadsheet default). An export written day first
+would have every row after the 12th rejected and every row up to the 12th
+silently read as the wrong date.
+
+**What we assumed meanwhile.** Slashed dates are month first; YYYY-MM-DD is
+what we ask for. A sample of the real export decides both.
+
+## B29. Is quoting a permit number and a surname enough for an owner to claim their old business online?
+
+Imported owners have no BizTrack account. At sign-up (or later) an owner
+claims their businesses by quoting a business account or permit number from
+before BizTrack, and BizTrack checks that the surname they registered with
+matches the old register's owner. Failed attempts are rate-limited.
+
+**Why it matters.** A permit number is printed on a certificate hanging on the
+shop wall, and a surname is not a secret. The check stops a stranger with a
+photo of the permit; it does not stop a relative or an employee. BPLO may want
+the claim confirmed at the counter against an ID, which would be a queue step
+rather than an instant link.
+
+**What we assumed meanwhile.** Number plus surname links the businesses at
+once, and every claim is audit-logged with the number used, so a wrong claim
+can be found and undone with the existing ownership transfer.
+
+## B30. Who may read the reporting views, and from where?
+
+BizTrack now offers three read-only views (businesses, permits, payments) for
+Excel or Power BI over ODBC, through a PostgreSQL role that can read those
+views and nothing else (docs/odbc.md). They carry owners' names but no emails,
+mobile numbers or TINs.
+
+**Why it matters.** A spreadsheet connected to the register is a copy of it that
+nobody here controls afterwards (RA 10173, see B5). Which offices get the
+login, and whether the database port is reachable beyond the server, are
+MISD's and the DPO's call.
+
+**What we assumed meanwhile.** One read-only role, created by MISD, reachable
+only from inside the city network.
+
 ---
 
 # C. For CPDO — zoning
