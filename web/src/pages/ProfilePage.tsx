@@ -1,7 +1,8 @@
-import { useId, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { roleLabel } from '../components/AppShell'
+import { ConfirmEmailCard } from '../components/EmailCode'
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -16,6 +17,7 @@ import { businessName, formatBytes, formatDate } from '../lib/format'
 import { documents as documentsApi, permits as permitsApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
+import { PaymentHistory } from './applicant/PaymentsPage'
 import type { HeldClearance, Permit, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 
@@ -539,6 +541,72 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
   )
 }
 
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+/*
+ * Account and Payment history, for owners [checklist 2026-09-27, View Payment
+ * History 1]. The tab lives in the address (`?tab=payments`) so /payments can
+ * redirect straight to it, and so Back and a reload keep the reader where they
+ * were.
+ *
+ * The WAI-ARIA tabs pattern: one tab stop, arrow keys move between tabs,
+ * `aria-selected` says which is open. Solid means selected, as on every pill
+ * in the app (FilterPills), and the selected tab also carries an underline so
+ * the state is not colour alone.
+ */
+const TABS = [
+  { value: 'account', label: 'Account' },
+  { value: 'payments', label: 'Payment history' },
+] as const
+type TabValue = (typeof TABS)[number]['value']
+
+function ProfileTabs({ value, onChange, idBase }: { value: TabValue; onChange: (v: TabValue) => void; idBase: string }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = TABS.length - 1
+    const next =
+      event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
+      : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : null
+    if (next === null) return
+    event.preventDefault()
+    onChange(TABS[next].value)
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div role="tablist" aria-label="Profile sections" className="mb-6 flex gap-2.5 border-b border-line pb-3">
+      {TABS.map((tab, i) => {
+        const active = tab.value === value
+        return (
+          <button
+            key={tab.value}
+            ref={(el) => {
+              refs.current[i] = el
+            }}
+            type="button"
+            role="tab"
+            id={`${idBase}-tab-${tab.value}`}
+            aria-selected={active}
+            aria-controls={`${idBase}-panel-${tab.value}`}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(tab.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            className={`rounded-full border-2 border-royal px-5 py-1.5 text-sm font-semibold transition-colors ${
+              active ? 'bg-royal text-white underline underline-offset-4' : 'bg-white text-royal hover:bg-royal-tint'
+            }`}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
 export function ProfilePage() {
@@ -559,6 +627,12 @@ export function ProfilePage() {
   )
   const [sort, setSort] = useState('name')
   const [filter, setFilter] = useState('all')
+  const [params, setParams] = useSearchParams()
+  const tabIdBase = useId()
+  // Payment history is an owner's tab; anyone else only ever sees Account.
+  const tab: TabValue = isOwner && params.get('tab') === 'payments' ? 'payments' : 'account'
+  const setTab = (next: TabValue) =>
+    setParams(next === 'account' ? {} : { tab: next }, { replace: true })
 
   const groups = useMemo<BusinessGroup[]>(() => {
     const map = new Map<number, BusinessGroup>()
@@ -714,6 +788,29 @@ export function ProfilePage() {
         )}
       </ProtoCard>
 
+      {isOwner && <ProfileTabs value={tab} onChange={setTab} idBase={tabIdBase} />}
+
+      {tab === 'payments' ? (
+        <div role="tabpanel" id={`${tabIdBase}-panel-payments`} aria-labelledby={`${tabIdBase}-tab-payments`}>
+          <PaymentHistory />
+        </div>
+      ) : (
+      <div
+        {...(isOwner
+          ? { role: 'tabpanel', id: `${tabIdBase}-panel-account`, 'aria-labelledby': `${tabIdBase}-tab-account` }
+          : {})}
+      >
+      {/*
+        Confirm the address, here beside it, when filing is waiting on that
+        [checklist 2026-09-27, Register 1]. Only while the API has a real
+        mailer; with mail off `email_verification_required` is always false.
+      */}
+      {user.email_verification_required && (
+        <div className="mb-6">
+          <ConfirmEmailCard user={user} />
+        </div>
+      )}
+
       <ProtoCard className="overflow-hidden">
         <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">Account details</h2>
         <dl>
@@ -816,6 +913,8 @@ export function ProfilePage() {
         Name, gender, mobile number and password are on the Settings page. Your email is your sign-in
         ID — the City BPLO changes it for you.
       </p>
+      </div>
+      )}
     </div>
   )
 }

@@ -26,7 +26,6 @@ import { ApplicationDetailPage } from './pages/applicant/ApplicationDetailPage'
 import { ApplyWizard } from './pages/applicant/ApplyWizard'
 import { ClearanceStagePage } from './pages/applicant/ClearanceStagePage'
 import { DraftsPage } from './pages/applicant/DraftsPage'
-import { PaymentsPage } from './pages/applicant/PaymentsPage'
 import { PayPage } from './pages/applicant/PayPage'
 import { PermitsPage } from './pages/applicant/PermitsPage'
 import { PermitDetailPage } from './pages/applicant/PermitDetailPage'
@@ -339,7 +338,9 @@ export default function App() {
           */}
           <Route path="/applications/:id/clearances" element={<ClearanceStagePage />} />
           <Route path="/drafts" element={<DraftsPage />} />
-          <Route path="/payments" element={<PaymentsPage />} />
+          {/* Payment History moved onto Profile [checklist 2026-09-27]. The
+              old address still lands on it. */}
+          <Route path="/payments" element={<Navigate to="/profile?tab=payments" replace />} />
           <Route path="/permits" element={<PermitsPage />} />
           <Route path="/permits/:id" element={<PermitDetailPage />} />
           <Route path="/messages" element={<MessagesPage />} />

@@ -6,7 +6,6 @@ import {
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
-  HistoryIcon,
   HomeIcon,
   InboxIcon,
   MailIcon,
@@ -66,7 +65,8 @@ export interface NavItem {
 
 /*
  * Prototype rail registry (docs/rehaul-spec.md §2).
- * Owner rail (PDF p5): Home · Track · Drafts · Payment History.
+ * Owner rail (PDF p5): Home · Track · Drafts. The PDF's Payment History is a
+ * tab on Profile since 2026-09-27.
  * Staff rail (p61): Home · Track (verification) · Other Requirements. The PDF
  * draws an Inspections entry beside Track; it is gone on purpose — the client
  * had the two screens merged into Track's For Inspection tab. See below.
@@ -81,7 +81,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Track', icon: TrackIcon, to: '/applications', permission: 'application.view_own', mobile: true },
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
-  { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
+  /*
+   * No Payment History entry [checklist 2026-09-27]. It is the second tab on
+   * Profile now, behind the avatar menu, and /payments redirects there.
+   */
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
   { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
