@@ -454,6 +454,18 @@ class AssignmentController extends Controller
             // BPLO reads old -> new on an amendment; empty on anything else.
             'application.requestedChanges',
             /*
+             * What the applicant CHANGED after this office returned the filing.
+             *
+             * Drives the "Corrected after your return" block and the CORRECTED
+             * badge on each field in Sections A and B. Missing until 29
+             * September 2026, so both were blank on every filing — see the
+             * trap described above `application.business.owners`, of which
+             * this was the third instance in this one list. The resource emits
+             * `[]` for an unloaded relation rather than lazy-loading it, so
+             * the omission read on screen as "nothing was corrected".
+             */
+            'application.corrections',
+            /*
              * Who set the RA 11032 tier, for the For Office Use Only panel. One
              * constant query, and without it the sheet cannot tell an officer
              * whether they are overriding somebody's decision or our automatic

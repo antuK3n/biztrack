@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -18,7 +18,13 @@ import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatVersionDate,
+} from '../../lib/format'
 import { OFFICE_FORM_INTERNAL_KEYS, officeFormFieldLabel } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
 import { otherPermitProgress } from '../../lib/status'
@@ -36,6 +42,7 @@ import type {
   AdminUser,
   AppDocument,
   Application,
+  ApplicationCorrection,
   FeeProfile,
   OfficeFormRequirement,
   Permit,
@@ -303,10 +310,114 @@ function SubHeading({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * Every correction on this filing, by target code, newest first.
+ *
+ * A context because `Field` is mounted about forty times on this sheet and
+ * only eighteen of those are correctable — passing the list to all of them to
+ * serve eighteen would put a prop on twenty-two boxes that can never use it.
+ *
+ * Empty by default, so a `Field` outside the sheet (or on a filing that was
+ * never returned) renders exactly as it always has.
+ */
+const FieldCorrections = createContext<Map<string, ApplicationCorrection[]>>(new Map())
+
+/**
+ * What a field was before the applicant corrected it.
+ *
+ * ── Uniform with Section C, and the one place it differs ────────────────────
+ *
+ * Client, 29 September 2026: *"Do you think it is good showing it too, just
+ * like with the documentary requirements? Please be consistent and uniform
+ * with the other fields as well."*
+ *
+ * Same badge, same wording, same fold as a re-uploaded document. The
+ * difference is that the immediately previous VALUE is shown inline rather
+ * than hidden: an earlier copy of a document is a file with two buttons and
+ * earns a fold, while "was 111111" fits on the line, and charging a click for
+ * it would be hiding the answer to the question the badge just raised.
+ *
+ * Only a third value onwards folds — the case a filing returned twice about
+ * one field produces, which is exactly what the client's own filing did.
+ */
+function FieldHistory({ history, label }: { history: ApplicationCorrection[]; label: string }) {
+  const [showOlder, setShowOlder] = useState(false)
+
+  /* Newest first, so [0] is the value this one replaced. */
+  const previous = history[0]
+  const older = history.slice(1)
+  const olderId = `field-history-${history[0]?.target ?? ''}`.replace(/[^\w-]/g, '-')
+
+  /* An emptied field is an answer too, and "was" with nothing after it is not. */
+  const shown = (text: string | null) => {
+    const trimmed = (text ?? '').trim()
+
+    return trimmed === '' ? 'blank' : trimmed
+  }
+
+  return (
+    <div className="mt-1 text-xs text-ink-muted">
+      {/*
+        One line: the value it replaced, when, and the way to the rest.
+        It read `was 11111 · corrected September 29, 2026` over a second
+        line, with the fold repeating the field's whole name on a third
+        and fourth — for one change to one box.
+      */}
+      <span>
+        was <span className="line-through">{shown(previous.old_value)}</span>
+        {previous.at && <> · {formatVersionDate(previous.at)}</>}
+      </span>
+      {older.length > 0 && (
+        <>
+          {' · '}
+          {/*
+            The long name lives in `aria-label`, not on screen. A screen
+            reader hearing "1 earlier" on six fields cannot tell them
+            apart, which is why the name was in the visible text; it only
+            ever needed to be in the accessible one.
+
+            A button with aria-expanded, never <details>:
+            web/e2e/inspection-review.spec.ts asserts this page has none.
+          */}
+          <button
+            type="button"
+            onClick={() => setShowOlder((open) => !open)}
+            aria-expanded={showOlder}
+            aria-controls={olderId}
+            aria-label={`${showOlder ? 'Hide' : 'Show'} the ${older.length} earlier ${
+              older.length === 1 ? 'value' : 'values'
+            } of ${label}`}
+            className="rounded font-semibold text-royal hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+          >
+            {older.length} earlier
+          </button>
+        </>
+      )}
+      <ul id={olderId} hidden={!showOlder} className="mt-0.5 space-y-0.5">
+        {older.map((c, i) => (
+          <li key={i}>
+            was <span className="line-through">{shown(c.old_value)}</span>
+            {c.at && <> · {formatVersionDate(c.at)}</>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** One answer the applicant submitted, presented as a record, never a control. */
 function Field({
   label,
   value,
+  /*
+   * The return-target code(s) this box shows, for fields an officer can send
+   * back. Several where one box holds several answers — the owner's name is
+   * four targets in one line — so a correction to any of them is reported
+   * against the box the reader is actually looking at.
+   *
+   * Absent on the boxes that are not correctable, which is most of them.
+   */
+  targets,
   /*
    * Defaults to a PACKING rule, not a plain block.
    *
@@ -322,12 +433,45 @@ function Field({
 }: {
   label: string
   value: string
+  targets?: string[]
   className?: string
 }) {
+  const corrections = useContext(FieldCorrections)
+
+  /*
+   * Flattened across the box's targets and re-sorted, so a name box corrected
+   * at the surname and then at the suffix reads in one sequence rather than
+   * in two blocks by target.
+   */
+  const history = (targets ?? [])
+    .flatMap((t) => corrections.get(t) ?? [])
+    .sort((a, b) => Date.parse(b.at ?? '') - Date.parse(a.at ?? ''))
+
   return (
     <dl className={`block ${className}`}>
-      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
+      {/*
+        A BLOCK with the badge inline, not a flex row. As a flex sibling the
+        badge could not be flowed around, so "1. DTI / SEC / CDA
+        Registration Number" broke across two lines to make room beside it.
+        Inline, it simply follows the last word and wraps with it.
+
+        Rose, because the palette already spends that hue on Returned —
+        see index.css — and a correction is what answers a return. Royal is
+        this app's ordinary interface blue and would have said nothing.
+      */}
+      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">
+        {label}
+        {history.length > 0 && (
+          <span
+            title="The applicant changed this after your office returned the filing."
+            className="ml-2 inline-block whitespace-nowrap rounded-full bg-s-rose px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white"
+          >
+            Corrected
+          </span>
+        )}
+      </dt>
       <dd className={recordValue}>{value || '—'}</dd>
+      {history.length > 0 && <FieldHistory history={history} label={label} />}
     </dl>
   )
 }
@@ -416,7 +560,43 @@ function OfficeReadout({ label, value }: { label: string; value: string }) {
  * shared control also carries the accessible names — a column of buttons all
  * called "View" does not say which of nine documents it opens.
  */
-function DocumentRow({ doc }: { doc: AppDocument }) {
+/** One requirement: the copy that counts, and whatever came before it. */
+type RequirementGroup = {
+  code: string
+  current: AppDocument
+  /** Newest first. Kept on the filing, folded away in the sheet. */
+  earlier: AppDocument[]
+  /** Did the current copy arrive after this filing was last handed back? */
+  resubmitted: boolean
+}
+
+/**
+ * One row of Section C — a requirement, not a file.
+ *
+ * ── Why one row and not one per upload ──────────────────────────────────────
+ *
+ * `documents.upload` APPENDS, so a requirement the applicant answered twice
+ * has two files against it. Listing both put three rows reading "Proof of
+ * Business Registration" on the client's sheet, and Section C is a checklist:
+ * an officer should be able to count it. The current copy is the row; the rest
+ * are history and sit behind a fold.
+ *
+ * Keeping them is deliberate — see the note at the head of this patch. The
+ * refused copy is the evidence of what was refused, and a remark that points
+ * at a deleted file cannot be checked by anybody.
+ */
+function DocumentRow({ group }: { group: RequirementGroup }) {
+  const { current, earlier, resubmitted } = group
+  const [showEarlier, setShowEarlier] = useState(false)
+
+  /*
+   * A button with aria-expanded/aria-controls, never <details>. Same reason
+   * the "show the application as filed" disclosure gives further down: a
+   * passing test asserts this page has no <details>, and a button is the only
+   * one of the two whose open state React controls.
+   */
+  const earlierId = `requirement-history-${current.id}`
+
   return (
     <li className="rounded-lg border border-line bg-white px-4 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -425,18 +605,93 @@ function DocumentRow({ doc }: { doc: AppDocument }) {
             <FileGlyph />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-ink">{doc.document_type.name}</p>
+            <p className="flex items-center gap-2">
+              <span className="truncate text-sm font-bold text-ink">
+                {current.document_type.name}
+              </span>
+              {/*
+                The one thing the officer came back to look at, so it is the
+                one thing badged. It is also said on a requirement whose ONLY
+                copy arrived after the return — an applicant can answer a
+                return about something they had never uploaded before.
+              */}
+              {resubmitted && (
+                <span
+                  title="Sent after this filing was returned — this is the copy answering it."
+                  className="shrink-0 rounded-full bg-s-rose px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white"
+                >
+                  Re-uploaded
+                </span>
+              )}
+            </p>
             <p className="truncate text-xs text-ink-muted">
-              {doc.original_filename} · {formatBytes(doc.size_bytes)}
+              {current.original_filename} · {formatBytes(current.size_bytes)}
+              {/* The date earns its place once there is more than one copy. */}
+              {(earlier.length > 0 || resubmitted) && (
+                <> · {formatVersionDate(current.created_at)}</>
+              )}
             </p>
           </div>
         </div>
         <DocumentActions
-          id={doc.id}
-          filename={doc.original_filename}
-          label={doc.document_type.name}
+          id={current.id}
+          filename={current.original_filename}
+          label={current.document_type.name}
         />
       </div>
+
+      {earlier.length > 0 && (
+        <div className="mt-2.5 border-t border-line pt-2.5">
+          <button
+            type="button"
+            onClick={() => setShowEarlier((open) => !open)}
+            aria-expanded={showEarlier}
+            aria-controls={earlierId}
+            aria-label={`${showEarlier ? 'Hide' : 'Show'} the ${earlier.length} earlier ${
+              earlier.length === 1 ? 'copy' : 'copies'
+            } of ${current.document_type.name}`}
+            className="flex items-center gap-1.5 rounded text-xs font-semibold text-royal hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+          >
+            <span
+              className={`shrink-0 transition-transform ${showEarlier ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            >
+              <ChevronDownIcon size={14} />
+            </span>
+            {/*
+              The requirement's name is in `aria-label`, not on screen. A
+              screen reader hearing "2 earlier copies" on six rows cannot
+              tell them apart; a sighted reader has the row's own heading
+              directly above and does not need it said twice.
+            */}
+            {earlier.length} earlier {earlier.length === 1 ? 'copy' : 'copies'}
+          </button>
+          {/*
+            `hidden` rather than unmounted: `aria-controls` must point at an
+            element that exists, and `hidden` takes it out of the
+            accessibility tree and out of find-in-page, so a closed fold is
+            genuinely closed and not merely out of sight.
+          */}
+          <ul id={earlierId} hidden={!showEarlier} className="mt-2 space-y-1.5">
+            {earlier.map((doc) => (
+              <li
+                key={doc.id}
+                className="flex items-center justify-between gap-3 rounded-md bg-canvas px-3 py-2"
+              >
+                <p className="min-w-0 truncate text-xs text-ink-secondary">
+                  {doc.original_filename} · {formatBytes(doc.size_bytes)} ·{' '}
+                  {formatVersionDate(doc.created_at)}
+                </p>
+                <DocumentActions
+                  id={doc.id}
+                  filename={doc.original_filename}
+                  label={`${doc.document_type.name} (earlier copy)`}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </li>
   )
 }
@@ -1723,6 +1978,40 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     (row) => row.state === 'missing' || row.state === 'expired',
   ).length
 
+  /**
+   * Section C, as things BPLO can send the filing back about.
+   *
+   * From what the applicant ACTUALLY UPLOADED — `app.documents` — not from
+   * the permit type's requirement list. Client, 29 September 2026: *"only put
+   * there what is submitted by the applicant ... if the applicant did not
+   * submit their TIN, how come can the admin return the TIN?"*
+   *
+   * The first attempt listed every requirement on the permit type, which
+   * offered a new filing's officer a renewal's VAT returns. Filtering that
+   * list by its conditional `context` tokens would have worked and would have
+   * meant a second copy of the wizard's evaluator; reading the uploads needs
+   * no rules at all, and answers the stricter question the client asked.
+   *
+   * Bare `document_types.code`, not a `form:` code: `remarks_target` already
+   * carries document codes for the office sheets, and `targetsInclude`
+   * already matches on them.
+   *
+   * Deduplicated by code: Other Requirements is repeatable, so one document
+   * type can hold several files and must appear once.
+   */
+  const documentTargets = [
+    ...new Map(
+      app.documents.map((d) => [
+        d.document_type.code,
+        {
+          value: d.document_type.code,
+          label: d.document_type.name,
+          group: 'C · Documentary Requirements',
+        },
+      ]),
+    ).values(),
+  ]
+
   const returnTargets = [
     ...ownOfficeForms.flatMap((form) => [
       ...(form.requirements ?? [])
@@ -1778,7 +2067,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
      * reading five certificates AND the form behind them, and either can be
      * the thing that is wrong.
      */
-    ...(canReject ? MAIN_FORM_RETURN_TARGETS : []),
+    /*
+     * Only the fields the applicant ANSWERED — `answered_targets` from the
+     * API. A field they left blank was never their answer to correct, and a
+     * missing TIN is chased by its own requirement at approval rather than by
+     * returning the whole filing. Client, 29 September 2026: *"if the
+     * applicant did not submit their TIN, how come can the admin return the
+     * TIN?"*
+     *
+     * Sections are kept whatever the payload says: they are steps rather than
+     * single values, and `answered_targets` only speaks for scalars.
+     */
+    ...(canReject
+      ? MAIN_FORM_RETURN_TARGETS.filter(
+          (t) => t.kind === 'section' || (app.answered_targets ?? []).includes(t.value),
+        )
+      : []),
+    /*
+     * Section C, one row per requirement THIS filing was asked for — see
+     * `documentTargets`. Offered alongside the form fields and on the same
+     * condition: it is BPLO reading Section C, and the five offices read
+     * their own sheets' checklists instead (the first block above).
+     */
+    ...(canReject ? documentTargets : []),
   ]
 
   /**
@@ -1947,13 +2258,90 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       .find((t) => t.code === 'BUSINESS')
       ?.document_types?.map((dt, index) => [dt.code, index]) ?? [],
   )
+  /**
+   * When this filing was last handed back to the applicant, in epoch ms.
+   *
+   * The LATER of two, because two different offices hand it back and each
+   * records it somewhere else: BPLO returns the FILING, which moves the
+   * application's status and lands in `status_history`; one of the five
+   * offices returns its own PERMIT, which never touches that status and is
+   * stamped on the pivot as `clearance.returned_at`. Reading one alone
+   * would leave the other office's sheet unable to mark anything.
+   *
+   * Null on a filing that has never been back, which is most of them — and
+   * then nothing is a re-upload, which is correct rather than unknown.
+   */
+  const lastHandback = (() => {
+    const moments = [
+      ...(app.status_history ?? [])
+        .filter((h) => h.to_status === 'returned' && h.created_at)
+        .map((h) => Date.parse(h.created_at)),
+      ...(data.clearance?.returned_at ? [Date.parse(data.clearance.returned_at)] : []),
+    ].filter((t) => !Number.isNaN(t))
+
+    return moments.length > 0 ? Math.max(...moments) : null
+  })()
+
+  /*
+   * ── Newest first WITHIN each requirement, and marked ─────────────────
+   *
+   * `documents.upload` appends rather than replaces, so a requirement the
+   * applicant answered twice has two rows with the same name. This sorted
+   * on `requirementRank` alone until 29 September 2026, which orders the
+   * requirements against each other and says nothing about copies of one:
+   * they came out in payload order, and the officer opening the first of
+   * three found whichever the database happened to return — quite possibly
+   * the copy their own office had just refused.
+   *
+   * `id` breaks a tie on `created_at`, which two uploads in the same second
+   * will give. Ids ascend, so the higher one is the later.
+   */
   const askedFor = app.documents
     .filter((d) => requirementRank.has(d.document_type.code))
-    .sort(
-      (a, b) =>
+    .sort((a, b) => {
+      const byRequirement =
         (requirementRank.get(a.document_type.code) ?? 0) -
-        (requirementRank.get(b.document_type.code) ?? 0),
-    )
+        (requirementRank.get(b.document_type.code) ?? 0)
+      if (byRequirement !== 0) return byRequirement
+
+      const byDate = Date.parse(b.created_at) - Date.parse(a.created_at)
+
+      return Number.isNaN(byDate) || byDate === 0 ? b.id - a.id : byDate
+    })
+
+  /*
+   * ── One group per requirement, newest copy first ─────────────────────────
+   *
+   * `askedFor` is already sorted requirement-then-newest, so the first file
+   * seen for a code IS its current copy and the rest are its history, in
+   * order. Built as groups rather than marked rows because Section C is a
+   * checklist: three rows named "Proof of Business Registration" cannot be
+   * counted, however they are badged.
+   */
+  const requirementGroups = askedFor.reduce<RequirementGroup[]>((groups, doc) => {
+    const code = doc.document_type.code
+    const existing = groups.find((g) => g.code === code)
+
+    if (existing) {
+      existing.earlier.push(doc)
+
+      return groups
+    }
+
+    groups.push({
+      code,
+      current: doc,
+      earlier: [],
+      /*
+       * Said of the CURRENT copy only. An earlier copy that also postdates
+       * the return is still an earlier copy — the officer is being pointed
+       * at the one answer they have to read, not at everything recent.
+       */
+      resubmitted: lastHandback !== null && Date.parse(doc.created_at) > lastHandback,
+    })
+
+    return groups
+  }, [])
 
   const feeProfile = app.fee_profile ?? null
   const feeFacts = feeProfile ? feeProfileFacts(feeProfile) : []
@@ -3140,7 +3528,35 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       : []),
   ]
 
+  /*
+   * ── Corrections by field, newest first ──────────────────────────────
+   *
+   * Feeds the CORRECTED badge and the "was …" line on every correctable
+   * box in Sections A and B. Client, 29 September 2026: *"I just Returned
+   * -> Resubmitted this specific field and it did not show the previous
+   * record … Please be consistent and uniform with the other fields as
+   * well."* The sheet already carried these facts at the top under
+   * "Corrected after your return"; this puts them where the officer is
+   * actually reading, which is what Section C had just been given.
+   *
+   * Reversed as it groups, because the API sends them oldest-first and
+   * every reader here wants the most recent change at [0].
+   */
+  const correctionsByTarget = (app.corrections ?? []).reduce((byTarget, correction) => {
+    const existing = byTarget.get(correction.target)
+    if (existing) {
+      existing.unshift(correction)
+    } else {
+      byTarget.set(correction.target, [correction])
+    }
+
+    return byTarget
+  }, new Map<string, ApplicationCorrection[]>())
+
   return (
+    <FieldCorrections.Provider value={correctionsByTarget}>
+    {/* Not re-indented: see the note in this patch — two spaces across
+        2,200 lines would rewrite the sheet's blame to move nothing. */}
     <div>
       {backLink}
 
@@ -4245,9 +4661,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 address was a number ("17" → Street "17", House "—"). The
                 fallback stays for the filings made that way.
               */}
-                <Field label="House / Bldg No." value={address?.house_bldg_no || house} className="grow basis-[10rem] max-w-full" />
-                <Field label="Street" value={address?.street || street} className="grow basis-[32rem] max-w-full" />
-                <Field label="Barangay" value={address?.barangay?.name ?? ''} className="grow basis-[12rem] max-w-full" />
+                <Field label="House / Bldg No." targets={['form:address']} value={address?.house_bldg_no || house} className="grow basis-[10rem] max-w-full" />
+                <Field label="Street" targets={['form:address']} value={address?.street || street} className="grow basis-[32rem] max-w-full" />
+                <Field label="Barangay" targets={['form:barangay']} value={address?.barangay?.name ?? ''} className="grow basis-[12rem] max-w-full" />
                 <Field label="City / Municipality" value={address?.city ?? 'Malabon City'} className="grow basis-[12rem] max-w-full" />
                 <Field label="Province" value={address?.province ?? 'Metro Manila'} className="grow basis-[12rem] max-w-full" />
                 <Field label="Postal Code" value={address?.postal_code ?? ''} className="grow basis-[8rem] max-w-full" />
@@ -4341,11 +4757,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="1. DTI / SEC / CDA Registration Number"
                     className="grow basis-[13rem] max-w-full"
+                    targets={['form:registration_number']}
                     value={business.registration_number ?? ''}
                   />
-                  <Field label="2. Tax Identification Number (TIN)" value={business.tin ?? ''} className="grow basis-[13rem] max-w-full" />
-                  <Field label="3. Business Name" value={business.name ?? ''} className="grow basis-[24rem] max-w-full" />
-                  <Field label="4. Trade Name / Franchise" value={business.trade_name ?? ''} className="grow basis-[16rem] max-w-full" />
+                  <Field label="2. Tax Identification Number (TIN)" targets={['form:tin']} value={business.tin ?? ''} className="grow basis-[13rem] max-w-full" />
+                  <Field label="3. Business Name" targets={['form:name']} value={business.name ?? ''} className="grow basis-[24rem] max-w-full" />
+                  <Field label="4. Trade Name / Franchise" targets={['form:trade_name']} value={business.trade_name ?? ''} className="grow basis-[16rem] max-w-full" />
                   {/*
                   Items 11 and 12 — the person the filing is in the name of,
                   assembled the way the wizard assembles it so the two read the
@@ -4359,11 +4776,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="6. Telephone (Landline)"
                     className="grow basis-[11rem] max-w-full"
+                    targets={['form:telephone']}
                     value={business.address?.telephone ?? ''}
                   />
-                  <Field label="7. Mobile Number" value={business.address?.mobile_number ?? ''} className="grow basis-[12rem] max-w-full" />
-                  <Field label="8. E-mail Address" value={business.address?.email ?? ''} className="grow basis-[18rem] max-w-full" />
-                  <Field label="9. Website Address" value={business.address?.website ?? ''} className="grow basis-[14rem] max-w-full" />
+                  <Field label="7. Mobile Number" targets={['form:mobile_number']} value={business.address?.mobile_number ?? ''} className="grow basis-[12rem] max-w-full" />
+                  <Field label="8. E-mail Address" targets={['form:email']} value={business.address?.email ?? ''} className="grow basis-[18rem] max-w-full" />
+                  <Field label="9. Website Address" targets={['form:website']} value={business.address?.website ?? ''} className="grow basis-[14rem] max-w-full" />
                   {/*
                   Item 10 is "Form of Organization" on the paper, offering
                   exactly these four, and the wizard now asks it under that name
@@ -4381,6 +4799,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="10. Form of Organization"
                     className="grow basis-[13rem] max-w-full"
+                    targets={['form:registration_type']}
                     value={
                       business.registration_type ? humanizeKey(business.registration_type) : ''
                     }
@@ -4396,6 +4815,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="11 / 12. Owner / Representative"
                     className="grow basis-[18rem] max-w-full"
+                    targets={[
+                      'form:owner_surname',
+                      'form:owner_given_name',
+                      'form:owner_middle_name',
+                      'form:owner_suffix',
+                    ]}
                     value={[
                       business.owner?.given_name,
                       business.owner?.middle_name,
@@ -4409,6 +4834,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="11 / 12. Gender"
                     className="grow basis-[7rem] max-w-full"
+                    targets={['form:owner_gender']}
                     value={business.owner?.gender ? humanizeKey(business.owner.gender) : ''}
                   />
                 </div>
@@ -4427,16 +4853,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field
                     label="13. Name of President / Officer in Charge"
                     className="grow basis-[15rem] max-w-full"
+                    targets={['form:president_officer_name']}
                     value={business.president_officer_name ?? ''}
                   />
                   <Field
                     label="14. Citizenship (of President/OIC)"
                     className="grow basis-[11rem] max-w-full"
+                    targets={['form:citizenship']}
                     value={business.citizenship ?? ''}
                   />
                   <Field
                     label="15. Capital Participation (% Filipino)"
                     className="grow basis-[11rem] max-w-full"
+                    targets={['form:capital_participation']}
                     value={
                       business.capital_participation_filipino == null
                         ? ''
@@ -4541,6 +4970,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               */}
                 <Field
                   label="6. Capital Investment"
+                  targets={['form:capital_investment']}
                   value={
                     business.capital_investment == null || business.capital_investment === ''
                       ? ''
@@ -4571,6 +5001,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 )}
                 <Field
                   label="7. Tax Incentives from a Government Entity"
+                  targets={['form:has_tax_incentives']}
                   value={
                     business.has_tax_incentives == null
                       ? ''
@@ -4654,14 +5085,17 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   // answered a question the paper does not put, and the wizard
                   // stopped putting it on 16 September 2026.
                   label="8. Do you pay rent for occupying a place of business?"
+                  targets={['form:is_rented']}
                   value={business.is_rented == null ? '' : business.is_rented ? 'Yes' : 'No'}
                 />
                 <Field
                   label="Emergency Contact Person"
+                  targets={['form:emergency_contact_name']}
                   value={business.emergency_contact_name ?? ''}
                 />
                 <Field
                   label="Emergency Contact Number"
+                  targets={['form:emergency_contact_number']}
                   value={business.emergency_contact_number ?? ''}
                 />
               </div>
@@ -4790,7 +5224,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <ul className="space-y-2.5">
                   {permitTypesRef.loading
                     ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 rounded-lg" />)
-                    : askedFor.map((doc) => <DocumentRow key={doc.id} doc={doc} />)}
+                    : requirementGroups.map((group) => (
+                        <DocumentRow key={group.code} group={group} />
+                      ))}
                 </ul>
               )}
             </section>
@@ -5361,5 +5797,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         />
       )}
     </div>
+    </FieldCorrections.Provider>
   )
 }
