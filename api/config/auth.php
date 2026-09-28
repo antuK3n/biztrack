@@ -162,6 +162,10 @@ return [
     | waiting at a locked door for this one, and a new owner may register on a
     | laptop and open their mail later on a phone.
     |
+    | `password_expire`: the code for changing a password from Settings
+    | [checklist 2026-09-27, Edit Settings], ten minutes like the sign-in
+    | code. The reader is sitting at the Settings dialog waiting for it.
+    |
     | `max_attempts`: wrong guesses before the code is dead. Five, the same as
     | the password lockout, and never reset by a resend — 5 guesses in a
     | million per sign-in.
@@ -173,6 +177,7 @@ return [
     'email_codes' => [
         'login_expire' => 10,
         'verify_expire' => 30,
+        'password_expire' => 10,
         'max_attempts' => 5,
         'resend_after' => 60,
         'max_sends' => 5,

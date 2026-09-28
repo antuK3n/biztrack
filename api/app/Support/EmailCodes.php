@@ -88,6 +88,41 @@ class EmailCodes
         return [$row, $code];
     }
 
+    /**
+     * A fresh code for changing the password from Settings [checklist
+     * 2026-09-27, Edit Settings]. Earlier open ones are closed first, for the
+     * reason issueVerify gives: only the newest e-mail should work.
+     *
+     * @return array{0: EmailCode, 1: string} [row, code]
+     */
+    public static function issuePassword(User $user): array
+    {
+        EmailCode::where('user_id', $user->id)
+            ->where('purpose', EmailCode::PASSWORD)
+            ->whereNull('consumed_at')
+            ->update(['consumed_at' => now()]);
+
+        $code = self::newCode();
+
+        $row = EmailCode::create([
+            'user_id' => $user->id,
+            'purpose' => EmailCode::PASSWORD,
+            'code_hash' => Hash::make($code),
+            'sent_at' => now(),
+            'expires_at' => now()->addMinutes(self::minutes(EmailCode::PASSWORD)),
+        ]);
+
+        return [$row, $code];
+    }
+
+    public static function latestPassword(User $user): ?EmailCode
+    {
+        return EmailCode::where('user_id', $user->id)
+            ->where('purpose', EmailCode::PASSWORD)
+            ->latest('id')
+            ->first();
+    }
+
     public static function findChallenge(string $challenge): ?EmailCode
     {
         return EmailCode::where('purpose', EmailCode::LOGIN)
@@ -202,12 +237,19 @@ class EmailCodes
         return mb_substr($local, 0, 1).'••••'.($domain !== '' ? '@'.$domain : '');
     }
 
+    /*
+     * A password code lives as long as a sign-in code, not as long as an
+     * address code. Both guard the account itself and are typed by someone
+     * waiting at the screen that asked for them; the address code is longer
+     * because the owner may register now and open the mail later.
+     */
     public static function minutes(string $purpose): int
     {
-        return (int) config(
-            $purpose === EmailCode::LOGIN ? 'auth.email_codes.login_expire' : 'auth.email_codes.verify_expire',
-            $purpose === EmailCode::LOGIN ? 10 : 30,
-        );
+        return (int) match ($purpose) {
+            EmailCode::LOGIN => config('auth.email_codes.login_expire', 10),
+            EmailCode::PASSWORD => config('auth.email_codes.password_expire', 10),
+            default => config('auth.email_codes.verify_expire', 30),
+        };
     }
 
     private static function maxAttempts(): int
