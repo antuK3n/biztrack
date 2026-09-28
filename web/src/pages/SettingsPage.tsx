@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode, SVGProps } from 'react'
+import { ChangePasswordModal } from '../components/ChangePasswordModal'
 import { ChevronRightIcon } from '../components/icons'
-import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
 import { api, toApiError } from '../lib/api'
 import { PHOTO_ACCEPT_ATTR, photoRejection, profilePhoto } from '../lib/resources'
@@ -180,9 +180,6 @@ export function SettingsPage() {
    * restating the format and leaving the reader to spot the difference.
    */
   const phoneError = phoneTouched ? validateMobile(phone) : undefined
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
 
   /*
    * The photo is its own small transaction, not part of Save Changes. It
@@ -250,13 +247,10 @@ export function SettingsPage() {
     setOpen('profile')
   }
 
+  // The dialog keeps its own fields (ChangePasswordModal), so each opening
+  // starts empty without anything to reset here.
   function openPassword() {
-    setCurrentPassword('')
-    setPassword('')
-    setConfirm('')
     setNote(null)
-    setFormError(null)
-    setFieldErrors({})
     setOpen('password')
   }
 
@@ -281,27 +275,6 @@ export function SettingsPage() {
       setUser(data.data)
       setOpen(null)
       setNote('Profile changes saved.')
-    } catch (error) {
-      const apiError = toApiError(error)
-      setFieldErrors(apiError.errors)
-      if (Object.keys(apiError.errors).length === 0) setFormError(apiError.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function savePassword() {
-    setSaving(true)
-    setFormError(null)
-    setFieldErrors({})
-    try {
-      await api.put('/auth/password', {
-        current_password: currentPassword,
-        password,
-        password_confirmation: confirm,
-      })
-      setOpen(null)
-      setNote('Password updated. Any other signed-in devices have been logged out.')
     } catch (error) {
       const apiError = toApiError(error)
       setFieldErrors(apiError.errors)
@@ -544,69 +517,14 @@ export function SettingsPage() {
       )}
 
       {open === 'password' && (
-        <ProtoModal
-          title="Change Password"
-          cancelLabel="Cancel"
-          confirmLabel={saving ? 'Saving…' : 'Save Changes'}
+        <ChangePasswordModal
+          codeRequired={user?.password_change_code_required ?? false}
           onCancel={() => setOpen(null)}
-          onConfirm={savePassword}
-          confirmDisabled={saving || !currentPassword || password.length < 8 || password !== confirm}
-        >
-          {formError && (
-            <p role="alert" className="mb-4 text-center text-sm font-medium text-s-red">
-              {formError}
-            </p>
-          )}
-          <div className="grid gap-5 py-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label htmlFor="settings-current">
-                <FieldLabel required>Current Password</FieldLabel>
-              </label>
-              <PasswordInput
-                id="settings-current"
-                placeholder="Current Password"
-                value={currentPassword}
-                onChange={setCurrentPassword}
-                autoComplete="current-password"
-                required
-                invalid={!!fieldErrors.current_password}
-                describedBy={fieldErrors.current_password ? 'settings-current-error' : undefined}
-                iconSize={18}
-              />
-              <FieldError id="settings-current-error" message={fieldErrors.current_password?.[0]} />
-            </div>
-            <div>
-              <label htmlFor="settings-password">
-                <FieldLabel required>Enter New Password</FieldLabel>
-              </label>
-              <PasswordInput
-                id="settings-password"
-                value={password}
-                onChange={setPassword}
-                required
-                invalid={!!fieldErrors.password}
-                describedBy={fieldErrors.password ? 'settings-password-error' : undefined}
-                iconSize={18}
-              />
-              <FieldError id="settings-password-error" message={fieldErrors.password?.[0]} />
-            </div>
-            <div>
-              <label htmlFor="settings-confirm">
-                <FieldLabel required>Confirm New Password</FieldLabel>
-              </label>
-              <PasswordInput
-                id="settings-confirm"
-                value={confirm}
-                onChange={setConfirm}
-                required
-                iconSize={18}
-              />
-            </div>
-          </div>
-          <p className="text-center text-xs text-ink-muted">
-            At least 8 characters. Both fields must match to save. Saving signs out your other devices.
-          </p>
-        </ProtoModal>
+          onChanged={() => {
+            setOpen(null)
+            setNote('Password updated. Any other signed-in devices have been logged out.')
+          }}
+        />
       )}
     </div>
   )
