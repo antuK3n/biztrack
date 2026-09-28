@@ -33,6 +33,19 @@ mkdir -p "$LOGS"
 
 [ -d "$DEMO" ] || { echo "No demo worktree. Run: git worktree add ../biztrack-demo demo" >&2; exit 1; }
 
+# Refuse before anything is killed, built or started if the code about to be
+# served expects a schema the register does not have yet, or is not the demo's
+# own code at all. Both are checked read-only; neither is fixed here, because
+# fixing the first means writing to the live register and that is a person's
+# call, with a backup in hand. Why this exists, and what it cost when it did
+# not [checklist 2026-09-27, Login 7]: scripts/lib/demo-preflight.sh.
+#
+# First, and not after the slot swap is worked out, so that a refusal leaves
+# the live slot exactly as it was: nothing below has run yet.
+# shellcheck source=lib/demo-preflight.sh
+. "$MAIN/scripts/lib/demo-preflight.sh"
+demo_preflight "$DEMO/api" "$DB" || { echo >&2; echo "Nothing was deployed. The live tunnel, if any, is untouched." >&2; exit 1; }
+
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 
 # Which port the RUNNING tunnel points at — the only honest answer to "which
