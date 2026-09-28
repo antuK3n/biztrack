@@ -1,9 +1,24 @@
 import { useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { ChangeEvent, ReactNode, SVGProps } from 'react'
 import { ChevronRightIcon } from '../components/icons'
 import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
 import { api, toApiError } from '../lib/api'
+import {
+  HOME_ADDRESS_AUTOCOMPLETE,
+  HOME_ADDRESS_FIELDS,
+  HOME_ADDRESS_HINTS,
+  HOME_ADDRESS_LABELS,
+  HOME_ADDRESS_REQUIRED,
+  ZIP_DIGITS,
+  homeAddressMissingParts,
+  homeAddressFrom,
+  homeAddressPayload,
+  validateHomeAddressField,
+  type HomeAddressField,
+  type HomeAddressValues,
+} from '../lib/homeAddress'
 import { PHOTO_ACCEPT_ATTR, photoRejection, profilePhoto } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
@@ -127,7 +142,12 @@ function ProfileField({
         <FieldLabel required={required}>{label}</FieldLabel>
       </label>
       {children}
-      {hint && <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>}
+      {/* The id lets the control name this line in aria-describedby. */}
+      {hint && (
+        <p id={`${id}-hint`} className="mt-1.5 text-xs text-ink-muted">
+          {hint}
+        </p>
+      )}
       <FieldError id={`${id}-error`} message={error} />
     </div>
   )
@@ -148,7 +168,15 @@ type OpenModal = 'profile' | 'password' | null
 export function SettingsPage() {
   const user = useAuth((s) => s.user)
   const setUser = useAuth((s) => s.setUser)
-  const [open, setOpen] = useState<OpenModal>(null)
+  const isOwner = user?.roles.includes('business_owner') ?? false
+  /*
+   * `?edit=profile` opens Edit Profile on arrival. It is where the "add your
+   * home address" prompt on Profile and the home page links to, so the answer
+   * is one step from the prompt rather than two. The fields below are already
+   * seeded from the signed-in user, which is all openProfile() would do.
+   */
+  const [params, setParams] = useSearchParams()
+  const [open, setOpen] = useState<OpenModal>(() => (params.get('edit') === 'profile' ? 'profile' : null))
   const [note, setNote] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -180,6 +208,23 @@ export function SettingsPage() {
    * restating the format and leaving the reader to spot the difference.
    */
   const phoneError = phoneTouched ? validateMobile(phone) : undefined
+  /*
+   * The home address, for owners only [checklist 2026-09-28, Register 2].
+   * Staff are never asked for one: their form neither shows nor sends it, and
+   * the API keeps whatever is stored when the keys are absent.
+   */
+  const [home, setHome] = useState<HomeAddressValues>(() => homeAddressFrom(user))
+  // Errors appear per part on blur, for the same reason the mobile number waits.
+  const [homeTouched, setHomeTouched] = useState<Partial<Record<HomeAddressField, boolean>>>({})
+  const homeError = (field: HomeAddressField) =>
+    fieldErrors[field]?.[0] ?? (homeTouched[field] ? validateHomeAddressField(field, home) : undefined)
+  /*
+   * Two separate holds on Save, because they need two separate explanations:
+   * a blank required part is named by the line above the address fields, a
+   * malformed ZIP by its own error once the field is left.
+   */
+  const homeIncomplete = isOwner && homeAddressMissingParts(home)
+  const zipInvalid = isOwner && !!validateHomeAddressField('home_postal_code', home)
   const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -243,6 +288,8 @@ export function SettingsPage() {
     setGender(user?.gender ?? '')
     setPhone(user?.mobile_number ?? '')
     setPhoneTouched(false)
+    setHome(homeAddressFrom(user))
+    setHomeTouched({})
     setNote(null)
     setFormError(null)
     setPhotoError(null)
@@ -277,9 +324,10 @@ export function SettingsPage() {
         suffix: suffix.trim(),
         gender,
         mobile_number: phone.trim(),
+        ...(isOwner ? homeAddressPayload(home) : {}),
       })
       setUser(data.data)
-      setOpen(null)
+      closeProfile()
       setNote('Profile changes saved.')
     } catch (error) {
       const apiError = toApiError(error)
@@ -288,6 +336,12 @@ export function SettingsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** Close Edit Profile, and drop `?edit=profile` so a reload does not reopen it. */
+  function closeProfile() {
+    setOpen(null)
+    if (params.has('edit')) setParams({}, { replace: true })
   }
 
   async function savePassword() {
@@ -334,9 +388,13 @@ export function SettingsPage() {
           wide
           cancelLabel="Cancel"
           confirmLabel={saving ? 'Saving…' : 'Save Changes'}
-          onCancel={() => setOpen(null)}
+          onCancel={closeProfile}
           onConfirm={saveProfile}
-          confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !!validateMobile(phone)}
+          confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !!validateMobile(phone) || homeIncomplete || zipInvalid}
+          // Only the address says why Save is waiting: the name and mobile
+          // fields already carry their own asterisks and errors in view, while
+          // the address sits at the bottom of a scrolling panel.
+          confirmDescribedBy={homeIncomplete ? 'profile-home-needed' : undefined}
         >
           <div className="flex flex-col items-center gap-2">
             <ProfileAvatar src={photoUrl} />
@@ -540,6 +598,71 @@ export function SettingsPage() {
               />
             </ProfileField>
           </div>
+          {isOwner && (
+            /*
+             * Required on this form for an owner, not merely accepted. The
+             * checklist item is "make sure that profile details are complete",
+             * and an owner who registered before the address was asked meets
+             * it here: Save waits for the four starred parts, and the line
+             * below says so. The API agrees — a part that is sent must be
+             * filled, and one part sent makes the rest required
+             * (AuthController::homeAddressRules).
+             */
+            <fieldset className="mt-6">
+              <legend className="mb-3 text-sm font-bold text-ink">Home Address</legend>
+              {homeIncomplete && (
+                <p id="profile-home-needed" className="mb-4 text-sm text-ink-secondary">
+                  Fill in the starred parts of your home address to save.
+                </p>
+              )}
+              <div className="grid gap-5 sm:grid-cols-2">
+                {HOME_ADDRESS_FIELDS.map((field) => {
+                  const id = `profile-${field.replace(/_/g, '-')}`
+                  const error = homeError(field)
+                  const hint = HOME_ADDRESS_HINTS[field]
+                  const isZip = field === 'home_postal_code'
+                  const describedBy =
+                    [error ? `${id}-error` : null, hint ? `${id}-hint` : null].filter(Boolean).join(' ') || undefined
+                  return (
+                    <div key={field} className={field === 'home_street' ? 'sm:col-span-2' : ''}>
+                      <ProfileField
+                        id={id}
+                        label={HOME_ADDRESS_LABELS[field]}
+                        required={HOME_ADDRESS_REQUIRED.includes(field)}
+                        error={error}
+                        hint={hint}
+                      >
+                        <div className="relative">
+                          <input
+                            id={id}
+                            value={home[field]}
+                            onChange={(e) => {
+                              // Digits only, capped here rather than with
+                              // `maxLength`, which would cut a pasted "ZIP
+                              // 1485" short before this sees it (see the same
+                              // field on RegisterPage).
+                              const value = isZip
+                                ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS)
+                                : e.target.value
+                              setHome((prev) => ({ ...prev, [field]: value }))
+                            }}
+                            onBlur={() => setHomeTouched((prev) => ({ ...prev, [field]: true }))}
+                            autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
+                            inputMode={isZip ? 'numeric' : undefined}
+                            aria-required={HOME_ADDRESS_REQUIRED.includes(field) ? 'true' : undefined}
+                            aria-invalid={error ? true : undefined}
+                            aria-describedby={describedBy}
+                            className={`${inputCls} pr-10`}
+                          />
+                          <InputPencil />
+                        </div>
+                      </ProfileField>
+                    </div>
+                  )
+                })}
+              </div>
+            </fieldset>
+          )}
         </ProtoModal>
       )}
 
