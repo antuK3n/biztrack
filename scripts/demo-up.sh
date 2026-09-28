@@ -16,6 +16,16 @@ mkdir -p "$LOGS"
 
 [ -d "$DEMO" ] || { echo "No demo worktree. Run: git worktree add ../biztrack-demo demo" >&2; exit 1; }
 
+# Refuse before the build if the code about to be served expects a schema the
+# register does not have yet, or is not the demo's own code at all. Read-only
+# checks; this never migrates the live register, which is a person's call with
+# a backup in hand (AGENTS.md §2.2). The why, and the tester-facing 500 it
+# cost when it was missing [checklist 2026-09-27, Login 7], is in
+# scripts/lib/demo-preflight.sh.
+# shellcheck source=lib/demo-preflight.sh
+. "$MAIN/scripts/lib/demo-preflight.sh"
+demo_preflight "$DEMO/api" "$DB" || { echo >&2; echo "Nothing was started." >&2; exit 1; }
+
 echo "Building the bundle testers will see…"
 ( cd "$DEMO/web" && npm run build >"$LOGS/build.log" 2>&1 ) || { tail -20 "$LOGS/build.log"; exit 1; }
 
