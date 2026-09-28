@@ -306,10 +306,35 @@ class ApplicationController extends Controller
     public function update(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
+        /*
+         * ── A RETURNED filing is editable, and that is the whole point ───
+         *
+         * Draft-only until 28 September 2026, which quietly broke half the
+         * targeted-return feature. BPLO can tick any of thirty fields when it
+         * sends a filing back; fifteen of them are single values the
+         * corrections route writes, and the other fifteen are whole sections
+         * — the line-of-business table, the uploaded documents, the owner's
+         * name parts — which only the wizard can edit. The wizard could not
+         * open a returned filing, so a return naming one of those reached the
+         * applicant with no way to answer it.
+         *
+         * "Returned for revision" means the applicant is meant to revise it.
+         * The rest of the flow already reads it that way: DocumentController,
+         * OfficeFormController and the amendment routes all pair Draft with
+         * Returned, and `resubmit` exists to carry it back. This guard was the
+         * odd one out.
+         *
+         * `submit` and `destroy` below stay Draft-only on purpose: a returned
+         * filing goes back through `resubmit`, and a filing the city has
+         * already seen is cancelled rather than deleted.
+         */
         abort_unless(
-            $application->status === ApplicationStatus::Draft,
+            in_array($application->status, [
+                ApplicationStatus::Draft,
+                ApplicationStatus::Returned,
+            ], true),
             422,
-            'Only draft applications can be edited.'
+            'Only a draft or a returned application can be edited.'
         );
 
         $data = $request->validate([
@@ -757,6 +782,36 @@ class ApplicationController extends Controller
                     'old_value' => $before === null ? null : (string) $before,
                     'new_value' => $record->{$column} === null ? null : (string) $record->{$column},
                 ]);
+            }
+
+            /*
+             * ── The sole proprietor's derived pair ──────────────────────
+             *
+             * Re-derived BEFORE the save, so a correction cannot leave the
+             * record holding a value the form would have refused — see the
+             * note at the head of this patch. A no-op for every other
+             * structure, and a no-op for a sole proprietorship whose
+             * citizenship and owner name were not touched.
+             */
+            if ($business->registration_type === 'sole_proprietorship') {
+                $citizenship = trim((string) $business->citizenship);
+                if ($citizenship !== '') {
+                    $business->capital_participation_filipino =
+                        strtolower($citizenship) === 'filipino' ? 100 : 0;
+                }
+
+                $primary = $records['owner'];
+                if ($primary !== null) {
+                    $full = trim(implode(' ', array_filter([
+                        trim((string) $primary->given_name),
+                        trim((string) $primary->middle_name),
+                        trim((string) $primary->surname),
+                        trim((string) $primary->suffix),
+                    ], fn (string $part) => $part !== '')));
+                    if ($full !== '') {
+                        $business->president_officer_name = $full;
+                    }
+                }
             }
 
             foreach ($records as $record) {

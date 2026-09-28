@@ -1252,6 +1252,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * `sendRemark`, which dispatches on this and nothing else.
    */
   const [popup, setPopup] = useState<'reject' | 'reject_permit' | 'return' | null>(null)
+  /*
+   * Separate from `popup`, which selects between the two REMARK composers
+   * and carries a textarea with it. Approve asks a yes/no question and
+   * collects nothing, so folding it into that union would give the
+   * composer a third mode that renders none of its own fields.
+   */
+  const [confirmingApprove, setConfirmingApprove] = useState(false)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -1623,13 +1630,23 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    *  - BPLO's SECOND approval does. Issuing the permit rests on five
    *    certificates, not on re-reading a form BPLO already approved, and the
    *    client's own framing of the stage is that it is about the clearances.
+   *  - An AMENDMENT does, since 28 September 2026. It is BPLO's own review,
+   *    so the second rule above would have kept it open — but the premise of
+   *    that rule is that reading the form IS the act, and here it is not.
+   *    The act is reading three or four "now X, asked for Y" rows against
+   *    the affidavit and the supporting documents. The unchanged fifty
+   *    answers are context exactly as they are for a clearance office, and
+   *    printing them above the decision buries the rows the decision is
+   *    about. Client: *"is it still good to show ALL BUSINESS DETAILS even
+   *    though this is just for amendment?"*
    *
    * The Tax Order of Payment follows the same line, which is why it is one
    * constant: where the application is folded, the assessment is a second bar
    * beside it; where it is open, the assessment sits in FOR OFFICE USE ONLY
    * where the paper puts it.
    */
-  const foldsApplication = foldsFiledSheet || bploFinalApproval
+  const foldsApplication =
+    foldsFiledSheet || bploFinalApproval || app.application_type === 'amendment'
 
   /**
    * The clearances this permit rests on, as rows the officer can act on.
@@ -2927,32 +2944,78 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * officer picks between two similar red buttons.
    */
   /**
+   * Is this sitting with the APPLICANT rather than with an office?
+   *
+   * A return hands the work back. Until they resubmit there is nothing for
+   * any office to decide, and every decision control is withheld — see the
+   * note at the head of this patch for the three that were not.
+   *
+   * BPLO reads the FILING's status and a clearance office reads its own
+   * CLEARANCE's, because that is the object each seat decides about: an
+   * office whose clearance went back is waiting even while the filing
+   * itself carries on.
+   */
+  /**
+   * Days a returned filing has sat since the office handed it back.
+   *
+   * Read from the status history rather than `updated_at`, which moves
+   * whenever anything touches the row — an analytics refresh would reset the
+   * clock and the filing would never look abandoned. The last transition INTO
+   * `returned` is the moment the applicant was handed the work, which is the
+   * only date this question is about.
+   *
+   * Null when the filing is not returned, or when the history does not carry
+   * it. Null withholds Reject, which is the safe direction: the cost of
+   * withholding is queue clutter, the cost of offering it wrongly is someone's
+   * application.
+   */
+  const daysSinceReturned = (() => {
+    if (app.status !== 'returned') return null
+
+    const last = [...(app.status_history ?? [])]
+      .filter((h) => h.to_status === 'returned' && h.created_at)
+      .pop()
+    if (!last?.created_at) return null
+
+    return (Date.now() - Date.parse(last.created_at)) / 86_400_000
+  })()
+
+  /**
+   * Untouched long enough to treat as abandoned.
+   *
+   * Thirty days, and deliberately NOT the RA 11032 deadline — that clock
+   * measures the office and is three working days under Malabon's charter.
+   * Borrowing it would tie the applicant's patience to a figure that exists to
+   * limit the city's.
+   *
+   * A wait rather than an automatic close, because of who pays when the rule
+   * is wrong: a lingering filing costs the office some clutter it can see, an
+   * auto-close costs the applicant their application and they may not find out
+   * until they are at the counter.
+   */
+  const RETURN_ABANDONED_DAYS = 30
+  const returnAbandoned =
+    daysSinceReturned !== null && daysSinceReturned >= RETURN_ABANDONED_DAYS
+
+  const withApplicant = canReject
+    ? app.status === 'returned'
+    : data.clearance?.status === 'returned'
+
+  /**
    * May this seat end the whole filing?
    *
-   * ── Not while it is merely being read ────────────────────────────────────
-   *
-   * This was `canReject` alone — the `application.reject` permission, with no
-   * stage gate — so BPLO met Reject and Return side by side on a filing it had
-   * only just opened. Client, 27 September 2026: *"Why can the BPLO both can
-   * Return or Reject? ... when it is all about filing, only Return can be
-   * made."*
-   *
-   * That is the same rule already applied to the five offices on 27 September,
-   * read correctly this time. Reading a form and refusing a business are
-   * different acts at different points: a form that is wrong is RETURNED, and
-   * the applicant fixes it. Ending the filing outright belongs after the
-   * offices have inspected and something has actually failed.
-   *
-   * `for_approval` is the reading stage, so Reject is withheld there and
-   * nowhere else — BPLO keeps it at Pending Payment and beyond, which is where
-   * the workflow's own rejection paths lead and where twelve tests exercise it.
+   * Not while BPLO is merely READING it (`for_approval`) — the client's
+   * rule of 27 September — and not while it is with the applicant. The
+   * first version of this said `status !== 'for_approval'` alone, which
+   * excluded one status where it meant to describe a stage, and so put a
+   * Reject button on a filing the applicant was still correcting.
    *
    * The API is deliberately unchanged. `rejectApplication` still accepts a
    * For Approval filing, because this is a rule about what BPLO is OFFERED
-   * while reading, not a new invariant — and today's lesson was that tightening
-   * that service without cause breaks a dozen legitimate callers.
+   * while reading, not a new invariant — and tightening that service without
+   * cause broke a dozen legitimate callers once already.
    */
-  const mayRejectFiling = canReject && app.status !== 'for_approval'
+  const mayRejectFiling = canReject && !withApplicant && app.status !== 'for_approval'
 
   const mayRefusePermit = !canReject && data.clearance?.status === 'for_inspection'
   /**
@@ -2966,7 +3029,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * BPLO always may. Its Return sends back the whole form, or one uploaded
    * clearance at Final Approval; neither is a `ClearanceStatus` move.
    */
-  const mayReturn = canReject || data.clearance?.status === 'for_approval'
+  const mayReturn = !withApplicant && (canReject || data.clearance?.status === 'for_approval')
 
   /**
    * The one thing this seat's buttons cannot say about themselves.
@@ -2979,7 +3042,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * BPLO and the five offices share this page and do NOT share these
    * sentences — see `canReject` for the split.
    */
-  const decisionNote = canReject
+  const decisionNote = withApplicant
+    ? /*
+       * Two situations wearing one status. An empty button row needs a
+       * reason or it reads as the page failing to load its controls — and a
+       * row that has just grown a Reject button needs one more, because the
+       * officer last saw this filing without it.
+       */
+      returnAbandoned
+      ? `Returned ${Math.floor(daysSinceReturned ?? 0)} days ago and not resubmitted. `
+        + 'Reject is available again so an abandoned filing can be closed.'
+      : 'This filing is with the applicant until they resubmit, so there is nothing to decide yet.'
+    : canReject
     ? // BPLO reading a filing: Reject is not drawn, and Return now explains
       // itself in the composer. Nothing left worth a banner.
       (mayRejectFiling ? 'Rejecting ends the filing for every office.' : '')
@@ -3219,9 +3293,23 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                  * enters a processing clock, so demanding a tier first would
                  * block an officer for a field nothing will ever measure.
                  */}
+                {/*
+                  Withheld while the applicant holds it. `approveMainForm`
+                  refuses anything that is not For Approval, so before this
+                  the officer met a 422 for pressing a button the page had
+                  offered them — the worst shape for a rule, since the
+                  screen and the server disagreed in front of them.
+                */}
+                {!withApplicant && (
                 <button
                   type="button"
-                  onClick={approve}
+                  /*
+                   * Opens the confirmation; `approve` runs from the dialog.
+                   * The `categoryMissing` guard stays inside `approve` where
+                   * it was — it is the API's rule restated, not part of
+                   * asking the officer whether they are sure.
+                   */
+                  onClick={() => setConfirmingApprove(true)}
                   disabled={busy}
                   aria-disabled={categoryMissing}
                   aria-describedby={categoryMissing ? 'approve-blocked-why' : undefined}
@@ -3231,6 +3319,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 >
                   Approve
                 </button>
+                )}
               </>
             )}
           </div>
@@ -5232,6 +5321,32 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         the same overlay at every width, so there is one of it and nothing to
         keep in step.
       */}
+      {/*
+        Approve's confirmation. One sentence: a dialog nobody reads is a click
+        with a step in front of it, and length is what stops it being read.
+
+        `ProtoModal` owns the focus trap, the Escape key and the two footer
+        buttons, the same as the remark composers — so this behaves like every
+        other dialog on the page rather than being a third pattern.
+      */}
+      {confirmingApprove && (
+        <ProtoModal
+          title="Approve this application?"
+          tone="green"
+          onCancel={() => setConfirmingApprove(false)}
+          confirmLabel={busy ? 'Approving…' : 'Yes, approve'}
+          confirmDisabled={busy}
+          onConfirm={() => {
+            setConfirmingApprove(false)
+            void approve()
+          }}
+        >
+          <p className="text-sm text-ink-secondary">
+            Confirm that you have reviewed all the details on this application. This cannot be
+            undone.
+          </p>
+        </ProtoModal>
+      )}
       {popup === 'return' && (
         <RemarkPopup
           chrome="modal"

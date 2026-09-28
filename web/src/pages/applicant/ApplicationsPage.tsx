@@ -515,6 +515,54 @@ function RejectionNote({
 }
 
 /**
+ * "BPLO sent this back" — the returned filing's own line on Track.
+ *
+ * ── Why the card needed one ─────────────────────────────────────────────────
+ *
+ * A returned filing looked exactly like a filing under review: a status pill
+ * and a count of approved permits. The one difference that matters — the
+ * office is waiting on YOU — was visible only after opening it.
+ *
+ * `RejectionNote` directly above solves the same shape of problem for the
+ * other status an applicant must act on, so this follows it rather than
+ * inventing a second treatment.
+ *
+ * ── It does not name the fields, and that is not laziness ───────────────────
+ *
+ * `ApplicationListItem` carries no assignments — the list payload is lean on
+ * purpose, since it is fetched for every filing the applicant has — so the
+ * pointer that names the returned fields is not here to read. Fattening the
+ * list to print them on a card would buy a sentence and cost every row.
+ *
+ * The card's job is to say YOU are the hold-up and get them one click from
+ * the boxes. The status page names each field beside its own input, which is
+ * where naming them is actually useful.
+ */
+function ReturnedNote({ app }: { app: ApplicationListItem }) {
+  return (
+    <div className="mt-2 rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-4 py-3">
+      <p className="text-sm font-bold text-ink">BPLO sent this back for correction</p>
+      <p className="mt-0.5 text-sm text-ink-secondary">
+        Open it to see which fields to correct, then resubmit.
+      </p>
+      <Link
+        to={`/applications/${app.id}`}
+        /*
+          Named for the filing, on RejectionNote's reasoning: a list of links
+          all reading "Fix and resubmit" cannot be chosen between by a screen
+          reader user.
+        */
+        aria-label={`Fix and resubmit the application for ${businessName(app.business)}`}
+        /* Same reactive control as the row's, so the two read alike. */
+        className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+      >
+        Fix and resubmit →
+      </Link>
+    </div>
+  )
+}
+
+/**
  * What every status on this page means, and what happens after it.
  *
  * ── Why it is here and not in a modal ─────────────────────────────────────
@@ -1201,6 +1249,20 @@ function ApplicationRow({
 
       {rejected && <RejectionNote app={app} detail={detail} />}
 
+      {/*
+        A returned filing is waiting on the APPLICANT, and the card alone did
+        not say so — it showed a status pill and a permit count, the same as a
+        filing nobody is waiting on.
+
+        CLOSED ONLY. Open, the Mayor's Permit row below carries the same
+        message with the officer's actual words and the field they named, so
+        this one becomes a worse duplicate stacked on top of a better one —
+        which is what the client saw on 28 September 2026. The row cannot
+        replace it outright, though: it is inside `open`, and a collapsed card
+        would go back to showing nothing to act on.
+      */}
+      {app.status === 'returned' && !open && <ReturnedNote app={app} />}
+
       {open && (
         <>
           <ul className="space-y-2.5">
@@ -1245,7 +1307,15 @@ function ApplicationRow({
                * so on this screen null means nothing was written, and the row
                * falls back to naming the office rather than inventing a reason.
                */
-              const returned = pt.status === 'returned'
+              /*
+               * A main-form return sets the APPLICATION to returned and
+               * leaves every pivot alone, so this row's Returned chip comes
+               * from `permitChip`'s BUSINESS branch while its note and link
+               * were looking at the pivot. Same condition as that branch,
+               * written out rather than read back off the rendered chip.
+               */
+              const mainFormReturned = pt.code === 'BUSINESS' && app.status === 'returned'
+              const returned = pt.status === 'returned' || mainFormReturned
               /*
                * The list payload's permit_types is the narrow shape — code,
                * name, status, status_label — so the note and the date come from
@@ -1255,7 +1325,9 @@ function ApplicationRow({
                * register to render a panel that only opens on one.
                */
               const full = detail?.permit_types.find((row) => row.code === pt.code)
-              const note = full?.remarks?.trim() ?? ''
+              const note = mainFormReturned
+                ? (detail?.assignments?.find((a) => a.remarks)?.remarks?.trim() ?? '')
+                : (full?.remarks?.trim() ?? '')
               const returnedAt = full?.returned_at ?? null
               const historyKey = `${app.id}:${pt.code}`
               const historyOpen = openHistory.has(historyKey)
@@ -1395,10 +1467,21 @@ function ApplicationRow({
                      * the note reads as belonging to the permit above it rather
                      * than to the row below.
                      */
-                    <div className="mt-2 pl-[7rem]">
+                    /*
+                      `relative z-20` is what makes the link inside CLICKABLE.
+
+                      The whole row is a stretched link: a covering button at
+                      `absolute inset-0 z-0`. A POSITIONED element paints above
+                      non-positioned siblings whatever the DOM order, so this
+                      block sat underneath the button and every click on "Fix
+                      and resubmit" opened or closed the row instead. Reported
+                      on 28 September 2026 — and it had been true of the
+                      clearance return since that block was written.
+                    */
+                    <div className="relative z-20 mt-2 pl-[7rem]">
                       <p className="text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
-                          This office asked for changes
+                          {mainFormReturned ? 'BPLO' : 'This office'} asked for changes
                           {/*
                           `?? null` first, then a null test. `full` is undefined
                           until the detail lands, and `full?.returned_at !== null`
@@ -1421,9 +1504,25 @@ function ApplicationRow({
                       */}
                         {note !== '' && <span className="italic">“{note}”</span>}
                       </p>
+                      {/*
+                        A returned CLEARANCE is fixed on the clearance stage;
+                        a returned FORM is fixed on the status page, where the
+                        correction boxes are. One link, two destinations,
+                        because they are two different repairs.
+                      */}
                       <Link
-                        to={`/applications/${app.id}/clearances`}
-                        className="mt-1 inline-block text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                        to={
+                          mainFormReturned
+                            ? `/applications/${app.id}`
+                            : `/applications/${app.id}/clearances`
+                        }
+                        /*
+                          A real control, not underlined text: the client asked
+                          for the same reactive treatment the permit boxes got —
+                          hand cursor, and a tint that arrives on hover so the
+                          press is acknowledged before it lands.
+                        */
+                        className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
                       >
                         Fix and resubmit →
                       </Link>

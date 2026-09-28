@@ -393,6 +393,38 @@ class NotificationService
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }
 
+    /**
+     * An applicant has answered a RETURN and handed the filing back.
+     *
+     * Modelled on `requestResponded` directly above, which does the same job
+     * for a requirement. A return is the larger of the two — it blocks the
+     * whole filing rather than sitting beside it — and until 28 September
+     * 2026 it was the one that told the office nothing.
+     *
+     * \@param  int  $fields  How many fields the applicant corrected, from
+     *   `application_corrections`. Zero for a return answered in the wizard,
+     *   where the changes are not recorded field by field — the sentence
+     *   drops the count rather than claiming none were changed.
+     */
+    public function filingResubmitted(Application $app, User $recipient, int $fields = 0): void
+    {
+        $what = $fields > 0
+            ? $fields.' field'.($fields === 1 ? '' : 's').' corrected'
+            : 'Corrections received';
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'Corrections received',
+            "{$what} on {$app->tracking_id}. It is back with your office for review.",
+            // Into the LGU site, chosen by who is being TOLD rather than by a
+            // literal — the same reasoning `requestResponded` records.
+            $this->filingLink($recipient, $app),
+            $app,
+        );
+        $this->fanOut($recipient, "BizTrack: corrections received on {$app->tracking_id}.");
+    }
+
     public function requestClosed(OfficerRequest $request, User $recipient): void
     {
         $app = $request->application;
