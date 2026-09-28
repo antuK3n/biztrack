@@ -89,7 +89,12 @@ export type ReturnTarget = {
 const A = 'A · Business Information'
 const B = 'B · Business Operation'
 const L = 'Location & Zoning'
-const D = 'Documents & Declarations'
+/*
+ * `D` is gone with its last entry. The headings are the wizard's own step
+ * names and Section C's requirements are assembled in ReviewPage, where the
+ * filing is; a heading kept with nothing under it invites somebody to find
+ * something to put there.
+ */
 
 /**
  * In the order the applicant is asked, which is the order the picker offers.
@@ -123,10 +128,40 @@ export const MAIN_FORM_RETURN_TARGETS: ReturnTarget[] = [
   { value: 'form:citizenship', label: '16. Citizenship (of President/OIC)', group: A, kind: 'scalar' },
   { value: 'form:capital_participation', label: '17. Capital Participation (% Filipino)', group: A, kind: 'scalar' },
 
-  { value: 'form:floor_area_sqm', label: '1. Business Area (sq. m.)', group: B, kind: 'scalar' },
-  { value: 'form:employees', label: '2. Total No. of Employees', group: B, kind: 'section', phase: 'operation' },
-  { value: 'form:employees_in_lgu', label: '3. Employees Residing in Malabon', group: B, kind: 'scalar' },
-  { value: 'form:delivery_units', label: '4. Delivery Units', group: B, kind: 'scalar' },
+  /*
+   * ── Items 1 to 4 are SECTIONS, and were scalars until 29 September 2026 ─
+   *
+   * They are not columns on `businesses`. The wizard asks them on the
+   * Business Operation step, which is `FeeProfileStep`, and that writes
+   * `applications.fee_profile`. The matching `businesses` columns are
+   * filled only at approval, by `WorkflowService::syncDeclaredFigures`.
+   *
+   * As scalars they were read out of those empty columns, so
+   * `answered_targets` reported them unanswered and the picker dropped
+   * items 1, 3 and 4 from the group — which is how the client found this.
+   * The quieter half was worse: a correction would have written a column
+   * nothing reads, and approval would then have copied the UNCORRECTED
+   * `fee_profile` straight over it.
+   *
+   * Sections rather than scalars against another store, because all four
+   * are ASSESSMENT INPUTS. A new floor area re-prices the permit, and the
+   * wizard step is what knows how; an inline box on the status page would
+   * change the declaration and leave the Tax Order of Payment computed
+   * from the figure it replaced.
+   */
+  { value: 'form:floor_area_sqm', label: '1. Business Area (sq. m.)', group: B, kind: 'section', phase: 'operation' },
+  /*
+   * Named for the two boxes that take a keystroke. Client, 29 September
+   * 2026: *"Total No. of Employees can't be returned because it is
+   * auto-computed by the sum of male and female employees."* Right — the
+   * form's heading covers a group of three, and the Total is `locked`, so
+   * an officer ticking the heading was pointing at the one box in it the
+   * applicant cannot type into.
+   */
+  { value: 'form:employees', label: '2. No. of Employees (Male / Female)', group: B, kind: 'section', phase: 'operation' },
+  { value: 'form:employees_in_lgu', label: '3. No. of Employees Residing within Malabon', group: B, kind: 'section', phase: 'operation' },
+  /* Two counts on the wizard — the Revenue Code taxes them at different rates. */
+  { value: 'form:delivery_units', label: '4. No. of Delivery Units (Motorized / Other)', group: B, kind: 'section', phase: 'operation' },
   { value: 'form:economic_organization', label: '5. Economic Organization', group: B, kind: 'section', phase: 'operation' },
   { value: 'form:capital_investment', label: '6. Capital Investment (₱)', group: B, kind: 'scalar' },
   { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity?', group: B, kind: 'section', phase: 'operation' },
@@ -147,8 +182,15 @@ export const MAIN_FORM_RETURN_TARGETS: ReturnTarget[] = [
   { value: 'form:emergency_contact_name', label: 'Emergency Contact Person', group: L, kind: 'scalar' },
   { value: 'form:emergency_contact_number', label: 'Emergency Contact Number', group: L, kind: 'scalar' },
 
-  { value: 'form:documents', label: 'Uploaded documents', group: D, kind: 'section', phase: 'documents' },
-  { value: 'form:fee_profile', label: 'Tax classification answers', group: D, kind: 'section', phase: 'operation' },
+  /*
+   * `form:documents` was here, meaning "one of the uploads". It is gone:
+   * ReviewPage now builds one target per requirement Section C actually
+   * asks of the filing in front of the officer, from the payload, so the
+   * conditional ones (renewal, rented, amendment) appear only where they
+   * apply. Keeping a lump beside them would just be the old option under a
+   * new name.
+   */
+  { value: 'form:fee_profile', label: 'Tax classification answers', group: B, kind: 'section', phase: 'operation' },
 ]
 
 const BY_VALUE = new Map(MAIN_FORM_RETURN_TARGETS.map((t) => [t.value, t]))

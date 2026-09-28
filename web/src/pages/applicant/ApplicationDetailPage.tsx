@@ -19,8 +19,9 @@ import {
   registrationNumberLabel,
   scalarFieldRule,
 } from '../../lib/fieldRules'
-import { mainFormTargets } from '../../lib/returnTargets'
-import { applications, officeForms } from '../../lib/resources'
+import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
+import { applications, documents, officeForms } from '../../lib/resources'
+import { ACCEPT_ATTR, MAX_UPLOAD_BYTES, fileRejection, uploadErrorMessage } from './uploads'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
@@ -216,6 +217,101 @@ function CorrectionInput({
         </p>
       )}
     </>
+  )
+}
+/**
+ * Re-upload one document BPLO sent the filing back about.
+ *
+ * ── The same box Section C gave them ────────────────────────────────────────
+ *
+ * `fileRejection`, `ACCEPT_ATTR` and `MAX_UPLOAD_BYTES` are imported from
+ * `./uploads`, which is the module Section C's own uploader uses. Client,
+ * 29 September 2026: *"the documentary requirement fields in the application
+ * forms should have the same allowable file size with their resubmission
+ * field counterparts."* They do, because it is the same constant and the same
+ * check — not a matching limit retyped here, which would agree today and
+ * drift the first time one of them moved.
+ *
+ * ── It uploads on choose, and does not wait for the resubmit ────────────────
+ *
+ * `documents.upload` APPENDS a new file against the document type rather than
+ * replacing the old one, which is what the officer wants: the previous copy is
+ * the evidence of what was refused, and the newest is what they will read.
+ * Uploading immediately also means a large file's progress is not hidden
+ * behind a Submit that appears to hang.
+ */
+function DocumentCorrection({
+  applicationId,
+  documentType,
+  note,
+  onUploaded,
+}: {
+  applicationId: number
+  documentType: { id: number; code: string; name: string }
+  note: string | null
+  /** Names the document, so the card can tell which returns are answered. */
+  onUploaded: (code: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  async function choose(file: File | null) {
+    if (!file) return
+
+    /* The form's own rule, run before the request rather than after it. */
+    const rejection = fileRejection(file)
+    if (rejection) {
+      setError(rejection)
+
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      await documents.upload(applicationId, documentType.id, file)
+      setDone(file.name)
+      onUploaded(documentType.code)
+    } catch (err) {
+      setError(uploadErrorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-[13px] font-semibold text-ink">
+        {documentType.name}{' '}
+        <span aria-hidden="true" className="text-s-red">
+          *
+        </span>
+        <span className="sr-only">(required)</span>
+      </p>
+      {note && <p className="mt-0.5 text-xs text-ink-secondary">{note}</p>}
+      <input
+        type="file"
+        accept={ACCEPT_ATTR}
+        disabled={busy}
+        onChange={(e) => void choose(e.target.files?.[0] ?? null)}
+        aria-label={`Re-upload ${documentType.name}`}
+        className="mt-1.5 block w-full text-sm text-ink file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-royal/30 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-royal hover:file:bg-royal-tint"
+      />
+      {/* The limit said out loud, in the same words the form uses. */}
+      <p className="mt-1 text-xs text-ink-muted">
+        PDF, JPG or PNG, up to {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.
+      </p>
+      {busy && <p className="mt-1 text-xs text-ink-secondary">Uploading…</p>}
+      {done && !busy && (
+        <p className="mt-1 text-xs font-medium text-s-green">Uploaded {done}.</p>
+      )}
+      {error && (
+        <p role="alert" className="mt-1 text-xs font-medium text-s-red">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }
 function OfficeVisits({ app }: { app: Application }) {
@@ -506,6 +602,13 @@ export function ApplicationDetailPage() {
    * somebody they are wrong for having started.
    */
   const [touchedCorrections, setTouchedCorrections] = useState<Record<string, boolean>>({})
+  /*
+   * Documents re-uploaded in this sitting, by code. Not read from the
+   * payload: `documents.upload` APPENDS, so a returned document always has
+   * an older file against it and counting rows could never tell a fresh
+   * answer from the copy that was refused.
+   */
+  const [uploadedDocs, setUploadedDocs] = useState<string[]>([])
 
   const [savingCorrections, setSavingCorrections] = useState(false)
   const [correctionError, setCorrectionError] = useState<string | null>(null)
@@ -638,6 +741,31 @@ export function ApplicationDetailPage() {
   )
 
   /*
+   * ── Documents BPLO sent back ──────────────────────────────────────────
+   *
+   * A document target is a bare `document_types.code`, which
+   * `mainFormTargets` drops — it resolves the wizard's `form:` codes and
+   * nothing else. Matched against what the applicant UPLOADED, which is
+   * also the only list the officer could have picked from.
+   */
+  const returnedDocuments =
+    status === 'returned'
+      ? (() => {
+          const named = new Set(
+            app.assignments.flatMap((a) => targetCodes(a.remarks_target)),
+          )
+
+          return [
+            ...new Map(
+              app.documents
+                .filter((d) => named.has(d.document_type.code))
+                .map((d) => [d.document_type.code, d.document_type]),
+            ).values(),
+          ]
+        })()
+      : []
+
+  /*
    * Every field BPLO named, answered and valid.
    *
    * Gates the Submit button AND hides the bare Resubmit further down, so
@@ -646,11 +774,13 @@ export function ApplicationDetailPage() {
    * application form applies — so "filled in" means filled in ACCEPTABLY,
    * not merely non-empty.
    */
-  const correctionsComplete = returnedScalars.every(
-    (t) =>
-      (corrections[t.value] ?? '').trim() !== ''
-      && scalarFieldRule(t.value).validate(corrections[t.value] ?? '') === undefined,
-  )
+  const correctionsComplete =
+    returnedScalars.every(
+      (t) =>
+        (corrections[t.value] ?? '').trim() !== ''
+        && scalarFieldRule(t.value).validate(corrections[t.value] ?? '') === undefined,
+    )
+    && returnedDocuments.every((dt) => uploadedDocs.includes(dt.code))
 
   async function submitCorrections() {
     setCorrectionError(null)
@@ -691,9 +821,19 @@ export function ApplicationDetailPage() {
       // `app` is non-null past the guard above, but the closure cannot carry
       // that narrowing, so it is re-established here rather than asserted.
       if (!app) return
-      const fields: Record<string, string> = {}
-      for (const t of returnedScalars) fields[t.value] = (corrections[t.value] ?? '').trim()
-      await applications.corrections(app.id, fields)
+      /*
+       * `corrections` writes the scalars and resubmits in one transaction,
+       * but refuses a filing that was returned about no single field. A
+       * document-only return has none — its uploads were saved as they were
+       * chosen — so that filing resubmits directly.
+       */
+      if (returnedScalars.length > 0) {
+        const fields: Record<string, string> = {}
+        for (const t of returnedScalars) fields[t.value] = (corrections[t.value] ?? '').trim()
+        await applications.corrections(app.id, fields)
+      } else {
+        await applications.resubmit(app.id)
+      }
       // Correcting resubmits, so the whole page changes state — reload rather
       // than patching, which would leave the status card stale.
       reload()
@@ -1226,17 +1366,22 @@ export function ApplicationDetailPage() {
           ACT on; everything below it is history and status. See the note at
           the head of this patch for why it lives on this page at all.
         */}
-        {returnedFields.length > 0 && (
+        {(returnedFields.length > 0 || returnedDocuments.length > 0) && (
           <section className="mt-8">
             <div className="border-b border-ink/50 pb-2">
               <h2 className="text-2xl font-bold text-ink">What you need to correct</h2>
             </div>
             <div className="mt-5 rounded-xl bg-white px-6 py-5 shadow-card">
               <p className="text-sm text-ink-secondary">
+                {/*
+                  Counts documents too. It counted `returnedFields` alone —
+                  the wizard's own targets — so a filing returned about one
+                  document announced it was returned about nothing.
+                */}
                 BPLO returned this application about{' '}
-                {returnedFields.length === 1
-                  ? 'one field'
-                  : `${returnedFields.length} fields`}
+                {returnedFields.length + returnedDocuments.length === 1
+                  ? 'one item'
+                  : `${returnedFields.length + returnedDocuments.length} items`}
                 . Everything else you filed stays as it is.
               </p>
 
@@ -1318,6 +1463,29 @@ export function ApplicationDetailPage() {
               )}
 
               {/*
+                A returned DOCUMENT gets the same upload box Section C gave
+                it — same accepted formats and same size limit, from the
+                same module, so a change to the limit moves both.
+              */}
+              {returnedDocuments.length > 0 && (
+                <div className="mt-4 space-y-4">
+                  {returnedDocuments.map((dt) => (
+                    <DocumentCorrection
+                      key={dt.code}
+                      applicationId={app.id}
+                      documentType={dt}
+                      note={(app.return_notes ?? {})[dt.code] ?? null}
+                      onUploaded={(code) =>
+                        setUploadedDocs((prev) =>
+                          prev.includes(code) ? prev : [...prev, code],
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/*
                 The section targets. Named rather than silently dropped: an
                 applicant told to fix three things and shown two boxes would
                 resubmit believing they had finished.
@@ -1351,7 +1519,12 @@ export function ApplicationDetailPage() {
                 <p className="mt-3 text-sm font-medium text-s-red">{correctionError}</p>
               )}
 
-              {returnedScalars.length > 0 && (
+              {/*
+                Shown whenever there is anything to answer, not just boxes.
+                Gated on the scalars alone it vanished on a document-only
+                return, leaving the applicant an upload and no way to send it.
+              */}
+              {(returnedScalars.length > 0 || returnedDocuments.length > 0) && (
                 <button
                   type="button"
                   onClick={submitCorrections}
@@ -1438,7 +1611,13 @@ export function ApplicationDetailPage() {
                 way back.
               */}
               {status === 'returned' ? (
-                returnedScalars.length === 0 && (
+                /*
+                  Withheld whenever the card above is showing anything to
+                  answer — scalars OR documents. Gated on the scalars alone
+                  it appeared on a document-only return and skipped the
+                  upload, handing the filing back unchanged.
+                */
+                returnedScalars.length === 0 && returnedDocuments.length === 0 && (
                   <PillButton onClick={runResubmit} disabled={action === 'resubmit'}>
                     {action === 'resubmit' ? 'Resubmitting…' : 'Resubmit'}
                   </PillButton>

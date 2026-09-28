@@ -89,7 +89,13 @@ it('parses the web return-target list at all', function () {
      * protecting nothing — the failure mode a parity test must not have.
      */
     /*
-     * 33 since 28 September 2026: items 10-13 became four targets instead of
+     * 32 since 29 September 2026, when `form:documents` left: Section C's
+     * requirements are now assembled per filing in ReviewPage from the
+     * payload, because they are conditional and a fixed list would offer a
+     * new filing a renewal document nobody asked it for. They are therefore
+     * not in this file and not counted here.
+     *
+     * 33 before that: items 10-13 became four targets instead of
      * one lumped "Owner / Representative", the emergency contact became its
      * two boxes, and `form:lessor` went because the wizard no longer collects
      * a lessor block. The exact figure is not the point — a number that must
@@ -97,7 +103,7 @@ it('parses the web return-target list at all', function () {
      * silently reducing this to nothing and every assertion below passing
      * against an empty array.
      */
-    expect(parsedWebReturnTargets($source))->toHaveCount(33);
+    expect(parsedWebReturnTargets($source))->toHaveCount(32);
 });
 
 it('agrees with the web on which targets are single fields', function () {
