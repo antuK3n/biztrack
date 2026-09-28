@@ -601,7 +601,8 @@ export interface ApplicationListItem {
 
 export interface AppDocument {
   id: number
-  document_type: { code: string; name: string }
+  /** `id` is for re-uploading a returned document; `code` is what readers match on. */
+  document_type: { id: number; code: string; name: string }
   original_filename: string
   size_bytes: number
   created_at: string
@@ -1156,6 +1157,18 @@ export interface Application extends ApplicationListItem {
    * but a handful of them.
    */
   corrections?: ApplicationCorrection[]
+  /**
+   * The `form:` codes this applicant actually answered.
+   *
+   * What an officer may return the filing about — a field left blank was
+   * never their answer to correct, and a missing TIN has its own route. Sent
+   * by the API because only it knows which record holds each field; see
+   * `ReturnTargets::answeredBy`.
+   *
+   * Optional: a payload from before this shipped carries no key, and `?? []`
+   * then offers nothing, which is the safe direction.
+   */
+  answered_targets?: string[]
   /**
    * BPLO's remark for each returned field, keyed by its `form:` code.
    *
