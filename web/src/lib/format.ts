@@ -98,6 +98,33 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : dateFmt.format(d)
 }
 
+/**
+ * The date a value was superseded, for the one-line revision notes.
+ *
+ * The only short date in the app, and named for its one job rather than
+ * offered as a general `formatDateShort` — which the note above refuses, and
+ * rightly: "the second helper is the one that quietly spreads."
+ *
+ * This is the screen the same note allows for. A revision note sits INSIDE a
+ * record box — `was 111111 · 29 Sep 2026` under a field that may be 13rem
+ * wide — and the long form wrapped it onto a second and third line, which is
+ * what the client reported on 29 September 2026. Nobody transcribes one onto
+ * a printed form; it is an at-a-glance marker of when something changed, so
+ * the reason for spelling the month out does not apply to it.
+ */
+const versionDateFmt = new Intl.DateTimeFormat('en-PH', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+})
+
+export function formatVersionDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+
+  return Number.isNaN(d.getTime()) ? '—' : versionDateFmt.format(d)
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
