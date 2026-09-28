@@ -1366,9 +1366,15 @@ function RequirementsChecklist({
              * 27 September 2026, and an office ticking two rows produced a
              * pointer equal to neither of them, so nothing was highlighted.
              */
-            flagged={targetsInclude(returnTarget, row.code)}
+            /*
+             * `row.code` is nullable — a row already answered by a
+             * business-permit attachment uploads nothing of its own — so it
+             * cannot be a lookup key or a needle without being checked. The
+             * `===` this replaced tolerated null by accident.
+             */
+            flagged={row.code !== null && targetsInclude(returnTarget, row.code)}
             /* What the office said about THIS row, when it said something. */
-            flagNote={returnNotes?.[row.code] ?? null}
+            flagNote={(row.code ? returnNotes?.[row.code] : null) ?? null}
             busy={busy === row.code}
             readOnly={ro}
             onChange={onChange}

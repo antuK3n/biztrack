@@ -88,7 +88,16 @@ it('parses the web return-target list at all', function () {
      * against an empty array and this test would go quietly green while
      * protecting nothing — the failure mode a parity test must not have.
      */
-    expect(parsedWebReturnTargets($source))->toHaveCount(30);
+    /*
+     * 33 since 28 September 2026: items 10-13 became four targets instead of
+     * one lumped "Owner / Representative", the emergency contact became its
+     * two boxes, and `form:lessor` went because the wizard no longer collects
+     * a lessor block. The exact figure is not the point — a number that must
+     * be updated deliberately is, because the alternative is a reformat
+     * silently reducing this to nothing and every assertion below passing
+     * against an empty array.
+     */
+    expect(parsedWebReturnTargets($source))->toHaveCount(33);
 });
 
 it('agrees with the web on which targets are single fields', function () {

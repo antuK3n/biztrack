@@ -68,6 +68,22 @@ final class ReturnTargets
         'form:employees_in_lgu' => ['business', 'employees_within_lgu'],
         'form:delivery_units' => ['business', 'delivery_units'],
         'form:capital_investment' => ['business', 'capital_investment'],
+
+        /*
+         * Items 10 to 13 — four boxes on the paper and four here since
+         * 28 September 2026. They were one lumped `form:owner_name` section,
+         * so an officer who could see that only the middle name was wrong had
+         * to send back all four. Columns on `business_owners`, which is why
+         * the `owner` relation exists.
+         */
+        'form:owner_surname' => ['owner', 'surname'],
+        'form:owner_given_name' => ['owner', 'given_name'],
+        'form:owner_middle_name' => ['owner', 'middle_name'],
+        'form:owner_suffix' => ['owner', 'suffix'],
+
+        /* Two boxes on the form, so two targets rather than one group. */
+        'form:emergency_contact_name' => ['business', 'emergency_contact_name'],
+        'form:emergency_contact_number' => ['business', 'emergency_contact_number'],
     ];
 
     /** Which record holds a scalar target's value: business, address or owner. */

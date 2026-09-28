@@ -114,27 +114,38 @@ export const MAIN_FORM_RETURN_TARGETS: ReturnTarget[] = [
    * initial. Gender is separate because it is a separate question with a
    * separate way of being wrong.
    */
-  { value: 'form:owner_name', label: '10–13. Owner / Representative', group: A, kind: 'section', phase: 'business' },
+  { value: 'form:owner_surname', label: '10. Surname', group: A, kind: 'scalar' },
+  { value: 'form:owner_given_name', label: '11. Given Name', group: A, kind: 'scalar' },
+  { value: 'form:owner_middle_name', label: '12. Middle Name', group: A, kind: 'scalar' },
+  { value: 'form:owner_suffix', label: '13. Suffix', group: A, kind: 'scalar' },
   { value: 'form:owner_gender', label: '14. Gender', group: A, kind: 'section', phase: 'business' },
-  { value: 'form:president_officer_name', label: '15. Name of President / OIC', group: A, kind: 'scalar' },
+  { value: 'form:president_officer_name', label: '15. Name of President / Officer in Charge', group: A, kind: 'scalar' },
   { value: 'form:citizenship', label: '16. Citizenship (of President/OIC)', group: A, kind: 'scalar' },
-  { value: 'form:capital_participation', label: '17. Capital Participation', group: A, kind: 'scalar' },
+  { value: 'form:capital_participation', label: '17. Capital Participation (% Filipino)', group: A, kind: 'scalar' },
 
   { value: 'form:floor_area_sqm', label: '1. Business Area (sq. m.)', group: B, kind: 'scalar' },
   { value: 'form:employees', label: '2. Total No. of Employees', group: B, kind: 'section', phase: 'operation' },
-  { value: 'form:employees_in_lgu', label: '3. Employees Residing within Malabon', group: B, kind: 'scalar' },
-  { value: 'form:delivery_units', label: '4. No. of Delivery Units', group: B, kind: 'scalar' },
+  { value: 'form:employees_in_lgu', label: '3. Employees Residing in Malabon', group: B, kind: 'scalar' },
+  { value: 'form:delivery_units', label: '4. Delivery Units', group: B, kind: 'scalar' },
   { value: 'form:economic_organization', label: '5. Economic Organization', group: B, kind: 'section', phase: 'operation' },
-  { value: 'form:capital_investment', label: '6. Capital Investment', group: B, kind: 'scalar' },
-  { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity', group: B, kind: 'section', phase: 'operation' },
-  { value: 'form:is_rented', label: '8. Do you pay rent for the premises', group: B, kind: 'section', phase: 'address' },
+  { value: 'form:capital_investment', label: '6. Capital Investment (₱)', group: B, kind: 'scalar' },
+  { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity?', group: B, kind: 'section', phase: 'operation' },
+  { value: 'form:is_rented', label: '8. Do you pay rent for the premises?', group: B, kind: 'section', phase: 'address' },
 
-  { value: 'form:address', label: 'Business address', group: L, kind: 'section', phase: 'address' },
-  { value: 'form:barangay', label: 'Barangay', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:address', label: 'House / Bldg. No. and Street', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:barangay', label: 'Barangay Name', group: L, kind: 'section', phase: 'address' },
   { value: 'form:map_pin', label: 'Pin on the map', group: L, kind: 'section', phase: 'address' },
-  { value: 'form:lines', label: 'Line of business / Products / Services', group: L, kind: 'section', phase: 'address' },
-  { value: 'form:lessor', label: 'Lessor details', group: L, kind: 'section', phase: 'address' },
-  { value: 'form:emergency_contact', label: 'Emergency contact', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:lines', label: 'Line of Business', group: L, kind: 'section', phase: 'address' },
+  /*
+   * `form:lessor` was here and is gone — the wizard STOPPED COLLECTING the
+   * lessor block, and not one of its inputs renders any more. Offering it
+   * let an officer return a filing about four boxes the applicant could
+   * never find. The same staleness hit the officer's review sheet, which
+   * printed those four rows as dashes for months; see ApplyWizard's note on
+   * `ReviewRow`. If the block comes back, so does this line.
+   */
+  { value: 'form:emergency_contact_name', label: 'Emergency Contact Person', group: L, kind: 'scalar' },
+  { value: 'form:emergency_contact_number', label: 'Emergency Contact Number', group: L, kind: 'scalar' },
 
   { value: 'form:documents', label: 'Uploaded documents', group: D, kind: 'section', phase: 'documents' },
   { value: 'form:fee_profile', label: 'Tax classification answers', group: D, kind: 'section', phase: 'operation' },

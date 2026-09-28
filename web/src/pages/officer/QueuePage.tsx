@@ -835,16 +835,39 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
   return `${item.trackingId} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
 }
 
+/**
+ * How a filing type reads on a row.
+ *
+ * Its own table rather than `TYPE_PLURAL` reused: that one exists for the
+ * empty state's sentence ("No renewals are at this stage") and is plural
+ * and lower case for that reason. A chip wants the singular.
+ */
+const TYPE_LABEL: Record<string, string> = {
+  new: 'New',
+  renewal: 'Renewal',
+  amendment: 'Amendment',
+}
+
 const CARD = 'flex items-stretch overflow-hidden rounded-lg bg-white shadow-card'
 
 function QueueRow({
   item,
   ownPermit,
+  showType,
   onClaim,
   onRelease,
   claiming,
 }: {
   item: QueueItem
+  /**
+   * Draw the New / Renewal / Amendment chip?
+   *
+   * False once the officer has filtered by type: every row is then that
+   * type, and the chip is a word repeated down the page. Decided by the
+   * list rather than by the row, because only the list knows what the
+   * filter is set to.
+   */
+  showType: boolean
   /** True in a clearance office's seat, false in BPLO's. See `badge` below. */
   ownPermit: boolean
   onClaim?: (item: QueueItem) => void
@@ -910,8 +933,20 @@ function QueueRow({
           * that case is the one that explains the heading. Either way the row
           * carries the tracking ID exactly once.
           */}
-        <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+          {/*
+            A quiet outline, not a second coloured chip: the row already has
+            one on the right and it means the STAGE. Two coloured chips would
+            compete and invite being read as one scale. Beside the tracking
+            ID, which is the other thing here that identifies rather than
+            progresses.
+          */}
+          {showType && item.type && (
+            <span className="rounded border border-royal/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
+              {TYPE_LABEL[item.type] ?? item.type}
+            </span>
+          )}
         </p>
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
@@ -1892,6 +1927,8 @@ export function QueuePage() {
                 key={item.key}
                 item={item}
                 ownPermit={!canReadEveryOffice}
+                /* Only while the list is mixed — see the prop's own note. */
+                showType={filingType === ''}
                 onClaim={claim}
                 onRelease={release}
                 claiming={claimingId === item.assignmentId}

@@ -36,6 +36,26 @@ class ApplicationResource extends JsonResource
                 ->groupBy('permit_type_id')
             : collect();
 
+        /*
+         * The FILING's own moves — the rows with no `permit_type_id`, which
+         * `transition()` writes and `transitionClearance()` does not.
+         *
+         * They are merged into the outcome permit's timeline below. Before
+         * 28 September 2026 they were read by the application-level
+         * `status_history` and by nothing else, so a filing that was
+         * returned and resubmitted showed a Mayor's Permit whose history
+         * still read "Application submitted" alone.
+         */
+        $filingHistory = $this->relationLoaded('permitTypes')
+            ? \App\Models\ApplicationStatusHistory::query()
+                ->where('application_id', $this->id)
+                ->whereNull('permit_type_id')
+                ->with('changedBy:id,name')
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->get()
+            : collect();
+
         return [
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
@@ -132,7 +152,7 @@ class ApplicationResource extends JsonResource
              * endpoint starts issuing a hundred of them.
              */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(function ($pt) use ($request, $historyByPermit) {
+                ? $this->permitTypes->map(function ($pt) use ($request, $historyByPermit, $filingHistory) {
                     /*
                      * SEP-5. Progress is shared across the filing; the words an
                      * office wrote are not.
@@ -207,7 +227,19 @@ class ApplicationResource extends JsonResource
                          * Without this a CHO officer would read BFP's reason
                          * for returning a permit by opening a timeline.
                          */
-                        'history' => ($historyByPermit[$pt->id] ?? collect())
+                        /*
+                         * The outcome permit carries the FILING's moves as
+                         * well as its own — see the note where
+                         * `$filingHistory` is read. Sorted together so a
+                         * return and the office decision around it read in
+                         * the order they happened rather than in two blocks.
+                         */
+                        'history' => ($pt->code === \App\Models\PermitType::OUTCOME_CODE
+                            ? ($historyByPermit[$pt->id] ?? collect())
+                                ->concat($filingHistory)
+                                ->sortBy([['created_at', 'asc'], ['id', 'asc']])
+                                ->values()
+                            : ($historyByPermit[$pt->id] ?? collect()))
                             ->map(fn ($h) => [
                                 'from_status' => $h->from_status,
                                 'to_status' => $h->to_status,

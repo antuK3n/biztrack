@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import type { SVGProps } from 'react'
 import { ArrowLeftIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
@@ -840,11 +840,22 @@ export function RequestsPage() {
   const composeFor = searchParams.get('compose')
   const [composing, setComposing] = useState(composeFor !== null)
 
-  // Officer compose select needs the visible applications.
-  const { data: apps } = useAsync<ApplicationListItem[]>(
-    () => (isOfficer ? applications.list() : Promise.resolve([])),
-    [isOfficer],
-  )
+  /*
+   * Both seats need this list now, for different reasons: the officer's
+   * compose select picks a filing to write to, and the owner's banner below
+   * names the filings BPLO has sent back to them.
+   *
+   * One request either way — it was already being made for the officer, and
+   * the owner's copy is scoped to their own filings by the API.
+   */
+  const { data: apps } = useAsync<ApplicationListItem[]>(() => applications.list(), [])
+
+  /*
+   * Filings BPLO has handed back. Only for the owner: an officer opening
+   * this page is looking at requirements they raised, and a list of other
+   * people's returned filings is not what they came for.
+   */
+  const returnedFilings = isOfficer ? [] : (apps ?? []).filter((a) => a.status === 'returned')
 
   const open = list.find((r) => r.id === openId) ?? null
 
@@ -912,6 +923,39 @@ export function RequestsPage() {
       >
         Other Requirements
       </PageTitle>
+
+      {/*
+        Above the list and OUTSIDE the empty-state branch below: an
+        applicant whose only outstanding thing is a returned filing would
+        otherwise be shown "No requests yet" on a page that is, at that
+        moment, wrong.
+      */}
+      {returnedFilings.length > 0 && (
+        <div className="mb-5 rounded-xl border-l-4 border-s-rose bg-s-rose-tint/40 px-5 py-4">
+          <p className="text-sm font-bold text-ink">
+            {returnedFilings.length === 1
+              ? 'An application was sent back for correction'
+              : `${returnedFilings.length} applications were sent back for correction`}
+          </p>
+          <p className="mt-0.5 text-sm text-ink-secondary">
+            This holds up the permit until you answer, so deal with it before the
+            requirements below.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {returnedFilings.map((a) => (
+              <li key={a.id}>
+                <Link
+                  to={`/applications/${a.id}`}
+                  className="text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
+                >
+                  {a.business?.name ?? a.tracking_id ?? `Application #${a.id}`} — fix and
+                  resubmit →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {firstLoad ? (
         <SkeletonList rows={4} />
