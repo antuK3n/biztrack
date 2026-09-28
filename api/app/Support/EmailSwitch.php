@@ -11,7 +11,8 @@ namespace App\Support;
  * Three features need a code to reach somebody's inbox: confirming the address
  * after sign-up (a filing is refused until it is confirmed), the sign-in code
  * every account is asked for after its password, and the resend buttons behind
- * both. Each would lock people out if it ran while mail goes nowhere: a sign-in
+ * both. (A fourth came later: the code a password change in Settings needs.)
+ * Each would lock people out if it ran while mail goes nowhere: a sign-in
  * code written to `laravel.log` is a sign-in nobody can finish. So they ask
  * this, and nothing else, before they act. [Ken, checklist 2026-09-27: "build
  * email features fully, but they switch ON only when a real mailer is
