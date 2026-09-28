@@ -432,5 +432,6 @@ function registration(string $email): array
         'password' => 'biztrack1',
         'password_confirmation' => 'biztrack1',
         'data_privacy_consent' => true,
+        ...homeAddress(),
     ];
 }
