@@ -1740,7 +1740,30 @@ export const emailCodes = {
     const res = await api.post<{ message: string }>('/auth/email/resend')
     return res.data.message
   },
+  /**
+   * E-mail the code a password change needs, or a new one [Edit Settings].
+   * Carries the current password because the API checks it before sending
+   * anything. `code_required: false` means mail is off and the change goes
+   * through on the password alone.
+   */
+  requestPasswordCode: async (currentPassword: string): Promise<PasswordCodeSent> => {
+    const res = await api.post<{ message?: string; data: PasswordCodeSent }>('/auth/password/code', {
+      current_password: currentPassword,
+    })
+    return { ...res.data.data, message: res.data.message }
+  },
 }
+
+export type PasswordCodeSent =
+  | { code_required: false; message?: string }
+  | {
+      code_required: true
+      message?: string
+      /** Masked, e.g. `o••••@biztrack.local`. */
+      email: string
+      expires_in_minutes: number
+      resend_after: number
+    }
 
 /* ── Office hours [checklist 2026-09-27, Login 6] ─────────────────────────── */
 

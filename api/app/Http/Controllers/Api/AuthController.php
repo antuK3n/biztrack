@@ -123,6 +123,14 @@ class AuthController extends Controller
                 'email_verification_required' => EmailSwitch::on()
                     && $user->roles->contains('name', 'business_owner')
                     && ! $user->hasVerifiedEmail(),
+                /*
+                 * Whether Settings must e-mail a code before a password change
+                 * [checklist 2026-09-27, Edit Settings]. The same for every
+                 * account — it is the mail switch — but sent here for the same
+                 * reason as the line above: the web app never learns how mail
+                 * is configured, only what it has to ask the reader for.
+                 */
+                'password_change_code_required' => EmailSwitch::on(),
             ];
     }
 
@@ -782,12 +790,28 @@ class AuthController extends Controller
      * Change the signed-in user's password. Requires the current password and
      * revokes every other token so a hijacked session dies with the old
      * credential; the token making this request stays valid.
+     *
+     * With a real mailer it also requires the code from requestPasswordCode
+     * [checklist 2026-09-27, Edit Settings; closes View Profile 3]. A session
+     * left open on a shared computer, plus a password read over a shoulder,
+     * was enough to take the account over for good — the change signs every
+     * other device out, the real owner included. The code adds the one thing
+     * neither of those gives: the inbox. With mail off (the demo) the current
+     * password is enough, as it was, because a code nobody can receive would
+     * make the password impossible to change.
      */
     public function updatePassword(Request $request): JsonResponse
     {
+        $codeRequired = EmailSwitch::on();
+
         $data = $request->validate([
             'current_password' => ['required', 'string'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
+            // Not validated at all with mail off, so a request shaped as it
+            // was before this feature is answered exactly as it was.
+            ...($codeRequired ? ['code' => ['required', 'string', 'max:32']] : []),
+        ], [
+            'code.required' => 'Enter the 6-digit code we e-mailed you. Press Send code if you do not have one.',
         ]);
 
         $user = $request->user();
@@ -798,6 +822,39 @@ class AuthController extends Controller
             ]);
         }
 
+        if ($codeRequired) {
+            if ($locked = $this->lockedResponse($user)) {
+                return $locked;
+            }
+
+            $row = EmailCodes::latestPassword($user);
+            $result = $row ? $this->tryCode($row, $data['code']) : ['status' => 'dead', 'remaining' => 0];
+
+            if ($result['status'] !== 'ok') {
+                /*
+                 * Wrong and dead codes count against the account as a wrong
+                 * sign-in code does (see verifySignInCode), `malformed` does
+                 * not. Without this, whoever holds the session and the
+                 * password asks for a fresh code every five guesses and walks
+                 * the million; with it, five wrong codes lock the account for
+                 * fifteen minutes. The cost falls on an owner who mistypes the
+                 * code five times: their other devices cannot sign in for
+                 * fifteen minutes, and this session is left alone. A request
+                 * with no code ever sent (`$row` null) cannot have been a
+                 * guess and is not counted.
+                 */
+                if ($row && $result['status'] !== 'malformed') {
+                    $this->countFailedCode($user);
+                }
+
+                return $this->codeRefusal(match ($result['status']) {
+                    'dead' => 'This code no longer works. Send yourself a new one.',
+                    'malformed' => 'Enter the 6 digits from the e-mail.',
+                    default => $this->triesLeft($result['remaining']),
+                });
+            }
+        }
+
         $user->forceFill(['password' => $data['password']])->save();
 
         // Revoke all other sessions (keep the one performing the change).
@@ -805,11 +862,132 @@ class AuthController extends Controller
             ->where('id', '!=', $user->currentAccessToken()->id)
             ->delete();
 
-        Audit::log('user.password_changed', $user);
+        Audit::log('user.password_changed', $user, $codeRequired ? ['via' => 'email code'] : []);
 
         return response()->json([
             'message' => 'Password updated. Other signed-in devices have been logged out.',
         ]);
+    }
+
+    /**
+     * E-mail the code a password change needs, and send it again when asked
+     * [checklist 2026-09-27, Edit Settings].
+     *
+     * The current password is checked FIRST, before anything is looked up,
+     * issued or sent. A stolen session on its own therefore cannot fill the
+     * owner's inbox with codes, and cannot learn from this endpoint whether
+     * mail is on or where the address points — it gets the same refusal as a
+     * mistyped password.
+     *
+     * One endpoint for the first code and every resend. While a code is still
+     * good, asking again re-sends a new number on the SAME row, so the wrong
+     * guesses already made stay counted (the rule the sign-in resend follows);
+     * one a minute, five per code (auth.email_codes). Only once it has expired,
+     * been used or been guessed out does a new row start.
+     *
+     * With mail off it sends nothing and says `code_required: false`: the
+     * change goes through on the password alone, as it always has.
+     */
+    public function requestPasswordCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is incorrect.'],
+            ]);
+        }
+
+        if (! EmailSwitch::on()) {
+            return response()->json(['data' => ['code_required' => false]]);
+        }
+
+        if ($locked = $this->lockedResponse($user)) {
+            return $locked;
+        }
+
+        $row = EmailCodes::latestPassword($user);
+        $resend = $row !== null && $row->isLive();
+
+        if ($resend) {
+            $wait = EmailCodes::resendWait($row);
+
+            // Five sends of one code: wait for it to run out rather than
+            // starting a new one, or the ration would reset on demand.
+            $wait ??= max(1, (int) ceil(now()->diffInSeconds($row->expires_at)));
+
+            if ($wait > 0) {
+                return response()->json([
+                    'message' => "You can ask for a new code in {$wait} second".($wait === 1 ? '' : 's').'.',
+                    'retry_after' => $wait,
+                ], 429);
+            }
+
+            $code = EmailCodes::refresh($row);
+        } else {
+            [$row, $code] = EmailCodes::issuePassword($user);
+        }
+
+        try {
+            EmailCodes::send($user, EmailCode::PASSWORD, $code);
+        } catch (\Throwable $e) {
+            // Closed so a code that never arrived cannot be half-used later.
+            // Same 503 and wording as the sign-in code.
+            $row->forceFill(['consumed_at' => now()])->save();
+            Log::error('Password-change code could not be sent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send your code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        // Never the code: the audit trail is read by administrators.
+        Audit::log('user.password_code_sent', $user, ['resend' => $resend]);
+
+        return response()->json([
+            'message' => 'We sent a 6-digit code to '.EmailCodes::mask($user->email).'.',
+            'data' => [
+                'code_required' => true,
+                'email' => EmailCodes::mask($user->email),
+                'expires_in_minutes' => EmailCodes::minutes(EmailCode::PASSWORD),
+                'resend_after' => (int) config('auth.email_codes.resend_after', 60),
+            ],
+        ]);
+    }
+
+    /**
+     * The account lockout, as sign-in applies it: 429 while `locked_until` is
+     * in the future. Used by the password-code steps so five wrong codes stop
+     * the guessing here as well as at the sign-in page.
+     */
+    private function lockedResponse(User $user): ?JsonResponse
+    {
+        if (! $user->locked_until?->isFuture()) {
+            return null;
+        }
+
+        $minutes = max(1, (int) ceil(now()->diffInSeconds($user->locked_until) / 60));
+
+        return response()->json([
+            'message' => "Account temporarily locked. Try again in {$minutes} minute".($minutes === 1 ? '' : 's').'.',
+        ], 429);
+    }
+
+    /** One more failed attempt on the account; the fifth locks it for fifteen minutes. */
+    private function countFailedCode(User $user): void
+    {
+        $attempts = $user->failed_login_attempts + 1;
+        $user->forceFill([
+            'failed_login_attempts' => $attempts,
+            'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $user->locked_until,
+        ])->save();
     }
 
     public function forgotPassword(Request $request): JsonResponse

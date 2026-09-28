@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A six-digit code sent by e-mail. See the migration for the two purposes and
+ * A six-digit code sent by e-mail. See the migration for the first two purposes
+ * (the third, PASSWORD, is below; it needed no new column) and
  * App\Support\EmailCodes for the rules; this class only holds the row.
  */
 class EmailCode extends Model
@@ -14,6 +15,16 @@ class EmailCode extends Model
     public const VERIFY = 'verify';
 
     public const LOGIN = 'login';
+
+    /*
+     * The second step of a password change from Settings [checklist
+     * 2026-09-27, Edit Settings]. Tied to the account only, like VERIFY: the
+     * request carrying it is already signed in, so there is no challenge.
+     * `purpose` is the whole boundary between the three — every lookup
+     * filters on it, so a sign-in code cannot change a password and a
+     * password code cannot finish a sign-in.
+     */
+    public const PASSWORD = 'password';
 
     protected $fillable = [
         'user_id', 'purpose', 'challenge_hash', 'portal', 'code_hash',
