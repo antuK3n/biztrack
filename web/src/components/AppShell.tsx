@@ -67,7 +67,7 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
   const initials = `${user.first_name[0] ?? ''}${user.last_name[0] ?? ''}`.toUpperCase()
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-20 flex-col items-center bg-royal py-4 lg:flex">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-20 flex-col items-center bg-royal py-4 lg:flex print:!hidden">
       <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
         {navItemsFor(user, portal).map((item) =>
           item.to ? (
@@ -137,7 +137,27 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
             className="absolute bottom-0 left-16 z-40 w-44 rounded-r-xl bg-royal-deep py-3 shadow-overlay"
           >
             {[
-              { label: 'Settings', to: portalPath(portal, '/settings') },
+              /*
+                -- Settings is not an office account's to open ---------------
+
+                An officer's name, mobile number, office and role are the
+                super admin's to set [client, 28 September 2026]. The officer
+                directory is the register's record of who staffs which office,
+                and a record people can quietly edit about themselves is not
+                one - a reviewer could change the office their filings are
+                routed to without anybody being told.
+
+                `department_id` is the test, and it is the honest one: an
+                office account has one, a business owner has none and neither
+                does the super admin. Owners keep Settings, because their
+                details are theirs.
+
+                What they get instead is the pinned conversation at the top of
+                Messages. See ProfilePage for the sentence that points at it.
+              */
+              ...(user.department === null
+                ? [{ label: 'Settings', to: portalPath(portal, '/settings') }]
+                : []),
               // Profile reads the account record; Settings edits it.
               { label: 'Profile', to: portalPath(portal, '/profile') },
             ].map((l) => (
@@ -303,7 +323,7 @@ function Bell({ count }: { count: number }) {
           ? `Notifications, ${count} unread`
           : 'Notifications'
       }
-      className="fixed right-5 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full text-royal hover:bg-white/60"
+      className="fixed right-5 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full text-royal hover:bg-white/60 print:!hidden"
     >
       <span className="relative flex items-center justify-center">
         <BellIcon size={24} />
@@ -315,13 +335,26 @@ function Bell({ count }: { count: number }) {
 
 function MobileTabBar({ user }: { user: User }) {
   const portal = useAuth((s) => s.portal)
+  /*
+   * ── Six, not five ──────────────────────────────────────────────────────
+   *
+   * The cap was five, and an applicant's rail yields six once My Permits is on
+   * it. Slicing would have dropped Payment History — and nothing else on a
+   * phone can reach it: the rail is `hidden … lg:flex`, so the account menu,
+   * Profile and Settings are all desktop-only, and this bar is the whole of
+   * mobile navigation. A sliced entry is not demoted, it is gone.
+   *
+   * Six tabs on a 360px phone is 60px each: wider than the 44px minimum touch
+   * target, with the 10px label still legible. The cap stays, because a
+   * seventh would not be.
+   */
   const items = navItemsFor(user, portal)
     .filter((i) => i.mobile && i.to)
-    .slice(0, 5)
+    .slice(0, 6)
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-20 bg-royal pb-[env(safe-area-inset-bottom)] lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-20 bg-royal pb-[env(safe-area-inset-bottom)] lg:hidden print:!hidden"
     >
       <ul className="grid" style={{ gridTemplateColumns: `repeat(${items.length}, 1fr)` }}>
         {items.map((item) => (
@@ -368,9 +401,15 @@ export function AppShell() {
     <div className="min-h-dvh bg-canvas">
       <Rail user={user} unreadMessages={counts.messages} />
       <Bell count={unreadNotifications} />
-      {isOwner && <ChatBubble />}
+      {/* Everything fixed to the viewport is furniture, and a printed
+          certificate should carry none of it. */}
+      {isOwner && (
+        <div className="print:hidden">
+          <ChatBubble />
+        </div>
+      )}
 
-      <main className="min-h-dvh lg:pl-20">
+      <main className="min-h-dvh lg:pl-20 print:!pl-0">
         {/*
           * No "verify your email" banner here (tester item 99). It nagged on every
           * screen and claimed verification was required before submitting, which no
@@ -379,7 +418,7 @@ export function AppShell() {
           * address is verified. If it ever becomes a real gate, block the action
           * that needs it — don't put the nag back on top of every page.
           */}
-        <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16">
+        <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16 print:!max-w-none print:!p-0">
           <Outlet />
         </div>
       </main>

@@ -42,6 +42,7 @@ import { OfficerCaseloadPage } from './pages/admin/OfficerCaseloadPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
+import { StaffMessagesPage } from './pages/admin/StaffMessagesPage'
 import { RecordsPage } from './pages/admin/RecordsPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
 import { BusinessMapPage } from './pages/admin/BusinessMapPage'
@@ -534,6 +535,33 @@ export default function App() {
             }
           />
           {/*
+            * Where office accounts reach the System Administrator.
+            *
+            * `user.manage`, not `message.participate`: the super admin does
+            * not hold the latter and should not — it opens every filing
+            * conversation in the city, and what this seat needs is the handful
+            * about accounts. The permission that already means "administers
+            * the other accounts" is the one this screen exercises.
+            *
+            * ── `office-messages`, not `messages` ──────────────────────
+            *
+            * `/admin/messages` was already taken — by the ordinary Messages
+            * page, mounted per-prefix like Profile and Settings. The rail
+            * entry pointed straight at it, so pressing "Office Messages" as
+            * the super admin opened the applicant-and-officer inbox instead,
+            * which for an account without `message.participate` renders
+            * nothing at all. It looked exactly like a feature that did not
+            * work.
+            */}
+          <Route
+            path="/staff/admin/office-messages"
+            element={
+              <RequirePermission permission="user.manage">
+                <StaffMessagesPage />
+              </RequirePermission>
+            }
+          />
+          {/*
             * `oic.assign`, the same permission the endpoints behind this screen
             * are gated on — not `user.manage`. Naming who handles a case and
             * correcting an officer's surname are different powers, and the
@@ -667,7 +695,22 @@ export default function App() {
               given on the staff tree — a single shared copy would have to sit
               outside the prefix, which the portal split cannot allow. */}
           <Route path="/admin/dashboard" element={<DashboardPage />} />
-          <Route path="/admin/messages" element={<MessagesPage />} />
+          {/*
+            * ── /admin/messages is not a screen the super admin can open ────
+            *
+            * It was `<MessagesPage />`, mounted per-prefix alongside Profile,
+            * Settings and Notifications. Only the super admin lives under
+            * `/admin`, and the super admin does not hold `message.participate`
+            * — so this route could only ever render "We couldn't load this.
+            * You do not have permission to perform this action." Every time.
+            *
+            * Redirected rather than deleted, because links to it already
+            * exist: the rail pointed here until this was found, notification
+            * rows written before the fix still carry the path, and a reader
+            * may well have bookmarked it. `replace` keeps it out of the
+            * history so Back does not bounce between the two.
+            */}
+          <Route path="/admin/messages" element={<Navigate to="/admin/office-messages" replace />} />
           <Route path="/admin/notifications" element={<NotificationsPage />} />
           <Route path="/admin/profile" element={<ProfilePage />} />
           <Route path="/admin/settings" element={<SettingsPage />} />
@@ -732,6 +775,16 @@ export default function App() {
               */
               <RequirePermission permission="oic.assign">
                 <OfficerCaseloadPage />
+              </RequirePermission>
+            }
+          />
+          {/* The one the super admin actually reaches; see the note on the
+              /staff copy above for why it is not called `messages`. */}
+          <Route
+            path="/admin/office-messages"
+            element={
+              <RequirePermission permission="user.manage">
+                <StaffMessagesPage />
               </RequirePermission>
             }
           />

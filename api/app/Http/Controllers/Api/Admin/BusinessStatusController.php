@@ -10,6 +10,7 @@ use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -489,6 +490,126 @@ class BusinessStatusController extends Controller
                 'owner_blacklisted' => $business->owner?->isBlacklisted() ?? false,
                 'others_blacklisted' => $sweep['blacklisted'],
                 'others_restored' => $sweep['restored'],
+            ],
+        ]);
+    }
+
+    /**
+     * Lift a blacklisting from the owner, and set every business they hold to
+     * one status.
+     *
+     * ── Why this is one act and not several ────────────────────────────────
+     *
+     * The sanctions card used to offer Change Status per business, and that
+     * was incoherent: a blacklisting falls on the PERSON and reaches
+     * everything they own, so releasing one shopfront while the other three
+     * stayed barred left a register that contradicted itself — the owner is
+     * blacklisted, and one of their businesses says Active
+     * [client, 28 September 2026: *"hindi pwedeng isahang business lang ang
+     * mamomodify mo tas yung iba naka tag pa rin sa blacklisted"*].
+     *
+     * The bar went on as one act. It comes off as one act.
+     *
+     * ── Why Blacklisted is not among the choices ───────────────────────────
+     *
+     * They already are. Offering it would be a control whose only effect is to
+     * re-date a sanction that is already in force — which is exactly what the
+     * "already blacklisted" guard on the business dialog refuses. To bar
+     * somebody who is not yet barred, use the business roster; this endpoint
+     * is the way back.
+     */
+    public function liftOwnerBlacklist(Request $request, User $owner): JsonResponse
+    {
+        $data = $request->validate([
+            /*
+             * The three a released business can land on, and no more.
+             * `blacklisted` is absent by design — see the note above.
+             */
+            'status' => ['required', 'in:active,flagged,suspended'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'status.in' => 'Choose Active, Flagged, or Suspended. They are already blacklisted.',
+        ]);
+
+        abort_unless($owner->isBlacklisted(), 422, 'This owner is not blacklisted.');
+
+        $to = $data['status'];
+        $reason = $data['reason'];
+
+        $moved = DB::transaction(function () use ($owner, $to, $reason, $request) {
+            $owner->forceFill([
+                'blacklisted_at' => null,
+                'blacklist_reason' => null,
+                'blacklisted_by' => null,
+            ])->save();
+
+            Audit::log('owner.blacklist_lifted', $owner, [
+                'reason' => $reason,
+                'to' => $to,
+                'by' => $request->user()?->id,
+            ]);
+
+            /*
+             * EVERY business they hold, not only the ones the cascade barred.
+             * One registered after the blacklisting still reads Active while
+             * being refused every filing, and leaving it behind would keep the
+             * exact contradiction this endpoint exists to end.
+             */
+            $businesses = $owner->businesses()->get();
+
+            foreach ($businesses as $business) {
+                $from = $business->status;
+                if ($from === $to) {
+                    continue;
+                }
+
+                $business->update(['status' => $to, 'status_changed_at' => now()]);
+
+                Audit::log('business.status_changed', $business, [
+                    'from' => $from,
+                    'to' => $to,
+                    'reason' => "Owner released from blacklist: {$reason}",
+                    'released_with_owner' => $owner->id,
+                ]);
+
+                /*
+                 * Suspended keeps the certificates suspended; the other two
+                 * bring them back. Flagged is a watch marker and never a
+                 * sanction — `isBlockedFromApplying` ignores it — so a flagged
+                 * business trades on valid permits like an active one.
+                 */
+                if ($to === 'suspended') {
+                    $this->workflow->suspendPermitsForBusiness($business, $reason);
+                } else {
+                    $this->workflow->restorePermitsForBusiness($business);
+                }
+            }
+
+            return $businesses;
+        });
+
+        /*
+         * One notice for the person, not one per shopfront. The bar was on
+         * them, so its lifting is one piece of news — and four notifications
+         * saying the same thing about four businesses is how somebody learns
+         * to swipe this app's messages away.
+         */
+        $this->notifications->push(
+            $owner,
+            'account_status',
+            $to === 'active' ? 'Your account has been restored' : 'Your account is no longer blacklisted',
+            $moved->count() === 1
+                ? "{$moved->first()->name} is now ".self::LABELS[$to].". Reason: {$reason}"
+                : "All {$moved->count()} of your businesses are now ".self::LABELS[$to].". Reason: {$reason}",
+            '/dashboard',
+        );
+
+        return response()->json([
+            'data' => [
+                'owner_blacklisted' => false,
+                'status' => $to,
+                'status_label' => self::LABELS[$to],
+                'businesses_moved' => $moved->count(),
             ],
         ]);
     }

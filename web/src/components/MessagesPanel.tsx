@@ -323,22 +323,48 @@ function OfficePicker({
  */
 export type MessageTarget =
   | { kind: 'application'; applicationId: number }
-  /** `userId` omitted means "mine"; an officer names the person. */
-  | { kind: 'general'; userId?: number | null }
+  /**
+   * `userId` omitted means "mine"; an officer names the person.
+   *
+   * `officeId` omitted means BPLO, which is what an enquiry always was. Every
+   * office has a front door now [client, 28 September 2026], so the office is
+   * part of WHICH conversation this is - two enquiries by the same person to
+   * two offices are two transcripts, not one.
+   */
+  | { kind: 'general'; userId?: number | null; officeId?: number | null }
+  /**
+   * An office account and the System Administrator.
+   *
+   * No office on either side, so no `officeId` and no picker — the super
+   * admin belongs to none, which is why this is its own shape rather than a
+   * general enquiry with a different addressee. `userId` omitted means "mine";
+   * the super admin names the officer.
+   */
+  | { kind: 'admin'; userId?: number | null }
 
 export function MessageThreadView({
   target,
+  counterpartyName,
   className = '',
   scrollClassName = 'max-h-96',
   onSent,
 }: {
   target: MessageTarget
+  /**
+   * Who is on the other side, where only the caller knows.
+   *
+   * An administrator thread carries no office and no filing, so this component
+   * cannot name the officer from the payload — the screen listing them can.
+   */
+  counterpartyName?: string | null
   className?: string
   scrollClassName?: string
   onSent?: () => void
 }) {
   const user = useAuth((s) => s.user)
   const viewerIsOfficer = Boolean(user?.permissions.includes('application.view_all'))
+  /** The seat that administers the other accounts, for admin threads. */
+  const administers = Boolean(user?.permissions.includes('user.manage'))
 
   /*
    * Outbound is "this account sent it". The old side-of-the-house test
@@ -363,12 +389,22 @@ export function MessageThreadView({
     meta: MessageTranscriptMeta
   }>(
     () =>
-      target.kind === 'general'
-        ? messagesApi.generalWithMeta(target.userId)
-        : messagesApi.listWithMeta(target.applicationId, officeId),
+      target.kind === 'admin'
+        ? messagesApi.adminWithMeta(target.userId)
+        : target.kind === 'general'
+          ? messagesApi.generalWithMeta(target.userId, target.officeId)
+          : messagesApi.listWithMeta(target.applicationId, officeId),
     // The key parts of the target, not the object: a fresh literal on every
     // render would re-fetch the transcript forever.
-    [target.kind, target.kind === 'general' ? target.userId : target.applicationId, officeId],
+    [
+      target.kind,
+      target.kind === 'application' ? target.applicationId : target.userId,
+      // The enquiry's office belongs in the key as much as the person does:
+      // without it, switching from the fire office's enquiry to the health
+      // office's would re-render the transcript and never re-fetch it.
+      target.kind === 'general' ? target.officeId : null,
+      officeId,
+    ],
   )
 
   const [body, setBody] = useState('')
@@ -410,7 +446,27 @@ export function MessageThreadView({
    * the thread belongs to the filing rather than to any of them, and "the
    * applicant" is the word the rest of the officer's screens use.
    */
-  const counterparty = viewerIsOfficer ? 'the applicant' : (active?.name ?? null)
+  /*
+   * An ADMINISTRATOR conversation has an office account on the other side, not
+   * an applicant — so the officer's generic word is wrong at both ends of it.
+   * The super admin was writing to an officer under a box that said "Write to
+   * the applicant…", and the officer writing back was addressing a seat, not a
+   * person.
+   */
+  const counterparty =
+    target.kind === 'admin'
+      ? /*
+           On an administrator thread the sides are told apart by `user.manage`,
+           NOT by `viewerIsOfficer` — the super admin holds
+           `application.view_all` too, so that test would have called them an
+           officer and offered to write to themselves.
+         */
+        administers
+        ? (counterpartyName ?? 'this officer')
+        : 'the System Administrator'
+      : viewerIsOfficer
+        ? 'the applicant'
+        : (active?.name ?? null)
 
   useEffect(() => {
     if (officeId === null && firstOfficeId !== null) setOfficeId(firstOfficeId)
@@ -432,16 +488,22 @@ export function MessageThreadView({
   async function send() {
     const text = body.trim()
     if (!text && !attachment) return
-    // Belt and braces with the disabled controls: Enter still fires the handler
-    // on a textarea some browsers let you focus while disabled.
-    if (closed) return
+    /*
+     * The real guard, not belt and braces any more. The controls say
+     * `aria-disabled` rather than `disabled` (AGENTS.md 6.2), which stops
+     * nothing by itself - a press and the Enter key both still arrive here,
+     * and this is where they are turned away.
+     */
+    if (closed || sending) return
     setSending(true)
     setSendError(null)
     try {
       const sent =
-        target.kind === 'general'
-          ? await messagesApi.sendGeneral(text, attachment, target.userId)
-          : await messagesApi.send(target.applicationId, text, attachment, officeId)
+        target.kind === 'admin'
+          ? await messagesApi.sendAdmin(text, attachment, target.userId)
+          : target.kind === 'general'
+            ? await messagesApi.sendGeneral(text, attachment, target.userId, target.officeId)
+            : await messagesApi.send(target.applicationId, text, attachment, officeId)
       /*
        * Append rather than refetch, so the message appears instantly — but only
        * onto a transcript that has loaded. With nothing to append to (the first
@@ -530,7 +592,16 @@ export function MessageThreadView({
               void send()
             }}
             rows={2}
-            disabled={closed}
+            /*
+              `readOnly`, never `disabled` (AGENTS.md 6.2). A screen reader
+              skips a disabled control and takes its label with it, so a
+              reader who cannot see the "this office has come off the filing"
+              notice above would find an unexplained hole where the composer
+              is. Read-only keeps the box reachable, announced and readable -
+              a closed conversation is still worth reading back.
+            */
+            readOnly={closed}
+            aria-disabled={closed || undefined}
             placeholder={counterparty ? `Write to ${counterparty}…` : 'Write a message…'}
             aria-label={active ? `Message to ${active.name}` : 'Message'}
             aria-describedby="message-send-hint"
@@ -548,18 +619,58 @@ export function MessageThreadView({
             <input
               type="file"
               className="sr-only"
-              disabled={closed}
+              /*
+                The refusal is in the handler, not on the element. A disabled
+                file input takes the label's "Attach a file" with it, and the
+                label is the only thing naming this control - the icon inside
+                is decorative.
+              */
+              aria-disabled={closed || undefined}
               onChange={(e) => {
-                setAttachment(e.target.files?.[0] ?? null)
+                if (!closed) setAttachment(e.target.files?.[0] ?? null)
                 e.target.value = ''
               }}
             />
           </label>
           <button
             type="button"
+            /*
+              ---- Why the press has to keep the focus ---------------------
+
+              Pressing Send did nothing. Not sometimes: never, with a mouse.
+              Enter worked, which is why it survived - the specs that cover
+              replying all type.
+
+              Mousedown on the button blurred the textarea. The hint below the
+              row ("Press Enter to send") is shown only while the box has
+              focus and collapses to `sr-only` otherwise, so losing focus took
+              ~24px out of the composer block. The transcript above is
+              `flex-1` and grew into the gap, carrying the whole row - and the
+              button with it - DOWN by that much. By the time mouseup landed,
+              the pointer was over the transcript, and a mousedown and mouseup
+              on different elements is not a click. The browser was right;
+              the layout moved out from under the finger.
+
+              Holding the focus is the fix rather than reserving the space:
+              the hint stays up, nothing moves, and the caret is still in the
+              box ready for the next message, which is what it should have
+              been doing anyway.
+            */
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => void send()}
-            disabled={closed || sending || (!body.trim() && !attachment)}
-            className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+            /*
+              `aria-disabled`, never `disabled` (AGENTS.md 6.2). Send is the
+              one control on this screen a reader has to be able to FIND, and
+              a disabled button is not in the tab order and is not announced -
+              so an empty box would read as a composer with no way out of it.
+              send() already refuses an empty message and a closed thread, so
+              nothing here is load-bearing but the appearance.
+
+              Playwright reads `aria-disabled` as disabled too, so the specs
+              that wait for Send to come alive keep working unchanged.
+            */
+            aria-disabled={closed || sending || (!body.trim() && !attachment) || undefined}
+            className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
           >
             {sending ? 'Sending…' : 'Send'}
           </button>

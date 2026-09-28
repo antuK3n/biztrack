@@ -13,10 +13,15 @@ it('lets a staff account change its own password and sign in with the new one', 
     $token = loginToken('bplo@biztrack.local');
     $this->app['auth']->forgetGuards();
 
+    // Through the emailed code, like every password change now.
+    $code = codeWithToken($token, 'biztrack1');
+
+    $this->app['auth']->forgetGuards();
     $this->withToken($token)->putJson('/api/v1/auth/password', [
         'current_password' => 'biztrack1',
         'password' => 'officer-pass-2',
         'password_confirmation' => 'officer-pass-2',
+        'code' => $code,
     ])->assertOk();
 
     // Staff sign in through their own door; the new password is the live one.

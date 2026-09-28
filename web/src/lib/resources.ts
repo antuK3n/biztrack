@@ -2,6 +2,7 @@ import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
 import type {
+  StaffMessageRow,
   BlacklistedOwner,
   AdminBusiness,
   AdminCaseload,
@@ -692,26 +693,72 @@ export const messages = {
    */
   generalWithMeta: async (
     userId?: number | null,
+    departmentId?: number | null,
   ): Promise<{ data: Message[]; meta: MessageTranscriptMeta }> => {
     const res = await api.get<{ data: Message[]; meta: MessageTranscriptMeta }>(
       userId ? `/general-messages/${userId}` : '/general-messages',
+      // Omitted, not sent as null: the server reads a missing office as BPLO,
+      // which is what every caller written before offices had front doors
+      // relies on.
+      departmentId ? { params: { department_id: departmentId } } : undefined,
     )
     return { data: res.data.data, meta: res.data.meta }
   },
-  sendGeneral: (body: string, attachment?: File | null, userId?: number | null) => {
+  sendGeneral: (
+    body: string,
+    attachment?: File | null,
+    userId?: number | null,
+    departmentId?: number | null,
+  ) => {
     const url = userId ? `/general-messages/${userId}` : '/general-messages'
     if (attachment) {
       const form = new FormData()
       form.append('body', body)
       form.append('attachment', attachment)
+      // A multipart body carries the office as a field like everything else;
+      // the server reads either place.
+      if (departmentId) form.append('department_id', String(departmentId))
       return unwrap<Message>(
         api.post(url, form, {
           headers: { 'Content-Type': 'multipart/form-data' },
         }),
       )
     }
+    return unwrap<Message>(
+      api.post(url, departmentId ? { body, department_id: departmentId } : { body }),
+    )
+  },
+  /*
+   * ── The office's line to the System Administrator ─────────────────
+   *
+   * Same two-shape addressing as a general enquiry: no id means "mine", which
+   * is what an officer sends; the super admin names the officer whose
+   * conversation they are opening. Who may open which is decided on the
+   * server, so the two-argument form is not a way in for anybody else.
+   */
+  adminWithMeta: async (
+    userId?: number | null,
+  ): Promise<{ data: Message[]; meta: MessageTranscriptMeta }> => {
+    const res = await api.get<{ data: Message[]; meta: MessageTranscriptMeta }>(
+      userId ? `/admin-messages/${userId}` : '/admin-messages',
+    )
+    return { data: res.data.data, meta: res.data.meta }
+  },
+  sendAdmin: (body: string, attachment?: File | null, userId?: number | null) => {
+    const url = userId ? `/admin-messages/${userId}` : '/admin-messages'
+    if (attachment) {
+      const form = new FormData()
+      form.append('body', body)
+      form.append('attachment', attachment)
+      return unwrap<Message>(
+        api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+      )
+    }
     return unwrap<Message>(api.post(url, { body }))
   },
+  /** Every office account, for the System Administrator's inbox. */
+  staffThreads: (params: { q?: string; narrow?: 'unread' } = {}) =>
+    unwrap<StaffMessageRow[]>(api.get('/admin/staff-messages', { params })),
   /** Attachment save-to-disk (the resource's download_url carries no bearer). */
   attachmentDownload: (id: number, filename: string) =>
     downloadBlob(`/message-attachments/${id}/download`, filename),
@@ -1530,6 +1577,23 @@ export const admin = {
    */
   blacklistedOwners: (params: { q?: string; page?: number; per_page?: number } = {}) =>
     unwrapPaged<BlacklistedOwner>(api.get('/admin/blacklisted-owners', { params })),
+
+  /**
+   * Lift a blacklisting from the owner and move every business they hold to
+   * one status.
+   *
+   * ONE act, because the bar went on as one: a blacklisting falls on the
+   * person and reaches everything they own, so releasing a single shopfront
+   * left the register saying the owner is barred and one of their businesses
+   * is not. `blacklisted` is not a choice here — they already are.
+   */
+  liftOwnerBlacklist: (ownerId: number, status: 'active' | 'flagged' | 'suspended', reason: string) =>
+    unwrap<{
+      owner_blacklisted: boolean
+      status: BusinessStatus
+      status_label: string
+      businesses_moved: number
+    }>(api.post(`/admin/owners/${ownerId}/lift-blacklist`, { status, reason })),
 
   businessesPage: (filters: AdminBusinessFilters = {}) =>
     unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),

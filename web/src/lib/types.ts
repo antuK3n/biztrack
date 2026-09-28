@@ -2656,12 +2656,26 @@ export interface MessageThreadSummary {
    *
    * 'general' is an enquiry with no filing behind it — the conversation a
    * business owner can have with BPLO before they have applied for anything.
+   * 'admin' is an office account's standing line to the System Administrator,
+   * pinned to the top of their inbox: office accounts cannot edit their own
+   * details, so this is where they ask the account that can.
+   *
    * Stated rather than inferred from a null application_id, so a reader
    * branches on a fact instead of on a missing value that reads like a bug.
    */
-  kind: 'application' | 'general'
+  kind: 'application' | 'general' | 'admin'
   /** Set on a general row only; null on a filing, whose threads are per office. */
   thread_id: number | null
+  /**
+   * WHICH office a general enquiry is with. Null on a filing, which carries
+   * its offices in `offices` instead.
+   *
+   * A general row used to be one row - the owner's line to BPLO - so `kind`
+   * alone told the rows apart. Every office has a front door now [client, 28
+   * September 2026], so an inbox can hold several at once and this is what
+   * separates them: in the React key, in the URL, and in what gets sent.
+   */
+  department_id: number | null
   /** Whose enquiry it is — what an officer opens a general conversation by. */
   user_id: number | null
   /** Null on a general enquiry: there is no filing to point at. */
@@ -3340,4 +3354,27 @@ export interface BlacklistedOwner {
      */
     registered_after: boolean
   }[]
+}
+
+/**
+ * One office account on the System Administrator's inbox.
+ *
+ * ── Why it is a list of ACCOUNTS and not of conversations ─────────────────
+ *
+ * An officer who has never written has no thread, and that row is the way in:
+ * the administrator has to be able to start one too, which is how "your
+ * details have been updated" reaches the person who asked. A list built from
+ * threads would hide every officer who had not spoken yet.
+ */
+export interface StaffMessageRow {
+  user: { id: number; name: string; email: string }
+  office: { id: number; code: string | null; name: string } | null
+  /** Null until somebody writes. The row exists either way. */
+  thread_id: number | null
+  messages_count: number
+  /** Turns the reader has not opened. Never their own. */
+  unread_count: number
+  last_message_at: string | null
+  preview: string | null
+  last_sender: string | null
 }

@@ -25,10 +25,10 @@ final class StaffCredentials
     /**
      * A Philippine mobile number, as the network actually issues them.
      *
-     * Eleven digits beginning 09. `+639…` and numbers typed with spaces or
-     * dashes are accepted by `normaliseMobile()` before they reach this, so the
-     * rule itself can stay a single shape rather than a regex with four arms —
-     * the form is forgiving, the column is not.
+     * Eleven digits beginning 09, and nothing else. `+63…` used to be converted
+     * before it reached here; the client asked for that to go [28 September
+     * 2026] and they are right that one shape is easier to teach at a counter
+     * than two that look different and mean the same.
      */
     public static function mobileRules(bool $required = true): array
     {
@@ -38,17 +38,23 @@ final class StaffCredentials
     /**
      * What a staff password has to be.
      *
-     * ── Why stricter than the eight characters this used to ask for ─────────
+     * ── Six, and all four kinds of character ────────────────────────────────
      *
-     * These accounts approve permits, release clearances and can reassign any
-     * office's caseload. `PasswordRule::min(8)` alone accepts "password" — it
-     * checks a length and nothing else — and the admin who types it is choosing
-     * on somebody else's behalf, so the person who has to live with the weak
-     * password never got a say in it.
+     * The length was eight and nothing else, which accepts "password" — it
+     * checks a count and no more, and the admin typing it is choosing on
+     * somebody else's behalf, so the person who has to live with a weak one
+     * never got a say.
      *
-     * Twelve with a mix of cases, a digit and a symbol is the shape a passphrase
-     * takes anyway ("Malabon-City-2026!"), so it is not a puzzle to satisfy; it
-     * is the difference between a guessable account and one that is not.
+     * It is six now, on the client's instruction [28 September 2026], with the
+     * four kinds kept: a capital, a small letter, a digit and a symbol. Those
+     * are what stop "password" and "123456", which is the failure actually
+     * seen in the field; six characters drawn from four classes is a smaller
+     * search space than a longer passphrase would give, and that trade is the
+     * client's to make. Nothing here is the last line anyway — sign-in locks
+     * an account after repeated failures (`AuthController::login`), so an
+     * online guess does not get many tries.
+     *
+     * Deliberately NOT `uncompromised()`: see below.
      *
      * Deliberately NOT `uncompromised()`. That rule calls the Have I Been Pwned
      * API over the network on every submit, so an office with the internet down
@@ -58,7 +64,7 @@ final class StaffCredentials
      */
     public static function passwordRules(bool $required): PasswordRule|array
     {
-        $rule = PasswordRule::min(12)->mixedCase()->numbers()->symbols();
+        $rule = PasswordRule::min(6)->mixedCase()->numbers()->symbols();
 
         return $required ? ['required', $rule] : ['nullable', $rule];
     }
@@ -80,18 +86,18 @@ final class StaffCredentials
     }
 
     /**
-     * Tidy what was typed into the one shape the column stores.
+     * Take out what a person might put BETWEEN the digits, and nothing more.
      *
-     * People type their own number the way they say it: `+63 917 123 4567`,
-     * `0917-123-4567`, `0917 123 4567`. All three are the same number, and
-     * refusing them teaches nothing — it just makes the admin retype what they
-     * already got right. What must not be tolerated is a number of the wrong
-     * LENGTH, because that is not a formatting preference, it is a wrong
-     * number; those still fail the rule above.
+     * `0917-123-4567` and `0917 123 4567` are the same number written with
+     * punctuation, and refusing them teaches nothing — it just makes the admin
+     * retype what they already got right.
      *
-     * Anything this does not recognise is returned untouched, so the validator
-     * rejects it and says why, rather than this quietly mangling it into
-     * something that passes.
+     * `+63…` is no longer converted. It was, and the client asked for that to
+     * go [28 September 2026: *"i want 09 at 11 digits lang"*]: one shape is
+     * easier to teach at a counter than two that look different and mean the
+     * same. A number in any other form is now returned untouched, fails the
+     * rule above and is told why — which is the honest outcome. Quietly
+     * rewriting it would be this method deciding what the admin meant.
      */
     public static function normaliseMobile(?string $value): ?string
     {
@@ -99,13 +105,6 @@ final class StaffCredentials
             return null;
         }
 
-        $digits = preg_replace('/[\s\-().]/', '', trim($value)) ?? '';
-
-        // +639171234567 and 639171234567 are both 09171234567.
-        if (preg_match('/^\+?63(9\d{9})$/', $digits, $m) === 1) {
-            return '0'.$m[1];
-        }
-
-        return $digits;
+        return preg_replace('/[\s\-().]/', '', trim($value)) ?? '';
     }
 }
