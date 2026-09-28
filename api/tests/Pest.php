@@ -243,3 +243,21 @@ function choAssignmentId(int $applicationId): int
         ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
         ->value('id');
 }
+
+/**
+ * A complete home address, as registration has required of every business
+ * owner since 28 September 2026 [checklist Register 2]. Spread into a
+ * registration payload; override a part to test it.
+ *
+ * @return array<string, string>
+ */
+function homeAddress(array $overrides = []): array
+{
+    return array_merge([
+        'home_street' => '12 Gen. Luna St.',
+        'home_barangay' => 'Longos',
+        'home_city' => 'Malabon',
+        'home_province' => 'Metro Manila',
+        'home_postal_code' => '1472',
+    ], $overrides);
+}

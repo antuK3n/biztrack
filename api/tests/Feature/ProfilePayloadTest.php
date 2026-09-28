@@ -53,6 +53,7 @@ it('includes the join date when registering', function () {
         'password' => 'biztrack1',
         'password_confirmation' => 'biztrack1',
         'data_privacy_consent' => true,
+        ...homeAddress(),
     ])
         ->assertCreated()
         ->assertJsonStructure(['data' => ['user' => ['created_at']]]);

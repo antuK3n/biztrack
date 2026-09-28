@@ -102,7 +102,8 @@ class AuthController extends Controller
     /**
      * The signed-in user as the web app's `User` type, plus the join date the
      * Profile screen shows as "member since". UserResource is shared with the
-     * admin user listings, so the extra field is added on this side.
+     * admin user listings, so what only the signed-in user should see — the
+     * join date and the home address — is added on this side.
      *
      * @return array<string, mixed>
      */
@@ -113,6 +114,18 @@ class AuthController extends Controller
         return (new UserResource($user))->resolve()
             + [
                 'created_at' => optional($user->created_at)->toISOString(),
+                /*
+                 * The owner's home address [checklist 2026-09-28, Register 2],
+                 * on the signed-in user's own payload only — see the note in
+                 * UserResource for why the admin listings do not carry it. Null
+                 * for staff, who are never asked, and for owners who registered
+                 * before it was; `home_address_missing` below says which.
+                 */
+                'home_street' => $user->home_street,
+                'home_barangay' => $user->home_barangay,
+                'home_city' => $user->home_city,
+                'home_province' => $user->home_province,
+                'home_postal_code' => $user->home_postal_code,
                 /*
                  * Whether this account has to confirm its address before it can
                  * file [checklist 2026-09-27, Register 1]. Worked out here so the
@@ -131,7 +144,81 @@ class AuthController extends Controller
                  * is configured, only what it has to ask the reader for.
                  */
                 'password_change_code_required' => EmailSwitch::on(),
+                /*
+                 * An owner with no home address on file [checklist 2026-09-28,
+                 * Register 2] — anyone who registered before it was asked. The
+                 * Profile and home pages prompt on this; nothing is refused
+                 * over it (docs/questions-for-malabon.md, A27). Staff are never
+                 * asked, so never owe one.
+                 */
+                'home_address_missing' => $user->roles->contains('name', 'business_owner')
+                    && ! $user->hasHomeAddress(),
             ];
+    }
+
+    /**
+     * Validation for the home address, shared by registration and the profile
+     * form so a value one accepts the other cannot refuse.
+     *
+     * Free text throughout, barangay included: an owner may live outside
+     * Malabon, so the city's barangay list (the one a business address is
+     * picked from) cannot be the list of answers. ZIP is optional and, when
+     * given, is the four digits every Philippine ZIP code is.
+     *
+     * @param  bool  $onUpdate  false at registration, where all four parts are
+     *                          simply required. True on the profile form,
+     *                          where three rules share the work:
+     *                          - an ABSENT key keeps what is stored, so a
+     *                          caller that predates the address (or a staff
+     *                          account, whose form never shows it) can still
+     *                          save a name edit;
+     *                          - `filled`: a key that IS sent may not be empty,
+     *                          so an address once given is corrected, never
+     *                          blanked;
+     *                          - `required_with`: sending any one part makes
+     *                          the other three required, so an owner cannot
+     *                          end up holding a street with no city.
+     * @return array<string, array<int, string>>
+     */
+    private function homeAddressRules(bool $onUpdate): array
+    {
+        $parts = User::HOME_ADDRESS_REQUIRED;
+        $presence = fn (string $field) => $onUpdate
+            ? ['required_with:'.implode(',', array_diff($parts, [$field])), 'filled']
+            : ['required'];
+
+        return [
+            'home_street' => [...$presence('home_street'), 'string', 'max:255'],
+            'home_barangay' => [...$presence('home_barangay'), 'string', 'max:100'],
+            'home_city' => [...$presence('home_city'), 'string', 'max:100'],
+            'home_province' => [...$presence('home_province'), 'string', 'max:100'],
+            'home_postal_code' => ['nullable', 'string', 'regex:/^\d{4}$/'],
+        ];
+    }
+
+    /**
+     * One sentence per part, whichever rule caught it — "required",
+     * "required_with" and "filled" are the same fact to the person typing.
+     *
+     * @return array<string, string>
+     */
+    private function homeAddressMessages(): array
+    {
+        $said = [
+            'home_street' => 'Enter your house number, building and street.',
+            'home_barangay' => 'Enter your barangay.',
+            'home_city' => 'Enter your city or municipality.',
+            'home_province' => 'Enter your province.',
+        ];
+
+        $messages = ['home_postal_code.regex' => 'A ZIP code is 4 digits.'];
+        foreach ($said as $field => $sentence) {
+            foreach (['required', 'required_with', 'filled'] as $rule) {
+                $messages["{$field}.{$rule}"] = $sentence;
+            }
+        }
+
+        return $messages;
     }
 
     private function authPayload(User $user, string $portal = 'public'): JsonResponse
@@ -167,9 +254,17 @@ class AuthController extends Controller
              * most people registering have nothing to claim.
              */
             'claim_number' => ['nullable', 'string', 'max:60'],
+            /*
+             * Required here and only here. Registration is the public portal,
+             * so everyone reaching this line is a business owner; staff
+             * accounts are made by the super admin (Admin\UserController),
+             * which never asks for a home address.
+             */
+            ...$this->homeAddressRules(onUpdate: false),
         ], [
             'email.unique' => 'This email is already registered. Try signing in instead.',
             'data_privacy_consent.accepted' => 'You must agree to the data privacy notice to continue.',
+            ...$this->homeAddressMessages(),
         ]);
 
         // Checked BEFORE the account is written, so a mistyped number is
@@ -188,6 +283,11 @@ class AuthController extends Controller
             'gender' => $data['gender'],
             'email' => strtolower(trim($data['email'])),
             'mobile_number' => $data['mobile_number'],
+            'home_street' => $data['home_street'],
+            'home_barangay' => $data['home_barangay'],
+            'home_city' => $data['home_city'],
+            'home_province' => $data['home_province'],
+            'home_postal_code' => $data['home_postal_code'] ?? null,
             'password' => $data['password'],
             'data_privacy_consent_at' => now(),
             'is_active' => true,
@@ -748,8 +848,15 @@ class AuthController extends Controller
              * one number would only make them harder to compare later.
              */
             'mobile_number' => ['required', 'string', 'regex:/^09\d{9}$/'],
+            /*
+             * The home address [checklist 2026-09-28, Register 2]: how an
+             * owner who registered before it was asked completes it. What an
+             * absent, emptied or partial answer does is on homeAddressRules.
+             */
+            ...$this->homeAddressRules(onUpdate: true),
         ], [
             'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
+            ...$this->homeAddressMessages(),
         ]);
 
         $user = $request->user();
@@ -762,6 +869,11 @@ class AuthController extends Controller
          * before it reaches here. `?? $user->middle_name` could not tell that
          * apart from a client that never sent the field, so it read as "keep"
          * either way and a middle name, once saved, could never be removed.
+         *
+         * The home address goes through the same helper for its "absent keeps"
+         * half only: of its parts, ZIP alone may be sent empty, and the
+         * validation above refuses an emptied street, barangay, city or
+         * province before this runs.
          */
         $optional = function (string $key) use ($data, $user) {
             return array_key_exists($key, $data) ? $data[$key] : $user->{$key};
@@ -777,6 +889,11 @@ class AuthController extends Controller
             'suffix' => $optional('suffix'),
             'gender' => $optional('gender'),
             'mobile_number' => $data['mobile_number'],
+            'home_street' => $optional('home_street'),
+            'home_barangay' => $optional('home_barangay'),
+            'home_city' => $optional('home_city'),
+            'home_province' => $optional('home_province'),
+            'home_postal_code' => $optional('home_postal_code'),
         ])->save();
 
         Audit::log('user.profile_updated', $user);
