@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { roleLabel } from '../components/AppShell'
 import { ConfirmEmailCard } from '../components/EmailCode'
+import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -14,6 +15,7 @@ import {
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { PageTitle, ProtoCard, SortFilter, type SortFilterOption } from '../components/ui/Proto'
 import { businessName, formatBytes, formatDate } from '../lib/format'
+import { formatHomeAddress } from '../lib/homeAddress'
 import { documents as documentsApi, permits as permitsApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
@@ -811,6 +813,9 @@ export function ProfilePage() {
         </div>
       )}
 
+      {/* Above the record it completes [checklist 2026-09-28, Register 2]. */}
+      {isOwner && user.home_address_missing && <HomeAddressPrompt className="mb-6" />}
+
       <ProtoCard className="overflow-hidden">
         <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">Account details</h2>
         <dl>
@@ -826,6 +831,14 @@ export function ProfilePage() {
             </span>
           </DetailRow>
           <DetailRow label="Mobile number">{user.mobile_number || 'Not set'}</DetailRow>
+          {/*
+            Owners only: staff are never asked for a home address, and a row
+            reading "Not given yet" on an officer's record would suggest they
+            owe one.
+          */}
+          {isOwner && (
+            <DetailRow label="Home address">{formatHomeAddress(user) ?? 'Not given yet'}</DetailRow>
+          )}
           {/* Shown because it is now editable on Settings. A field the account
               holds but no screen prints is the other half of item 74. */}
           <DetailRow label="Gender">{GENDER_LABELS[user.gender] ?? 'Not specified'}</DetailRow>
@@ -910,8 +923,10 @@ export function ProfilePage() {
         <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />
       </Link>
       <p className="mt-2 text-xs text-ink-muted">
-        Name, gender, mobile number and password are on the Settings page. Your email is your sign-in
-        ID — the City BPLO changes it for you.
+        {isOwner
+          ? 'Name, gender, mobile number, home address and password are on the Settings page.'
+          : 'Name, gender, mobile number and password are on the Settings page.'}{' '}
+        Your email is your sign-in ID — the City BPLO changes it for you.
       </p>
       </div>
       )}

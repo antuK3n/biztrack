@@ -13,6 +13,16 @@ export interface User {
   last_name: string
   suffix: string | null
   gender: 'M' | 'F'
+  /*
+   * The owner's home address [checklist 2026-09-28, Register 2]; lib/homeAddress
+   * has the rules. Null for staff, who are never asked, and for owners who
+   * registered before it was.
+   */
+  home_street: string | null
+  home_barangay: string | null
+  home_city: string | null
+  home_province: string | null
+  home_postal_code: string | null
   department: Department | null
   /*
    * Whether to fetch the photo, not where it is. The file is served from
@@ -35,6 +45,13 @@ export interface User {
    * Optional for the same reason as the line above.
    */
   password_change_code_required?: boolean
+  /*
+   * An owner with no home address on file — anyone who registered before it
+   * was asked. Profile and the home page prompt on it; filing is not held for
+   * it (docs/questions-for-malabon.md, A27). Optional for the same reason as
+   * the flag above: only the signed-in user's own payload carries it.
+   */
+  home_address_missing?: boolean
   roles: string[]
   permissions: string[]
 }

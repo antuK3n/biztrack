@@ -19,6 +19,14 @@ class UserResource extends JsonResource
             'last_name' => $this->last_name,
             'suffix' => $this->suffix,
             'gender' => $this->gender,
+            /*
+             * No home address here, on purpose. This resource also feeds the
+             * super admin's user listings, and an owner's home is personal data
+             * nobody at City Hall needs to browse (RA 10173 proportionality,
+             * docs/questions-for-malabon.md B5). The owner's own payload adds it
+             * in AuthController::userPayload. If an office turns out to need it
+             * (A27), add it there for that office, not back here for everyone.
+             */
             'department' => $this->department ? [
                 'id' => $this->department->id,
                 'code' => $this->department->code,
