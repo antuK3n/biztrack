@@ -64,9 +64,24 @@ final class ReturnTargets
         'form:president_officer_name' => ['business', 'president_officer_name'],
         'form:citizenship' => ['business', 'citizenship'],
         'form:capital_participation' => ['business', 'capital_participation_filipino'],
-        'form:floor_area_sqm' => ['business', 'business_area_sqm'],
-        'form:employees_in_lgu' => ['business', 'employees_within_lgu'],
-        'form:delivery_units' => ['business', 'delivery_units'],
+        /*
+         * Section B items 1, 3 and 4 were here and are NOT columns on this
+         * record — `business_area_sqm`, `employees_within_lgu` and
+         * `delivery_units` exist, and are written only at approval by
+         * `WorkflowService::syncDeclaredFigures`, from
+         * `applications.fee_profile`. The wizard writes the fee profile;
+         * during review these are NULL on every filing.
+         *
+         * So `answeredBy` called them unanswered and the picker hid them,
+         * and a correction that did get through would have written a column
+         * nothing reads before approval copied the old figure back over it.
+         * They are `section` targets now and are corrected on the wizard
+         * step that owns them, which also re-prices the permit — which is
+         * the real reason they cannot be one-box corrections.
+         *
+         * `capital_investment` below stays: it IS a column here, written at
+         * submission, and carries a value on filings in review.
+         */
         'form:capital_investment' => ['business', 'capital_investment'],
 
         /*
@@ -123,6 +138,50 @@ final class ReturnTargets
             self::parse($stored),
             fn (string $code) => isset(self::SCALAR_FIELDS[$code]),
         ));
+    }
+
+    /**
+     * The scalar codes this business has actually answered.
+     *
+     * What an officer may send a filing back about: a field the applicant
+     * left blank was never their answer to correct. A missing TIN has its
+     * own route — BPLO's approval raises a requirement for it — and
+     * returning the whole filing instead would be both disproportionate and
+     * a second way to ask one question.
+     *
+     * Computed here because only this side knows where each field lives:
+     * four are on the address row and one on the primary owner's.
+     *
+     * @return list<string>
+     */
+    public static function answeredBy(\App\Models\Business $business): array
+    {
+        $records = [
+            'business' => $business,
+            'address' => $business->address,
+            'owner' => $business->owners->firstWhere('is_primary', true),
+        ];
+
+        $answered = [];
+        foreach (self::SCALAR_FIELDS as $code => [$relation, $column]) {
+            $record = $records[$relation] ?? null;
+            if ($record === null) {
+                continue;
+            }
+
+            /*
+             * A declared FALSE or a zero is an answer. Only null and the
+             * empty string are "they did not say" — `empty()` would drop a
+             * capital participation of 0, which is the correct figure for a
+             * wholly foreign-owned sole proprietorship.
+             */
+            $value = $record->{$column};
+            if ($value !== null && $value !== '') {
+                $answered[] = $code;
+            }
+        }
+
+        return $answered;
     }
 
     /** The column a scalar code writes, or null when it is not one. */

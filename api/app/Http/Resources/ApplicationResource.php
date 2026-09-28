@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\ReturnTargets;
 use App\Enums\ApplicationType;
 use App\Enums\OfficerRequestStatus;
 use App\Support\AmendableFields;
@@ -565,6 +566,21 @@ class ApplicationResource extends JsonResource
                     'new_value' => $c->new_value,
                     'at' => optional($c->created_at)->toISOString(),
                 ])->all()
+                : [],
+            /*
+             * ── What an officer may return this filing ABOUT ────────────
+             *
+             * The `form:` codes the applicant actually answered. A field
+             * they left blank was never their answer to correct, and a
+             * missing TIN already has its own route — see
+             * `ReturnTargets::answeredBy`.
+             *
+             * Sent rather than worked out in the browser because only this
+             * side knows which record holds each field. The picker keeps
+             * the labels and the grouping, which is what it knows.
+             */
+            'answered_targets' => $this->relationLoaded('business') && $this->business
+                ? ReturnTargets::answeredBy($this->business)
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];
