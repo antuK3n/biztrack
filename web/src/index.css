@@ -216,3 +216,122 @@
   height: 3.25rem;
   font-size: 1.0625rem;
 }
+
+/*
+ * ── Printing a certificate ────────────────────────────────────────────────
+ *
+ * The Print button on a permit called `window.print()` against a page that had
+ * never been told what printing means, so the sheet came out with the royal
+ * rail down its left edge, the notification bell over its corner and the chat
+ * bubble on top of the signature lines. A permit printed that way is not a
+ * document anybody would hand to an inspector.
+ *
+ * The shell hides its own furniture with `print:hidden` where it is declared.
+ * What is left here is the page itself: a normal margin, a white canvas, and
+ * colours that survive the trip — browsers drop background fills by default,
+ * which would take the tinted value boxes and the red SUSPENDED banner with
+ * them. On this document the tint IS the field boundary and the red IS the
+ * warning, so both have to print.
+ */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* Keep the tinted field boxes and any status banner. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* A certificate is one page; nothing in it should be split across a fold. */
+  article {
+    break-inside: avoid;
+  }
+}
+
+/*
+ * ── Scrollbars ────────────────────────────────────────────────────────────
+ *
+ * The default Windows scrollbar is a 17px grey channel with square arrow
+ * buttons at each end. On a screen like Office Messages — two panes that each
+ * scroll — that is two heavy vertical stripes drawn in a grey belonging to no
+ * palette in this app, and they are the first thing the eye lands on
+ * [client, 28 September 2026].
+ *
+ * These are the app's own: slim, rounded, in the line colour the cards and
+ * table rules already use, and darker on hover so the thumb answers the
+ * cursor. The padding trick — a transparent border with `background-clip:
+ * content-box` — is what gives the thumb air inside the gutter without
+ * needing a second element.
+ *
+ * ── Why `pointer: fine` ──────────────────────────────────────────────────
+ *
+ * Touch platforms draw overlay scrollbars that fade in while a finger is
+ * moving and take no layout width. Styling those replaces a good native
+ * behaviour with a worse copy, and on iOS forces a permanent gutter into the
+ * layout. So phones and tablets keep what they have.
+ *
+ * ── Why they are not hidden ──────────────────────────────────────────────
+ *
+ * The temptation with a design like this is `scrollbar-width: none`. A
+ * scrollbar is the only thing on screen saying "there is more below" — the
+ * officer list here is cut off mid-card precisely so a reader can tell — and a
+ * pane with no visible affordance reads as a pane with nothing more in it.
+ */
+@media (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-line);
+    border-radius: 9999px;
+    /* Transparent border + content-box clip = a slim thumb with padding. */
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-line-strong);
+  }
+
+  /* Where the two scrollbars meet, there is nothing to draw. */
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /*
+   * On the royal rail and any other dark surface, a thumb in the line colour
+   * disappears. These take the same shape in white at low opacity.
+   */
+  .bg-royal ::-webkit-scrollbar-thumb,
+  .bg-royal-deep ::-webkit-scrollbar-thumb {
+    background-color: rgb(255 255 255 / 0.35);
+  }
+
+  .bg-royal ::-webkit-scrollbar-thumb:hover,
+  .bg-royal-deep ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(255 255 255 / 0.55);
+  }
+
+  .bg-royal,
+  .bg-royal-deep {
+    scrollbar-color: rgb(255 255 255 / 0.35) transparent;
+  }
+}

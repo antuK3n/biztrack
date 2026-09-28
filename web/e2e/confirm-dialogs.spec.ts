@@ -348,7 +348,9 @@ test.describe('confirming what cannot be taken back', () => {
        */
       await expect(dialog).toContainText(roleName)
       await expect(dialog).toContainText('Sample-Pass-2026!')
-      await expect(dialog).toContainText(/last time it can be read/i)
+      // The claim, not the sentence: the copy was tightened on 28 September
+      // 2026 and this asserts what it has to say, not how it says it.
+      await expect(dialog).toContainText(/cannot be shown again/i)
 
       expect(wrote, 'reviewing must not create the account').toBe(false)
 

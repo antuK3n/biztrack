@@ -4,7 +4,7 @@ import type { AdminBusinessFilters } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import type { AdminBusiness, AuditLog, BusinessStatus } from '../../lib/types'
+import type { AdminBusiness, AuditLog, BlacklistedOwner, BusinessStatus } from '../../lib/types'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import {
   FieldLabel,
@@ -474,7 +474,11 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
 
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
-type ModalState = { kind: 'change' | 'history' | 'fees'; row: AdminBusiness } | null
+type ModalState =
+  | { kind: 'change' | 'history' | 'fees'; row: AdminBusiness }
+  /** Releasing a blacklisted OWNER, and everything they hold, in one act. */
+  | { kind: 'release'; owner: BlacklistedOwner }
+  | null
 
 /**
  * What a business has been issued and not yet paid for, itemised.
@@ -564,7 +568,7 @@ function FeesModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }
 function BlacklistedOwners({
   query,
   refreshKey,
-  onChangeStatus,
+  onRelease,
   onHistory,
 }: {
   query: string
@@ -578,13 +582,16 @@ function BlacklistedOwners({
    * restore a business that was already active.
    */
   refreshKey: number
-  /*
-   * The two acts every other row on this screen offers. A card that shows a
-   * barred business but cannot lift the bar sends the reader back to the
-   * Businesses pill to find the same row again — see the note on the buttons
-   * below.
+  /**
+   * Release this OWNER, and with them everything they hold.
+   *
+   * It used to be one Change Status per business, and that was incoherent: a
+   * blacklisting falls on the person, so freeing one shopfront while the
+   * others stayed barred left the register contradicting itself — the owner
+   * barred, and one of their businesses reading Active [client, 28 September
+   * 2026].
    */
-  onChangeStatus: (business: AdminBusiness) => void
+  onRelease: (owner: BlacklistedOwner) => void
   onHistory: (business: AdminBusiness) => void
 }) {
   const [page, setPage] = useState(1)
@@ -753,28 +760,46 @@ function BlacklistedOwners({
                       row again — on the one screen where the reader is already
                       looking straight at it.
                     */}
-                    <span className="flex shrink-0 items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onChangeStatus(asRow)}
-                        className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-                        aria-label={`Change the status of ${business.name}`}
-                      >
-                        Change Status
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onHistory(asRow)}
-                        className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
-                        aria-label={`Status history for ${business.name}`}
-                      >
-                        View Status History
-                      </button>
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onHistory(asRow)}
+                      className="shrink-0 rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                      aria-label={`Status history for ${business.name}`}
+                    >
+                      View Status History
+                    </button>
                   </li>
                 )
               })}
             </ul>
+
+            {/*
+              ── One way back, for the whole account ──────────────────────
+
+              The bar went on as one act and it comes off as one. A button per
+              business would let an administrator free one shopfront and leave
+              the owner barred — a register that disagrees with itself, and an
+              owner refused a filing on a business the screen calls Active
+              [client, 28 September 2026: *"hindi pwedeng isahang business lang
+              ang mamomodify mo tas yung iba naka tag pa rin sa blacklisted"*].
+            */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+              <p className="text-xs text-ink-muted">
+                Releasing {owner.name} moves{' '}
+                {owner.businesses.length === 1
+                  ? 'their business'
+                  : `all ${owner.businesses.length} of their businesses`}{' '}
+                together.
+              </p>
+              <button
+                type="button"
+                onClick={() => onRelease(owner)}
+                className="shrink-0 rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                aria-label={`Change the status of ${owner.name} and their businesses`}
+              >
+                Change Status
+              </button>
+            </div>
           </div>
         </ProtoCard>
       ))}
@@ -1158,7 +1183,7 @@ export function OwnersPage() {
         <BlacklistedOwners
           query={query}
           refreshKey={ownersRefresh}
-          onChangeStatus={(business) => setModal({ kind: 'change', row: business })}
+          onRelease={(owner) => setModal({ kind: 'release', owner })}
           onHistory={(business) => setModal({ kind: 'history', row: business })}
         />
       ) : (
@@ -1387,8 +1412,207 @@ export function OwnersPage() {
           onChanged={applyChange}
         />
       )}
+      {modal?.kind === 'release' && (
+        <ReleaseOwnerModal
+          owner={modal.owner}
+          onClose={() => setModal(null)}
+          onReleased={() => {
+            setModal(null)
+            setOwnersRefresh((n) => n + 1)
+            reload()
+          }}
+        />
+      )}
       {modal?.kind === 'history' && <HistoryModal row={modal.row} onClose={() => setModal(null)} />}
       {modal?.kind === 'fees' && <FeesModal row={modal.row} onClose={() => setModal(null)} />}
     </div>
+  )
+}
+
+/* ── Releasing a blacklisted owner ────────────────────────────────────── */
+
+/** The three a released business can land on. Blacklisted is not one: they are. */
+const RELEASE_TO: { value: 'active' | 'flagged' | 'suspended'; label: string; says: string }[] = [
+  {
+    value: 'active',
+    label: 'Active',
+    says: 'They can file and renew again, and their suspended permits are restored.',
+  },
+  {
+    value: 'flagged',
+    label: 'Flagged',
+    says: 'A note to watch them. Nothing is blocked — they can file, and their permits are restored.',
+  },
+  {
+    value: 'suspended',
+    label: 'Suspended',
+    says: 'Still barred from filing, and their permits stay suspended — but the blacklisting is lifted.',
+  },
+]
+
+/**
+ * Lift a blacklisting from the owner, and move everything they hold together.
+ *
+ * ── Why the whole account, and why it asks ───────────────────────────────
+ *
+ * The card used to offer Change Status per business, which let an
+ * administrator free one shopfront and leave the owner barred — a register
+ * disagreeing with itself. The bar went on as one act, so it comes off as one
+ * [client, 28 September 2026].
+ *
+ * That makes it a bigger act than the per-business one it replaces, which is
+ * exactly why it is confirmed: it names the count, the destination and every
+ * business it will move before anything is written.
+ */
+function ReleaseOwnerModal({
+  owner,
+  onClose,
+  onReleased,
+}: {
+  owner: BlacklistedOwner
+  onClose: () => void
+  onReleased: () => void
+}) {
+  const [status, setStatus] = useState<'active' | 'flagged' | 'suspended'>('active')
+  const [reasonCode, setReasonCode] = useState('')
+  const [details, setDetails] = useState('')
+  const [review, setReview] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const chosen = RELEASE_TO.find((o) => o.value === status)!
+  const count = owner.businesses.length
+
+  async function confirm() {
+    setBusy(true)
+    setError(null)
+    try {
+      const reason = [reasonCode, details.trim()].filter(Boolean).join(' · ')
+      await admin.liftOwnerBlacklist(owner.id, status, reason)
+      onReleased()
+    } catch (err) {
+      // The dialog stays open carrying the message: closing it would put the
+      // reader back on the card with no sign their typing survived.
+      setError(toApiError(err).message)
+      setReview(false)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ProtoModal
+      title={review ? `Release ${owner.name}?` : 'Change Status'}
+      /*
+        BLUE, not red. DESIGN.md keeps red for acts that stop somebody
+        trading; every option here either frees this owner or leaves them
+        exactly as barred as they already are. Lifting a sanction is not a
+        danger, and colouring it as one spends the alarm on good news.
+      */
+      tone="blue"
+      cancelLabel={review ? 'Back' : 'Cancel'}
+      confirmLabel={review ? (busy ? 'Saving…' : `Set all to ${chosen.label}`) : 'Review this change'}
+      onCancel={review ? () => setReview(false) : onClose}
+      onConfirm={review ? confirm : () => setReview(true)}
+      confirmDisabled={busy || (!review && !reasonCode)}
+      confirmDescribedBy={!review && !reasonCode ? 'release-blocker' : undefined}
+    >
+      <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">{owner.name}</p>
+
+      {review ? (
+        <div className="space-y-4">
+          <p className="text-sm text-ink">
+            The blacklisting is lifted from <span className="font-bold">{owner.name}</span>, and{' '}
+            <span className="font-bold">
+              {count === 1 ? 'their business' : `all ${count} of their businesses`}
+            </span>{' '}
+            move to <span className="font-bold">{chosen.label}</span>.
+          </p>
+
+          <p className="rounded-lg border border-line bg-canvas px-4 py-3 text-sm text-ink-secondary">
+            {chosen.says}
+          </p>
+
+          {/* Named, so the reader can check they are releasing who they meant. */}
+          <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-line px-4 py-3">
+            {owner.businesses.map((b) => (
+              <li key={b.id} className="text-sm text-ink">
+                {b.name}
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-xs text-ink-muted">
+            Written to each business's status history, and {owner.name} is notified once — one
+            piece of news, not one per business.
+          </p>
+
+          {error && (
+            <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+              {error}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <label className="block">
+            <FieldLabel required>Move all their businesses to</FieldLabel>
+            <select
+              className={inputCls}
+              value={status}
+              onChange={(e) => setStatus(e.target.value as typeof status)}
+            >
+              {RELEASE_TO.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {/*
+              Blacklisted is absent on purpose, and saying so stops a reader
+              hunting for it: they already are, and re-applying it would only
+              re-date a sanction that is already in force.
+            */}
+            <p className="mt-1 text-xs text-ink-muted">{chosen.says}</p>
+          </label>
+
+          <label className="block">
+            <FieldLabel required>Reason code</FieldLabel>
+            <select
+              className={inputCls}
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+            >
+              <option value="">Select reason…</option>
+              {REASON_CODES.map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <FieldLabel>Details</FieldLabel>
+            <textarea
+              rows={3}
+              className={`${inputCls} min-h-20`}
+              placeholder="Describe the basis for lifting this"
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+            />
+          </label>
+
+          {!reasonCode && (
+            <p id="release-blocker" className="text-xs text-ink-muted">
+              Choose a reason code — it goes on the record and the owner is shown it.
+            </p>
+          )}
+
+          {error && (
+            <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </ProtoModal>
   )
 }

@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\Application;
 use App\Models\Business;
+use App\Models\PermitType;
+use App\Models\Role;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 
@@ -39,11 +42,11 @@ function roster(array $params = []): array
  */
 function oweMoney(int $businessId, array $amounts): void
 {
-    $permitTypeId = \App\Models\PermitType::value('id');
+    $permitTypeId = PermitType::value('id');
     // The fee is incurred BY a filing — the column is NOT NULL — so it has to
     // hang off one of this business's own applications.
-    $applicationId = \App\Models\Application::where('business_id', $businessId)->value('id')
-        ?? \App\Models\Application::value('id');
+    $applicationId = Application::where('business_id', $businessId)->value('id')
+        ?? Application::value('id');
 
     foreach ($amounts as $amount) {
         UnbilledPermitFee::create([
@@ -139,7 +142,7 @@ it('narrows to the businesses caught by their owner’s blacklisting', function 
         'data_privacy_consent_at' => now(),
         'email_verified_at' => now(),
     ]);
-    $owner->roles()->sync(\App\Models\Role::where('name', 'business_owner')->pluck('id'));
+    $owner->roles()->sync(Role::where('name', 'business_owner')->pluck('id'));
 
     foreach (['Barred One', 'Barred Two'] as $name) {
         Business::create([

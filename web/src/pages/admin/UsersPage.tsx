@@ -813,7 +813,6 @@ function EditModal({
                 value={password}
                 onChange={setPassword}
                 error={firstError(errors, 'password')}
-                hint="You will have to pass it to them yourself, and they should change it. It is stored scrambled, so nobody — including you — can read it back afterwards."
               />
             </div>
           )}
@@ -1000,11 +999,19 @@ function CreateOfficerModal({
       confirmDisabled={submitting || (!review && notReady)}
       confirmDescribedBy={!review && notReady ? 'create-missing' : undefined}
     >
-      <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
-        {review
-          ? 'Check the role and office. They decide what this person may do and whose work reaches them.'
-          : 'Give an LGU staff member access with a role and office.'}
-      </p>
+      {/*
+        The subtitle is only drawn where it says something the title does not.
+
+        "Give an LGU staff member access with a role and office" under a
+        heading reading "Add Officer" is the heading again, in a longer form,
+        costing a line and a border on a dialog that already scrolls. The
+        review step keeps one, because there it names what to check.
+      */}
+      {review && (
+        <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
+          Check the office and role — they decide whose work reaches this person.
+        </p>
+      )}
 
       {review && (
         <div className="space-y-4">
@@ -1049,9 +1056,9 @@ function CreateOfficerModal({
             copying it now and ringing back tomorrow to ask for it.
           */}
           <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
-            Give them this password yourself: <span className="font-bold">{form.password}</span>. It
-            is stored scrambled, so this is the last time it can be read. They sign in at{' '}
-            <span className="font-semibold">/staff/login</span> and should change it.
+            <span className="font-bold">{form.password}</span> — copy it now. It is stored
+            scrambled and cannot be shown again. They sign in at{' '}
+            <span className="font-semibold">/staff/login</span>.
           </p>
 
           {formError && (
@@ -1067,8 +1074,22 @@ function CreateOfficerModal({
           {formError}
         </p>
       )}
-      <div className={review ? 'hidden' : 'space-y-4'} aria-hidden={review || undefined}>
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className={review ? 'hidden' : 'space-y-6'} aria-hidden={review || undefined}>
+        {/*
+          -- Two groups, not nine equal fields --------------------------------
+
+          The form ran as one undifferentiated column, so an administrator
+          filling it had no landmarks and no sense of how much was left. The
+          split is the one the dialog is actually about: WHO the person is, and
+          WHAT they may do. The second group is the consequential half - office,
+          role, and the password that lets them in - and it reads as a group
+          rather than as three more text boxes.
+        */}
+        <fieldset>
+          <legend className="mb-3 w-full border-b border-line pb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+            Who they are
+          </legend>
+          <div className="grid gap-4 sm:grid-cols-2">
           <label className="block">
             <FieldLabel required>Given name</FieldLabel>
             <input className={inputCls} value={form.first_name} onChange={(e) => set('first_name', e.target.value)} />
@@ -1109,33 +1130,49 @@ function CreateOfficerModal({
             onChange={(v) => set('mobile_number', v)}
             error={firstError(errors, 'mobile_number')}
           />
-        </div>
-        <label className="block">
-          <FieldLabel required>Email address</FieldLabel>
-          <input type="email" className={inputCls} value={form.email} onChange={(e) => set('email', e.target.value)} />
-          <FieldError message={firstError(errors, 'email')} />
-        </label>
-        {/*
-          The rules on screen before they are broken, rather than a sentence
-          saying "at least 8 characters" beside a field the server holds to
-          four separate clauses. See PasswordField.
-        */}
-        <PasswordField
-          label="Temporary password"
-          required
-          value={form.password}
-          onChange={(v) => set('password', v)}
-          error={firstError(errors, 'password')}
-          hint="You hand this to them; they should change it after their first sign-in."
-        />
-        {/*
-          Office, then role — the office narrows the list the role comes from,
-          so it is asked first and on its own row. Same shape as the edit form,
-          deliberately: these two dialogs ask the same questions and ought to
-          ask them the same way.
-        */}
-        <label className="block">
-          <FieldLabel required>Office</FieldLabel>
+          </div>
+          <label className="mt-4 block">
+            <FieldLabel required>Email address</FieldLabel>
+            <input
+              type="email"
+              className={inputCls}
+              value={form.email}
+              onChange={(e) => set('email', e.target.value)}
+            />
+            <FieldError message={firstError(errors, 'email')} />
+          </label>
+
+          {/*
+            Directly under the email, where the client asked for it
+            [28 September 2026] — and where it reads best: the two together are
+            what the officer is handed to sign in with, so they are filled in
+            one after the other and checked as a pair.
+
+            Its four rules are chips on one line rather than a stacked list;
+            see PasswordField.
+          */}
+          <div className="mt-4">
+            <PasswordField
+              label="Temporary password"
+              required
+              value={form.password}
+              onChange={(v) => set('password', v)}
+              error={firstError(errors, 'password')}
+            />
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend className="mb-3 w-full border-b border-line pb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+            What they can do
+          </legend>
+          {/*
+            Office, then role — the office narrows the list the role comes
+            from, so it is asked first. Same shape as the edit form: these two
+            dialogs ask the same questions and ought to ask them the same way.
+          */}
+          <label className="block">
+            <FieldLabel required>Office</FieldLabel>
           <select
             className={inputCls}
             value={form.department_id}
@@ -1175,12 +1212,13 @@ function CreateOfficerModal({
             */}
             <option value="none">No office — works across every one (super admin)</option>
           </select>
-          <FieldError message={firstError(errors, 'department_id')} />
-        </label>
+            <FieldError message={firstError(errors, 'department_id')} />
+          </label>
 
-        <RolePicker
-          roles={rolesForOffice}
-          officeId={worksEverywhere ? undefined : form.department_id}
+          <div className="mt-4">
+          <RolePicker
+            roles={rolesForOffice}
+            officeId={worksEverywhere ? undefined : form.department_id}
           value={form.role}
           typed={form.new_role}
           onChange={(name, typedTitle) => {
@@ -1189,11 +1227,14 @@ function CreateOfficerModal({
           }}
           // See the note on the edit form's picker: never on the super-admin
           // path, where a typed name would be escalation by spelling.
-          allowTyped={needsOffice}
-          disabled={!officeChosen}
-          disabledReason="Choose an office above first — it decides which roles are available."
-          error={firstError(errors, 'new_role', 'roles', 'roles.0', 'role')}
-        />
+            allowTyped={needsOffice}
+            disabled={!officeChosen}
+            disabledReason="Choose an office above first — it decides which roles are available."
+            error={firstError(errors, 'new_role', 'roles', 'roles.0', 'role')}
+          />
+          </div>
+
+        </fieldset>
 
         {notReady && (
           /*

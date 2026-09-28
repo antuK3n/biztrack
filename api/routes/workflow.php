@@ -181,6 +181,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
     });
 
+    /*
+     * ── The office's line to the System Administrator ─────────────────────
+     *
+     * Outside `message.participate`, and deliberately: the super admin does
+     * not hold that permission (it would hand them every filing conversation
+     * in the city, which is not what this screen is for) and the officer at
+     * the other end has to be able to write whatever else they may do.
+     *
+     * Both sides go through the same two endpoints. Who may open which
+     * conversation is decided in the controller — the officer it belongs to,
+     * or whoever holds `user.manage` — because the rule depends on the row
+     * rather than on the route.
+     */
+    Route::get('admin-messages/{user?}', [MessageController::class, 'adminIndex']);
+    Route::post('admin-messages/{user?}', [MessageController::class, 'adminStore']);
+
     // Officer requests ("Other Requirements")
     Route::get('requests', [OfficerRequestController::class, 'index']);
     /*
@@ -522,6 +538,16 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('oic-assignments', [OicAssignmentController::class, 'index']);
             Route::get('oic-assignments/{assignment}/candidates', [OicAssignmentController::class, 'candidates']);
         });
+        /*
+         * Who has written to the System Administrator.
+         *
+         * `user.manage` is the gate because it is the seat being written TO:
+         * the officers on this list cannot edit their own details, and this is
+         * where they ask the account that can.
+         */
+        Route::middleware('permission:user.manage')
+            ->get('staff-messages', [MessageController::class, 'adminThreads']);
+
         Route::middleware('permission:owner.manage_status')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
             Route::get('businesses', [BusinessStatusController::class, 'index']);
@@ -531,6 +557,15 @@ Route::middleware('auth:sanctum')->group(function () {
              * hold, so the register that lists it is a register of people.
              */
             Route::get('blacklisted-owners', [BusinessStatusController::class, 'blacklistedOwners']);
+            /*
+             * The way back, as ONE act.
+             *
+             * A blacklisting falls on the person and reaches everything they
+             * own, so releasing one shopfront while the others stayed barred
+             * left the register contradicting itself. It goes on as one act
+             * and it comes off as one.
+             */
+            Route::post('owners/{owner}/lift-blacklist', [BusinessStatusController::class, 'liftOwnerBlacklist']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
             /*
              * The other half of FO-003's section II. Same permission as the

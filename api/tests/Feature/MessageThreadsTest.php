@@ -113,6 +113,13 @@ it('never shows one applicant the conversations of another', function () {
 
 it('names the conversation after the applicant for a reviewing officer', function () {
     $appId = ownerApplicationId();
+    /*
+     * Handed to BPLO. ownerApplicationId() creates a filing and does not file
+     * it, so nothing is routed anywhere - and an office's Messages page is its
+     * caseload now [client, 28 September 2026], which means an unrouted filing
+     * is on nobody's. Writing to an office used to be enough to put it there.
+     */
+    assignOffice($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
@@ -201,6 +208,15 @@ it('names the offices an applicant may talk to on each inbox row', function () {
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
+    /*
+     * submit() routes BPLO and nobody else. The other two are opened by hand
+     * here, which is what happens in the product when the applicant pays for
+     * those clearances — and the point of this test is that the row names the
+     * offices that are ON the filing, so it needs more than one of them.
+     */
+    assignOffice($appId, 'CHO');
+    assignOffice($appId, 'BFP');
+
     $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
         ->firstWhere('application_id', $appId);
 
@@ -208,20 +224,25 @@ it('names the offices an applicant may talk to on each inbox row', function () {
      * This test used to assert exactly ['BPLO'], because an office had to hold
      * an assignment before it could be written to and BPLO is the only office
      * submit() routes — the other five arrive one at a time, as the applicant
-     * opens each clearance after paying. The rule it encoded is no longer true:
-     * the client asked for the owner to choose from the offices the system has,
-     * so every configured office is offered and BPLO is one of them rather than
-     * the only one. See addressableOffices().
+     * opens each clearance after paying.
      *
-     * The reasoning that made BPLO special still holds — an applicant whose
+     * It then asserted the opposite: every configured office, because the
+     * client had asked for the owner to choose from the offices the system
+     * has. That is settled a third way now, and by two instructions that only
+     * make sense together [client, 28 September 2026]: an office accesses only
+     * the filings assigned to it, and the owner gets a general enquiry with
+     * every office. So a PERMIT offers the offices that are on it - the ones
+     * that will actually be shown what is written - and an office with no
+     * filing of yours is reached through its enquiry instead.
+     *
+     * The reasoning that made BPLO special still holds: an applicant whose
      * clearances have not been opened yet is exactly the applicant with a
-     * question — it simply no longer has to carry every other office's mail to
-     * get there.
+     * question, and BPLO is routed from the moment the form is filed.
      */
     $codes = collect($row['offices'])->pluck('code');
 
     expect($codes)->toContain('BPLO')->toContain('CHO')->toContain('BFP')
-        ->and($codes)->toHaveCount(Department::count())
+        ->and($codes)->toHaveCount(3)
         ->and(collect($row['offices'])->every(fn ($o) => $o['can_message']))->toBeTrue()
         // Offered, but nothing said yet: no thread exists until somebody writes.
         ->and(collect($row['offices'])->every(fn ($o) => $o['thread_id'] === null))->toBeTrue()
@@ -392,15 +413,19 @@ it('never calls a conversation unread because ANOTHER office has mail on it', fu
      * office learns that City Health said something it may not read.
      */
     $appId = requirementFilingForInbox();
+    // Both offices are handed the filing, or neither has an inbox row on it to
+    // be wrongly marked unread - an office's page is its caseload now.
+    $choId = assignOffice($appId, 'CHO');
+    $bfpId = assignOffice($appId, 'BFP');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
         'body' => 'A question for the health office.',
-        'department_id' => Department::where('code', 'CHO')->value('id'),
+        'department_id' => $choId,
     ])->assertCreated();
     $this->postJson("/api/v1/applications/{$appId}/messages", [
         'body' => 'A question for the fire office.',
-        'department_id' => Department::where('code', 'BFP')->value('id'),
+        'department_id' => $bfpId,
     ])->assertCreated();
 
     // The fire office reads ITS conversation and has nothing left waiting.

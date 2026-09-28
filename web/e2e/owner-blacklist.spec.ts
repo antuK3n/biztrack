@@ -232,7 +232,7 @@ test.describe('Owner Status', () => {
       await expect(page.getByRole('table')).toHaveCount(0)
     })
 
-    test('offers the same two acts as every other row on the screen', async ({ page }) => {
+    test('offers ONE Change Status for the whole account', async ({ page }) => {
       await page.getByRole('button', { name: 'Blacklisted', exact: true }).click()
 
       const listed = page.getByText('Businesses barred').first()
@@ -241,17 +241,40 @@ test.describe('Owner Status', () => {
       test.skip(await empty.isVisible(), 'nobody is blacklisted on this register')
 
       /*
-       * Without these the card was read-only, so lifting a bar meant going
-       * back to the Businesses pill and finding the row again — on the one
-       * screen where the reader is already looking straight at it.
+       * It used to be one per business, and that was incoherent: a
+       * blacklisting falls on the PERSON, so freeing one shopfront while the
+       * others stayed barred left the register contradicting itself — the
+       * owner barred, one of their businesses reading Active [client,
+       * 28 September 2026].
+       *
+       * The button now names the OWNER, and there is exactly one of it per
+       * card however many businesses are listed under it.
        */
-      const change = page.getByRole('button', { name: /^Change the status of/ }).first()
-      await expect(change).toBeVisible()
+      const change = page.getByRole('button', { name: /^Change the status of .+ and their businesses$/ })
+      await expect(change.first()).toBeVisible()
+
+      const businesses = await page.getByRole('button', { name: /^Status history for/ }).count()
+      expect(businesses, 'the card lists no businesses').toBeGreaterThan(0)
+      expect(await change.count(), 'more than one way to change the status').toBeLessThan(
+        businesses + 1,
+      )
+
+      // History stays per business — each has its own past, worth reading one
+      // at a time. Only the FUTURE is shared while the bar stands.
       await expect(page.getByRole('button', { name: /^Status history for/ }).first()).toBeVisible()
 
-      // And the dialog they open is about the business named on that line.
-      await change.click()
-      await expect(page.getByRole('dialog')).toBeVisible()
+      await change.first().click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+
+      /*
+       * Blacklisted is not among the choices: they already are, and offering
+       * it would be a control whose only effect is to re-date a sanction that
+       * is already in force.
+       */
+      const options = await dialog.getByLabel(/move all their businesses to/i).innerText()
+      expect(options.toLowerCase()).not.toContain('blacklisted')
+
       await page.keyboard.press('Escape')
     })
 
@@ -416,17 +439,19 @@ test.describe('Owner Status', () => {
        * they mean, and sending them back to the All pill to find it again is
        * the trip this button exists to save.
        */
-      const line = page
-        .getByRole('listitem')
-        .filter({ hasText: business })
+      await page
+        .getByRole('button', { name: /^Change the status of .+ and their businesses$/ })
         .first()
-      await line.getByRole('button', { name: /^Change the status of/ }).click()
-      await dialog.getByLabel(/new status/i).selectOption('active')
+        .click()
+
+      await dialog.getByLabel(/move all their businesses to/i).selectOption('active')
       await dialog.getByLabel(/reason code/i).selectOption({ label: 'Compliance restored' })
       await dialog.getByRole('button', { name: 'Review this change' }).click()
-      // The dialog says it lifts the bar from the person, not just this row.
-      await expect(dialog).toContainText(/also lifts the blacklisting/i)
-      await dialog.getByRole('button', { name: 'Restore to active' }).click()
+
+      // It names the whole account and every business it will move, before
+      // anything is written.
+      await expect(dialog).toContainText(/blacklisting is lifted from/i)
+      await dialog.getByRole('button', { name: /^Set all to Active$/ }).click()
       await expect(dialog).toBeHidden()
 
       /*

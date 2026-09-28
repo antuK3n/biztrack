@@ -127,10 +127,10 @@ it('refuses a password too weak for an account that approves permits', function 
     $user = editableOfficer();
 
     foreach ([
-        'short1A!' => 'eleven characters is not twelve',
-        'sample-pass-2026!' => 'no capital letter',
-        'Sample-Pass-Word!' => 'no digit',
-        'SamplePass2026' => 'no symbol',
+        'Ab1!' => 'four characters is not six',
+        'sample1!' => 'no capital letter',
+        'SamplePass!' => 'no digit',
+        'SamplePass1' => 'no symbol',
     ] as $password => $why) {
         test()->withHeaders(authAs('admin@biztrack.local'))
             ->putJson("/api/v1/admin/users/{$user->id}", ['password' => $password])
@@ -143,19 +143,27 @@ it('refuses a password too weak for an account that approves permits', function 
     expect(Hash::check('Biztrack-Test1!', $user->refresh()->password))->toBeTrue();
 });
 
-it('accepts a passphrase, which is what a strong password actually looks like', function () {
+it('accepts a short password that carries all four kinds', function () {
     /*
-     * The rules are not a puzzle to be solved. Somebody who types the way they
-     * would name the thing anyway lands inside them on the first try, which is
-     * the difference between a policy and an obstacle.
+     * Six characters is the floor [client, 28 September 2026], and the four
+     * kinds are what stop "password" and "123456" — the failures actually seen
+     * in the field. Anything longer passes too; this pins the floor itself, so
+     * a later tightening cannot happen by accident.
      */
     $user = editableOfficer();
 
+    // Exactly six: a capital, a small letter, a digit and a symbol.
     test()->withHeaders(authAs('admin@biztrack.local'))
-        ->putJson("/api/v1/admin/users/{$user->id}", ['password' => 'Malabon-City-2026!'])
+        ->putJson("/api/v1/admin/users/{$user->id}", ['password' => 'Ab1!cd'])
         ->assertOk();
 
-    expect(Hash::check('Malabon-City-2026!', $user->refresh()->password))->toBeTrue();
+    expect(Hash::check('Ab1!cd', $user->refresh()->password))->toBeTrue();
+
+    // And five of the same kinds is one too few.
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$user->id}", ['password' => 'Ab1!c'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('password');
 });
 
 it('signs out everyone holding a session when the password is changed', function () {
@@ -216,14 +224,13 @@ it('says how to fix a mobile number rather than that it is invalid', function ()
         ->and($message)->toContain('09171234567');
 });
 
-it('takes a number written the way people say it, and stores the one shape', function () {
+it('takes the punctuation out of an 09 number, and nothing else', function () {
     /*
-     * `+63 917 123 4567` and `0917-123-4567` are the same number as
-     * `09171234567`. Refusing them teaches nobody anything — it just makes the
-     * admin retype what they already had right — while a number of the wrong
-     * LENGTH is a wrong number and still fails.
+     * `0917-123-4567` is `09171234567` written with punctuation, and refusing
+     * it teaches nobody anything — it just makes the admin retype what they
+     * already had right.
      */
-    foreach (['+63 917 123 4567', '0917-123-4567', '0917 123 4567', '+639171234567'] as $typed) {
+    foreach (['0917-123-4567', '0917 123 4567', '(0917) 123 4567'] as $typed) {
         $user = editableOfficer();
 
         test()->withHeaders(authAs('admin@biztrack.local'))
@@ -231,6 +238,31 @@ it('takes a number written the way people say it, and stores the one shape', fun
             ->assertOk("refused {$typed}");
 
         expect($user->refresh()->mobile_number)->toBe('09171234567');
+
+        $user->forceDelete();
+    }
+});
+
+it('no longer takes +63, because one shape is what the counter teaches', function () {
+    /*
+     * It used to convert `+639171234567` into `09171234567`. The client asked
+     * for that to go [28 September 2026: *"i want 09 at 11 digits lang"*], and
+     * they are right that one shape is easier to teach than two that look
+     * different and mean the same.
+     *
+     * Refused rather than silently rewritten: quietly turning it into a number
+     * the admin did not type is the method deciding what they meant.
+     */
+    foreach (['+639171234567', '639171234567', '+63 917 123 4567'] as $typed) {
+        $user = editableOfficer();
+
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->putJson("/api/v1/admin/users/{$user->id}", ['mobile_number' => $typed])
+            ->assertStatus(422, "accepted {$typed}")
+            ->assertJsonValidationErrors('mobile_number');
+
+        // And the stored number is untouched by the refusal.
+        expect($user->refresh()->mobile_number)->toBe('09170000000');
 
         $user->forceDelete();
     }
@@ -257,4 +289,3 @@ it('holds a new account to the same two rules', function () {
 
     expect(User::where('email', 'weakly.secured@biztrack.local')->exists())->toBeFalse();
 });
-

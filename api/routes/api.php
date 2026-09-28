@@ -51,6 +51,16 @@ Route::prefix('auth')->group(function () {
         Route::post('profile/photo', [AuthController::class, 'updatePhoto']);
         Route::get('profile/photo', [AuthController::class, 'showPhoto']);
         Route::delete('profile/photo', [AuthController::class, 'destroyPhoto']);
+        /*
+         * A password change is confirmed by email.
+         *
+         * `password/code` mails the six digits; `PUT password` will not act
+         * without them. Throttled at the route as well as per-account inside
+         * the method: the account limiter stops one owner's inbox being
+         * buried, and this one stops a script walking sessions.
+         */
+        Route::post('password/code', [AuthController::class, 'sendPasswordCode'])
+            ->middleware('throttle:10,1');
         Route::put('password', [AuthController::class, 'updatePassword']);
         // Laravel's own convention for this endpoint. The per-account limiter
         // inside the method is the tighter of the two — see the note there.

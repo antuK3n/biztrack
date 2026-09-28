@@ -37,34 +37,77 @@ import type { AdminRole } from '../../lib/types'
 const MOBILE = /^09\d{9}$/
 
 /**
- * Tidy what was typed into the shape the rule expects.
+ * The digits of what was typed, and nothing else.
  *
- * People type their own number the way they say it — `+63 917 123 4567`,
- * `0917-123-4567`. All of those are the same number and the form accepts them,
- * exactly as the API does; a number of the wrong LENGTH is a wrong number and
- * is still refused. Mirrors `StaffCredentials::normaliseMobile`.
+ * ── `+63` is not accepted here ────────────────────────────────────────────
+ *
+ * It was, and it converted `+63 917 123 4567` into `09171234567` on the way
+ * out. The client asked for that to go [28 September 2026: *"i want 09 at 11
+ * digits lang"*], and they are right that one shape is easier to teach at a
+ * counter than two that look different and mean the same.
+ *
+ * So this only strips what a person might put BETWEEN the digits. A number in
+ * any other form is left as it is, fails the rule, and is told why — quietly
+ * rewriting it into a form the reader did not type would be this function
+ * deciding what they meant. Mirrors `StaffCredentials::normaliseMobile`.
  */
 export function normaliseMobile(value: string): string {
-  const digits = value.trim().replace(/[\s\-().]/g, '')
-  const international = /^\+?63(9\d{9})$/.exec(digits)
-  return international ? `0${international[1]}` : digits
+  return value.trim().replace(/[\s\-().]/g, '')
 }
 
 export function mobileLooksRight(value: string): boolean {
   return MOBILE.test(normaliseMobile(value))
 }
 
+/** The digits of what was typed, after `+63` has become `0`. */
+function mobileDigits(value: string): string {
+  return normaliseMobile(value).replace(/\D/g, '')
+}
+
 /**
- * The mobile field, with the rule said before it is broken.
+ * Could these digits still become a valid number?
  *
- * ── Why it does not shout while you are typing ────────────────────────────
+ * ── Why this is not just "is it valid yet" ────────────────────────────────
  *
- * A number is wrong for every keystroke but the last one. Marking the field
- * red on the third digit is telling somebody off for not having finished, and
- * it trains them to ignore the colour by the time it means something — so the
- * requirement sits under the field as plain help from the start, and only
- * turns into an error once they have left the field with something that
- * cannot be a number (WCAG 3.3.1: identify the error; 3.3.3: suggest the fix).
+ * A number is invalid for every keystroke but the last one, so marking the
+ * field red on the third digit is telling somebody off for not having
+ * finished — and by the time the colour means something they have learnt to
+ * ignore it.
+ *
+ * This is the narrower question: is what they have typed so far a PREFIX of
+ * something that could work? `0917` is; `12` never can be, whatever follows.
+ * Only the second earns a warning, and it earns it immediately rather than
+ * after nine more digits and a trip out of the field.
+ *
+ * One road only. `09` and eleven digits is the whole rule.
+ */
+function couldStillBeAMobile(digits: string): boolean {
+  if (digits === '') return true
+  if (digits[0] !== '0') return false
+
+  return digits.length < 2 || digits[1] === '9'
+}
+
+/**
+ * The mobile field: eleven digits, starting 09, and it says so as soon as it
+ * knows.
+ *
+ * ── What it warns about, and when ─────────────────────────────────────────
+ *
+ * Three different wrongs, told apart because they need three different fixes
+ * (WCAG 3.3.1 identify, 3.3.3 suggest):
+ *
+ *   NOT 09          said at the first or second digit, because "12" can never
+ *                   become a mobile number and waiting until they leave the
+ *                   field wastes nine keystrokes.
+ *   TOO SHORT       said on the way out, not while typing: an unfinished
+ *                   number is not a wrong one.
+ *   TOO LONG        said at once. It can only arrive by paste, and a pasted
+ *                   number is finished by definition.
+ *
+ * The box itself refuses anything that is not a digit, `+`, a space or a dash,
+ * so a letter cannot be entered at all — there is no reason to accept one and
+ * then explain why it was wrong.
  */
 export function MobileField({
   value,
@@ -80,9 +123,25 @@ export function MobileField({
   const id = useId()
   const [touched, setTouched] = useState(false)
 
-  const typed = value.trim() !== ''
-  const wrong = touched && typed && !mobileLooksRight(value)
-  const message = error ?? (wrong ? 'This is not 11 digits starting 09.' : undefined)
+  const digits = mobileDigits(value)
+  const typed = digits.length > 0
+  const done = mobileLooksRight(value)
+
+  /*
+   * The warning, in the order a reader meets the problems. `error` first: the
+   * server has seen the whole number and this screen has only seen its shape.
+   */
+  const warning =
+    error ??
+    (typed && !couldStillBeAMobile(digits)
+      ? 'A mobile number starts with 09.'
+      : digits.length > 11 && digits[0] === '0'
+        ? `That is ${digits.length} digits \u2014 a mobile number has 11.`
+        : touched && typed && !done
+          ? digits.length < 11
+            ? `That is ${digits.length} of 11 digits.`
+            : 'A mobile number is 11 digits starting 09, as in 09171234567.'
+          : undefined)
 
   return (
     <label className="block">
@@ -90,13 +149,26 @@ export function MobileField({
       <input
         id={id}
         className={inputCls}
-        inputMode="tel"
+        inputMode="numeric"
         autoComplete="tel"
         placeholder="09171234567"
-        aria-invalid={message ? true : undefined}
+        // Eleven, because eleven is the whole of it.
+        maxLength={11}
+        aria-invalid={warning ? true : undefined}
         aria-describedby={`${id}-help`}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          /*
+           * Digits, and only digits. A letter is never part of a mobile
+           * number and neither is a `+` any more, so both are refused at the
+           * keystroke rather than accepted and then explained.
+           *
+           * Pasting `+639171234567` therefore leaves `639171234567`, which
+           * fails the rule and is told why — rather than being silently
+           * rewritten into a number the reader did not type.
+           */
+          onChange(e.target.value.replace(/\D/g, ''))
+        }}
         /*
          * Tidied on the way out, not on every keystroke: rewriting the field
          * under the cursor moves the caret and makes the box feel like it is
@@ -108,11 +180,18 @@ export function MobileField({
           if (tidy !== value) onChange(tidy)
         }}
       />
-      <FieldError message={message} />
-      <p id={`${id}-help`} className="mt-1 text-xs text-ink-muted">
-        11 digits starting 09, as in 09171234567. <span className="font-mono">+63</span>, spaces and
-        dashes are tidied up for you.
-      </p>
+      <FieldError message={warning} />
+      {/*
+        The rule in words, under a placeholder that shows it. Hidden the moment
+        anything is in the box, and replaced by the warning above when there is
+        one \u2014 two lines of grey under one field is how a form row ends up
+        lopsided.
+      */}
+      {!typed && !warning && (
+        <p id={`${id}-help`} className="mt-1 text-xs text-ink-muted">
+          11 digits, starting 09.
+        </p>
+      )}
     </label>
   )
 }
@@ -127,11 +206,15 @@ export function MobileField({
  * refuses is worse than no checklist, because it moves the refusal to the one
  * moment the reader has stopped looking for it.
  */
-const RULES: { label: string; met: (value: string) => boolean }[] = [
-  { label: 'At least 12 characters', met: (v) => v.length >= 12 },
-  { label: 'A capital and a small letter', met: (v) => /[a-z]/.test(v) && /[A-Z]/.test(v) },
-  { label: 'A number', met: (v) => /\d/.test(v) },
-  { label: 'A symbol, such as ! - or @', met: (v) => /[^A-Za-z0-9]/.test(v) },
+const RULES: { label: string; short: string; met: (value: string) => boolean }[] = [
+  { label: 'At least 6 characters', short: '6+ characters', met: (v) => v.length >= 6 },
+  {
+    label: 'A capital and a small letter',
+    short: 'Aa',
+    met: (v) => /[a-z]/.test(v) && /[A-Z]/.test(v),
+  },
+  { label: 'A number', short: '0-9', met: (v) => /\d/.test(v) },
+  { label: 'A symbol', short: '!@#', met: (v) => /[^A-Za-z0-9]/.test(v) },
 ]
 
 export function passwordMeetsRules(value: string): boolean {
@@ -188,34 +271,43 @@ export function PasswordField({
       />
       <FieldError message={error} />
 
-      <ul id={`${id}-rules`} className="mt-2 space-y-1">
+      {/*
+        -- Four chips, not four rows -------------------------------------
+
+        The rules were a bulleted list: four lines of ~20px inside a dialog
+        that already scrolls, and the last field on the form pushed the
+        buttons off the bottom. They fit on one or two wrapped lines like
+        this, and a reader checking "have I got a symbol yet" scans a row of
+        four faster than a column of four.
+
+        Colour is never the whole signal: the tick is decorative and
+        `aria-hidden`, and each chip carries "done" or "still needed" in text
+        a screen reader reads.
+      */}
+      <ul id={`${id}-rules`} className="mt-2 flex flex-wrap gap-1.5">
         {RULES.map((rule) => {
           const met = rule.met(value)
           return (
             <li
               key={rule.label}
-              className={`flex items-center gap-2 text-xs ${
-                met ? 'text-s-green' : typed ? 'text-ink-secondary' : 'text-ink-muted'
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                met
+                  ? 'bg-s-green-tint text-s-green'
+                  : typed
+                    ? 'bg-canvas text-ink-secondary'
+                    : 'bg-canvas text-ink-muted'
               }`}
             >
-              {/*
-                The tick is decorative and the state is in the text, because a
-                reader who cannot see a green tick still has to know which
-                clauses are done. `aria-hidden` on the mark, the word "done" in
-                the label a screen reader reads.
-              */}
               <span
                 aria-hidden="true"
-                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                  met ? 'border-s-green bg-s-green text-white' : 'border-line'
+                className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full ${
+                  met ? 'bg-s-green text-white' : 'border border-line'
                 }`}
               >
-                {met && <CheckIcon size={10} />}
+                {met && <CheckIcon size={9} />}
               </span>
-              <span>
-                {rule.label}
-                <span className="sr-only">{met ? ' — done' : ' — still needed'}</span>
-              </span>
+              {rule.short}
+              <span className="sr-only">{met ? ' \u2014 done' : ' \u2014 still needed'}</span>
             </li>
           )
         })}

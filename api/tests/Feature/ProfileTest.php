@@ -1,6 +1,46 @@
 <?php
 
 use App\Models\User;
+use App\Notifications\PasswordChangeCode;
+use Illuminate\Support\Facades\Notification;
+
+/**
+ * Walk the emailed-code step, and hand back the digits.
+ *
+ * A password change is confirmed by email now (`PasswordChangeCodeTest`), so
+ * every test that changes one has to go through this. Faked notifications, and
+ * the code read off the one that was sent — asserting on the rendered mail body
+ * instead would pin wording that is meant to be rewritten.
+ */
+function codeWithToken(string $token, string $current): string
+{
+    Notification::fake();
+
+    // `app` is protected on the test case, so the guard reset goes through the
+    // container rather than through the instance.
+    app('auth')->forgetGuards();
+    test()->withToken($token)
+        ->postJson('/api/v1/auth/password/code', ['current_password' => $current])
+        ->assertOk();
+
+    /*
+     * Collected, not asserted. `assertSentTo` with a collection of notifiables
+     * demands that EVERY one of them received it - so passing the whole users
+     * table fails on the first account that did not ask for a code, which is
+     * all of them but one.
+     */
+    $sent = null;
+    foreach (User::all() as $candidate) {
+        Notification::sent($candidate, PasswordChangeCode::class)
+            ->each(function (PasswordChangeCode $n) use (&$sent) {
+                $sent ??= $n->code;
+            });
+    }
+
+    expect($sent)->not->toBeNull();
+
+    return $sent;
+}
 
 it('updates the signed-in user profile', function () {
     $token = loginToken('owner@biztrack.local');
@@ -128,12 +168,20 @@ it('rejects a profile update without a valid token', function () {
 it('rejects a password change with the wrong current password', function () {
     $token = loginToken('owner@biztrack.local');
 
+    /*
+     * A real code, so the WRONG CURRENT PASSWORD is the only thing left to
+     * fail on. Without one the request is refused for a missing code, and this
+     * test would pass while saying nothing about the password check it names.
+     */
+    $code = codeWithToken($token, 'biztrack1');
+
     $this->app['auth']->forgetGuards();
 
     $this->withToken($token)->putJson('/api/v1/auth/password', [
         'current_password' => 'not-the-password',
         'password' => 'brand-new-pass1',
         'password_confirmation' => 'brand-new-pass1',
+        'code' => $code,
     ])
         ->assertStatus(422)
         ->assertJsonValidationErrors('current_password');
@@ -143,11 +191,14 @@ it('changes the password and revokes every other token', function () {
     $tokenA = loginToken('owner@biztrack.local'); // "other device"
     $tokenB = loginToken('owner@biztrack.local'); // device making the change
 
+    $code = codeWithToken($tokenB, 'biztrack1');
+
     $this->app['auth']->forgetGuards();
     $this->withToken($tokenB)->putJson('/api/v1/auth/password', [
         'current_password' => 'biztrack1',
         'password' => 'brand-new-pass1',
         'password_confirmation' => 'brand-new-pass1',
+        'code' => $code,
     ])->assertOk();
 
     // The other device's token is revoked; the current one survives.

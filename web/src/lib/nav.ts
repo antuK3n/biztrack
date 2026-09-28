@@ -78,6 +78,20 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Home', icon: HomeIcon, to: '/dashboard', mobile: true },
   // Business owner
   { label: 'Track', icon: TrackIcon, to: '/applications', permission: 'application.view_own', mobile: true },
+  /*
+   * ── The permits, reachable ─────────────────────────────────────────────
+   *
+   * They had no rail entry at all: /permits redirected to Profile, and Profile
+   * is behind the avatar menu, which lives in this rail — which is
+   * `hidden … lg:flex`. So an applicant on a phone could not reach their own
+   * certificates, on the one device they would be holding when an inspector
+   * asks to see one [client, 28 September 2026: *"create a page dedicated for
+   * approved permits for more visibility and accessibility"*].
+   *
+   * Right after Track, because that is the order the work happens in: you
+   * track a filing until it is approved, and then it is a permit.
+   */
+  { label: 'My Permits', icon: ShieldCheckIcon, to: '/permits', permission: 'permit.view_own', mobile: true },
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
   { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
@@ -162,6 +176,27 @@ const NAV_ITEMS: NavItem[] = [
    * only thing removed is the second front door.
    */
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
+  /*
+   * The offices' line to this seat.
+   *
+   * `user.manage` rather than `message.participate`: the super admin does not
+   * hold that permission, and giving it to them would hand them every filing
+   * conversation in the city. This entry is for the conversations about
+   * ACCOUNTS — which is the same permission that lets them act on one.
+   */
+  {
+    label: 'Office Messages',
+    /*
+     * `/admin/office-messages`, NOT `/admin/messages`: that path is the
+     * ordinary Messages page, mounted per-prefix. This entry pointed at it,
+     * so the super admin pressed "Office Messages" and landed on the
+     * applicant inbox — which renders nothing for an account without
+     * `message.participate`, and read as a screen that simply did not work.
+     */
+    icon: MailIcon,
+    to: '/admin/office-messages',
+    permission: 'user.manage',
+  },
   /*
    * Records is the SUPER ADMIN's console, and `user.manage` is what says so.
    *

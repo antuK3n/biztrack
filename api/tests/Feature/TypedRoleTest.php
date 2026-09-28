@@ -4,6 +4,7 @@ use App\Models\AuditLog;
 use App\Models\Department;
 use App\Models\Role;
 use App\Models\User;
+use Illuminate\Testing\TestResponse;
 
 /*
  * ── A role typed in because it is not on the list ──────────────────────────
@@ -37,7 +38,7 @@ function typedRolePayload(array $overrides = []): array
     ], $overrides);
 }
 
-function addOfficer(array $overrides = []): \Illuminate\Testing\TestResponse
+function addOfficer(array $overrides = []): TestResponse
 {
     return test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson('/api/v1/admin/users', typedRolePayload($overrides));

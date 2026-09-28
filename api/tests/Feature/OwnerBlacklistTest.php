@@ -1,7 +1,10 @@
 <?php
 
+use App\Models\AuditLog;
 use App\Models\Business;
+use App\Models\Role;
 use App\Models\User;
+use Illuminate\Testing\TestResponse;
 
 /*
  * ── A blacklisting is of the owner ─────────────────────────────────────────
@@ -36,7 +39,7 @@ function ownerWithThree(): User
         'data_privacy_consent_at' => now(),
         'email_verified_at' => now(),
     ]);
-    $owner->roles()->sync(\App\Models\Role::where('name', 'business_owner')->pluck('id'));
+    $owner->roles()->sync(Role::where('name', 'business_owner')->pluck('id'));
 
     foreach (['Reyes Sari-Sari', 'Reyes Hardware', 'Reyes Canteen'] as $name) {
         Business::create([
@@ -51,7 +54,7 @@ function ownerWithThree(): User
     return $owner->refresh();
 }
 
-function blacklist(Business $business, string $reason = 'Falsified sanitary clearance.'): \Illuminate\Testing\TestResponse
+function blacklist(Business $business, string $reason = 'Falsified sanitary clearance.'): TestResponse
 {
     return test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/admin/businesses/{$business->id}/status", [
@@ -289,4 +292,171 @@ it('marks the roster row so three shops of one owner read as one sanction', func
         expect($row['owner']['blacklisted'])->toBeTrue()
             ->and($row['status'])->toBe('blacklisted');
     }
+});
+
+/*
+ * ── The way back is one act ────────────────────────────────────────────────
+ *
+ * The sanctions card used to offer Change Status per business, and that was
+ * incoherent: a blacklisting falls on the PERSON and reaches everything they
+ * own, so releasing one shopfront while the others stayed barred left a
+ * register contradicting itself — the owner blacklisted, one of their
+ * businesses reading Active [client, 28 September 2026: *"hindi pwedeng
+ * isahang business lang ang mamomodify mo tas yung iba naka tag pa rin sa
+ * blacklisted"*].
+ *
+ * It goes on as one act. It comes off as one.
+ */
+
+function releaseOwner(int $ownerId, string $status, string $reason = 'Compliance restored.'): TestResponse
+{
+    return test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/owners/{$ownerId}/lift-blacklist", [
+            'status' => $status,
+            'reason' => $reason,
+        ]);
+}
+
+it('lifts the bar from the person and moves every business together', function () {
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    expect($owner->refresh()->isBlacklisted())->toBeTrue();
+
+    $data = releaseOwner($owner->id, 'active')->assertOk()->json('data');
+
+    expect($owner->refresh()->isBlacklisted())->toBeFalse()
+        ->and($owner->businesses()->pluck('status')->unique()->all())->toBe(['active'])
+        ->and($data['businesses_moved'])->toBe(3);
+
+    foreach ($owner->businesses()->get() as $business) {
+        expect($business->isBlockedFromApplying())->toBeFalse();
+    }
+});
+
+it('can release them to Flagged, which blocks nothing', function () {
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    releaseOwner($owner->id, 'flagged')->assertOk();
+
+    expect($owner->refresh()->isBlacklisted())->toBeFalse()
+        ->and($owner->businesses()->pluck('status')->unique()->all())->toBe(['flagged']);
+
+    // Flagged is a watch marker, never a sanction — `isBlockedFromApplying`
+    // ignores it, and the permits come back with the release.
+    foreach ($owner->businesses()->get() as $business) {
+        expect($business->isBlockedFromApplying())->toBeFalse();
+    }
+});
+
+it('can release them to Suspended, which keeps them barred but not blacklisted', function () {
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    releaseOwner($owner->id, 'suspended')->assertOk();
+
+    expect($owner->refresh()->isBlacklisted())->toBeFalse()
+        ->and($owner->businesses()->pluck('status')->unique()->all())->toBe(['suspended']);
+
+    // Still barred, for the business's own reason rather than the person's.
+    foreach ($owner->businesses()->get() as $business) {
+        expect($business->isBlockedFromApplying())->toBeTrue();
+    }
+});
+
+it('takes a business registered after the bar with it', function () {
+    /*
+     * The cascade never touched it — it started life Active — so releasing
+     * only what the cascade barred would leave exactly the contradiction this
+     * endpoint exists to end.
+     */
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    $this->travel(1)->days();
+    Business::create([
+        'owner_user_id' => $owner->id,
+        'name' => 'Reyes Water Refilling',
+        'registration_type' => 'sole',
+        'status' => 'active',
+        'is_active' => true,
+    ]);
+
+    $data = releaseOwner($owner->id, 'flagged')->assertOk()->json('data');
+
+    expect($data['businesses_moved'])->toBe(4)
+        ->and($owner->businesses()->pluck('status')->unique()->all())->toBe(['flagged']);
+});
+
+it('will not take Blacklisted as a destination, because they already are', function () {
+    // A control whose only effect is to re-date a sanction already in force.
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    releaseOwner($owner->id, 'blacklisted')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('status');
+
+    expect($owner->refresh()->isBlacklisted())->toBeTrue();
+});
+
+it('refuses to release somebody who is not blacklisted', function () {
+    $owner = ownerWithThree();
+
+    releaseOwner($owner->id, 'active')->assertStatus(422);
+});
+
+it('tells the owner once, not once per business', function () {
+    /*
+     * The bar was on them, so its lifting is one piece of news. Four notices
+     * saying the same thing about four businesses is how somebody learns to
+     * swipe this app's messages away.
+     */
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    $before = $owner->notifications()->count();
+    releaseOwner($owner->id, 'active')->assertOk();
+
+    expect($owner->notifications()->count())->toBe($before + 1);
+
+    $newest = $owner->notifications()->latest('id')->first();
+    expect($newest->body)->toContain('All 3 of your businesses');
+});
+
+it('records the release against every business it moved', function () {
+    // An audit trail that recorded the decision and not its reach is one
+    // nobody could reconstruct the register from.
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    releaseOwner($owner->id, 'active', 'Documents verified on appeal.')->assertOk();
+
+    foreach ($owner->businesses()->get() as $business) {
+        $entry = AuditLog::where('action', 'business.status_changed')
+            ->where('auditable_id', $business->id)
+            ->latest('id')
+            ->first();
+
+        expect($entry->changes['to'])->toBe('active')
+            ->and($entry->changes['reason'])->toContain('Owner released from blacklist')
+            ->and($entry->changes['released_with_owner'])->toBe($owner->id);
+    }
+});
+
+it('keeps the release away from everyone but the super admin', function () {
+    $owner = ownerWithThree();
+    blacklist($owner->businesses()->first())->assertOk();
+
+    foreach (['bplo@biztrack.local', 'sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
+        test()->withHeaders(authAs($email))
+            ->postJson("/api/v1/admin/owners/{$owner->id}/lift-blacklist", [
+                'status' => 'active',
+                'reason' => 'Trying it on.',
+            ])
+            ->assertForbidden();
+    }
+
+    expect($owner->refresh()->isBlacklisted())->toBeTrue();
 });

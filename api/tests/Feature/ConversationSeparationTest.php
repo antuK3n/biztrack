@@ -49,18 +49,6 @@ function separationApplication(string $businessName, string $registrationNumber)
 }
 
 /** Put an office on a filing so the owner is allowed to address it. */
-function assignOffice(int $applicationId, string $departmentCode): int
-{
-    $department = Department::where('code', $departmentCode)->firstOrFail();
-
-    ApplicationAssignment::firstOrCreate([
-        'application_id' => $applicationId,
-        'department_id' => $department->id,
-    ]);
-
-    return $department->id;
-}
-
 it('keeps a message to the health office out of an unrelated office inbox', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70001');
     $choId = assignOffice($appId, 'CHO');
@@ -141,29 +129,57 @@ it('keeps every conversation out of a seat that holds no office', function () {
 });
 
 /*
- * Section 1 and 5: the owner picks any configured office, and may come back
- * later and start another conversation without disturbing the first.
+ * ---- Which offices a filing offers, and why it stopped being all of them --
+ *
+ * This asserted that every configured office was offered on every filing, and
+ * it was right at the time: the client had asked for exactly that, against an
+ * earlier rule that offered only the routed ones.
+ *
+ * Two instructions on 28 September 2026 settle it the other way, and they only
+ * make sense together:
+ *
+ *   "sa admin offices ang maaccess lang nila once na naka assign na sa kanila
+ *    yung application"
+ *   "sa business owner side lahat na ng offices may general inquiry"
+ *
+ * An office's Messages page is its caseload, so an office that is not on this
+ * filing will never be shown a message about it - not in its inbox, and not by
+ * notification either, since counterparty() has no officer to name and falls
+ * back to the applicant. Offering that office here would be offering a message
+ * that is accepted, stored, and read by nobody.
+ *
+ * The owner has not lost the ability to reach it. That is what the general
+ * enquiry is for, and every office now has one. What they cannot do is raise it
+ * against a PERMIT the office was never handed.
+ *
+ * Section 5 still holds and is still asserted below: two offices opened at
+ * different times stay two conversations.
  */
-it('lets the owner open a conversation with any configured office', function () {
+it('offers the owner the offices that are actually on the filing', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70010');
 
     authAs('owner@biztrack.local');
 
-    // Only BPLO is routed — submit() hands the form to it and to nobody else —
-    // and yet every office is offered. Under the old rule this list was the
-    // routed offices, which is to say BPLO alone.
+    // submit() hands the form to BPLO and to nobody else.
+    $offices = $this->getJson("/api/v1/applications/{$appId}/messages")
+        ->assertOk()->json('meta.offices');
+
+    expect(collect($offices)->pluck('code'))->toContain('BPLO')
+        ->and(collect($offices)->pluck('code'))->not->toContain('CPDO')
+        ->and(collect($offices)->every(fn ($o) => $o['can_message']))->toBeTrue();
+
+    // Route two more, and they appear - there is somebody to read them now.
+    $cho = assignOffice($appId, 'CHO');
+    $bfp = assignOffice($appId, 'BFP');
+
     $offices = $this->getJson("/api/v1/applications/{$appId}/messages")
         ->assertOk()->json('meta.offices');
 
     expect(collect($offices)->pluck('code'))
-        ->toContain('BPLO')->toContain('CHO')->toContain('BFP')->toContain('CPDO')
-        ->and(collect($offices)->every(fn ($o) => $o['can_message']))->toBeTrue()
-        ->and(count($offices))->toBe(Department::count());
+        ->toContain('BPLO')->toContain('CHO')->toContain('BFP')
+        ->and(collect($offices)->pluck('code'))->not->toContain('CPDO');
 
     // Two offices, opened at different times, stay two conversations.
-    $cho = Department::where('code', 'CHO')->value('id');
-    $bfp = Department::where('code', 'BFP')->value('id');
-
     $this->postJson("/api/v1/applications/{$appId}/messages", [
         'body' => 'For health.', 'department_id' => $cho,
     ])->assertCreated();
@@ -290,7 +306,7 @@ it('keeps the general enquiry apart from the filing conversations', function () 
  * Every other test in this file assigns the office first, which is exactly why
  * none of them caught it.
  */
-it('lets an office read a filing it was written to but never routed', function () {
+it('lets an office read a filing it was written to, and lists it once routed', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70011');
 
     /*
@@ -321,8 +337,34 @@ it('lets an office read a filing it was written to but never routed', function (
 
     expect(collect($seen)->pluck('body'))->toContain('Health question on an unrouted filing.');
 
-    // And the filing is listed in its inbox, or the message arrives somewhere
-    // the officer has no way to navigate to.
+    /*
+     * ---- The inbox row is gone, and that is now the point ----------------
+     *
+     * This asserted the filing WAS listed, on the reasoning that a message
+     * which arrives nowhere the officer can navigate to has not arrived.
+     *
+     * "Sa admin offices ang maaccess lang nila once na naka assign na sa
+     * kanila yung application" [client, 28 September 2026]. The page is the
+     * caseload, so an unrouted filing is not on it.
+     *
+     * The reasoning that produced the old assertion was sound, and the answer
+     * to it is upstream rather than here: the office picker on a filing now
+     * offers only the offices that are on it (see visibleOffices), so an
+     * applicant is not invited to start this conversation in the first place.
+     * The message above could only be written by a client aiming straight at
+     * the endpoint, which is why the test has to construct it that way.
+     *
+     * Reading is untouched - authorizeParticipant still lets the office open
+     * the transcript, asserted just above - so nothing already sent becomes
+     * unreadable. It returns to the inbox when the routing catches up.
+     */
+    $rows = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data');
+
+    expect(collect($rows)->firstWhere('application_id', $appId))->toBeNull();
+
+    assignOffice($appId, 'CHO');
+
     $rows = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data');
 
