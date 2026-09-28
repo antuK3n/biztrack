@@ -19,6 +19,17 @@ class UserResource extends JsonResource
             'last_name' => $this->last_name,
             'suffix' => $this->suffix,
             'gender' => $this->gender,
+            /*
+             * The owner's home address [checklist 2026-09-28, Register 2]. Null
+             * for staff, who are never asked, and for owners who registered
+             * before it was — AuthController::userPayload says which of those
+             * still owes one.
+             */
+            'home_street' => $this->home_street,
+            'home_barangay' => $this->home_barangay,
+            'home_city' => $this->home_city,
+            'home_province' => $this->home_province,
+            'home_postal_code' => $this->home_postal_code,
             'department' => $this->department ? [
                 'id' => $this->department->id,
                 'code' => $this->department->code,

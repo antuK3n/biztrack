@@ -679,6 +679,35 @@ the revoked branch on `/verify`. See `RevokePermitTest`.
 happens when an office refuses to issue a clearance at all. An answer to one
 probably constrains the other.
 
+## A27. Does BPLO need the owner's home address checked, and should filing wait until it is given?
+
+Since 28 September 2026 every business owner's account carries a home address
+(checklist item Register 2, "make sure that profile details are complete, like
+home details"). A new owner cannot register without it. Owners who registered
+before that date have none, and the system cannot make one up for them. Two
+things are not ours to decide:
+
+1. **Is it checked against anything?** Should a clerk compare it with a
+   government ID or barangay certificate at the counter, or is what the owner
+   typed enough? Nothing in BizTrack verifies it today.
+2. **Should an owner without one be stopped from filing?** Or is a reminder
+   enough until they add it?
+
+**Why it matters.** The tester register already holds real owners with filings
+in progress. Blocking filing until the address is given would stop them
+mid-application for a detail no office has yet said it reads. Not blocking means
+some filings will reach BPLO from an owner with no home address on record. If
+BPLO relies on the home address (for a notice, a Barangay clearance check, or
+the owner section of the paper form), the second is the worse failure.
+
+**What we assumed meanwhile.** Not checked, and not blocking. An owner without
+an address sees a blue reminder on their Profile and home page linking to the
+form that adds it, and can still file. Once given, it can be corrected but not
+blanked. The address may be outside Malabon, so the barangay is typed rather
+than picked from the city's list. If BPLO answers that filing must wait, the
+submit gate that already holds a filing for an unconfirmed email
+(`EmailSwitch`, checklist Register 1) is where the same check would go.
+
 ---
 
 # B. For MISD — systems, data, hosting, accounts

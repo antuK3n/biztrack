@@ -274,6 +274,7 @@ function claimRegistration(array $overrides = []): array
         'password' => 'long-enough-1',
         'password_confirmation' => 'long-enough-1',
         'data_privacy_consent' => true,
+        ...homeAddress(),
     ], $overrides);
 }
 
