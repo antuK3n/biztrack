@@ -52,6 +52,11 @@ test('with mail off, the current password alone changes it', async ({ page }) =>
           password,
           password_confirmation: password,
           data_privacy_consent: true,
+          // Owners give a home address at sign-up (checklist Register 2).
+          home_street: '12 Gen. Luna St.',
+          home_barangay: 'Longos',
+          home_city: 'Malabon',
+          home_province: 'Metro Manila',
         }),
       })
       if (!res.ok) throw new Error(`register failed: ${res.status} ${await res.text()}`)
