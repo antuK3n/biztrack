@@ -18,7 +18,17 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class MessageThread extends Model
 {
-    protected $fillable = ['application_id', 'user_id', 'department_id'];
+    /**
+     * The one kind that names itself.
+     *
+     * Null on a filing thread and on a general enquiry — those two are told
+     * apart by which of `application_id` and `department_id` is set, and
+     * always were. An administrator conversation has neither, so it cannot be
+     * inferred and says so instead. See migration 2026_09_28_000200.
+     */
+    public const KIND_ADMIN = 'admin';
+
+    protected $fillable = ['application_id', 'user_id', 'department_id', 'kind'];
 
     /**
      * A thread with no office named is BPLO's.
@@ -37,6 +47,20 @@ class MessageThread extends Model
     protected static function booted(): void
     {
         static::creating(function (self $thread) {
+            /*
+             * The administrator conversation is the one kind with no office on
+             * either side, and it says so.
+             *
+             * The default below exists so that no thread can be left that
+             * nobody is answerable for — which is right for a filing and for
+             * an enquiry, and wrong for this one: the super admin belongs to
+             * no office, and quietly filing their mail under BPLO would put an
+             * officer's request about their own name into the BPLO queue.
+             */
+            if ($thread->kind === self::KIND_ADMIN) {
+                return;
+            }
+
             if ($thread->department_id === null) {
                 $thread->department_id = Department::where('code', 'BPLO')->value('id');
             }

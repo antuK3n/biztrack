@@ -313,8 +313,8 @@ function numberedBusiness(string $name, string $registrationNumber): int
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',
-        'address' => ['line1' => '5 Number Street', 'barangay_id' => \App\Models\Barangay::first()->id],
-        'lines' => [['psic_code_id' => \App\Models\PsicCode::first()->id, 'capitalization' => 100000]],
+        'address' => ['line1' => '5 Number Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 100000]],
     ])->assertCreated()->json('data.id');
 }
 
@@ -325,7 +325,7 @@ function filedOn(int $businessId, string $type): array
         'business_id' => $businessId,
         'data_privacy_consent' => true,
         'application_type' => $type,
-        'permit_type_ids' => \App\Models\PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     return test()->withHeaders(authAs('owner@biztrack.local'))
@@ -387,8 +387,8 @@ it('reads "latest" from the calendar, not from the insertion order', function ()
 
     // The one inserted FIRST is the one submitted LAST — the shape the seeded
     // register happens to have, and the shape that broke the column.
-    \App\Models\Application::whereKey($older['id'])->update(['submitted_at' => now()]);
-    \App\Models\Application::whereKey($newer['id'])->update(['submitted_at' => now()->subYear()]);
+    Application::whereKey($older['id'])->update(['submitted_at' => now()]);
+    Application::whereKey($newer['id'])->update(['submitted_at' => now()->subYear()]);
 
     expect(ownerStatusRow($businessId)['tracking_id'])->toBe($older['tracking_id']);
 });

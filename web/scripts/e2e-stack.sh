@@ -41,8 +41,28 @@ if [ ! -f "$LIVE_DB" ]; then
   exit 1
 fi
 
+# ── Copying a WAL database ───────────────────────────────────────────────────
+#
+# `cp "$LIVE_DB" "$E2E_DB"` is what this used to be, and it is wrong for this
+# database. The register runs in WAL mode: committed changes live in
+# `database.sqlite-wal` until SQLite checkpoints them back, and that file was
+# 3.9 MB when this was found. A plain `cp` takes the main file alone, so the
+# throwaway stack came up holding the register as it stood at the last
+# checkpoint — silently, and with no error anywhere.
+#
+# It cost an afternoon: two migrations applied to the live database were simply
+# absent here, so a screen that worked on :5173 answered 500 on :5199 and the
+# browser suite disagreed with the API suite about whether a column existed.
+#
+# `VACUUM INTO` writes one consistent file with the WAL folded in — SQLite's
+# own answer to "give me a copy of this database". The target must not exist,
+# hence the rm.
 echo "Copying the register to a throwaway database…"
-cp "$LIVE_DB" "$E2E_DB"
+rm -f "$E2E_DB" "$E2E_DB-wal" "$E2E_DB-shm"
+php -r '
+  $source = new PDO("sqlite:".$argv[1]);
+  $source->exec("VACUUM INTO ".$source->quote($argv[2]));
+' "$LIVE_DB" "$E2E_DB"
 
 cleanup() {
   echo

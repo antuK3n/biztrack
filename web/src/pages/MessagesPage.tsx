@@ -4,7 +4,7 @@ import { MailIcon, SearchIcon, XIcon } from '../components/icons'
 import { MessageThreadView } from '../components/MessagesPanel'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { PageTitle, SortFilter } from '../components/ui/Proto'
-import { formatDate } from '../lib/format'
+import { formatDate, formatListStamp, initialsOf } from '../lib/format'
 import { messages as messagesApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
@@ -120,9 +120,18 @@ function ThreadCard({
   onOpen: () => void
 }) {
   const last = thread.last_message
+  /*
+   * "Nothing said yet" and not "No messages yet. Start the conversation."
+   *
+   * An office's inbox is its caseload now, so most rows on it are permits
+   * nobody has written about - eight of ten on BPLO's screen carried the same
+   * eleven-word sentence, one per row, saying the same thing eight times. The
+   * short form says as much, is set in italic so it reads as a STATE rather
+   * than as somebody's words, and leaves the row's shape to the rest.
+   */
   const preview = last
     ? `${last.mine ? 'You' : (last.sender_name ?? thread.counterparty.name)}: ${last.body}`
-    : 'No messages yet. Start the conversation.'
+    : 'Nothing said yet'
   /*
    * "Handled by X" only where X is a fact the card has not already given.
    *
@@ -137,7 +146,9 @@ function ThreadCard({
    *    being handled. The office is who you are writing to, and the title
    *    already says so.
    */
-  const office = thread.kind === 'general' ? null : officeLine(thread)
+  //  - the row is the administrator's line, which has no office on either
+  //    side at all.
+  const office = thread.kind === 'application' ? officeLine(thread) : null
 
   /*
    * ── What names the row, and for whom ─────────────────────────────────────
@@ -162,6 +173,13 @@ function ThreadCard({
       : null
   const title = businessTitle ?? thread.counterparty.name
 
+  /*
+   * The "Handled by " prefix is gone with the card's extra line. On a list
+   * where the line is always an office, in royal, under a business name, the
+   * two words were furniture - and they pushed the office name itself into a
+   * truncation on the narrow left pane, which is the one part of it a reader
+   * actually needs.
+   */
   const handledBy =
     office && office !== title && office !== readerOffice ? office : null
 
@@ -220,51 +238,123 @@ function ThreadCard({
           .join(' · ')
       : null
 
+  const unread = thread.unread_count > 0
+  const quiet = thread.messages_count === 0
+
   return (
     <li>
       <button
         type="button"
         onClick={onOpen}
         aria-current={active ? 'true' : undefined}
-        className={`flex w-full items-center gap-4 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised ${
-          active ? 'ring-2 ring-royal' : ''
+        /*
+          ---- A row in a list, not a card floating on canvas ---------------
+
+          These were separate white cards with 12px of canvas between them and
+          20px of padding inside. Ten of them filled a laptop screen with six
+          conversations' worth of information, and read as ten unrelated
+          things: a conversation list is ONE thing with rows in it, which is
+          why every messaging app draws it that way. The dividers are drawn by
+          the <ul>; the row brings only its selected state.
+
+          The selected row is marked on its LEFT EDGE as well as by its fill,
+          because a tint alone is a light wash on a white list and the one row
+          that matters should be unmistakable scanning down the column.
+        */
+        className={`flex w-full items-start gap-3 border-l-[3px] px-4 py-3 text-left transition-colors ${
+          active ? 'border-royal bg-royal-tint' : 'border-transparent hover:bg-canvas/60'
         }`}
       >
-        <Avatar />
+        <span
+          aria-hidden="true"
+          className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+            unread ? 'bg-royal text-white' : 'bg-canvas text-ink-secondary'
+          }`}
+        >
+          {/*
+            Initials of the row's OWN title, not of the counterparty.
+
+            An applicant's row is titled after the business; the counterparty
+            is the office. Taking the letters from the office put "BO" beside
+            "Test" and "BP" beside "SAMPLE Aling Nena Bakery" - two letters
+            that appear nowhere in the words next to them, which reads as a
+            rendering fault rather than as an avatar. The shape is there to be
+            recognised, so it has to be a shape OF the thing named.
+          */}
+          {initialsOf(title)}
+        </span>
+
         <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">
+          <span className="flex items-baseline justify-between gap-2">
+            <span
+              className={`min-w-0 flex-1 truncate text-sm text-ink ${unread ? 'font-bold' : 'font-semibold'}`}
+            >
               {title}
               {subtitle && (
-                <span className="font-semibold italic text-ink-secondary"> · {subtitle}</span>
+                <span className="font-medium italic text-ink-secondary"> · {subtitle}</span>
               )}
             </span>
             {/*
-              A filter for something the card never showed is a filter you
-              cannot check. The badge is the reason a row is in the Unread
-              list — and it carries the number as text, not colour alone, so
-              "3 unread" is readable to a screen reader and in monochrome.
+              The date sits WITH the name, where a reader looks for it, rather
+              than wrapping onto a line of its own - which cost a line per row
+              down the whole column on the narrow left pane.
             */}
-            {thread.unread_count > 0 && (
-              <span className="tnum shrink-0 rounded-full bg-royal px-2 py-0.5 text-[11px] font-bold text-white">
-                {thread.unread_count} unread
-              </span>
-            )}
-            <span className="shrink-0 text-xs italic text-ink-muted">
-              {formatDate(thread.updated_at)}
+            <span
+              className="shrink-0 text-[11px] text-ink-muted"
+              title={formatDate(thread.updated_at)}
+            >
+              {formatListStamp(thread.updated_at)}
             </span>
           </span>
-          {identity && (
-            <span className="mt-0.5 block truncate text-xs font-medium text-ink-muted">
-              {identity}
+
+          {/*
+            The filing and the office answerable for it, on ONE muted line.
+
+            They had a line each, and the office's was set in bold royal - the
+            colour this app uses for links and for the thing you are meant to
+            press. On a row where the whole card is the control, a second
+            pressable-looking thing is a lie, and three lines of small print
+            under every title is what made ten rows fill a screen.
+
+            Both facts are still here, in the order a reader wants them: which
+            filing, then whose desk it is on.
+          */}
+          {(identity || handledBy) && (
+            <span className="mt-0.5 block truncate text-xs text-ink-muted">
+              {[identity, handledBy].filter(Boolean).join(' · ')}
             </span>
           )}
-          {handledBy && (
-            <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
-              Handled by {handledBy}
+
+          <span className="mt-1 flex items-center gap-2">
+            <span
+              className={`min-w-0 flex-1 truncate text-xs ${
+                quiet
+                  ? 'italic text-ink-muted'
+                  : unread
+                    ? 'font-medium text-ink'
+                    : 'text-ink-secondary'
+              }`}
+            >
+              {preview}
             </span>
-          )}
-          <span className="mt-0.5 block truncate text-sm text-ink-secondary">{preview}</span>
+
+            {/*
+              A filter for something the card never showed is a filter you
+              cannot check. The badge is the reason a row is in the Unread
+              list - and it carries the number as TEXT, not colour alone, so
+              it is readable in monochrome; the word is kept for a screen
+              reader, which has no room problem.
+
+              Only when there is one. A permanent "0 unread" beside every row
+              teaches the eye to skip the column that matters.
+            */}
+            {unread && (
+              <span className="tnum shrink-0 rounded-full bg-royal px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {thread.unread_count}
+                <span className="sr-only"> unread</span>
+              </span>
+            )}
+          </span>
         </span>
       </button>
     </li>
@@ -321,6 +411,7 @@ export function MessagesPage() {
   const threads = rows
   const total = data?.meta.total ?? 0
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
+
   const firstLoad = loading && rows.length === 0
   /*
    * A row is identified by a KEY, not by an application id — an enquiry with
@@ -330,16 +421,52 @@ export function MessagesPage() {
    * Number() reads as NaN and no filing can collide with.
    */
   const rowKey = (t: MessageThreadSummary) =>
-    t.kind === 'general' ? 'general' : String(t.application_id)
+    /*
+     * An enquiry is keyed by its OFFICE. It used to be the bare word
+     * 'general', which was right while an owner had exactly one - their line
+     * to BPLO. They have one per office now [client, 28 September 2026], and
+     * a shared key made every enquiry row select every other one: eight rows
+     * highlighting together, all opening whichever the list happened to find
+     * first.
+     *
+     * The bare word is still honoured when a row somehow has no office, so a
+     * ?application=general link that predates this keeps working.
+     */
+    t.kind === 'general'
+      ? t.department_id
+        ? `general-${t.department_id}`
+        : 'general'
+      : t.kind === 'admin'
+        ? 'admin'
+        : String(t.application_id)
 
   const selectedKey = params.get('application')
   const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
 
-  // On a wide screen an empty pane is wasted space: open the newest thread.
+  /*
+   * On a wide screen an empty pane is wasted space: open the newest
+   * CONVERSATION.
+   *
+   * Not simply `threads[0]`. Since every office has a front door, the newest
+   * row is often an enquiry nobody has written in - and the rows are sorted
+   * by when they last moved, so creating a thread by merely LOOKING at one
+   * pushed it to the top and made it the thing the screen opened on next
+   * time. An owner with live correspondence was landing in an empty "write to
+   * the fire office" box, which is not where they were going.
+   *
+   * It also stopped the page settling. The auto-open wrote one office into
+   * the URL, a press wrote another, and the transcript mounted twice in a
+   * row - losing anything typed into the first.
+   *
+   * Nothing said yet in ANY of them is a real state (a new account), and then
+   * there is nothing to open and the empty pane is honest.
+   */
   useEffect(() => {
     if (selectedKey || threads.length === 0) return
-    if (window.matchMedia('(min-width: 1024px)').matches) {
-      setParams({ application: rowKey(threads[0]) }, { replace: true })
+
+    const newest = threads.find((t) => t.kind !== 'general' || t.messages_count > 0)
+    if (newest && window.matchMedia('(min-width: 1024px)').matches) {
+      setParams({ application: rowKey(newest) }, { replace: true })
     }
   }, [selectedKey, threads, setParams])
 
@@ -379,8 +506,50 @@ export function MessagesPage() {
     const ordered = [...matched].sort(
       (a, b) => Date.parse(a.updated_at ?? '') - Date.parse(b.updated_at ?? ''),
     )
-    return sort === 'recent' ? ordered.reverse() : ordered
+    const byDate = sort === 'recent' ? ordered.reverse() : ordered
+
+    /*
+     * -- The administrator's line stays on top ---------------------------
+     *
+     * The server pins it, and this sort used to undo that: an officer who has
+     * never written has no `updated_at`, so `Date.parse(undefined)` is NaN and
+     * the row fell to wherever the comparator left it - which on the screen
+     * the pin exists FOR (an officer looking for where to ask about their own
+     * details) was the bottom of the list.
+     *
+     * Pinned here rather than by leaning on the server's order, because this
+     * page sorts and filters on its own and any ordering it does not respect
+     * is an ordering it will silently lose.
+     */
+    const pinned = byDate.filter((t) => t.kind === 'admin')
+    return pinned.length > 0 ? [...pinned, ...byDate.filter((t) => t.kind !== 'admin')] : byDate
   }, [threads, query, sort])
+  /*
+   * ---- Conversations, and doors into ones that do not exist yet ---------
+   *
+   * An enquiry with nothing in it is not a conversation. It is an invitation
+   * to start one, and the two want different shapes on the page - see the
+   * "Ask an office" section below for what happened when they shared one.
+   *
+   * `messages_count` and not `last_message`: the count is what the server
+   * filters and sorts on, so splitting on the same number keeps the screen
+   * and the API agreeing about which rows are which.
+   */
+  const started = visible.filter((t) => t.kind !== 'general' || t.messages_count > 0)
+  /*
+   * The doors are sorted by NAME, not by when they last moved.
+   *
+   * Everything else on this screen is ordered by recency, and that is right
+   * for a conversation. It is wrong for a list of offices: a thread is
+   * created the moment an enquiry is OPENED, so merely looking at one pushed
+   * it to the top and the list reshuffled itself under the reader between
+   * visits. A directory should be where you left it.
+   */
+  const doors = visible
+    .filter((t) => t.kind === 'general' && t.messages_count === 0)
+    .slice()
+    .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name))
+  const conversationTotal = Math.max(total - doors.length, started.length)
 
   /*
    * ── The grouping is gone, and why ────────────────────────────────────────
@@ -503,24 +672,111 @@ export function MessagesPage() {
             Both numbers named (§6.4). "50 conversations" reads as the whole
             inbox; "50 of 137" is the only version that tells a clerk there is
             more of it, which is what this page never said.
+
+            The unopened front doors are subtracted from both sides. They are
+            not conversations - nothing has been said in them - and counting
+            them told an owner with nothing in their inbox that they had six.
           */}
           <p className="-mb-2 px-1 text-sm text-ink-muted" role="status">
-            Showing {visible.length.toLocaleString()} of {total.toLocaleString()} conversation
-            {total === 1 ? '' : 's'}
+            Showing {started.length.toLocaleString()} of {conversationTotal.toLocaleString()}{' '}
+            conversation{conversationTotal === 1 ? '' : 's'}
             {narrow !== 'all' ? ` (${NARROW_LABELS[narrow].toLowerCase()})` : ''}
             {query ? ', searched within the ones loaded' : ''}.
           </p>
-          <ul aria-label="Conversations" className="flex flex-col gap-3">
-            {visible.map((t) => (
-              <ThreadCard
-                key={rowKey(t)}
-                thread={t}
-                readerOffice={readerOffice}
-                active={rowKey(t) === selectedKey}
-                onOpen={() => open(rowKey(t))}
-              />
-            ))}
-          </ul>
+          {started.length > 0 && (
+            <ul
+              aria-label="Conversations"
+              className="divide-y divide-line overflow-hidden rounded-xl bg-white shadow-card"
+            >
+              {started.map((t) => (
+                <ThreadCard
+                  key={rowKey(t)}
+                  thread={t}
+                  readerOffice={readerOffice}
+                  active={rowKey(t) === selectedKey}
+                  onOpen={() => open(rowKey(t))}
+                />
+              ))}
+            </ul>
+          )}
+
+          {doors.length > 0 && (
+            /*
+             * ---- The offices you have not written to yet -----------------
+             *
+             * Every office has a front door now, not just BPLO [client, 28
+             * September 2026]. Rendered as conversation cards, that put five
+             * or six identical rows saying "No messages yet. Start the
+             * conversation." at the top of an inbox, each the size of a real
+             * exchange and each carrying a date that was not a date. An owner
+             * with one live conversation had to find it among six invitations
+             * to start another.
+             *
+             * So a door is drawn as a door. Small, quiet, one line each, under
+             * a heading that says what they are - and below the conversations,
+             * because what you are already discussing outranks what you might
+             * ask. The moment one is used it stops being a door and joins the
+             * list above, which is why the split is on `messages_count` rather
+             * than on a flag.
+             */
+            <section aria-labelledby="ask-an-office" className="mt-2">
+              <h2
+                id="ask-an-office"
+                className="px-1 text-xs font-bold uppercase tracking-wide text-ink-muted"
+              >
+                Ask an office
+              </h2>
+              <p className="mb-2.5 mt-1 px-1 text-sm text-ink-secondary">
+                A question that is not about one permit. Pick the office it is for.
+              </p>
+              {/*
+                One column, not two. Two fitted the offices into half the
+                width of an already narrow pane and truncated every name that
+                mattered: "Office of t…", "City Envi…", "Bureau of F…". A
+                list of offices whose names are cut off is not a list of
+                offices.
+              */}
+              <ul className="flex flex-col gap-2">
+                {doors.map((t) => (
+                  <li key={rowKey(t)}>
+                    <button
+                      type="button"
+                      onClick={() => open(rowKey(t))}
+                      aria-current={rowKey(t) === selectedKey ? 'true' : undefined}
+                      /*
+                        A border rather than a shadow, and canvas rather than
+                        white: the conversations above are raised cards, and a
+                        door that matched them would read as one more of them.
+                        Selected still gets the royal ring the cards use, so
+                        "which one am I in" is answered the same way everywhere.
+                      */
+                      className={`flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left transition-colors ${
+                        rowKey(t) === selectedKey
+                          ? 'border-royal bg-royal-tint ring-2 ring-royal'
+                          : 'border-line bg-white hover:border-royal/40 hover:bg-canvas'
+                      }`}
+                    >
+                      {/*
+                        A fixed width on the code, so the names line up down
+                        the column instead of stepping in and out with the
+                        length of "OBO" against "CENRO".
+                      */}
+                      <span
+                        aria-hidden="true"
+                        className="tnum w-14 shrink-0 rounded-md bg-canvas py-1 text-center text-[11px] font-bold text-royal"
+                      >
+                        {t.responsible_office?.code ?? '—'}
+                      </span>
+                      <span className="min-w-0 flex-1 text-sm font-semibold leading-snug text-ink">
+                        {t.counterparty.name}
+                      </span>
+                      <span className="shrink-0 text-xs font-semibold text-royal">Write</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {hasMore && (
             <button
               type="button"
@@ -658,9 +914,15 @@ export function MessagesPage() {
       <MessageThreadView
         key={rowKey(selected)}
         target={
-          selected.kind === 'general'
-            ? { kind: 'general', userId: selected.user_id }
-            : { kind: 'application', applicationId: selected.application_id! }
+          selected.kind === 'admin'
+            ? { kind: 'admin' }
+            : selected.kind === 'general'
+              ? {
+                  kind: 'general',
+                  userId: selected.user_id,
+                  officeId: selected.department_id,
+                }
+              : { kind: 'application', applicationId: selected.application_id! }
         }
         className="flex-1 px-5 pb-5 pt-4"
         scrollClassName="min-h-0"

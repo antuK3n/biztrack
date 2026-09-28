@@ -146,9 +146,29 @@ function LetterView({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The status the office is proposing, and why. '' means the editor is shut.
+  /*
+   * The status the office is PROPOSING, and why. '' means nothing is being
+   * decided and the dialog is shut.
+   *
+   * Approving used to skip this: "Mark Approved" closed the requirement on
+   * one press, with nothing between the pointer and a decision the applicant
+   * cannot appeal from this screen. The other two verdicts already asked, so
+   * the one that ENDS the matter was the one that asked nothing [client, 28
+   * September 2026: a confirmation on every major decision].
+   */
   const [nextStatus, setNextStatus] = useState<RequestStatus | ''>('')
   const [reason, setReason] = useState('')
+  /*
+   * Raised when Confirm is pressed with nothing written where words are
+   * required. Not `disabled` on the button: a disabled control is skipped by
+   * the tab order, so the one thing that would explain the hold-up is the one
+   * thing a screen-reader user never reaches (WCAG 3.3.1/3.3.3). The button
+   * stays pressable and says what is missing when pressed.
+   */
+  const [reasonMissing, setReasonMissing] = useState(false)
+
+  // The owner's submission, held for confirmation before it goes.
+  const [confirmingResponse, setConfirmingResponse] = useState(false)
 
   const tone = REQUIREMENT_CHIP_TONE[request.status] ?? 'tint-gray'
   const thread = request.responses ?? []
@@ -170,12 +190,29 @@ function LetterView({
    */
   const canSetStatus = isOfficer
 
+  // The verdict under confirmation, in the API's own words.
+  const statusWord = officeStatuses.find((o) => o.value === nextStatus)?.label ?? nextStatus
+  const approving = nextStatus === 'fulfilled'
+  /*
+   * ---- Which decisions are allowed to be red --------------------------
+   *
+   * Green for approving, red for rejecting, blue for everything else.
+   *
+   * The dialog took its colour from "is this an approval", so putting a
+   * requirement back to Pending - an undo, the gentlest thing an office can
+   * do here - opened under the same red banner as refusing a document.
+   * DESIGN.md: red means STOP, and a colour that means stop everywhere means
+   * nothing anywhere. Reverting is not a stop.
+   */
+  const decisionTone = approving ? 'green' : nextStatus === 'rejected' ? 'red' : 'blue'
+
   async function submitResponse() {
     setBusy(true)
     setError(null)
     try {
       const updated = await requests.respond(request.id, replyText.trim(), replyFile)
       onUpdated(updated)
+      setConfirmingResponse(false)
       setReplying(false)
       setReplyText('')
       setReplyFile(null)
@@ -203,6 +240,7 @@ function LetterView({
       onUpdated(await requests.close(request.id, outcome, remarks))
       setNextStatus('')
       setReason('')
+      setReasonMissing(false)
     } catch (err) {
       setError(toApiError(err).message)
     } finally {
@@ -393,9 +431,18 @@ function LetterView({
 
         {error && <p className="mt-4 text-sm font-medium text-s-red">{error}</p>}
 
-        <div className="mt-8 flex flex-wrap items-center gap-4 sm:pl-16">
+        {/*
+          ---- The decision, set apart from the letter ----------------------
+
+          These controls sat in a bare flex row hard against the last
+          paragraph, indented to match the prose, so the office's verdict read
+          as one more line of the document. A decision is not part of what you
+          are reading; it is what you do about it. The rule and the panel say
+          so, and the indent is dropped because the panel is not prose.
+        */}
+        <div className="mt-8 border-t border-line pt-6">
           {canRespond && !replying && (
-            <>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
               <PillButton onClick={() => setReplying(true)} className="px-9">
                 {thread.length > 0 ? 'Add another response' : 'Respond'}
               </PillButton>
@@ -404,38 +451,79 @@ function LetterView({
                   You can keep adding responses until this office closes the request.
                 </p>
               )}
-            </>
+            </div>
           )}
+
           {canSetStatus && (
-            <>
+            <div className="rounded-xl bg-canvas px-5 py-4">
               {/*
-                One button per status the office may set, from the API's own
-                list. Approving needs no words; anything else has to say why,
-                and the applicant reads it verbatim.
+                Named, because a row of coloured buttons under a letter does
+                not say whose act it is or what it settles.
               */}
-              {officeStatuses
-                .filter((o) => o.value !== request.status)
-                .map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() =>
-                      o.value === 'fulfilled' ? setStatus('fulfilled') : setNextStatus(o.value)
-                    }
-                    disabled={busy}
-                    className={`rounded-md px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60 ${
-                      o.value === 'fulfilled'
-                        ? 'bg-s-green'
-                        : o.value === 'rejected'
-                          ? 'bg-s-red'
-                          : 'bg-s-orange'
-                    }`}
-                  >
-                    {busy && o.value === 'fulfilled' ? 'Working…' : `Mark ${o.label}`}
-                  </button>
-                ))}
-            </>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+                Your decision on this requirement
+              </p>
+              <p className="mt-1 text-sm text-ink-secondary">
+                The applicant is told either way, and reads anything you write here word
+                for word.
+              </p>
+
+              {/*
+                ---- One primary, the rest recessive --------------------------
+
+                This was three solid buttons side by side - green, red, orange -
+                all the same size and weight, which is three primary actions and
+                therefore none. Worse, the solid red sat a few pixels from the
+                solid green with nothing between them.
+
+                DESIGN.md: red means STOP. A filled red button among equals is
+                an invitation, which is the opposite of a stop. So approving -
+                the ordinary outcome, the one an office reaches for most - is
+                the filled button, and sending it back is outlined in its own
+                colour: unmistakable, reachable, and not the thing your hand
+                lands on by default.
+              */}
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                {officeStatuses
+                  .filter((o) => o.value !== request.status)
+                  .map((o) => {
+                    const positive = o.value === 'fulfilled'
+                    const stop = o.value === 'rejected'
+
+                    return (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => {
+                          if (busy) return
+                          setReason('')
+                          setReasonMissing(false)
+                          setNextStatus(o.value)
+                        }}
+                        /*
+                          `aria-disabled`, never `disabled` (AGENTS.md 6.2). A
+                          disabled button leaves the tab order and takes its
+                          label with it, so a reader who cannot see the row
+                          greying out is simply short one control. The press is
+                          refused in the handler instead.
+                        */
+                        aria-disabled={busy || undefined}
+                        className={`rounded-lg px-6 py-2.5 text-sm font-semibold shadow-card transition-colors aria-disabled:cursor-wait aria-disabled:opacity-60 ${
+                          positive
+                            ? 'bg-s-green text-white hover:brightness-110'
+                            : stop
+                              ? 'border-2 border-s-red bg-white text-s-red hover:bg-s-red-tint'
+                              : 'border-2 border-s-orange bg-white text-s-orange hover:bg-s-orange-tint'
+                        }`}
+                      >
+                        Mark {o.label}
+                      </button>
+                    )
+                  })}
+              </div>
+            </div>
           )}
+
           {!canRespond && !canSetStatus && (
             <StatusDot status={request.status} label={`Status: ${request.status_label}`} />
           )}
@@ -443,38 +531,168 @@ function LetterView({
       </div>
 
       {nextStatus && (
+        /*
+          ---- Every verdict comes through here now ------------------------
+
+          Approving used to bypass this entirely. It is the verdict that ENDS
+          the requirement, so it was the one decision on the page that asked
+          nothing before acting - and the two that leave the matter open both
+          asked. Backwards, and fixed [client, 28 September 2026].
+
+          The tone follows the outcome rather than the dialog: approving is
+          green, sending back is red. A red header over "Mark Approved" would
+          be the interface disagreeing with itself at the moment a reader is
+          deciding whether to trust it.
+        */
         <ProtoModal
-          title={`Mark ${officeStatuses.find((o) => o.value === nextStatus)?.label ?? nextStatus}`}
-          tone="red"
-          cancelLabel="Cancel"
-          confirmLabel="Save status"
-          onCancel={() => setNextStatus('')}
-          onConfirm={() => setStatus(nextStatus, reason.trim())}
-          confirmDisabled={busy || !reason.trim()}
+          title={`Mark ${statusWord} — are you sure?`}
+          tone={decisionTone}
+          cancelLabel="Go back"
+          confirmLabel={busy ? 'Saving…' : `Yes, mark ${statusWord.toLowerCase()}`}
+          onCancel={() => {
+            setNextStatus('')
+            setReason('')
+            setReasonMissing(false)
+          }}
+          onConfirm={() => {
+            if (busy) return
+            /*
+              Refused here rather than by a disabled button, and the reason is
+              named on screen when it happens (WCAG 3.3.1/3.3.3). A greyed
+              Confirm with no stated cause is the version of this that sends
+              people back to the letter looking for what they missed.
+            */
+            if (!approving && !reason.trim()) {
+              setReasonMissing(true)
+              return
+            }
+            setStatus(nextStatus, reason.trim() || undefined)
+          }}
+          confirmDescribedBy={reasonMissing ? 'requirement-reason-hint' : undefined}
         >
-          <p className="mb-4 border-b border-line pb-3 text-sm text-ink-secondary">
-            {request.subject} ·{' '}
-            {businessName(
-              request.application?.business_name ? { name: request.application.business_name } : null,
-            )}
+          {/*
+            WHAT is being decided, before the form asking about it. A dialog
+            that opens with a text box assumes the reader still has the letter
+            in mind; they have been looking at a list of eleven of these.
+          */}
+          <dl className="mb-4 grid gap-x-5 gap-y-2 rounded-xl bg-canvas px-4 py-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                Requirement
+              </dt>
+              <dd className="font-bold text-ink">{request.subject}</dd>
+            </div>
+            <div>
+              <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                Business
+              </dt>
+              <dd className="font-bold text-ink">
+                {businessName(
+                  request.application?.business_name
+                    ? { name: request.application.business_name }
+                    : null,
+                )}
+              </dd>
+            </div>
+          </dl>
+
+          <p className="mb-4 text-sm text-ink-secondary">
+            {approving
+              ? 'This closes the requirement. The applicant is told it has been accepted, and stops being asked for it.'
+              : nextStatus === 'rejected'
+                ? 'The requirement stays open, so the applicant can send another document.'
+                : 'This puts the requirement back to waiting. Nothing the applicant has already sent is deleted.'}
           </p>
+
           <label className="block">
-            <FieldLabel required>Why?</FieldLabel>
+            <FieldLabel required={!approving}>
+              {approving ? 'Add a note (optional)' : 'Why?'}
+            </FieldLabel>
             <textarea
-              className={`${inputCls} min-h-24`}
+              className={`${inputCls} min-h-24 ${
+                reasonMissing ? 'border-s-red ring-1 ring-s-red' : ''
+              }`}
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
+              onChange={(e) => {
+                setReason(e.target.value)
+                if (reasonMissing) setReasonMissing(false)
+              }}
+              aria-invalid={reasonMissing || undefined}
               placeholder={
-                nextStatus === 'rejected'
-                  ? 'e.g. Please submit a clearer copy of the certificate.'
-                  : 'e.g. Approved in error — still waiting on the certificate.'
+                approving
+                  ? 'e.g. Received, thank you — nothing further needed.'
+                  : nextStatus === 'rejected'
+                    ? 'e.g. Please submit a clearer copy of the certificate.'
+                    : 'e.g. Approved in error — still waiting on the certificate.'
               }
             />
-            <p className="mt-1.5 text-xs text-ink-secondary">
-              The owner reads this word for word. The requirement stays open, so they can
-              send another document.
+            <p
+              id="requirement-reason-hint"
+              className={`mt-1.5 text-xs ${
+                reasonMissing ? 'font-semibold text-s-red' : 'text-ink-secondary'
+              }`}
+            >
+              {reasonMissing
+                ? 'Say why first — the applicant is shown this instead of a bare refusal.'
+                : 'The applicant reads this word for word.'}
             </p>
           </label>
+        </ProtoModal>
+      )}
+
+      {confirmingResponse && (
+        /*
+          ---- The applicant's side of a major decision ---------------------
+
+          Sending a requirement document is the one act on this page an owner
+          cannot take back, and it used to happen on a press of "Send" with
+          nothing in between. The usual failure is not a change of mind, it is
+          the wrong file: the picker keeps no preview, so what the office
+          receives is whatever was last chosen, and nobody finds out until the
+          office says so days later.
+
+          So the dialog's job is to show the filename back, and it is the only
+          thing in it set in bold.
+        */
+        <ProtoModal
+          title="Send this to the office?"
+          tone="blue"
+          cancelLabel="Keep editing"
+          confirmLabel={busy ? 'Sending…' : 'Send response'}
+          onCancel={() => setConfirmingResponse(false)}
+          onConfirm={() => {
+            if (busy) return
+            void submitResponse()
+          }}
+        >
+          <p className="mb-4 text-sm text-ink-secondary">
+            Going to{' '}
+            <span className="font-semibold text-ink">
+              {request.from_office?.name ?? request.created_by?.department ?? 'the requesting office'}
+            </span>{' '}
+            for <span className="font-semibold text-ink">{request.subject}</span>.
+          </p>
+
+          <div className="rounded-xl bg-canvas px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+              Attachment
+            </p>
+            <p className="mt-0.5 text-sm font-bold text-ink">
+              {replyFile ? replyFile.name : 'No file attached'}
+            </p>
+            {replyText.trim() && (
+              <>
+                <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                  Your message
+                </p>
+                <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink">{replyText.trim()}</p>
+              </>
+            )}
+          </div>
+
+          <p className="mt-4 text-xs text-ink-secondary">
+            You can send another response later if you need to correct this one.
+          </p>
         </ProtoModal>
       )}
 
@@ -503,12 +721,21 @@ function LetterView({
               </p>
             )}
             <div className="mt-3 flex items-center gap-5">
+              {/*
+                `aria-disabled`, never `disabled` (AGENTS.md 6.2): a disabled
+                Send leaves the tab order, and on a form whose whole point is
+                this one button that is the control a screen-reader user never
+                finds. The press is refused in the handler.
+              */}
               <PillButton
-                disabled={busy || (!replyText.trim() && !replyFile)}
-                onClick={submitResponse}
-                className="px-9"
+                aria-disabled={busy || (!replyText.trim() && !replyFile) || undefined}
+                onClick={() => {
+                  if (busy || (!replyText.trim() && !replyFile)) return
+                  setConfirmingResponse(true)
+                }}
+                className="px-9 aria-disabled:opacity-60"
               >
-                {busy ? 'Sending…' : 'Send'}
+                Send
               </PillButton>
               <label
                 className="flex cursor-pointer items-center gap-1.5 text-sm text-ink-muted hover:text-ink"
@@ -970,15 +1197,36 @@ export function RequestsPage() {
           */}
           <ProtoCard className="overflow-hidden rounded-xl">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[46rem] text-left text-sm">
+              {/*
+                ---- Why the columns are sized, and not left to the browser --
+
+                Every cell but one wrapped. "BIZ-2026-00008" came down in three
+                pieces, "City Environment and Natural Resources Office" in four,
+                and a row carrying one line of information stood 130px tall - so
+                four requirements filled the screen and the table it was drawn
+                as stopped being a table you can run your eye down.
+
+                The cause is that an auto-layout table hands its width to
+                whichever column has the longest text, which here is the
+                requirement's instructions. So the requirement is told to take
+                the slack and everything else is told to keep to one line. The
+                truncated cells carry a `title`, and the whole table still
+                scrolls sideways on a phone rather than folding.
+              */}
+              <table className="w-full min-w-[58rem] text-left text-sm">
                 <thead>
                   <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
                     <th className="px-5 py-3">Business</th>
-                    <th className="px-5 py-3">Business No.</th>
-                    <th className="px-5 py-3">Requirement</th>
+                    <th className="whitespace-nowrap px-5 py-3">Business No.</th>
+                    <th className="w-[40%] px-5 py-3">Requirement</th>
                     <th className="px-5 py-3">{isOfficer ? 'Submitted' : 'Office'}</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Action</th>
+                    <th className="whitespace-nowrap px-5 py-3">Status</th>
+                    {/*
+                      Right-aligned, because it is the end of the row and the
+                      thing you reach for. A left-aligned action column puts a
+                      ragged edge of buttons in the middle of the table.
+                    */}
+                    <th className="px-5 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -986,24 +1234,57 @@ export function RequestsPage() {
                     const rowTone = REQUIREMENT_CHIP_TONE[r.status] ?? 'tint-gray'
                     const latest = r.responses?.[r.responses.length - 1]
                     return (
-                      <tr key={r.id} className="border-t border-line align-top">
-                        <td className="px-5 py-3.5 font-bold text-ink">
+                      <tr
+                        key={r.id}
+                        /*
+                          A hover state on the whole row. The only thing that
+                          moved before was the button at the far right, so on a
+                          46rem-wide table there was nothing tying the business
+                          name under the pointer to the control being aimed at.
+                        */
+                        /*
+                          `align-middle`, now that the cells are one line each.
+                          `align-top` was holding the status chip and the button
+                          against the ceiling of a row three lines deep.
+                        */
+                        className="border-t border-line align-middle transition-colors hover:bg-canvas/50"
+                      >
+                        <td
+                          className="max-w-[15rem] truncate px-5 py-3.5 font-bold text-ink"
+                          title={r.application?.business_name ?? undefined}
+                        >
                           {businessName(
                             r.application?.business_name ? { name: r.application.business_name } : null,
                           )}
                         </td>
-                        <td className="tnum px-5 py-3.5 text-ink-secondary">
+                        <td className="tnum whitespace-nowrap px-5 py-3.5 text-ink-secondary">
                           {r.application?.tracking_id || 'Draft'}
                         </td>
-                        <td className="px-5 py-3.5">
-                          <span className="block font-semibold text-ink">{r.subject}</span>
+                        {/*
+                          `max-w-0` with a percentage width is the table
+                          equivalent of a max-width, and without it `truncate`
+                          inside a cell does nothing: a table cell sizes itself
+                          to its content, so the instructions simply pushed
+                          Office, Status and Action off the right-hand edge.
+                        */}
+                        <td className="max-w-0 px-5 py-3.5">
+                          <span className="block truncate font-semibold text-ink" title={r.subject}>
+                            {r.subject}
+                          </span>
                           {r.body && (
-                            <span className="mt-0.5 block max-w-md truncate text-xs text-ink-secondary">
+                            <span className="mt-0.5 block truncate text-xs text-ink-secondary">
                               {r.body}
                             </span>
                           )}
                         </td>
-                        <td className="px-5 py-3.5 text-ink-secondary">
+                        <td
+                          className="max-w-[10rem] truncate px-5 py-3.5 text-ink-secondary"
+                          title={
+                            isOfficer
+                              ? undefined
+                              : (r.from_office?.name ?? r.created_by?.department ?? undefined)
+                          }
+                        >
                           {/*
                             The office is the useful column for an owner — "who
                             is asking me for this" — and for an office reading
@@ -1016,14 +1297,21 @@ export function RequestsPage() {
                               : '—'
                             : (r.from_office?.name ?? r.created_by?.department ?? '—')}
                         </td>
-                        <td className="px-5 py-3.5">
+                        <td className="whitespace-nowrap px-5 py-3.5">
                           <StatusChip tone={rowTone}>{r.status_label}</StatusChip>
                         </td>
-                        <td className="px-5 py-3.5">
+                        <td className="whitespace-nowrap px-5 py-3.5 text-right">
                           <button
                             type="button"
                             onClick={() => setOpenId(r.id)}
-                            className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                            /*
+                              Named for the row it opens. Eleven buttons all
+                              reading "View" are eleven identical stops to
+                              anyone listening rather than looking
+                              (AGENTS.md 6.2).
+                            */
+                            aria-label={`${isOfficer && r.awaits_office ? 'Review' : 'View'} ${r.subject}`}
+                            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-royal-hover"
                           >
                             {/* An office with something waiting is being asked to
                                 review; everyone else is being offered a read. */}
@@ -1040,9 +1328,12 @@ export function RequestsPage() {
           {hasMore && (
             <button
               type="button"
-              onClick={() => setPage((p) => p + 1)}
-              disabled={loading}
-              className="mt-5 w-full rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas disabled:cursor-wait disabled:text-ink-muted"
+              onClick={() => {
+                if (!loading) setPage((p) => p + 1)
+              }}
+              // aria-disabled, never disabled (AGENTS.md 6.2).
+              aria-disabled={loading || undefined}
+              className="mt-5 w-full rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas aria-disabled:cursor-wait aria-disabled:text-ink-muted"
             >
               {loading ? 'Loading…' : 'Load more'}
             </button>
