@@ -13,6 +13,7 @@ use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationCorrection;
 use App\Models\ApplicationPermitType;
 use App\Models\ApplicationReturnNote;
 use App\Models\ApplicationStatusHistory;
@@ -947,12 +948,55 @@ class WorkflowService
     /** B: resubmit a returned form. returned → for_approval. */
     public function resubmit(Application $app): void
     {
+        /*
+         * Read BEFORE the assignments are cleared. `returned_by` is the
+         * officer holding the question, and the update below puts every
+         * returned assignment back to Pending — after it there is nothing
+         * left saying who sent this filing back.
+         */
+        $returnedBy = $app->assignments()
+            ->where('status', AssignmentStatus::Returned->value)
+            ->with('officer')
+            ->first()?->officer;
+
         DB::transaction(function () use ($app) {
             $app->assignments()
                 ->where('status', AssignmentStatus::Returned->value)
                 ->update(['status' => AssignmentStatus::Pending->value, 'remarks' => null]);
             $this->transition($app, ApplicationStatus::ForApproval, 'Applicant resubmitted revisions.');
         });
+
+        /*
+         * ── And the office is told ──────────────────────────────────────
+         *
+         * Outside the transaction, like every other notification here: a
+         * push that fails must not roll back a resubmission the applicant
+         * has already been shown as done.
+         *
+         * Falls back to whoever holds BPLO's assignment when the returning
+         * officer's account has gone — a notice that disappears with a
+         * staff change is the failure this exists to prevent.
+         */
+        /*
+         * The returning officer if the case was claimed; otherwise everyone
+         * in the office that holds it.
+         *
+         * `officer_user_id` is null until somebody takes the case, and a
+         * returned filing nobody has claimed is precisely the one that comes
+         * back unnoticed — so falling back to a second nullable officer, as
+         * the first version did, skipped the notification exactly when it
+         * was most needed. The office is the honest last answer: it is the
+         * same set of people the queue would show the filing to.
+         */
+        $recipients = $returnedBy !== null
+            ? collect([$returnedBy])
+            : User::where('department_id', $this->bploDepartmentId())->get();
+
+        $corrected = ApplicationCorrection::where('application_id', $app->id)->count();
+        $fresh = $app->fresh();
+        foreach ($recipients as $recipient) {
+            $this->notify->filingResubmitted($fresh, $recipient, $corrected);
+        }
     }
 
     /** Terminal rejection of the whole filing. Reachable from any live status. */
@@ -2839,12 +2883,13 @@ class WorkflowService
      * screen, and the applicant has already been told their amendment was
      * approved.
      *
-     * The link is Business Owner Status, which is where the transfer lives.
-     * Worth saying plainly that it did not exist when this was written — the
-     * admin "Reassign" screen moves FILINGS BETWEEN OFFICERS and nothing in
-     * the codebase moved a business between owner accounts, so an approved
-     * ownership amendment landed nowhere. Transferring one is the other half
-     * of this decision, not a nicety.
+     * The link is Owner Status, which is where the transfer lives:
+     * `BusinessStatusController::transferOwner` takes the new owner's e-mail
+     * and a reason, and the page offers it per business.
+     *
+     * This used to say the transfer did not exist. True when written, false
+     * once it shipped, and left standing long enough to mislead — see the note
+     * on AmendableFields for what that cost.
      */
     private function tellBploToMoveTheAccount(Application $app): void
     {
@@ -3130,7 +3175,28 @@ class WorkflowService
             }
 
             $old = AmendableFields::apply($business, $row->field, $row->new_value);
-            $row->update(['old_value' => $old, 'applied_at' => now()]);
+
+            /*
+             * `applied_at` only where something was actually written.
+             *
+             * `owner_name` is declared `writes: null` — the permit prints the
+             * ACCOUNT holder's name and BPLO moves the account by hand — so
+             * stamping it marked a transfer as done while the business still
+             * belonged to the previous account. The old value is still
+             * recorded: "recorded, pending the transfer" is a real state and
+             * a null `applied_at` is how it reads.
+             */
+            $applied = AmendableFields::writesToRecord($row->field);
+            $row->update([
+                'old_value' => $old,
+                'applied_at' => $applied ? now() : null,
+            ]);
+
+            /*
+             * Still counted as CHANGED. The offices and the fee both care
+             * that an ownership amendment was granted, whoever finishes the
+             * paperwork — it is the approval that is the decision.
+             */
             $written[] = $row->field;
         }
 

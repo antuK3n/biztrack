@@ -229,3 +229,202 @@ it('corrects fields on two different records in one submission', function () {
         ->and($fresh->business->trade_name)->toBe('Both Records')
         ->and(ApplicationCorrection::where('application_id', $app->id)->count())->toBe(2);
 });
+
+/*
+ * ── The section half of a return ─────────────────────────────────────────────
+ *
+ * Fifteen of the thirty targets are whole sections — the line-of-business
+ * table, the uploaded documents, the owner's name parts — and only the wizard
+ * can edit those. `update` was Draft-only until 28 September 2026, so a return
+ * naming one of them reached the applicant with no way to answer it: the
+ * wizard redirected away and the API refused the write.
+ *
+ * Client: *"when the applicant resubmits that specific field (via Return), it
+ * will overwrite the past record, then the application filing will open again
+ * for Approval or Return."*
+ */
+it('lets the applicant edit a filing BPLO returned', function () {
+    $app = filingReturnedAbout('form:lines');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}", ['title' => 'Edited while returned'])
+        ->assertOk();
+
+    expect($app->fresh()->title)->toBe('Edited while returned')
+        // Editing does not itself resubmit — the applicant may make several
+        // changes before sending it back.
+        ->and($app->fresh()->status->value)->toBe('returned');
+});
+
+it('reopens the filing for BPLO once the applicant resubmits', function () {
+    $app = filingReturnedAbout('form:lines');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}", ['title' => 'Fixed'])
+        ->assertOk();
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/resubmit")
+        ->assertOk();
+
+    // "open again for Approval or Return" — back in front of BPLO.
+    expect($app->fresh()->status->value)->toBe('for_approval');
+});
+
+it('still refuses to edit a filing that is with an office', function () {
+    /*
+     * The guard was widened by exactly one status, not removed. A filing at
+     * For Approval is being read by BPLO and must not move under them.
+     */
+    $app = filingReturnedAbout('form:lines');
+    app(WorkflowService::class)->resubmit($app);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}", ['title' => 'Sneaked in'])
+        ->assertStatus(422);
+
+    expect($app->fresh()->title)->not->toBe('Sneaked in');
+});
+
+/*
+ * ── The Mayor's Permit timeline shows what happened to the FILING ────────────
+ *
+ * Client, 28 September 2026: *"Why is it not listed in the tracking status?
+ * Make sure those events are listed too."*
+ *
+ * A per-permit timeline reads `application_status_history` rows carrying a
+ * `permit_type_id`, which only `transitionClearance` writes. A main-form
+ * return moves the APPLICATION, so its row has a null permit_type_id and
+ * belonged to no permit — the Mayor's Permit read "Application submitted"
+ * through a return, a correction and a resubmission.
+ */
+it('lists the filing’s own moves on the Mayor’s Permit timeline', function () {
+    $app = filingReturnedAbout('form:trade_name');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:trade_name' => 'Corrected Name'],
+        ])
+        ->assertOk();
+
+    $res = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$app->id}")
+        ->assertOk();
+
+    $outcome = collect($res->json('data.permit_types'))
+        ->firstWhere('code', PermitType::OUTCOME_CODE);
+
+    $moves = collect($outcome['history'])->pluck('to_status')->all();
+
+    // The round trip, in order: sent back, then handed in again.
+    expect($moves)->toContain('returned')
+        ->and($moves)->toContain('for_approval');
+});
+
+it('keeps the filing’s moves off the other permits’ timelines', function () {
+    /*
+     * A sanitary permit's timeline is what the City Health Office did. Folding
+     * the filing's own moves into it would bury the two or three events that
+     * office actually caused.
+     */
+    $app = filingReturnedAbout('form:trade_name');
+
+    $res = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$app->id}")
+        ->assertOk();
+
+    foreach ($res->json('data.permit_types') as $pt) {
+        if ($pt['code'] === PermitType::OUTCOME_CODE) {
+            continue;
+        }
+
+        expect(collect($pt['history'])->pluck('to_status')->all())
+            ->not->toContain('returned', "{$pt['code']} carries the filing's own history");
+    }
+});
+
+/*
+ * ── The office is told when the answer arrives ───────────────────────────────
+ *
+ * `resubmit()` notified the APPLICANT that their own filing had moved and told
+ * the officer nothing — so a filing the office had asked a question about came
+ * back silently, while the RA 11032 clock, which counts from the filing date
+ * and never stopped, kept running. `requestResponded` has always done this for
+ * the smaller case of a requirement.
+ */
+it('tells the officer who returned it that corrections arrived', function () {
+    $app = filingReturnedAbout('form:trade_name');
+
+    $bplo = App\Models\User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    $before = $bplo->notifications()->count();
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:trade_name' => 'Corrected Name'],
+        ])
+        ->assertOk();
+
+    expect($bplo->notifications()->count())->toBeGreaterThan($before);
+
+    $latest = $bplo->notifications()->latest('id')->first();
+    expect($latest->title)->toBe('Corrections received')
+        // Counted from the corrections themselves, so the officer knows the
+        // size of what came back before opening it.
+        ->and($latest->body)->toContain('1 field corrected')
+        ->and($latest->body)->toContain($app->fresh()->tracking_id)
+        // Into the LGU site, not the applicant's.
+        ->and($latest->link)->toContain('/staff/queue/');
+});
+
+/*
+ * ── A sole proprietor's derived pair stays derived ───────────────────────────
+ *
+ * The form locks item 15 (President / OIC, from the proprietor's own name) and
+ * item 17 (Capital Participation, 100 if Filipino and 0 if not) for a sole
+ * proprietorship — one owner, no separate juridical personality, so the
+ * capital is theirs and the share can only be all or none.
+ *
+ * That rule lived in ApplyWizard and nowhere else. `BusinessController` writes
+ * whatever it is handed, so a correction could put a figure into the register
+ * that the form itself would have refused.
+ */
+it('re-derives a sole proprietor’s capital share from the citizenship it was given', function () {
+    $app = filingReturnedAbout('form:citizenship');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:citizenship' => 'Chinese'],
+        ])
+        ->assertOk();
+
+    // Not Filipino, so the Filipino share of a one-owner business is nil.
+    expect((float) $app->fresh()->business->capital_participation_filipino)->toBe(0.0);
+
+    // And back again, to prove it follows rather than latching.
+    app(WorkflowService::class)->returnMainForm($app->fresh(), 'Again.', 'form:citizenship');
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:citizenship' => 'Filipino'],
+        ])
+        ->assertOk();
+
+    expect((float) $app->fresh()->business->capital_participation_filipino)->toBe(100.0);
+});
+
+it('leaves a corporation’s capital share alone', function () {
+    /*
+     * A corporation's capital is POOLED — the 60/40 rules live there — so the
+     * share is a real number the applicant knows and this must not overwrite.
+     */
+    $app = filingReturnedAbout('form:citizenship');
+    $app->business->update(['registration_type' => 'corporation']);
+    $app->business->update(['capital_participation_filipino' => 60]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:citizenship' => 'Chinese'],
+        ])
+        ->assertOk();
+
+    expect((float) $app->fresh()->business->capital_participation_filipino)->toBe(60.0);
+});

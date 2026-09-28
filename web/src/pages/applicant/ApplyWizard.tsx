@@ -1,6 +1,17 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import {
+  TIN_ERROR,
+  emailValid,
+  lotAreaValid,
+  percentValid,
+  phoneValid,
+  plainAmount,
+  registrationNumberValid,
+  tinValid,
+  websiteValid,
+} from '../../lib/fieldRules'
 import { mainFormTargets } from '../../lib/returnTargets'
 import { PsicPicker, type PsicPickerHandle } from '../../components/PsicPicker'
 import {
@@ -891,10 +902,6 @@ function hasPresidentOrOfficer(_registrationType: string): boolean {
 }
 
 /** A lot area in sq. m.: a positive number, commas allowed. Blank is not checked here. */
-function lotAreaValid(raw: string): boolean {
-  const n = Number(plainAmount(raw))
-  return plainAmount(raw) !== '' && Number.isFinite(n) && n > 0 && n <= 10_000_000
-}
 
 /**
  * A saved capital participation, as the applicant would have typed it.
@@ -912,14 +919,6 @@ function percentToInput(raw: string | null | undefined): string {
 }
 
 /** 0-100 with up to two decimals, or blank. Percentages are not money. */
-function percentValid(raw: string): boolean {
-  const trimmed = raw.trim()
-  if (!trimmed) return true
-  if (!/^\d{1,3}(\.\d{1,2})?$/.test(trimmed)) return false
-  const n = Number(trimmed)
-
-  return Number.isFinite(n) && n >= 0 && n <= 100
-}
 
 /* ── Form of organization, and the agency it decides (item 94) ──────────── */
 
@@ -1104,10 +1103,6 @@ function normalizeRegistrationType(raw: string | null | undefined): string {
  * shortest real reference found anywhere, SEC's "1074". BusinessController
  * applies the identical rule.
  */
-function registrationNumberValid(raw: string): boolean {
-  const trimmed = raw.trim()
-  return trimmed.length >= 4 && /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-/]*$/.test(trimmed)
-}
 
 /*
  * `normalizeRegistrationNumber` was here, mirroring
@@ -1132,28 +1127,13 @@ function registrationNumberValid(raw: string): boolean {
  * has one, written with any of the usual separators (123-456-789-000,
  * 123 456 789, 123456789). The API normalises and re-checks the same shape.
  */
-function tinValid(raw: string): boolean {
-  const trimmed = raw.trim()
-  if (!/^[\d\s.-]+$/.test(trimmed)) return false
-  const digits = trimmed.replace(/\D/g, '').length
-  return digits === 9 || (digits >= 12 && digits <= 14)
-}
 
-const TIN_ERROR =
-  'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'
 
 /**
  * Philippine contact number: an 11-digit mobile (09XX XXX XXXX), the same
  * number written +63, or a landline with or without its area code. Deliberately
  * lenient about separators — the point is to catch a typo, not a format.
  */
-function phoneValid(raw: string): boolean {
-  const trimmed = raw.trim()
-  if (!/^[+\d\s().-]+$/.test(trimmed)) return false
-  const digits = trimmed.replace(/\D/g, '').length
-
-  return digits >= 7 && digits <= 13
-}
 
 const PHONE_ERROR = 'Enter a Philippine mobile or landline number, like 09171234567 or 8123 4567.'
 
@@ -1163,13 +1143,6 @@ const PHONE_ERROR = 'Enter a Philippine mobile or landline number, like 09171234
  * a sentence or an email address, which is the mistake this field actually
  * attracts — the point is to catch a wrong KIND of answer, not to police a URL.
  */
-function websiteValid(raw: string): boolean {
-  const trimmed = raw.trim()
-  if (!trimmed) return true
-  if (trimmed.includes('@') || /\s/.test(trimmed)) return false
-
-  return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(trimmed)
-}
 
 /**
  * BPLO item A8 — the BUSINESS's own e-mail, which became required on
@@ -1182,16 +1155,8 @@ function websiteValid(raw: string): boolean {
  * mailbox as far as this form is concerned, and refusing a valid unusual
  * address is a worse failure than accepting a typo an officer will notice.
  */
-function emailValid(raw: string): boolean {
-  const trimmed = raw.trim()
-
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
-}
 
 /** Strip the display separators before an amount goes to the API. */
-function plainAmount(raw: string): string {
-  return raw.replace(/,/g, '').trim()
-}
 
 /* ── Attachments ──────────────────────────────────────────────────────── */
 
@@ -3023,6 +2988,13 @@ export function ApplyWizard() {
    * Empty for every filing that was not returned about a section, which is
    * almost all of them — and empty therefore means "no restriction", not
    * "no steps". See the `sequence` memo.
+   */
+  /**
+   * The wizard steps a returned filing is allowed to show.
+   *
+   * Empty for a draft and for a return that named only scalar fields — those
+   * are corrected on the status page and never open this wizard. Empty
+   * therefore means NO RESTRICTION, not "no steps"; see the `sequence` memo.
    */
   const [returnedPhases, setReturnedPhases] = useState<string[]>([])
   /**
@@ -7610,7 +7582,15 @@ export function ApplyWizard() {
     setSaving(true)
     setSubmitError(null)
     try {
-      const app = await applications.submit(applicationId)
+      /*
+       * A returned filing RESUBMITS. `submit` is draft-only on the API and
+       * would answer 422 here; `resubmit` is the transition that exists for
+       * this — returned → for_approval — and is what puts the filing back
+       * in front of BPLO for another Approve or Return.
+       */
+      const app = returnedPhases.length > 0
+        ? await applications.resubmit(applicationId)
+        : await applications.submit(applicationId)
       setTracking(app.tracking_id)
     } catch (err) {
       setSubmitError(toApiError(err).message)
@@ -7634,7 +7614,17 @@ export function ApplyWizard() {
       try {
         const app = await applications.get(draftId)
         if (!active) return
-        if (app.status !== 'draft') {
+        /*
+         * Drafts and RETURNED filings only. Everything else is with an
+         * office and is read-only to the applicant, so it goes to the
+         * status page rather than opening an editor over it.
+         *
+         * `returned` was excluded until 28 September 2026, which made the
+         * section half of the targeted return unreachable — see the note at
+         * the head of this patch, and the matching guard in
+         * ApplicationController::update.
+         */
+        if (app.status !== 'draft' && app.status !== 'returned') {
           navigate(`/applications/${app.id}`, { replace: true })
           return
         }
@@ -7661,15 +7651,16 @@ export function ApplyWizard() {
         setApplicationId(app.id)
         setFiledAt(app.submitted_at ?? app.created_at)
         /*
-         * Which sections BPLO ticked when it returned this filing, if it
-         * did. Read once at hydration rather than kept live: the applicant
-         * is mid-correction from here on, and a list that changed under
-         * them would move the steps out from under the one they are on.
+         * ── Which sections BPLO ticked, when it returned this ───────────
          *
-         * Only while RETURNED. The pointer survives resubmission so the
-         * officer can still see what the last round was about, and
-         * restricting a filing that is back with BPLO would lock an
-         * applicant out of a form nobody has asked them to change.
+         * Read once at hydration rather than kept live: the applicant is
+         * mid-correction from here on, and a list that changed under them
+         * would move the steps out from under the one they are on.
+         *
+         * Empty for a draft, and empty for a return that named only scalar
+         * fields — those are corrected on the status page and never open
+         * this wizard at all. Empty means no restriction, so a draft is
+         * unaffected.
          */
         setReturnedPhases(
           app.status === 'returned'
@@ -7684,6 +7675,26 @@ export function ApplyWizard() {
               )
             : [],
         )
+        /*
+         * ── Historical note, kept ───────────────────────────────────────
+         *
+         * This read the sections BPLO ticked and restricted the wizard to
+         * them. It was dead code from the moment it was written: the guard
+         * twenty lines up redirects anything that is not a DRAFT to the
+         * status page, and `PUT /applications/{id}` refuses the same
+         * ("Only draft applications can be edited"). TypeScript said so —
+         * comparing the narrowed `'draft'` against `'returned'` has no
+         * overlap — and the error went unseen because the typecheck being
+         * run pointed at a solution file that compiles nothing.
+         *
+         * So section targets currently have NO route for the applicant: the
+         * status page can only correct scalar fields, and the link it offers
+         * to this wizard bounces straight back. Opening `returned` for
+         * editing is the fix and it needs the API rule relaxed with it, which
+         * is a decision rather than a patch. `returnedPhases` and the
+         * `sequence` branch that reads it are left in place, correct and
+         * unreachable, so that fix is a guard change rather than a rewrite.
+         */
         setTitle(app.title ?? '')
         // A draft that arrives already named was named by somebody. Treat that
         // as the applicant's own words and stop generating over it, even if the

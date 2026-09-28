@@ -14,6 +14,11 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import {
+  registrationNumberHint,
+  registrationNumberLabel,
+  scalarFieldRule,
+} from '../../lib/fieldRules'
 import { mainFormTargets } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
@@ -109,6 +114,110 @@ function MessageIcon({ size = 26 }: { size?: number }) {
  * sits under a sentence that says so rather than leaving an applicant to infer
  * it from four green rows and a fifth that is still pending.
  */
+/**
+ * One correction box, carrying its own field's rule.
+ *
+ * The rule comes from `lib/fieldRules`, which the WIZARD imports too — so a
+ * TIN is checked here exactly as it is checked on the form that first asked
+ * for it, because it is the same function and not a second copy of it.
+ * Client, 28 September 2026: *"this should carry the validation rules from
+ * their application fields as well. Ensure consistency."*
+ *
+ * The message waits for `touched`. A field that says "enter a valid TIN" on
+ * the first keystroke is telling somebody they are wrong for having started.
+ */
+function CorrectionInput({
+  code,
+  label,
+  value,
+  touched,
+  onChange,
+  onBlur,
+}: {
+  code: string
+  label: string
+  value: string
+  touched: boolean
+  onChange: (value: string) => void
+  onBlur: () => void
+}) {
+  const rule = scalarFieldRule(code)
+  const error = touched ? rule.validate(value) : undefined
+  const errorId = `correction-error-${code.replace(/[^a-z0-9]/gi, '-')}`
+
+  /*
+   * A field the form asks as a CHOICE gets a choice here. Citizenship is
+   * the case: free text would let a correction put back the very spelling
+   * spread the select exists to prevent, on a field the city's register
+   * counts.
+   *
+   * Picking "Other" clears the box rather than storing the word "Other",
+   * so the applicant types the nationality itself — the same two-step the
+   * form uses.
+   */
+  const known = rule.choices?.some((c) => c.value === value) ?? false
+  if (rule.choices) {
+    return (
+      <>
+        <select
+          value={known ? value : value === '' ? '' : 'Other'}
+          onChange={(e) => onChange(e.target.value === 'Other' ? '' : e.target.value)}
+          onBlur={onBlur}
+          aria-label={label}
+          className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+        >
+          <option value="">Select</option>
+          {rule.choices.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        {/* Only for the rare answer, so the common one stays one click. */}
+        {!known && (
+          <input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            placeholder="Which nationality"
+            maxLength={rule.maxLength}
+            aria-label={`${label} — other`}
+            className="mt-2 w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+          />
+        )}
+        {error && (
+          <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
+            {error}
+          </p>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        /* Mirrors the wizard's own input, so the phone keypad matches. */
+        inputMode={rule.inputMode}
+        maxLength={rule.maxLength}
+        aria-label={label}
+        aria-invalid={error !== undefined}
+        aria-describedby={error ? errorId : undefined}
+        className={`w-full rounded-lg border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 ${
+          error ? 'border-s-red focus:ring-s-red' : 'border-input-border focus:ring-royal'
+        }`}
+      />
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
+          {error}
+        </p>
+      )}
+    </>
+  )
+}
 function OfficeVisits({ app }: { app: Application }) {
   /*
    * Highest id per department. `reduce` rather than a sort, because the payload
@@ -391,6 +500,13 @@ export function ApplicationDetailPage() {
    * asks the question the officer asked.
    */
   const [corrections, setCorrections] = useState<Record<string, string>>({})
+  /*
+   * A box the applicant has left. Its rule is not shown before that — an
+   * "enter a valid TIN" that appears on the first keystroke is telling
+   * somebody they are wrong for having started.
+   */
+  const [touchedCorrections, setTouchedCorrections] = useState<Record<string, boolean>>({})
+
   const [savingCorrections, setSavingCorrections] = useState(false)
   const [correctionError, setCorrectionError] = useState<string | null>(null)
   /*
@@ -494,8 +610,47 @@ export function ApplicationDetailPage() {
     status === 'returned'
       ? app.assignments.flatMap((a) => mainFormTargets(a.remarks_target))
       : []
-  const returnedScalars = returnedFields.filter((t) => t.kind === 'scalar')
-  const returnedSections = returnedFields.filter((t) => t.kind === 'section')
+  /*
+   * ── Two fields a sole proprietor does not type ────────────────────────
+   *
+   * The form derives and locks item 15 from the proprietor's own name and
+   * item 17 from their citizenship, and the corrections endpoint re-derives
+   * both on write. Offering a box here would take an answer, send it, and
+   * silently replace it — worse than not offering one, because the
+   * applicant would believe they had answered.
+   *
+   * Moved to the SECTION list instead, where they are corrected on the form
+   * beside the field that actually drives them. Only for a sole
+   * proprietorship: a corporation's president and pooled capital are real
+   * answers nobody else knows.
+   */
+  const DERIVED_FOR_SOLE_PROPRIETOR = ['form:president_officer_name', 'form:capital_participation']
+  const derivedHere =
+    app.business?.registration_type === 'sole_proprietorship'
+      ? DERIVED_FOR_SOLE_PROPRIETOR
+      : []
+
+  const returnedScalars = returnedFields.filter(
+    (t) => t.kind === 'scalar' && !derivedHere.includes(t.value),
+  )
+  const returnedSections = returnedFields.filter(
+    (t) => t.kind === 'section' || derivedHere.includes(t.value),
+  )
+
+  /*
+   * Every field BPLO named, answered and valid.
+   *
+   * Gates the Submit button AND hides the bare Resubmit further down, so
+   * there is no route back to BPLO that skips the corrections. `validate`
+   * is the field's own rule from `lib/fieldRules` — the same one the
+   * application form applies — so "filled in" means filled in ACCEPTABLY,
+   * not merely non-empty.
+   */
+  const correctionsComplete = returnedScalars.every(
+    (t) =>
+      (corrections[t.value] ?? '').trim() !== ''
+      && scalarFieldRule(t.value).validate(corrections[t.value] ?? '') === undefined,
+  )
 
   async function submitCorrections() {
     setCorrectionError(null)
@@ -515,8 +670,27 @@ export function ApplicationDetailPage() {
       return
     }
 
+    /*
+     * And every answer has to satisfy its own field's rule — the same rule
+     * the wizard applies, from `lib/fieldRules`. Re-run over ALL of them
+     * rather than trusting the live messages: a box nobody touched shows no
+     * message and can still be wrong.
+     */
+    const firstBad = returnedScalars
+      .map((t) => ({ t, error: scalarFieldRule(t.value).validate(corrections[t.value] ?? '') }))
+      .find((r) => r.error !== undefined)
+    if (firstBad) {
+      setTouchedCorrections((prev) => ({ ...prev, [firstBad.t.value]: true }))
+      setCorrectionError(`${firstBad.t.label}: ${firstBad.error}`)
+
+      return
+    }
+
     setSavingCorrections(true)
     try {
+      // `app` is non-null past the guard above, but the closure cannot carry
+      // that narrowing, so it is re-established here rather than asserted.
+      if (!app) return
       const fields: Record<string, string> = {}
       for (const t of returnedScalars) fields[t.value] = (corrections[t.value] ?? '').trim()
       await applications.corrections(app.id, fields)
@@ -1071,7 +1245,30 @@ export function ApplicationDetailPage() {
                   {returnedScalars.map((t) => (
                     <label key={t.value} className="block">
                       <span className="block text-[13px] font-semibold text-ink">
-                        {t.label}
+                        {/*
+                          The registration number is named for the AGENCY that
+                          issued it, exactly as the form names it — a
+                          cooperative is asked for its CDA number, not for a
+                          generic one. Every other field keeps the picker's
+                          own label, which already matches the form.
+                        */}
+                        {t.value === 'form:registration_number'
+                          ? `2. ${registrationNumberLabel(app.business?.registration_type)}`
+                          : t.label}{' '}
+                        {/*
+                          The same marker the application form uses on a
+                          required question. These are the strongest
+                          requirement in the system — an office has asked for
+                          them by name — and carried nothing until now.
+
+                          The glyph is decoration and the word is the signal,
+                          which is why the screen-reader text is spelled out
+                          rather than left as a bare asterisk.
+                        */}
+                        <span aria-hidden="true" className="text-s-red">
+                          *
+                        </span>
+                        <span className="sr-only">(required)</span>
                       </span>
                       {/*
                         What BPLO said about THIS field, between its name and
@@ -1092,14 +1289,28 @@ export function ApplicationDetailPage() {
                           {(app.return_notes ?? {})[t.value]}
                         </span>
                       )}
+                      {/*
+                        Which certificate to copy it from — the form's own
+                        hint, shown only where there is one to give.
+                      */}
+                      {t.value === 'form:registration_number'
+                        && registrationNumberHint(app.business?.registration_type) && (
+                        <span className="mb-1.5 block text-xs text-ink-muted">
+                          {registrationNumberHint(app.business?.registration_type)}
+                        </span>
+                      )}
                       {!(app.return_notes ?? {})[t.value] && <span className="mb-1.5 block" />}
-                      <input
+                      <CorrectionInput
+                        code={t.value}
+                        label={t.label}
                         value={corrections[t.value] ?? ''}
-                        onChange={(e) =>
-                          setCorrections((prev) => ({ ...prev, [t.value]: e.target.value }))
+                        touched={Boolean(touchedCorrections[t.value])}
+                        onChange={(v) =>
+                          setCorrections((prev) => ({ ...prev, [t.value]: v }))
                         }
-                        maxLength={255}
-                        className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+                        onBlur={() =>
+                          setTouchedCorrections((prev) => ({ ...prev, [t.value]: true }))
+                        }
                       />
                     </label>
                   ))}
@@ -1144,8 +1355,14 @@ export function ApplicationDetailPage() {
                 <button
                   type="button"
                   onClick={submitCorrections}
-                  disabled={savingCorrections}
-                  className="mt-5 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
+                  disabled={savingCorrections || !correctionsComplete}
+                  /*
+                    `disabled`, not `aria-disabled`: unlike Approve on the
+                    officer's sheet there is no rule to explain here beyond
+                    the empty boxes directly above, which say it themselves
+                    and carry their own messages once touched.
+                  */
+                  className="mt-5 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {savingCorrections ? 'Sending…' : 'Submit corrections'}
                 </button>
@@ -1162,7 +1379,7 @@ export function ApplicationDetailPage() {
             <ul className="mt-5 space-y-4">
               {(remarks.length > 0
                 ? remarks
-                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.', field: null }]
+                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.', fields: [] }]
               ).map((r, i) => (
                 <li
                   key={i}
@@ -1197,10 +1414,35 @@ export function ApplicationDetailPage() {
               ))}
             </ul>
             <div className="mt-5 flex justify-end">
+              {/*
+                ── The bare Resubmit is withheld while fields are open ────
+
+                It predates the corrections card and calls `resubmit`
+                straight out, so an applicant could ignore the boxes above
+                and hand the filing back unchanged: BPLO returns it over a
+                wrong registration number, they press this, and it arrives
+                at For Approval with the same wrong number. Client,
+                28 September 2026: *"DO NOT ALLOW RESUBMISSION UNTIL A FIELD
+                IS FILLED."*
+
+                Gated on there being NO boxes at all, not on the boxes being
+                filled. Gating on "filled" meant both buttons appeared the
+                moment the field was valid — two ways to do one thing, which
+                is what the client saw next. When this page has correction
+                boxes, Submit corrections IS the resubmit: it writes and
+                resubmits in one transaction.
+
+                Not deleted, because a return naming only SECTIONS — the
+                line-of-business table, the uploaded documents — has no boxes
+                here. That filing is fixed in the wizard and still needs a
+                way back.
+              */}
               {status === 'returned' ? (
-                <PillButton onClick={runResubmit} disabled={action === 'resubmit'}>
-                  {action === 'resubmit' ? 'Resubmitting…' : 'Resubmit'}
-                </PillButton>
+                returnedScalars.length === 0 && (
+                  <PillButton onClick={runResubmit} disabled={action === 'resubmit'}>
+                    {action === 'resubmit' ? 'Resubmitting…' : 'Resubmit'}
+                  </PillButton>
+                )
               ) : (
                 <PillButton onClick={() => navigate('/apply')}>Re-apply</PillButton>
               )}
