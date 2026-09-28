@@ -61,6 +61,14 @@ Route::prefix('auth')->group(function () {
         Route::get('profile/photo', [AuthController::class, 'showPhoto']);
         Route::delete('profile/photo', [AuthController::class, 'destroyPhoto']);
         Route::put('password', [AuthController::class, 'updatePassword']);
+        /*
+         * The code a password change needs while mail is on [checklist
+         * 2026-09-27, Edit Settings]. The first code and every resend; the
+         * per-account ration (one a minute, five per code) is inside the
+         * method, this limiter caps password guesses against the session.
+         */
+        Route::post('password/code', [AuthController::class, 'requestPasswordCode'])
+            ->middleware('throttle:6,1');
         // Laravel's own convention for this endpoint. The per-account limiter
         // inside the method is the tighter of the two — see the note there.
         Route::post('email/resend', [AuthController::class, 'resendVerification'])

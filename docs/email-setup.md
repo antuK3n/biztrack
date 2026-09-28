@@ -9,9 +9,10 @@ issued, expiry reminders, account suspended or restored. The code is finished.
 Until those lines are in, e-mails are written to `api/storage/logs/laravel.log`
 instead of being sent (`MAIL_MAILER=log`). Nothing breaks either way.
 
-**Setting a real mailer also switches on two sign-in rules** (section 7): a
-six-digit code by e-mail at every sign-in, and a confirmed address before an
-owner can file. Read section 7 before changing `MAIL_MAILER`.
+**Setting a real mailer also switches on three account rules** (section 7): a
+six-digit code by e-mail at every sign-in, a confirmed address before an owner
+can file, and a code by e-mail before a password change in Settings. Read
+section 7 before changing `MAIL_MAILER`.
 
 SMS is not part of this. The SMS driver still only writes to the log.
 
@@ -26,8 +27,9 @@ number), the business name and a link into the owner's site built from
 `FRONTEND_URL`. A **queue worker** picks the job up and sends it through the
 configured mailer. The job tries 3 times (1 minute, then 5 minutes apart). If
 the mail server is down, the officer's action still goes through. The failure
-is only logged. Staff do not get these e-mails. The sign-in and confirmation
-codes (section 7) are separate e-mails, sent straight away rather than queued.
+is only logged. Staff do not get these e-mails. The sign-in, confirmation and
+password-change codes (section 7) are separate e-mails, sent straight away
+rather than queued.
 
 Code: `api/app/Jobs/SendOwnerUpdateEmail.php`, `api/app/Mail/OwnerUpdate.php`,
 `api/resources/views/mail/owner-update*.blade.php`,
@@ -176,11 +178,11 @@ The day's usage is shown in the Brevo dashboard.
   in all day). Revisit if an office asks for it.
 - **SMS.** Out of scope for now; `SMS_DRIVER=log`.
 
-## 7. Sign-in codes and address confirmation — on with the mailer
+## 7. Sign-in, address and password-change codes — on with the mailer
 
-Two more e-mails, both a six-digit code, both built and both **off while
+Three more e-mails, all a six-digit code, all built and all **off while
 `MAIL_MAILER` is `log` or `array`**. The moment it is anything else (`smtp` for
-Brevo), both switch on together. The decision is made in one place,
+Brevo), all three switch on together. The decision is made in one place,
 `api/app/Support/EmailSwitch.php`; there is no separate flag.
 
 | | Mail off (`log`, today) | Mail on (`smtp`) |
@@ -189,6 +191,7 @@ Brevo), both switch on together. The decision is made in one place,
 | Sign-up | the old confirmation link is written to the log | a confirmation code is e-mailed |
 | Filing (Submit on a draft) | allowed | refused until the address is confirmed |
 | Profile | nothing extra | "Confirm your email address" box, for owners who have not |
+| Change Password (Settings, every account) | current password only | current password, then a code e-mailed to the account |
 
 **The sign-in code** (`Your BizTrack sign-in code`). Sent after a correct
 password, for owners, officers and the super admin. Works for 10 minutes and 5
@@ -203,9 +206,20 @@ wizard. Works for 30 minutes and 5 wrong tries; only the newest one works. The
 resend is limited to 3 in 15 minutes per account. Drafting is never blocked,
 only Submit, and resubmitting a filing an office sent back is not blocked.
 
-Both are **sent immediately, not queued**: somebody is waiting at the sign-in
-page, and a queued code with no worker running would never arrive. No worker is
-needed for these two.
+**The password-change code** (`Your code to change your BizTrack password`).
+Sent from Settings → Change Password → Send Code, only after the current
+password is checked, so a signed-in session on its own cannot trigger one.
+Works for 10 minutes and 5 wrong tries, like the sign-in code. Wrong codes
+count toward the same 15-minute lockout as wrong passwords and wrong sign-in
+codes; the lockout stops further codes and guesses but does not sign out the
+session in use. "Send a new code" works once a minute, up to 5 e-mails per
+code. A sign-in code is never accepted here, nor this code at sign-in. No
+"your password was changed" e-mail is sent afterwards (not built; the change
+already signs out every other device).
+
+All three are **sent immediately, not queued**: somebody is waiting at the
+screen that asked, and a queued code with no worker running would never arrive.
+No worker is needed for these.
 
 Codes are stored only as hashes (`email_codes` table). The code is not in the
 subject line, so it does not show on a locked phone's notification.
@@ -213,8 +227,12 @@ subject line, so it does not show on a locked phone's notification.
 Settings: `api/config/auth.php` → `email_codes` (expiry, tries, resend wait).
 Code: `api/app/Support/EmailCodes.php`, `api/app/Mail/OneTimeCode.php`,
 `api/resources/views/mail/one-time-code*.blade.php`, the sign-in and confirm
-methods in `AuthController`, `EnsureEmailConfirmedToFile` on the submit route.
-Tests: `api/tests/Feature/EmailCodeTest.php`.
+methods in `AuthController` (and `requestPasswordCode` / `updatePassword` for
+the password code), `EnsureEmailConfirmedToFile` on the submit route,
+`web/src/components/ChangePasswordModal.tsx`.
+Tests: `api/tests/Feature/EmailCodeTest.php`,
+`api/tests/Feature/PasswordChangeCodeTest.php`,
+`web/e2e/password-change.spec.ts`.
 
 **Before switching the mailer on:**
 

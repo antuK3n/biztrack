@@ -29,6 +29,12 @@ export interface User {
    * share this type and never carry it.
    */
   email_verification_required?: boolean
+  /*
+   * True while the API has a real mailer: Settings must e-mail a code before
+   * a password change goes through [checklist 2026-09-27, Edit Settings].
+   * Optional for the same reason as the line above.
+   */
+  password_change_code_required?: boolean
   roles: string[]
   permissions: string[]
 }
