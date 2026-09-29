@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeftIcon, CheckCircleFilledIcon } from '../../components/icons'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeftIcon, CheckCircleFilledIcon, ClockIcon, XCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
@@ -9,47 +9,148 @@ import { formatDateTime, formatMoney, paymentMethodLabel } from '../../lib/forma
 import { toApiError } from '../../lib/api'
 import { applications, payments } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { FeeAssessment, Payment, PaymentMethod } from '../../lib/types'
+import type { FeeAssessment, Payment, PaymentMethod, PaymentOptions } from '../../lib/types'
 
 /*
  * Pay page (PDF p51): the white "Tax Order of Payment" card — serif
  * Reference No / Description / Charge / Total Amount — light-blue method
  * chips, and a royal "Pay Online" pill. Success flips to the green Paid state.
+ *
+ * ── Two ways a payment is made (docs/payment-gateway.md) ─────────────────
+ *
+ * The super admin's switch decides, and this page asks the server which one is
+ * on rather than assuming (`payments.options`):
+ *
+ *   simulated  Pay → Paid in the same press, exactly as before the switch.
+ *   online     Pay → the owner finishes in their GCash / Maya / bank app, by
+ *              following a link or scanning a QR code → this page waits, asks
+ *              the server every few seconds, and shows Paid once the payment
+ *              service has confirmed it. It never shows Paid on its own
+ *              say-so: "accepted" is not "paid".
+ *
+ * The method chips come from the server for the same reason — Card exists only
+ * in simulated mode, QR Ph and GoTyme only online.
+ *
+ * Coming back from the payment app lands here with `?payment=<id>&returned=1`
+ * (the gateway's return address). `returned` makes the page ask once straight
+ * away instead of waiting for the next poll.
  */
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: 'gcash', label: 'GCash' },
-  { value: 'maya', label: 'Maya' },
-  { value: 'card', label: 'Card' },
-]
+const POLL_MS = 5000
 
 export function PayPage() {
   const { id = '' } = useParams()
   const appId = Number(id)
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
 
   const { data: app, loading: appLoading, error: appError, reload } = useAsync(
     () => applications.get(appId),
     [appId],
   )
   const { data: fee } = useAsync<FeeAssessment>(() => payments.fee(appId), [appId])
+  const {
+    data: options,
+    error: optionsError,
+    reload: reloadOptions,
+  } = useAsync<PaymentOptions>(() => payments.options(appId), [appId])
 
-  const [method, setMethod] = useState<PaymentMethod>('gcash')
+  const [method, setMethod] = useState<PaymentMethod | null>(null)
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState<string | null>(null)
-  const [receipt, setReceipt] = useState<Payment | null>(null)
+  /** The payment this screen is showing: none yet, waiting, paid or failed. */
+  const [attempt, setAttempt] = useState<Payment | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null)
+  const [checkNote, setCheckNote] = useState<string | null>(null)
+
+  /* ── Resume: back from the payment app, or a payment already in flight ── */
+  const returnedId = Number(params.get('payment')) || null
+  const returned = params.get('returned') === '1'
+  const resumed = useRef(false)
+  useEffect(() => {
+    if (resumed.current) return
+    if (returnedId) {
+      resumed.current = true
+      const load = returned ? payments.check(returnedId) : payments.get(returnedId)
+      load
+        .then((p) => {
+          setAttempt(p)
+          setCheckedAt(new Date())
+        })
+        .catch(() => undefined)
+      // Asked once; a refresh should not ask again.
+      if (returned) setParams({ payment: String(returnedId) }, { replace: true })
+      return
+    }
+    if (options) {
+      resumed.current = true
+      if (options.in_progress) setAttempt(options.in_progress)
+    }
+  }, [returnedId, returned, options, setParams])
+
+  /* ── Waiting: poll our own record until the gateway has decided ────────── */
+  const waitingId = attempt?.status === 'pending' ? attempt.id : null
+  useEffect(() => {
+    if (!waitingId) return
+    const timer = window.setInterval(() => {
+      payments
+        .get(waitingId)
+        .then((p) => {
+          setAttempt(p)
+          setCheckedAt(new Date())
+        })
+        .catch(() => undefined)
+    }, POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [waitingId])
+
+  const methods = options?.methods ?? []
+  const chosen: PaymentMethod | null = method ?? methods[0]?.value ?? null
+  const online = options?.mode === 'kwikpay'
 
   async function pay() {
+    if (paying || !chosen || !(fee ?? app?.fee_assessment)) return
     setPaying(true)
     setPayError(null)
     try {
-      const result = await payments.pay(appId, method)
-      setReceipt(result)
+      const result = await payments.pay(appId, chosen)
+      setAttempt(result)
+      setCheckedAt(new Date())
+      if (result.status === 'pending' && result.pay_url && result.pay_url_kind === 'link') {
+        // The payment page is the gateway's; its return address brings the
+        // owner back here with the marker above.
+        window.location.assign(result.pay_url)
+      }
     } catch (err) {
       setPayError(toApiError(err).message)
     } finally {
       setPaying(false)
     }
+  }
+
+  async function checkNow() {
+    if (!attempt || checking) return
+    setChecking(true)
+    setCheckNote(null)
+    try {
+      const p = await payments.check(attempt.id)
+      setAttempt(p)
+      setCheckedAt(new Date())
+      if (p.status === 'pending') setCheckNote('Not confirmed yet. If you have paid, it can take a few minutes.')
+    } catch (err) {
+      setCheckNote(toApiError(err).message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  function tryAgain() {
+    setAttempt(null)
+    setPayError(null)
+    setCheckNote(null)
+    setParams({}, { replace: true })
+    reloadOptions()
   }
 
   if (appLoading) {
@@ -65,7 +166,8 @@ export function PayPage() {
   const assessment = fee ?? app.fee_assessment
 
   /* ── Paid state (green, receipt) ──────────────────────────────────────── */
-  if (receipt) {
+  if (attempt?.status === 'completed') {
+    const receipt = attempt
     return (
       <div className="mx-auto max-w-2xl">
         <h2 className="display-serif mb-5 text-center text-3xl text-ink">Payment Status</h2>
@@ -146,6 +248,57 @@ export function PayPage() {
     )
   }
 
+  /* ── Waiting for the payment service to confirm ───────────────────────── */
+  if (attempt?.status === 'pending') {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <h2 className="display-serif mb-5 text-center text-3xl text-ink">Payment Status</h2>
+        <WaitingCard
+          payment={attempt}
+          checking={checking}
+          checkedAt={checkedAt}
+          checkNote={checkNote}
+          onCheck={checkNow}
+        />
+        <div className="mt-6 flex justify-center">
+          <Link
+            to={`/applications/${appId}`}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline"
+          >
+            <ArrowLeftIcon size={16} /> Back to application
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  /* ── The payment service said no ──────────────────────────────────────── */
+  if (attempt?.status === 'failed') {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <h2 className="display-serif mb-5 text-center text-3xl text-ink">Payment Status</h2>
+        <StatusCard tone="red">
+          <div className="flex items-center gap-4 py-1 text-ink">
+            <XCircleIcon size={44} className="text-s-red" />
+            <span className="text-3xl font-medium">Payment did not go through</span>
+          </div>
+          <p className="max-w-md text-center text-sm text-ink-secondary">
+            Your {paymentMethodLabel(attempt.method)} payment of {formatMoney(attempt.amount)} was not
+            completed, so your application is still waiting for payment. You can try again, with the
+            same method or another one.
+          </p>
+          <p className="text-xs text-ink-muted">
+            Reference no. <span className="tnum">{attempt.reference_number}</span>
+          </p>
+          <PillButton onClick={tryAgain} className="mt-2">
+            Try again
+          </PillButton>
+        </StatusCard>
+      </div>
+    )
+  }
+
+  /* ── Choose how to pay ────────────────────────────────────────────────── */
   return (
     <div className="mx-auto max-w-2xl">
       <Link
@@ -185,39 +338,149 @@ export function PayPage() {
         </div>
       </ProtoCard>
 
-      {/* ── Method chips ───────────────────────────────────────────────── */}
+      {/* ── Method chips — the server's list for the current mode ────────── */}
       <fieldset className="mt-6">
         <legend className="mb-2.5 text-sm font-bold text-ink">Choose how to pay</legend>
-        <div className="flex flex-wrap gap-3">
-          {METHODS.map((m) => {
-            const selected = method === m.value
-            return (
-              <button
-                key={m.value}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setMethod(m.value)}
-                className={`rounded-full border px-6 py-2 text-sm font-semibold transition-colors ${
-                  selected
-                    ? 'border-royal bg-royal text-white'
-                    : 'border-input-border bg-input text-ink hover:brightness-95'
-                }`}
-              >
-                {m.label}
-              </button>
-            )
-          })}
-        </div>
+        {optionsError ? (
+          <Alert variant="error">
+            The ways to pay could not be loaded.{' '}
+            <button type="button" onClick={reloadOptions} className="font-semibold underline">
+              Try again
+            </button>
+          </Alert>
+        ) : !options ? (
+          <div className="flex gap-3">
+            <Skeleton className="h-9 w-24 rounded-full" />
+            <Skeleton className="h-9 w-24 rounded-full" />
+            <Skeleton className="h-9 w-24 rounded-full" />
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {methods.map((m) => {
+              const selected = chosen === m.value
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setMethod(m.value)}
+                  className={`rounded-full border px-6 py-2 text-sm font-semibold transition-colors ${
+                    selected
+                      ? 'border-royal bg-royal text-white'
+                      : 'border-input-border bg-input text-ink hover:brightness-95'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </fieldset>
 
       <div className="mt-7">
-        <PillButton onClick={pay} disabled={paying || !assessment} className="w-full py-3 text-base">
+        <PillButton
+          onClick={pay}
+          aria-disabled={paying || !assessment || !chosen}
+          className="w-full py-3 text-base aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        >
           {paying ? 'Processing…' : 'Pay Online'}
         </PillButton>
-        <p className="mt-2.5 text-center text-xs text-ink-muted">
-          This is a simulated payment. No real charge is made.
-        </p>
+        {options && (
+          <p className="mt-2.5 text-center text-xs text-ink-muted">
+            {online
+              ? `You will finish paying in your ${chosen === 'qrph' ? 'bank or e-wallet' : paymentMethodLabel(chosen ?? '')} app. Your application moves on once the payment is confirmed.`
+              : 'This is a simulated payment. No real charge is made.'}
+          </p>
+        )}
       </div>
     </div>
+  )
+}
+
+/*
+ * The owner has been sent to pay (or shown a code to scan) and we are waiting
+ * for the payment service. Yellow, like every other "in progress" card: it is
+ * not an error, and red here would read as money lost.
+ */
+function WaitingCard({
+  payment,
+  checking,
+  checkedAt,
+  checkNote,
+  onCheck,
+}: {
+  payment: Payment
+  checking: boolean
+  checkedAt: Date | null
+  checkNote: string | null
+  onCheck: () => void
+}) {
+  const [qrBroken, setQrBroken] = useState(false)
+  const isQr = payment.pay_url_kind === 'qr' && !!payment.pay_url && !qrBroken
+  const amount = formatMoney(payment.amount)
+
+  return (
+    <StatusCard tone="yellow">
+      <div className="flex items-center gap-3 text-ink">
+        <ClockIcon size={36} className="text-s-yellow-ink" />
+        <span className="text-3xl font-medium">Waiting for your payment</span>
+      </div>
+
+      {isQr ? (
+        <>
+          <p className="max-w-md text-center text-sm text-ink-secondary">
+            Scan this code with your GCash, Maya or bank app and pay{' '}
+            <span className="tnum font-semibold text-ink">{amount}</span>. This page updates by itself
+            once the payment is confirmed.
+          </p>
+          <img
+            src={payment.pay_url ?? ''}
+            alt={`QR code to pay ${amount}`}
+            onError={() => setQrBroken(true)}
+            className="h-56 w-56 rounded-lg border border-input-border bg-white p-2"
+          />
+        </>
+      ) : (
+        <p className="max-w-md text-center text-sm text-ink-secondary">
+          Finish paying <span className="tnum font-semibold text-ink">{amount}</span> in your{' '}
+          {paymentMethodLabel(payment.method)} app. If you have already paid, this page updates by
+          itself once the payment is confirmed — usually within a minute.
+        </p>
+      )}
+
+      <div className="mt-1 w-full max-w-md space-y-2 text-sm text-ink">
+        <p className="flex justify-between">
+          <span className="text-ink-muted">Method</span>
+          <span>{paymentMethodLabel(payment.method)}</span>
+        </p>
+        <p className="flex justify-between">
+          <span className="text-ink-muted">Reference no.</span>
+          <span className="tnum">{payment.reference_number}</span>
+        </p>
+      </div>
+
+      <div className="mt-2 flex flex-wrap justify-center gap-3">
+        <PillButton onClick={onCheck} aria-disabled={checking}>
+          {checking ? 'Checking…' : 'Check payment status'}
+        </PillButton>
+        {payment.pay_url && !isQr && (
+          <a
+            href={payment.pay_url}
+            className="inline-flex items-center justify-center rounded-full border-2 border-royal bg-white px-7 py-2 text-sm font-semibold text-royal hover:bg-royal-tint"
+          >
+            Open the payment page
+          </a>
+        )}
+      </div>
+
+      {/* Announced, so a screen reader hears the answer to the button it pressed. */}
+      <p role="status" className="min-h-5 text-center text-xs text-ink-muted">
+        {checkNote ??
+          (checkedAt
+            ? `Last checked ${checkedAt.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}.`
+            : '')}
+      </p>
+    </StatusCard>
   )
 }
