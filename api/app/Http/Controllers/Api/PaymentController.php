@@ -22,6 +22,7 @@ use App\Support\PermitFees;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -346,6 +347,36 @@ class PaymentController extends Controller
         return response()->json(['data' => new PaymentResource($payment->fresh())]);
     }
 
+    /**
+     * "Pay a different way": set a pending online payment aside so a new one
+     * can be opened. KwikPayGateway::abandon asks KwikPay once first — the
+     * answer may be that it was paid after all, in which case the payment
+     * comes back completed and there is nothing to set aside.
+     *
+     * At most three per application per hour. Each one can end in a new order
+     * at KwikPay, and an endless loop of set-aside orders is both noise in
+     * their system and, if any of them is quietly paid, money to refund.
+     */
+    public function abandon(Request $request, Payment $payment): JsonResponse
+    {
+        $this->authorizePaymentOwner($request, $payment);
+
+        if (! $payment->isKwikPay() || ! $payment->isPending() || $payment->abandoned_at !== null) {
+            return response()->json(['data' => new PaymentResource($payment)]);
+        }
+
+        $key = 'payment-abandon:'.$payment->application_id;
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            $minutes = (int) ceil(RateLimiter::availableIn($key) / 60);
+            throw ValidationException::withMessages([
+                'payment' => ["You have changed how you pay several times in the last hour. Please wait {$minutes} minute(s), or finish the payment you started."],
+            ]);
+        }
+        RateLimiter::hit($key, 3600);
+
+        return response()->json(['data' => new PaymentResource($this->kwikpay->abandon($payment))]);
+    }
+
     /** The caller's payment history, most recent first. Paginated. */
     public function index(Request $request): JsonResponse
     {
@@ -441,6 +472,8 @@ class PaymentController extends Controller
             ->awaitingKwikPay()
             ->where('application_id', $application->id)
             ->whereNotNull('pay_url')
+            // Set aside by the owner: still reconciled, no longer blocking.
+            ->whereNull('abandoned_at')
             ->latest('id')
             ->first();
     }

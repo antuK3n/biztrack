@@ -227,6 +227,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payments/{payment}/check', [PaymentController::class, 'check'])
             ->whereNumber('payment')
             ->middleware('throttle:10,1');
+        // "Pay a different way". Its own per-application limit is in the action.
+        Route::post('payments/{payment}/abandon', [PaymentController::class, 'abandon'])
+            ->whereNumber('payment')
+            ->middleware('throttle:10,1');
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);

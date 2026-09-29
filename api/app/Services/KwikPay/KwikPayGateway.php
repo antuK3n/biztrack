@@ -221,8 +221,85 @@ class KwikPayGateway
         ] + $context);
 
         $this->workflow->onPaymentCompleted($payment);
+        $this->catchDoublePayment($payment);
 
         return true;
+    }
+
+    /**
+     * "Pay a different way": set a pending payment aside so the owner can open
+     * a new one — but only after asking KwikPay once what became of it.
+     *
+     * The docs never let us assume an open order is unpaid ("No answer is not
+     * no payment"). So:
+     *
+     *   "5"            it WAS paid: completed here, and no new payment is needed
+     *   "3"            it failed: marked failed, a new one is free to open
+     *   "1"/"0"/none   set aside (`abandoned_at`), still `pending`: still
+     *                  reconciled, its callback still accepted. If it later
+     *                  turns out paid, catchDoublePayment() tells staff.
+     */
+    public function abandon(Payment $payment): Payment
+    {
+        $payment = $this->check($payment, 'owner_abandon');
+
+        if ($payment->isPending() && $payment->abandoned_at === null) {
+            $payment->update(['abandoned_at' => now()]);
+            Audit::log('payment.abandoned', $payment, [
+                'gateway' => 'kwikpay',
+                'order_id' => $payment->gateway_order_id,
+                'last_answer' => $payment->gateway_note,
+            ]);
+        }
+
+        return $payment->fresh();
+    }
+
+    /**
+     * Two payments went through for one application and one of them had been
+     * set aside by the owner: the "paying again could charge you twice" the
+     * confirmation warned about. Nothing is refunded automatically — that is a
+     * cashier's decision — but the payment that settled second is marked for
+     * refund review, the owner sees it in their payment history, and every
+     * super admin and BPLO officer is told.
+     */
+    private function catchDoublePayment(Payment $payment): void
+    {
+        $others = Payment::query()
+            ->where('application_id', $payment->application_id)
+            ->whereKeyNot($payment->id)
+            ->where('status', PaymentStatus::Completed->value)
+            ->get();
+
+        $involvesSetAside = $payment->abandoned_at !== null
+            || $others->contains(fn (Payment $p) => $p->abandoned_at !== null);
+
+        if ($others->isEmpty() || ! $involvesSetAside) {
+            return;
+        }
+
+        $payment->update([
+            'refund_review_at' => now(),
+            'gateway_note' => 'Paid twice for one bill (also '.$others->pluck('reference_number')->implode(', ').'). Refund to be reviewed.',
+        ]);
+        Audit::log('payment.double_paid', $payment, [
+            'other_payments' => $others->pluck('reference_number')->all(),
+            'amount' => (string) $payment->amount,
+        ]);
+
+        $tracking = $payment->application?->tracking_id ?? '—';
+        User::query()
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['admin', 'bplo_staff']))
+            ->get()
+            ->each(fn (User $staff) => $this->notify->push(
+                $staff,
+                'payment_double_paid',
+                'An application was paid twice',
+                "Application {$tracking} was paid twice online: {$payment->reference_number} and "
+                .$others->pluck('reference_number')->implode(', ')
+                .'. The owner set one payment aside to pay another way, and both went through. A refund of '
+                .$payment->amount.' needs to be reviewed.',
+            ));
     }
 
     /** Mark it failed — once. Only on a FINAL "3"/3, never on silence. */

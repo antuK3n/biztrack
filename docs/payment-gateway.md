@@ -108,6 +108,26 @@ Every other role gets 403.
    The pay screen also checks once on its own when the owner comes back from
    the payment page.
 
+7. **Pay a different way.** While an online payment is waiting, the pay
+   screen offers **Pay a different way**. It first asks for confirmation: "If
+   you already paid with <method>, wait for it to be confirmed instead —
+   paying again could charge you twice." After the owner confirms,
+   `POST /api/v1/payments/{id}/abandon` asks `/api/query` once:
+   - `"5"`: the payment is completed as usual and the owner sees **Paid**.
+     No new payment is opened.
+   - `"3"`: the payment is marked failed and the owner chooses again.
+   - `"1"`, `"0"` or no answer: the payment is **set aside**
+     (`abandoned_at`). It stays `pending`, is still reconciled, and its
+     callback is still accepted. It just stops blocking a new order.
+
+   If a set-aside payment later turns out to be paid, and another payment for
+   the same application was also paid, the one that settled second is marked
+   `refund_review_at`. Every super admin and BPLO officer is notified, an
+   audit row is written (`payment.double_paid`), and the owner's payment
+   history says "paid twice, BPLO will contact you about a refund". Nothing is
+   refunded automatically. The limit is 3 set-asides per application per
+   hour.
+
 Completing a payment is a single conditional update (`… WHERE status =
 'pending'`), and whichever path gets there first does the work. A second
 callback, or a callback that arrives after reconciliation, does nothing.

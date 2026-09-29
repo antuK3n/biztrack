@@ -27,7 +27,7 @@ class Payment extends Model
         'application_id', 'fee_assessment_id', 'reference_number', 'amount',
         'method', 'status', 'receipt_path', 'paid_at',
         'gateway', 'gateway_order_id', 'pay_url', 'pay_url_kind', 'next_check_at', 'check_attempts',
-        'flagged_at', 'gateway_note',
+        'flagged_at', 'gateway_note', 'abandoned_at', 'refund_review_at',
     ];
 
     protected $casts = [
@@ -37,6 +37,8 @@ class Payment extends Model
         'paid_at' => 'datetime',
         'next_check_at' => 'datetime',
         'flagged_at' => 'datetime',
+        'abandoned_at' => 'datetime',
+        'refund_review_at' => 'datetime',
         'check_attempts' => 'integer',
     ];
 

@@ -729,6 +729,13 @@ export interface Payment {
   pay_url?: string | null
   pay_url_kind?: 'link' | 'qr' | null
   created_at?: string | null
+  /**
+   * The owner chose "Pay a different way". Still pending at the payment
+   * service (it may yet be paid), but no longer the payment being waited on.
+   */
+  set_aside?: boolean
+  /** Paid twice for one bill; staff are reviewing a refund of this one. */
+  refund_review?: boolean
   /** Present in the owner's cross-application payment history. */
   application?: { id: number; tracking_id: string }
 }

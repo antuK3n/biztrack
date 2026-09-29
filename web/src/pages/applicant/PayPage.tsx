@@ -4,7 +4,7 @@ import { ArrowLeftIcon, CheckCircleFilledIcon, ClockIcon, XCircleIcon } from '..
 import { Alert } from '../../components/ui/Alert'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
-import { PillButton, ProtoCard, StatusCard } from '../../components/ui/Proto'
+import { PillButton, ProtoCard, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDateTime, formatMoney, paymentMethodLabel } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, payments } from '../../lib/resources'
@@ -63,6 +63,9 @@ export function PayPage() {
   const [checking, setChecking] = useState(false)
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
   const [checkNote, setCheckNote] = useState<string | null>(null)
+  /** Said on the choose screen after "Pay a different way" set a payment aside. */
+  const [setAsideNote, setSetAsideNote] = useState<string | null>(null)
+  const [abandoning, setAbandoning] = useState(false)
 
   /* ── Resume: back from the payment app, or a payment already in flight ── */
   const returnedId = Number(params.get('payment')) || null
@@ -75,6 +78,8 @@ export function PayPage() {
       const load = returned ? payments.check(returnedId) : payments.get(returnedId)
       load
         .then((p) => {
+          // One set aside is not the payment being waited on any more.
+          if (p.status === 'pending' && p.set_aside) return
           setAttempt(p)
           setCheckedAt(new Date())
         })
@@ -149,8 +154,40 @@ export function PayPage() {
     setAttempt(null)
     setPayError(null)
     setCheckNote(null)
+    setSetAsideNote(null)
     setParams({}, { replace: true })
     reloadOptions()
+  }
+
+  /*
+   * "Pay a different way", after the owner confirmed they have not paid. The
+   * server asks the payment service once before letting go of the payment,
+   * because an open order may have been paid a moment ago:
+   *   completed → it was; show Paid, and there is nothing more to pay
+   *   failed    → back to the choice
+   *   set aside → back to the choice, saying what happens if it was paid
+   */
+  async function payDifferently() {
+    if (!attempt || abandoning) return
+    setAbandoning(true)
+    setCheckNote(null)
+    try {
+      const p = await payments.abandon(attempt.id)
+      if (p.status === 'completed') {
+        setAttempt(p)
+        return
+      }
+      const note =
+        p.status === 'pending'
+          ? `Your ${paymentMethodLabel(p.method)} payment (${p.reference_number}) is set aside. If it goes through after all, BPLO will contact you about refunding the extra payment.`
+          : null
+      tryAgain()
+      setSetAsideNote(note)
+    } catch (err) {
+      setCheckNote(toApiError(err).message)
+    } finally {
+      setAbandoning(false)
+    }
   }
 
   if (appLoading) {
@@ -259,6 +296,8 @@ export function PayPage() {
           checkedAt={checkedAt}
           checkNote={checkNote}
           onCheck={checkNow}
+          abandoning={abandoning}
+          onPayDifferently={payDifferently}
         />
         <div className="mt-6 flex justify-center">
           <Link
@@ -311,6 +350,11 @@ export function PayPage() {
       {payError && (
         <div className="mb-4">
           <Alert variant="error">{payError}</Alert>
+        </div>
+      )}
+      {setAsideNote && !payError && (
+        <div className="mb-4">
+          <Alert variant="info">{setAsideNote}</Alert>
         </div>
       )}
 
@@ -411,14 +455,19 @@ function WaitingCard({
   checkedAt,
   checkNote,
   onCheck,
+  abandoning,
+  onPayDifferently,
 }: {
   payment: Payment
   checking: boolean
   checkedAt: Date | null
   checkNote: string | null
   onCheck: () => void
+  abandoning: boolean
+  onPayDifferently: () => void
 }) {
   const [qrBroken, setQrBroken] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const isQr = payment.pay_url_kind === 'qr' && !!payment.pay_url && !qrBroken
   const amount = formatMoney(payment.amount)
 
@@ -475,6 +524,39 @@ function WaitingCard({
           </a>
         )}
       </div>
+
+      {/*
+        * The way out of a payment the owner cannot or will not finish — a
+        * different app, a declined wallet, the wrong method picked. Quiet on
+        * purpose (a text button, not red): it is not destructive, and the
+        * confirmation is where the one real risk, paying twice, is said.
+        */}
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        aria-disabled={abandoning || undefined}
+        className="text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline aria-disabled:opacity-60"
+      >
+        {abandoning ? 'Checking your payment…' : 'Pay a different way'}
+      </button>
+
+      {confirming && (
+        <ProtoModal
+          title="Pay a different way?"
+          cancelLabel="Keep waiting"
+          confirmLabel="I haven't paid — choose another way"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false)
+            onPayDifferently()
+          }}
+        >
+          <p className="text-sm">
+            If you already paid with {paymentMethodLabel(payment.method)}, wait for it to be
+            confirmed instead — paying again could charge you twice.
+          </p>
+        </ProtoModal>
+      )}
 
       {/* Announced, so a screen reader hears the answer to the button it pressed. */}
       <p role="status" className="min-h-5 text-center text-xs text-ink-muted">
