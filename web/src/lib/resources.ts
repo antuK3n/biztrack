@@ -313,6 +313,8 @@ export interface WizardDraftSummary {
   application_type: string
   title: string | null
   updated_at: string | null
+  /** When it was last resumed. Moves on open, never on save. */
+  last_opened_at?: string | null
 }
 
 export interface WizardDraftRecord extends WizardDraftSummary {
@@ -361,6 +363,14 @@ export const wizardDrafts = {
   }) => unwrap<WizardDraftSummary>(api.post('/wizard-drafts', body)),
   save: (id: number, body: { payload: Record<string, unknown>; title?: string | null }) =>
     unwrap<WizardDraftSummary>(api.put(`/wizard-drafts/${id}`, body)),
+  /**
+   * Change the name and nothing else.
+   *
+   * No payload: `update` treats it as optional, so the answers are left
+   * alone. The drafts list does not load them and must not send them back.
+   */
+  rename: (id: number, title: string | null) =>
+    unwrap<WizardDraftSummary>(api.put(`/wizard-drafts/${id}`, { title })),
   /** Idempotent — deleting nothing is a success. */
   discard: (id: number) => api.delete(`/wizard-drafts/${id}`),
 }
@@ -631,11 +641,23 @@ export const officeForms = {
       `/applications/${applicationId}/office-forms/${permitTypeCode}/declaration`,
       filename,
     ),
-  /** Take one checklist file back off, deleting the stored copy with it. */
-  removeRequirement: (applicationId: number, permitTypeCode: string, documentCode: string) =>
+  /**
+   * Take one checklist file back off, deleting the stored copy with it.
+   *
+   * `documentId` says which. Omitted, the endpoint clears the whole slot —
+   * what Remove meant while a slot held one file, and what an un-updated
+   * tab still asks for.
+   */
+  removeRequirement: (
+    applicationId: number,
+    permitTypeCode: string,
+    documentCode: string,
+    documentId?: number,
+  ) =>
     unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
       api.delete(
         `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
+        documentId === undefined ? undefined : { data: { document_id: documentId } },
       ),
     ),
 }
@@ -1020,8 +1042,26 @@ export const assignments = {
    * request to fix an answer — the reason is prose because what it has to
    * carry is why the permit cannot be granted at all.
    */
-  reject: (id: number, reason: string, remedy: string) =>
-    unwrap<Assignment>(api.post(`/assignments/${id}/reject`, { reason, remedy })),
+  reject: (
+    id: number,
+    reason: string,
+    remedy: string,
+    /*
+     * Which rows the refusal is about, optional — the same pointer Return
+     * carries. A refusal can be about the business rather than about one
+     * answer, so naming nothing is a real answer and not an omission.
+     */
+    target: string | null = null,
+    notes: Record<string, string> = {},
+  ) =>
+    unwrap<Assignment>(
+      api.post(`/assignments/${id}/reject`, {
+        reason,
+        remedy,
+        ...(target ? { remarks_target: target } : {}),
+        ...(Object.keys(notes).length > 0 ? { remarks_notes: notes } : {}),
+      }),
+    ),
   /**
    * Send one permit back for the applicant to fix.
    *
@@ -1046,6 +1086,29 @@ export const assignments = {
         // Omitted rather than sent as null when there is none: the endpoint
         // takes it `sometimes`, and an absent key is the same answer with less
         // to read in the request log.
+        ...(target ? { remarks_target: target } : {}),
+        ...(Object.keys(notes).length > 0 ? { remarks_notes: notes } : {}),
+      }),
+    ),
+  /**
+   * Change what an ALREADY RETURNED filing is being asked for.
+   *
+   * Same body as `return` above, different act. The filing is on the
+   * applicant's desk: this corrects the instruction in place and moves
+   * nothing, so the applicant is not bounced out of a repair already under
+   * way and the history does not claim a second return happened. The
+   * endpoint refuses anything that is not currently returned.
+   */
+  /* Refusing names its rows too, since 30 September 2026 — see `return`. */
+  amendReturn: (
+    id: number,
+    remarks: string,
+    target: string | null = null,
+    notes: Record<string, string> = {},
+  ) =>
+    unwrap<Assignment>(
+      api.post(`/assignments/${id}/amend-return`, {
+        remarks,
         ...(target ? { remarks_target: target } : {}),
         ...(Object.keys(notes).length > 0 ? { remarks_notes: notes } : {}),
       }),

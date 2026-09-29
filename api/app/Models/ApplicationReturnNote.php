@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ApplicationReturnNote extends Model
 {
-    protected $fillable = ['application_id', 'target', 'note'];
+    protected $fillable = ['application_id', 'permit_type_id', 'target', 'note'];
 
     public function application(): BelongsTo
     {

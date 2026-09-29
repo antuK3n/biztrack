@@ -234,10 +234,11 @@ function clearanceRow(Application $app, string $code): array
  */
 function handInClearance(Application $app, string $code): void
 {
-    app(WorkflowService::class)->submitClearanceForm(
-        $app->fresh(),
-        PermitType::where('code', $code)->firstOrFail(),
-    );
+    $type = PermitType::where('code', $code)->firstOrFail();
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app->fresh(), $type);
+    app(WorkflowService::class)->submitClearanceForm($app->fresh(), $type);
 }
 
 /**
@@ -834,40 +835,96 @@ it('refuses to withdraw any of the five, because every one of them is required',
  * rule 3 says both are reviewed and both are inspected, because the LGU
  * inspects the premises rather than the paperwork.
  */
-it('reviews a copy the applicant holds exactly as it reviews an application', function () {
+/**
+ * A paid RENEWAL, for the tests that hand in a certificate already held.
+ *
+ * `WorkflowService::startClearance` refuses `upload` on a new filing since
+ * 29 September 2026 — the LGU's rule that a business cannot already hold
+ * these before it applies to BPLO, and may not hand in another business's.
+ * So a held copy is a second-year fact and needs a second-year filing.
+ *
+ * Separate from `paidClearanceApplication` rather than replacing it: this
+ * file is written around a NEW filing's lifecycle — five clearances
+ * attached at submission, the whole bill, the new-application status walk
+ * — and moving every test to a renewal broke eleven of them.
+ */
+function paidClearanceRenewal(): Application
+{
     $app = paidClearanceApplication();
-    $cho = Department::where('code', 'CHO')->firstOrFail();
 
-    $assessedBefore = clearanceMeta($app)['total_assessed'];
+    /*
+     * Turned into a renewal after the fact, deliberately.
+     *
+     * Building one through the API means issuing last year's permit and
+     * naming it, and then the filing carries only the permits it renews —
+     * which is not the shape these tests need. What they need is a paid
+     * filing with five clearances open, that is allowed to hand one in.
+     * The application TYPE is the only thing `startClearance` asks about.
+     */
+    $app->forceFill(['application_type' => 'renewal'])->saveQuietly();
 
-    $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+    return $app->fresh();
+}
+
+/*
+ * ── A copy you already hold belongs to a renewal ────────────────────────────
+ *
+ * Client, 29 September 2026, relaying the LGU: a business cannot already hold
+ * these before it applies to BPLO, and one business may not hand in another's
+ * certificate. Nothing in the system can tell whose certificate a file is — it
+ * is an image against a permit row — so the choice itself is the only place
+ * the rule can live.
+ *
+ * This replaced a test asserting that an upload on a NEW filing still routes
+ * and is still inspected, which was the 6 September decision. There is no
+ * upload on a new filing to route any more, and the renewal path deliberately
+ * does not route either.
+ */
+it('refuses a held copy on a new filing and takes one on a renewal', function () {
+    $new = paidClearanceApplication();
+
+    $this->postJson("/api/v1/applications/{$new->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
+    ])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.mode.0', 'A new business has no permits to hand in yet. Apply for this one instead.');
+
+    /* And nothing was recorded on the way to being refused. */
+    $row = ApplicationPermitType::where('application_id', $new->id)
+        ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
+        ->first();
+    expect($row?->mode)->not->toBe(ApplicationPermitType::MODE_UPLOAD);
+
+    /* The renewal takes it. */
+    $renewal = paidClearanceRenewal();
+    $body = $this->postJson("/api/v1/applications/{$renewal->id}/clearances/SANITARY/held", [
         'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
     ])->assertCreated()->json();
 
     expect($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value)
         ->and($body['data']['held_document']['name'])->toBe('sanitary.pdf')
-        ->and($body['data']['held_document']['size'])->toBeGreaterThan(0)
-        // Routed to CHO like any other. The office reads an image instead of a
-        // form; that is the only difference the mode records.
-        ->and($body['data']['assignment'])->not->toBeNull()
-        ->and(ApplicationAssignment::where('application_id', $app->id)
-            ->where('department_id', $cho->id)->exists())->toBeTrue();
+        ->and($body['data']['held_document']['size'])->toBeGreaterThan(0);
 
-    $row = ApplicationPermitType::where('application_id', $app->id)
-        ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
-        ->firstOrFail();
+    expect(
+        ApplicationPermitType::where('application_id', $renewal->id)
+            ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
+            ->value('mode')
+    )->toBe(ApplicationPermitType::MODE_UPLOAD);
 
-    expect($row->mode)->toBe(ApplicationPermitType::MODE_UPLOAD);
-
-    // And it was charged for at submission either way — rule 4, because the fee
-    // covers the inspection an uploaded permit still gets.
-    expect(ledger($body['meta'])['total_assessed'])->toBe($assessedBefore)
-        ->and(ledger($body['meta'])['balance_due'])->toBe(0.0)
-        ->and(topOrderLabels($app))->toContain('sanitary inspection fee');
+    /*
+     * NOT routed, and that is the point of the renewal branch: the office
+     * visit behind last year's certificate already happened, so a renewal
+     * upload does not send the office out again. See `$renewalUpload` in
+     * WorkflowService::startClearance.
+     */
+    $cho = Department::where('code', 'CHO')->firstOrFail();
+    expect(
+        ApplicationAssignment::where('application_id', $renewal->id)
+            ->where('department_id', $cho->id)->exists()
+    )->toBeFalse();
 });
-
 it('records the held copy through the same mechanism the wizard uses', function () {
-    $app = paidClearanceApplication();
+    $app = paidClearanceRenewal();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -886,7 +943,7 @@ it('records the held copy through the same mechanism the wizard uses', function 
 });
 
 it('replaces an earlier held copy rather than stacking them', function () {
-    $app = paidClearanceApplication();
+    $app = paidClearanceRenewal();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -914,7 +971,7 @@ it('replaces an earlier held copy rather than stacking them', function () {
  * then looking at.
  */
 it('removes the held copy and its file, and leaves the permit standing with its office', function () {
-    $app = paidClearanceApplication();
+    $app = paidClearanceRenewal();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -952,7 +1009,7 @@ it('removes the held copy and its file, and leaves the permit standing with its 
  * application.
  */
 it('lets a copy replace an application, and does not let an application replace a copy', function () {
-    $app = paidClearanceApplication();
+    $app = paidClearanceRenewal();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
@@ -1300,7 +1357,8 @@ it('survives a filing whose business has been removed from the register', functi
 });
 
 it('still lets a held copy be filed when the business record has gone', function () {
-    $app = paidClearanceApplication();
+    /* A held copy is a renewal's, so this filing has to be one. */
+    $app = paidClearanceRenewal();
     $app->business->delete();
 
     // Nothing here needs a price — the applicant can still hand in the

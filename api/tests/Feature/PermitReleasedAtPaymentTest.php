@@ -73,6 +73,12 @@ function paidNewFiling(): Application
     foreach (['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'] as $code) {
         authAs('owner@biztrack.local');
         test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         test()->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
             'form_data' => [],
             'submit' => true,
@@ -192,6 +198,12 @@ function reapplyAndGrant(Application $app, string $permitCode): void
 
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$app->id}/clearances/{$permitCode}/apply")->assertOk();
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($app->id),
+        PermitType::where('code', $permitCode)->firstOrFail(),
+    );
     test()->putJson("/api/v1/applications/{$app->id}/office-forms/{$permitCode}", [
         'form_data' => [],
         'submit' => true,
@@ -580,6 +592,12 @@ it('refuses a rejection with no remedy, and keeps the refusal after a re-applica
      */
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($app->id),
+        PermitType::where('code', 'SANITARY')->firstOrFail(),
+    );
     test()->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
         'form_data' => [],
         'submit' => true,

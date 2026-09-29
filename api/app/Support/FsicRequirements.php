@@ -51,7 +51,7 @@ final class FsicRequirements
         /* ── FSIC for Certificate of Occupancy ───────────────────────────── */
         [
             'key' => 'OBO_ENDORSEMENT',
-            'label' => 'Endorsement from the Office of the Building Official',
+            'label' => 'Endorsement from the Office of the Local Building Official',
             'when' => 'occupancy',
             'note' => 'OBO endorses the building to BFP once it has checked the plans.',
             'carried_from' => null,
@@ -60,7 +60,7 @@ final class FsicRequirements
             'key' => 'COMPLETION',
             'label' => 'Certificate of Completion',
             'when' => 'occupancy',
-            'note' => 'Form B-10, notarised and sealed by your architect or civil engineer. The blank form comes from the Office of the Building Official.',
+            'note' => 'Form B-10, notarised and sealed by your architect or civil engineer. The blank form comes from the Office of the Local Building Official.',
             'carried_from' => null,
         ],
         [
@@ -157,7 +157,12 @@ final class FsicRequirements
             'key' => 'FORM',
             'label' => 'Completely filled-up application form',
             'when' => 'always',
-            'note' => 'This sheet. It is ticked when you submit it.',
+            /*
+             * Its own state, in words. This row has no file and no
+             * upload box — the tick beside it WAS its status, and the
+             * checklist stopped drawing ticks on 30 September 2026.
+             */
+            'note' => 'This sheet. It counts as complete once you submit it.',
             'carried_from' => 'sheet',
         ],
     ];
@@ -208,6 +213,28 @@ final class FsicRequirements
     public static function accepts(string $code): bool
     {
         return ChecklistSupport::accepts(self::ROWS, self::CODE_PREFIX, $code);
+    }
+
+    /**
+     * Every slot on this checklist, whether or not a file is in one.
+     *
+     * A `sheet` row is the form itself and is not a slot. Used to declare
+     * the document types up front — see ReferenceSeeder — so the set a
+     * register holds does not depend on which offices have happened to
+     * receive an upload.
+     *
+     * @return list<string>
+     */
+    public static function slotCodes(): array
+    {
+        $out = [];
+        foreach (self::ROWS as $row) {
+            if (($row['carried_from'] ?? null) !== 'sheet') {
+                $out[] = self::CODE_PREFIX.$row['key'];
+            }
+        }
+
+        return $out;
     }
 
     public static function documentType(string $code): DocumentType

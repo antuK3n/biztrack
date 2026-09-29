@@ -123,6 +123,9 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
 
         $type = PermitType::where('code', $code)->firstOrFail();
         $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist($app->fresh(), $type);
         $workflow->submitClearanceForm($app->fresh(), $type);
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');
@@ -273,6 +276,9 @@ it('leaves a new application’s permits dated from today', function () {
     foreach (PermitType::REQUIRED_CLEARANCE_CODES as $code) {
         $type = PermitType::where('code', $code)->firstOrFail();
         $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist($app->fresh(), $type);
         $workflow->submitClearanceForm($app->fresh(), $type);
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');

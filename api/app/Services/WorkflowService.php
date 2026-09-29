@@ -27,7 +27,9 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
+use App\Support\ClearanceSnapshot;
 use App\Support\ReturnTargets;
+use App\Support\SheetRequirements;
 use App\Support\Audit;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
@@ -929,18 +931,17 @@ class WorkflowService
              * under a field this round is not about and tells the applicant
              * to fix something nobody asked about.
              */
-            ApplicationReturnNote::where('application_id', $app->id)->delete();
-            foreach ($notes as $code => $note) {
-                $text = trim((string) $note);
-                if ($text === '') {
-                    continue;
-                }
-                ApplicationReturnNote::create([
-                    'application_id' => $app->id,
-                    'target' => $code,
-                    'note' => $text,
-                ]);
-            }
+            /*
+             * `whereNull('permit_type_id')` — only the MAIN FORM's notes.
+             * The five offices write into this table too since 30
+             * September 2026, scoped to their permit, and an unscoped
+             * clear here would delete CHO's instructions every time BPLO
+             * returned the form.
+             */
+            ApplicationReturnNote::where('application_id', $app->id)
+                ->whereNull('permit_type_id')
+                ->delete();
+            $this->writeReturnNotes($app->id, null, $notes);
 
             /*
              * ── What each named field says, as the officer saw it ──────
@@ -970,6 +971,119 @@ class WorkflowService
             ])->save();
 
             $this->transition($app, ApplicationStatus::Returned, $remarks);
+        });
+    }
+
+    /**
+     * Change what an open return asks for, without returning again.
+     *
+     * The officer has already sent this filing back and has since noticed
+     * something else, or worded the remark badly. A second return is not
+     * legal — `ApplicationStatus::Returned` goes only forward — and it
+     * should not be: the filing is with the applicant, and bouncing it
+     * would interrupt a repair already under way.
+     *
+     * So this REPLACES the instruction in place. Nothing transitions,
+     * nothing is added to the history, and the applicant's next look at
+     * the correction dialog simply shows the amended list.
+     *
+     * Refuses a filing that is not returned, which is the whole guard: on
+     * anything else the office should be pressing Return, and silently
+     * rewriting an approved filing's pointer would be a different bug.
+     *
+     * @param  array<string, string>  $notes
+     */
+    public function amendMainFormReturn(
+        Application $app,
+        string $remarks,
+        ?string $target = null,
+        array $notes = [],
+    ): void {
+        if ($app->status !== ApplicationStatus::Returned) {
+            throw ValidationException::withMessages([
+                'status' => ['This filing is not with the applicant, so there is no return to change.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($app, $remarks, $target, $notes) {
+            /*
+             * The same writes `returnMainForm` makes, minus the transition.
+             * Every assignment on the filing, because that is where the
+             * pointer lives and the applicant's screen reads all of them.
+             */
+            ApplicationAssignment::where('application_id', $app->id)
+                ->where('status', AssignmentStatus::Returned->value)
+                ->update([
+                    'remarks' => $remarks,
+                    'remarks_target' => $target,
+                ]);
+
+            ApplicationReturnNote::where('application_id', $app->id)
+                ->whereNull('permit_type_id')
+                ->delete();
+            $this->writeReturnNotes($app->id, null, $notes);
+
+            /*
+             * Re-snapshotted against the NEW pointer. The snapshot is what
+             * the resubmission is compared with to report what changed, so
+             * keeping the old one would compare a newly-named field against
+             * nothing and call every one of them unchanged.
+             */
+            $app->forceFill([
+                'returned_values' => [
+                    'at' => now()->toISOString(),
+                    'values' => ReturnTargets::snapshot(
+                        $app->load(['business.address.barangay', 'business.owners', 'business.lines']),
+                        ReturnTargets::parse($target),
+                    ),
+                ],
+            ])->save();
+        });
+    }
+
+    /**
+     * Change what an office's open return asks for, without returning again.
+     *
+     * `amendMainFormReturn` for a clearance. Same rule and same reason:
+     * `ClearanceStatus::Returned` goes only to ForApproval, so the office
+     * cannot send back a sheet the applicant is already holding, and this
+     * corrects the instruction in place instead.
+     *
+     * @param  array<string, string>  $notes
+     */
+    public function amendClearanceReturn(
+        ApplicationPermitType $row,
+        string $remarks,
+        ?string $target = null,
+        array $notes = [],
+    ): void {
+        if ($row->status !== ClearanceStatus::Returned) {
+            throw ValidationException::withMessages([
+                'status' => ['This permit is not with the applicant, so there is no return to change.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($row, $remarks, $target, $notes) {
+            $row->update([
+                'remarks' => $remarks,
+                'remarks_target' => $target,
+                /*
+                 * Re-captured against the new pointer, for the reason the
+                 * main form's is: `recordClearanceCorrections` diffs the
+                 * resubmission against this, and a field named for the
+                 * first time has nothing here to be compared with.
+                 */
+                'returned_state' => ClearanceSnapshot::capture(
+                    $row->application,
+                    $row->permitType->code,
+                    ReturnTargets::parse($target),
+                ),
+            ]);
+
+            ApplicationReturnNote::where('application_id', $row->application_id)
+                ->where('permit_type_id', $row->permit_type_id)
+                ->delete();
+            $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
         });
     }
 
@@ -1026,6 +1140,223 @@ class WorkflowService
         }
     }
 
+    /**
+     * Store one note per returned row, dropping the blanks.
+     *
+     * Shared by the main form and the offices so the two cannot drift into
+     * storing the same thing differently — which is how the offices came to
+     * store nothing at all.
+     *
+     * A blank note is skipped rather than stored empty: the officer's UI
+     * already refuses to send one, so a blank arriving here is a caller
+     * that did not ask for a note on that row, not an officer who left it
+     * empty.
+     *
+     * @param  array<string, string>  $notes  keyed by target code
+     */
+    private function writeReturnNotes(int $applicationId, ?int $permitTypeId, array $notes): void
+    {
+        foreach ($notes as $code => $note) {
+            $text = trim((string) $note);
+            if ($text === '') {
+                continue;
+            }
+
+            ApplicationReturnNote::create([
+                'application_id' => $applicationId,
+                'permit_type_id' => $permitTypeId,
+                'target' => $code,
+                'note' => $text,
+            ]);
+        }
+    }
+
+    /**
+     * Refuse a resubmission while a ticked row is still empty.
+     *
+     * ── Why only the empty ones ─────────────────────────────────────────────
+     *
+     * The client's rule for the main form is that a returned field must be
+     * answered before it can go back. The faithful version here is narrower on
+     * purpose: `ClearanceStatus` allows `Returned → ForApproval` and nothing
+     * else, so an office cannot approve a row it has returned. Demanding a
+     * DIFFERENT file would leave an applicant whose document was right all
+     * along unable to resubmit and unable to be waved through, with uploading
+     * a deliberately different file as the only escape.
+     *
+     * An empty row has no such trap: attaching something is always possible,
+     * and "you never sent this" is the case that plainly wastes a review
+     * today.
+     */
+    /**
+     * Refuse a re-application that changed nothing since the refusal.
+     *
+     * Re-applying reopens the sheet with every answer still on it — the
+     * client's choice, and the right one, since retyping twenty fields to
+     * fix one invites new errors. The cost is that resubmitting an
+     * identical form is the path of least effort, and the office spends a
+     * second review discovering that.
+     *
+     * Only after a REFUSAL. A return has `refuseEmptyReturnedRows`, which
+     * is narrower on purpose — see its note — and this is the case that
+     * one deliberately leaves alone: `ClearanceStatus::Rejected` goes to
+     * ForApproval, so an office CAN approve a permit it refused once the
+     * applicant answers, and nobody is trapped by being asked to change
+     * something.
+     *
+     * The test is that ANYTHING moved, not that the named rows did,
+     * because a refusal may name nothing: "the premises are not zoned for
+     * this" is about no field in particular and might be answered by a
+     * lease at another address. The weakest claim that still rules out the
+     * case worth ruling out.
+     */
+    private function refuseUnchangedAfterRefusal(ApplicationPermitType $row): void
+    {
+        if ($row->status !== ClearanceStatus::Rejected) {
+            return;
+        }
+
+        $before = $row->returned_state;
+        /*
+         * Nothing to compare — a refusal made before this snapshot existed,
+         * or one whose capture failed. Let it through: refusing on absent
+         * evidence would strand an applicant over a record they never had.
+         */
+        if (! is_array($before) || $before === []) {
+            return;
+        }
+
+        $now = ClearanceSnapshot::capture(
+            $row->application,
+            $row->permitType->code,
+            array_keys($before),
+        );
+
+        if ($now !== $before) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'requirements' => [
+                'This is the same form this office refused. Change what they asked for '
+                .'before sending it again — their reason and what would settle it are '
+                .'on the permit.',
+            ],
+        ]);
+    }
+
+    private function refuseEmptyReturnedRows(ApplicationPermitType $row): void
+    {
+        $codes = ReturnTargets::parse($row->remarks_target);
+        if ($codes === []) {
+            return;
+        }
+
+        $missing = [];
+        /*
+         * `?? []` — `SheetRequirements::for()` returns NULL for a permit with
+         * no checklist of its own, and SANITARY has none. Its docblock says
+         * so; iterating it without this threw "foreach() argument must be of
+         * type array|object" the moment a health officer returned a sheet.
+         */
+        foreach (SheetRequirements::for($row->application, $row->permitType->code) ?? [] as $checklistRow) {
+            $code = $checklistRow['code'] ?? null;
+            if ($code === null || ! in_array($code, $codes, true)) {
+                continue;
+            }
+
+            if (($checklistRow['document'] ?? null) === null) {
+                $missing[] = $checklistRow['label'];
+            }
+        }
+
+        if ($missing === []) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'requirements' => [
+                count($missing) === 1
+                    ? 'Attach '.$missing[0].' before sending this back.'
+                    : 'Attach these before sending this back: '.implode(', ', $missing).'.',
+            ],
+        ]);
+    }
+
+    /**
+     * Refuse a sheet whose checklist is not complete.
+     *
+     * `blocking` is decided once, per row, by the requirement classes, and
+     * read by all three of the applicant's sheet, the officer's review
+     * screen and this refusal. See the note beside it in
+     * `ChecklistSupport::build()` for why every row carries it now.
+     *
+     * The message names the rows. "A document is missing" on a list of
+     * eleven sends the applicant back to hunt for which.
+     */
+    private function refuseIncompleteChecklist(ApplicationPermitType $row): void
+    {
+        $missing = [];
+        /*
+         * `?? []` — `SheetRequirements::for()` returns NULL for a permit
+         * with no checklist of its own, and SANITARY has none.
+         */
+        foreach (SheetRequirements::for($row->application, $row->permitType->code) ?? [] as $item) {
+            if (($item['blocking'] ?? false) === true && ($item['satisfied'] ?? false) !== true) {
+                $missing[] = $item['label'];
+            }
+        }
+
+        if ($missing === []) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'requirements' => [
+                count($missing) === 1
+                    ? 'Attach '.$missing[0].' before submitting this form.'
+                    : 'Attach these before submitting this form: '.implode(', ', $missing).'.',
+            ],
+        ]);
+    }
+
+    /**
+     * Record what the applicant changed on the rows this office asked about.
+     *
+     * The office half of `recordWizardCorrections`, reading
+     * `ApplicationPermitType::returned_state` instead of
+     * `applications.returned_values`, and writing the same
+     * `ApplicationCorrection` rows scoped by `permit_type_id`.
+     *
+     * Unchanged rows are recorded too, for the reason `corrections()` gives:
+     * "the applicant looked at this and left it as it was" is an answer, and
+     * an office that asked about a row needs to see that rather than an empty
+     * list which reads as having been ignored. It is also the only way the
+     * office learns that a file it called wrong came back identical.
+     */
+    private function recordClearanceCorrections(ApplicationPermitType $row): void
+    {
+        $snapshot = $row->returned_state;
+        if (! is_array($snapshot) || ! is_array($snapshot['values'] ?? null)) {
+            return;
+        }
+
+        $now = ClearanceSnapshot::capture(
+            $row->application,
+            $row->permitType->code,
+            array_keys($snapshot['values']),
+        );
+
+        foreach ($snapshot['values'] as $code => $was) {
+            ApplicationCorrection::create([
+                'application_id' => $row->application_id,
+                'permit_type_id' => $row->permit_type_id,
+                'target' => $code,
+                'old_value' => $was,
+                'new_value' => $now[$code] ?? null,
+            ]);
+        }
+    }
     /** B: resubmit a returned form. returned → for_approval. */
     public function resubmit(Application $app): void
     {
@@ -1359,6 +1690,35 @@ class WorkflowService
             ]);
         }
 
+        /*
+         * ── A new business holds no permits ──────────────────────────
+         *
+         * The LGU's rule, relayed by the client on 29 September 2026: a
+         * business cannot already hold these before it applies to BPLO,
+         * and one business may not hand in another's certificate.
+         *
+         * Nothing here can tell whose certificate a file is — it is an
+         * image against a permit row, checked by an officer reading the
+         * name on it — so the only place to enforce the rule is the
+         * choice itself.
+         *
+         * Refused rather than quietly turned into `apply`: the applicant
+         * asked for something the city does not allow, and silently doing
+         * a different thing would leave them believing a copy had been
+         * accepted.
+         *
+         * Renewals are untouched — see the note at the head of this
+         * method — and so are amendments.
+         */
+        if ($mode === ApplicationPermitType::MODE_UPLOAD
+            && $app->application_type === ApplicationType::New) {
+            throw ValidationException::withMessages([
+                'mode' => [
+                    'A new business has no permits to hand in yet. Apply for this one instead.',
+                ],
+            ]);
+        }
+
         return DB::transaction(function () use ($app, $type, $mode) {
             $row = $this->pivotFor($app, $type->code);
             if ($row === null) {
@@ -1644,10 +2004,55 @@ class WorkflowService
              * to know. A clean row is how an office approves what it turned
              * down last week.
              */
+            /*
+             * ── Nothing goes back with a ticked row still empty ───────
+             *
+             * The office asked for a document that was never attached and
+             * the applicant could press Submit with it still missing, so the
+             * office received the identical sheet and spent a second review
+             * discovering that.
+             *
+             * Only EMPTY rows block. A row that already holds a file is one
+             * the office called wrong, and requiring a DIFFERENT file would
+             * trap an applicant whose document was right all along:
+             * `ClearanceStatus` allows Returned -> ForApproval only, so no
+             * office can wave one through. That case is answered by the
+             * comparison below, which shows the office it did not change.
+             */
+            $this->refuseEmptyReturnedRows($row);
+            $this->refuseUnchangedAfterRefusal($row);
+
+            /*
+             * ── And nothing goes in missing what the office asks for ──
+             *
+             * The check above is about a RETURN — the rows this office
+             * named. This one is about the checklist itself, and it is the
+             * rule the client asked for on 30 September 2026 reading the
+             * Locational Clearance screen: the documentary requirements are
+             * required.
+             *
+             * It lives here and not only in the browser. The browser had
+             * the declaration gate since 17 September and the server had
+             * nothing, so the rule was a disabled button: anything that
+             * posted the submit itself — an old tab, a retried request, a
+             * second window left open from before the row was emptied —
+             * went straight through. A rule the server does not hold is a
+             * suggestion.
+             */
+            $this->refuseIncompleteChecklist($row);
+
+            /*
+             * Recorded BEFORE the pointer and the snapshot are cleared — the
+             * only moment both halves of the comparison exist.
+             */
+            $this->recordClearanceCorrections($row);
+
             $row->update([
                 'submitted_at' => now(),
                 'remarks' => null,
                 'remarks_target' => null,
+                /* The round is over; the history is in the corrections. */
+                'returned_state' => null,
             ]);
             $this->transitionClearance(
                 $row,
@@ -1771,9 +2176,21 @@ class WorkflowService
      * good return — see the migration that added `remarks_target` for why the
      * text is never parsed to derive this.
      */
-    public function returnClearance(ApplicationPermitType $row, string $remarks, ?string $target = null): void
-    {
-        DB::transaction(function () use ($row, $remarks, $target) {
+    /**
+     * @param  array<string, string>  $notes  One remark per returned row,
+     *   keyed by the same code as $target. The officer's UI refuses to send
+     *   a return until every ticked row has one, and until 30 September
+     *   2026 this method had nowhere to put them — so an office typed three
+     *   notes and the applicant got one paragraph with all three run
+     *   together and the rows themselves blank.
+     */
+    public function returnClearance(
+        ApplicationPermitType $row,
+        string $remarks,
+        ?string $target = null,
+        array $notes = [],
+    ): void {
+        DB::transaction(function () use ($row, $remarks, $target, $notes) {
             /*
              * The pointer is REPLACED on every return, including with null. A
              * stale target from a previous round would highlight a row this
@@ -1792,6 +2209,18 @@ class WorkflowService
                  */
                 'returned_at' => now(),
             ]);
+            /*
+             * Replaced as a SET, scoped to THIS permit — the same reasoning
+             * as the pointer above: a note from a previous round sits under
+             * a row this round is not about. `permit_type_id` keeps it clear
+             * of BPLO's main-form notes, which live in the same table with a
+             * null in that column and are cleared by their own return.
+             */
+            ApplicationReturnNote::where('application_id', $row->application_id)
+                ->where('permit_type_id', $row->permit_type_id)
+                ->delete();
+            $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
+
             $this->transitionClearance($row, ClearanceStatus::Returned, $remarks);
             $this->notify->applicationStatus(
                 $row->application,
@@ -1856,6 +2285,16 @@ class WorkflowService
         ApplicationPermitType $row,
         string $reason,
         string $remedy = '',
+        /*
+         * Which rows this refusal is about, the same comma-joined pointer
+         * a return carries. Optional: a refusal can be about the business
+         * rather than about any one answer — "the premises are not zoned
+         * for this" names no field — and forcing a tick would make the
+         * officer invent one.
+         */
+        ?string $target = null,
+        /** @var array<string, string> What is wrong with each named row. */
+        array $notes = [],
     ): void {
         $reason = trim($reason);
         $remedy = trim($remedy);
@@ -1899,7 +2338,7 @@ class WorkflowService
             ]);
         }
 
-        DB::transaction(function () use ($row, $app, $reason, $remedy) {
+        DB::transaction(function () use ($row, $app, $reason, $remedy, $target, $notes) {
             /*
              * `remarks` AND the refusal columns, which look redundant and are
              * not. `remarks` is what the applicant's card reads as the current
@@ -1911,10 +2350,35 @@ class WorkflowService
             $row->update([
                 'decided_at' => now(),
                 'remarks' => $reason,
+                /*
+                 * Which rows, so the applicant's correction dialog can draw
+                 * them — the same field a return writes, read by the same
+                 * screens. A refusal naming nothing stores null and the
+                 * applicant gets the two sentences, as before.
+                 */
+                'remarks_target' => $target,
+                /*
+                 * What the sheet said at the moment of refusal, so an
+                 * untouched resubmission can be refused rather than
+                 * costing the office a second review. `returned_state`
+                 * already means "what it said when this office last handed
+                 * it back", and a refusal is a handing back.
+                 */
+                'returned_state' => ClearanceSnapshot::capture(
+                    $app,
+                    $row->permitType->code,
+                    ReturnTargets::parse($target),
+                ),
                 'rejected_at' => now(),
                 'rejection_note' => $reason,
                 'rejection_remedy' => $remedy !== '' ? $remedy : null,
             ]);
+
+            /* One note per named row, replacing any from an earlier round. */
+            ApplicationReturnNote::where('application_id', $row->application_id)
+                ->where('permit_type_id', $row->permit_type_id)
+                ->delete();
+            $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
             $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
 
             /*
@@ -3398,6 +3862,10 @@ class WorkflowService
         ApplicationAssignment $assignment,
         string $reason,
         string $remedy = '',
+        /* Which rows the refusal is about; see `rejectClearance`. */
+        ?string $target = null,
+        /** @var array<string, string> */
+        array $notes = [],
     ): void {
         $app = $assignment->application;
 
@@ -3423,7 +3891,7 @@ class WorkflowService
             ]);
         }
 
-        $this->rejectClearance($row, $reason, $remedy);
+        $this->rejectClearance($row, $reason, $remedy, $target, $notes);
     }
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
     /**
@@ -3432,6 +3900,56 @@ class WorkflowService
      *   return that names wizard fields. Passed straight through rather than
      *   inspected here: `returnMainForm` owns what a note means.
      */
+    /**
+     * Change what an already-returned filing is being asked for.
+     *
+     * `returnAssignment`'s counterpart, and it routes the same way: BPLO
+     * naming a clearance amends that clearance's return, everything else
+     * amends the main form's. Neither transitions anything — see
+     * `amendMainFormReturn` for why that is the whole point.
+     *
+     * @param  array<string, string>  $notes
+     */
+    public function amendReturn(
+        ApplicationAssignment $assignment,
+        string $remarks,
+        ?string $target = null,
+        array $notes = [],
+    ): void {
+        $app = $assignment->application;
+        $app->loadMissing('permitTypes');
+
+        /*
+         * An office amends its OWN permit's return. BPLO has no permit of
+         * its own to return, so it lands on the main form unless its
+         * pointer names a clearance — the same fork `returnAssignment`
+         * makes, for the same reasons, written out there at length.
+         */
+        if ($assignment->department_id !== $this->bploDepartmentId()) {
+            $row = $this->pivotForDepartment($app, $assignment->department_id);
+            if ($row !== null) {
+                $this->amendClearanceReturn($row, $remarks, $target, $notes);
+
+                return;
+            }
+        }
+
+        $clearance = $target === null
+            ? null
+            : $app->permitTypes->firstWhere('code', $target);
+
+        if ($clearance !== null && $clearance->code !== PermitType::OUTCOME_CODE) {
+            $row = $this->pivotForDepartment($app, $clearance->issuing_department_id);
+            if ($row !== null) {
+                $this->amendClearanceReturn($row, $remarks, $target, $notes);
+
+                return;
+            }
+        }
+
+        $this->amendMainFormReturn($app, $remarks, $target, $notes);
+    }
+
     public function returnAssignment(
         ApplicationAssignment $assignment,
         string $remarks,
@@ -3475,7 +3993,7 @@ class WorkflowService
                 $row = $this->pivotForDepartment($app, $clearance->issuing_department_id);
 
                 if ($row !== null) {
-                    $this->returnClearance($row, $remarks, $target);
+                    $this->returnClearance($row, $remarks, $target, $notes);
 
                     return;
                 }
@@ -3512,7 +4030,7 @@ class WorkflowService
             ]);
         }
 
-        $this->returnClearance($row, $remarks, $target);
+        $this->returnClearance($row, $remarks, $target, $notes);
     }
 
     // ── shared internals ────────────────────────────────────────────────────

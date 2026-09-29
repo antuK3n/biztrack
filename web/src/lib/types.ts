@@ -593,10 +593,19 @@ export interface ApplicationListItem {
   /**
    * Last WRITE, which on a draft is the last autosave.
    *
-   * Not "last opened": reading a draft changes nothing, so this does not
-   * move. The drafts list sorts by it and labels it accordingly.
+   * Not "last opened" — reading a draft does not move it. That question
+   * has its own column now; see `last_opened_at`.
    */
   updated_at: string
+  /**
+   * When the applicant last OPENED this draft, or null if they never have.
+   *
+   * Stamped by `ApplicationController::show` for the owner of a draft and
+   * by nothing else, so an autosave leaves it alone. Null rather than
+   * backfilled from `updated_at`: a draft nobody has opened since this
+   * shipped has genuinely never been observed being opened.
+   */
+  last_opened_at?: string | null
 }
 
 export interface AppDocument {
@@ -830,6 +839,17 @@ export interface Assignment {
      * and Malabon has given us no response window (open question A10).
      */
     returned_at: string | null
+    /**
+     * What this office last asked for, and what it said about each.
+     *
+     * The office reading its OWN open return, so amending it can open on the
+     * fields already ticked. The pointer is replaced wholesale on every
+     * write, so a blank composer would silently drop whatever it does not
+     * re-tick.
+     */
+    return_target?: string | null
+    return_remark?: string | null
+    return_notes?: Record<string, string>
     /**
      * When this office REFUSED the permit, and what it said.
      *
@@ -1139,6 +1159,15 @@ export interface Ra11032Standing {
  * this build does not know resolves to null and is skipped rather than
  * printed raw.
  */
+/** One row of an office's checklist, as the applicant left it and as it is now. */
+export interface ClearanceCorrection {
+  /** The checklist row's document code, or an office-sheet answer key. */
+  target: string
+  old_value: string | null
+  new_value: string | null
+  at: string | null
+}
+
 export interface ApplicationCorrection {
   target: string
   old_value: string | null
@@ -3020,6 +3049,14 @@ export interface OfficeForm {
    */
   requirements?: OfficeFormRequirement[] | null
   /**
+   * What the applicant changed on the rows this office last returned.
+   *
+   * Includes rows that did NOT change — the resubmit gate lets a file
+   * the office called wrong come back identical, so this is how the
+   * office finds out without opening it again.
+   */
+  corrections?: ClearanceCorrection[]
+  /**
    * Last year's answers, OFFERED to a renewal — not applied.
    *
    * A renewal's office form is the same form as a new application's, so the
@@ -3074,20 +3111,59 @@ export interface OfficeFormRequirement {
   source: 'upload' | 'carried' | 'sheet'
   satisfied: boolean
   /**
+   * The business-permit attachment that answers this row, when one does.
+   *
+   * Null on an `upload` row, which is its own source, and on a `sheet` row,
+   * which is the form itself. A `carried` row has no slot of its own —
+   * `code` is null on it — so this is the only machine-readable statement
+   * of WHICH document it is waiting for; the note says it in prose.
+   */
+  carried_from?: string | null
+  /**
+   * Which files on this row belong to the business permit rather than to this
+   * sheet. Remove is not offered on them: it means "I attached the wrong page
+   * to this checklist", never "take it off my business permit".
+   */
+  carried_document_ids?: number[]
+  /**
    * Does an unsatisfied row stop the sheet being handed in?
    *
-   * False for almost all of them, deliberately: CPDD's paper is a counter
-   * checklist and a missing lease is a conversation with the office, not a
-   * reason to refuse the form. The notarised Applicant Declaration is the
-   * exception — its own line is in capitals, MUST BE NOTARIZED PRIOR TO
-   * SUBMISSION OF APPLICATION — and the server owns that judgement so the
-   * applicant's gate and CPDD's review screen cannot disagree about it. See
-   * `App\Support\ZoningRequirements`.
+   * True for every documentary row since 30 September 2026, on the client's
+   * instruction reading the Locational Clearance form — *"Are the
+   * documentary fields here not required? Make sure they are required."*
+   * Before that only the notarised Applicant Declaration blocked, on the
+   * reading that CPDD's paper is a counter checklist a clerk ticks on
+   * receipt; what settled it is that the office cannot act on a filing
+   * missing the documents its decision rests on either way.
+   *
+   * A `sheet` row is the exception, because it IS the form and is satisfied
+   * only by being submitted.
+   *
+   * The server owns the judgement — see `App\Support\ChecklistSupport` and
+   * `WorkflowService::submitClearanceForm`, which refuses what this greys
+   * out — so the applicant's gate and the officer's review screen cannot
+   * disagree about it.
    *
    * Optional on the wire so an older API that does not send it reads as "does
    * not block", which is the behaviour this replaced.
    */
   blocking?: boolean
+  /**
+   * EVERY file under this row, newest first.
+   *
+   * A slot held one until 30 September 2026 — the office upload endpoint
+   * deleted the previous file on each press — and the business permit
+   * form has always taken many per requirement. `document` below is the
+   * first of these and stays for the rows that are single by nature: a
+   * `carried` file from the business permit, and the officer's one-line
+   * read of the checklist.
+   */
+  documents?: {
+    id: number
+    filename: string
+    size_bytes: number | null
+    uploaded_at?: string | null
+  }[]
   document: {
     id: number
     filename: string
@@ -3223,6 +3299,16 @@ export interface Clearance {
    * Exists so nothing has to read the prose to work out what it refers to.
    */
   return_target: string | null
+  /**
+   * The office's note for EACH returned row, keyed by the same code as
+   * `return_target`.
+   *
+   * The officer's screen will not send an office return until every ticked
+   * row has one. Nothing stored them until 30 September 2026, so the
+   * applicant saw the notes only run together in `return_note` above, with
+   * the rows they describe blank.
+   */
+  return_notes?: Record<string, string>
   /** When it was last sent back. Elapsed time only, never a due date. */
   returned_at: string | null
   /**

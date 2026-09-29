@@ -56,7 +56,7 @@ export interface PermitColumn {
  */
 export const OFFICES = [
   { code: 'BUSINESS', office: 'BPLO', name: "Mayor's / Business Permit" },
-  { code: 'ZONING', office: 'CPDD', name: 'Zoning / Locational Clearance' },
+  { code: 'ZONING', office: 'CPDD', name: 'Zoning Clearance' },
   { code: 'SANITARY', office: 'CHO', name: 'Sanitary Permit' },
   { code: 'FSIC', office: 'BFP', name: 'Fire Safety Inspection Certificate' },
   { code: 'OCCUPANCY', office: 'OBO', name: 'Occupancy Permit' },

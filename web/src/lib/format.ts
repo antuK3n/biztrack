@@ -125,6 +125,54 @@ export function formatVersionDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : versionDateFmt.format(d)
 }
 
+/**
+ * A date and time small enough for a list tile.
+ *
+ * The second named short format, and named for its job rather than offered
+ * as a general one — see the note above, which refuses a generic
+ * `formatDateShort` because "the second helper is the one that quietly
+ * spreads".
+ *
+ * A draft tile is about 200px wide and carries two dated lines, Started and
+ * Last opened. The long form is "September 29, 2026 at 5:38 PM", which wraps
+ * each of them onto two lines and buries a one-line title under four lines
+ * of metadata. Nobody transcribes a draft's timestamps onto a paper form,
+ * which is the reason the long form exists at all.
+ */
+const tileDateTimeFmt = new Intl.DateTimeFormat('en-PH', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+/*
+ * The same thing without the year, for a date in the current one.
+ *
+ * "Last opened: Sep 29, 2026, 10:15 PM" wrapped a tile and left "PM" on a
+ * line of its own. Dropping the year saves six characters and drops the
+ * part of the answer the reader already knows — and only while they know
+ * it: a draft from another year still carries its year, which is when that
+ * digit is the whole point.
+ */
+const tileThisYearFmt = new Intl.DateTimeFormat('en-PH', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+export function formatTileDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+
+  return d.getFullYear() === new Date().getFullYear()
+    ? tileThisYearFmt.format(d)
+    : tileDateTimeFmt.format(d)
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)

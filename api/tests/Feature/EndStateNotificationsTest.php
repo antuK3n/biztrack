@@ -84,6 +84,12 @@ it('notifies the applicant when the application is approved', function () use ($
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],

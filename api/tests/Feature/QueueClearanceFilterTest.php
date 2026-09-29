@@ -75,6 +75,9 @@ function permitReaching(Application $app, string $code, string $to): Application
     // of its office. This fixture wants a permit an office is holding, so it
     // does both — see WorkflowService::submitClearanceForm.
     $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app, $type);
     $workflow->submitClearanceForm($app, $type);
 
     $row = ApplicationPermitType::where('application_id', $app->id)

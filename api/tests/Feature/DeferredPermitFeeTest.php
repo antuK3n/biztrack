@@ -99,6 +99,9 @@ function issueClearanceOnRenewal(Application $app, string $code): void
     $row = $workflow->pivotFor($app->fresh(), $code);
 
     $workflow->startClearance($app->fresh(), $row->permitType, 'apply');
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app->fresh(), $row->permitType);
     $workflow->submitClearanceForm($app->fresh(), $row->permitType);
     $workflow->approveClearance($workflow->pivotFor($app->fresh(), $code), 'Paperwork fine.');
 

@@ -162,14 +162,14 @@ class ChatbotResponder
             'aliases' => ['application type', 'full or partial', 'partial occupancy', 'full occupancy', 'occupancy scope'],
             'answer' => 'Application Type on the Occupancy sheet is the occupancy scope, and it is required. '
                 ."Choose Full if the whole building will be occupied, Partial if only a part of it will be.\n"
-                .'The Office of the Building Official inspects against what you pick, so it has to match what you will actually occupy.',
+                .'The Office of the Local Building Official inspects against what you pick, so it has to match what you will actually occupy.',
         ],
         [
             'label' => 'Building Permit No.',
             'codes' => ['OCCUPANCY'],
             'aliases' => ['building permit no', 'building permit number', 'building permit'],
             'answer' => 'Building Permit No. is on the Occupancy sheet. '
-                ."Enter the number printed on the building permit the Office of the Building Official issued for the structure.\n"
+                ."Enter the number printed on the building permit the Office of the Local Building Official issued for the structure.\n"
                 .'Give the number only. The date it was issued is filled in by the reviewing office, not by you.',
         ],
         [

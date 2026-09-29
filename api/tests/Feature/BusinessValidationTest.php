@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Business;
@@ -177,7 +178,7 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
     expect((float) $fee->total_amount)->toBeGreaterThan(0.0);
 });
 
-it('routes the zoning clearance to the City Planning and Development Office when the applicant hands its form in', function () {
+it('routes the zoning clearance to the Planning/Zoning Office when the applicant hands its form in', function () {
     $owner = authAs('owner@biztrack.local');
     $businessId = $this->withHeaders($owner)
         ->postJson('/api/v1/businesses', businessPayload(['name' => 'Zoning Test Co']))
@@ -218,6 +219,13 @@ it('routes the zoning clearance to the City Planning and Development Office when
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
         ->assertSuccessful();
+
+    // The checklist has to be complete before the sheet goes in, since 30
+    // September 2026. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($appId),
+        PermitType::where('code', 'ZONING')->firstOrFail(),
+    );
 
     $this->withHeaders($owner)
         ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
