@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\KwikPayCallbackController;
 use App\Http\Controllers\Api\OfficeHoursController;
+use App\Http\Controllers\FakeKwikPayController;
+use App\Services\KwikPay\FakeKwikPay;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -85,6 +87,22 @@ Route::get('office-hours', OfficeHoursController::class);
  */
 Route::post('payments/kwikpay/callback', KwikPayCallbackController::class)
     ->name('payments.kwikpay.callback');
+
+/*
+ * The stand-in KwikPay for demos and e2e — never on a real server. Both the
+ * registration and every action check FakeKwikPay::available() (local/testing
+ * AND KWIKPAY_FAKE=true). See FakeKwikPayController.
+ */
+if (FakeKwikPay::available()) {
+    Route::prefix('fake-kwikpay')->group(function () {
+        Route::post('api/transfer', [FakeKwikPayController::class, 'transfer']);
+        Route::post('api/query', [FakeKwikPayController::class, 'query']);
+        Route::post('api/me', [FakeKwikPayController::class, 'me']);
+        Route::get('pay/{orderId}', [FakeKwikPayController::class, 'page']);
+        Route::post('pay/{orderId}/{outcome}', [FakeKwikPayController::class, 'settle']);
+        Route::get('qr/{orderId}', [FakeKwikPayController::class, 'qr']);
+    });
+}
 
 // Workflow routes are registered in routes/workflow.php (loaded below) once
 // their controllers exist.
