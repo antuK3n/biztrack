@@ -302,6 +302,68 @@ export interface PriorPermitChoice {
   prior_permit_ids: number[]
 }
 
+/** One filing the applicant has started, saved before it could be a draft. */
+export interface WizardDraftSummary {
+  /*
+   * Addressed by id, so an applicant may have several of one kind. The key
+   * was (user, application_type) until 29 September 2026, and three starts
+   * of a New Business Permit left one row: each save replaced the last.
+   */
+  id: number
+  application_type: string
+  title: string | null
+  updated_at: string | null
+}
+
+export interface WizardDraftRecord extends WizardDraftSummary {
+  payload: Record<string, unknown>
+}
+
+/**
+ * Answers saved before the API will accept a business.
+ *
+ * ── Why this exists beside `applications` ───────────────────────────────────
+ *
+ * A draft is an `applications` row and needs a `businesses` row, and the API
+ * will not create one without a name, a form of organization, a registration
+ * number, a barangay and a line of business — answers spread across the
+ * wizard's second and third steps. Until then the applicant's typing had
+ * nowhere to go but the tab it was typed in.
+ *
+ * These endpoints hold it. One row per user per form, replaced on save and
+ * deleted the moment a real draft exists. Nothing but the wizard reads the
+ * payload, and nothing validates it: they are answers in progress, most of
+ * them incomplete by definition. The register's own rules are untouched — a
+ * saved row here can never become a filing.
+ */
+export const wizardDrafts = {
+  /** Every unfinished filing this applicant has, newest first. */
+  list: () => unwrap<WizardDraftSummary[]>(api.get('/wizard-drafts')),
+  /**
+   * One unfinished filing with its answers, or null if it has gone.
+   *
+   * Null rather than a throw on 404: the row may have been deleted from
+   * the Drafts page in another tab, and the honest response to resuming
+   * something that no longer exists is a blank form, not an error screen.
+   */
+  get: async (id: number): Promise<WizardDraftRecord | null> => {
+    try {
+      return await unwrap<WizardDraftRecord>(api.get(`/wizard-drafts/${id}`))
+    } catch {
+      return null
+    }
+  },
+  /** Begin one. Called on the first change, never on merely opening a form. */
+  create: (body: {
+    application_type: string
+    payload: Record<string, unknown>
+    title?: string | null
+  }) => unwrap<WizardDraftSummary>(api.post('/wizard-drafts', body)),
+  save: (id: number, body: { payload: Record<string, unknown>; title?: string | null }) =>
+    unwrap<WizardDraftSummary>(api.put(`/wizard-drafts/${id}`, body)),
+  /** Idempotent — deleting nothing is a success. */
+  discard: (id: number) => api.delete(`/wizard-drafts/${id}`),
+}
 export const applications = {
   /**
    * Filings visible to the caller, newest first.
