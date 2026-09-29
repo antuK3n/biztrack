@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\KwikPayCallbackController;
 use App\Http\Controllers\Api\OfficeHoursController;
 use Illuminate\Support\Facades\Route;
 
@@ -73,6 +74,17 @@ Route::prefix('auth')->group(function () {
 
 // Is City Hall open now? Public: the sign-in pages show it [Login 6].
 Route::get('office-hours', OfficeHoursController::class);
+
+/*
+ * KwikPay's deposit callback (docs/payment-gateway.md). Public — KwikPay holds
+ * no token of ours; the MD5 signature over the fields is the authentication,
+ * checked in KwikPayCallback. No CSRF: API routes carry none. Registered
+ * whatever the payment mode is, so a payment opened before the switch was
+ * turned off can still be confirmed after. Its raw fields are protected from
+ * TrimStrings / ConvertEmptyStringsToNull in bootstrap/app.php.
+ */
+Route::post('payments/kwikpay/callback', KwikPayCallbackController::class)
+    ->name('payments.kwikpay.callback');
 
 // Workflow routes are registered in routes/workflow.php (loaded below) once
 // their controllers exist.

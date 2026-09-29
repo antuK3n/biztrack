@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
 use App\Http\Controllers\Api\Admin\OicAssignmentController;
+use App\Http\Controllers\Api\Admin\PaymentGatewayController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AmendmentController;
 use App\Http\Controllers\Api\AnalyticsController;
@@ -213,7 +214,19 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::post('applications/{application}/fee-preview', [PaymentController::class, 'feePreview']);
         Route::post('applications/{application}/pay', [PaymentController::class, 'pay']);
+        // Mode, methods on offer, and any online payment still in flight.
+        Route::get('applications/{application}/payment-options', [PaymentController::class, 'options']);
         Route::get('payments', [PaymentController::class, 'index']);
+        // The waiting screen polls this; it reads our own record only.
+        Route::get('payments/{payment}', [PaymentController::class, 'show'])->whereNumber('payment');
+        /*
+         * "Check payment status": one query to KwikPay. Throttled, because each
+         * press is a request to a third party that IP-checks and may rate
+         * limit the whole merchant account, not just this owner.
+         */
+        Route::post('payments/{payment}/check', [PaymentController::class, 'check'])
+            ->whereNumber('payment')
+            ->middleware('throttle:10,1');
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
@@ -548,5 +561,16 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);
+        /*
+         * The payment gateway switch (docs/payment-gateway.md). Super admin
+         * only — checked by ROLE in the controller rather than by a permission,
+         * because a new permission would have to be seeded into the live
+         * register before anyone could use it, and this is exactly one role's
+         * decision by Ken's instruction.
+         */
+        Route::get('payment-gateway', [PaymentGatewayController::class, 'show']);
+        Route::put('payment-gateway', [PaymentGatewayController::class, 'update']);
+        Route::post('payment-gateway/test', [PaymentGatewayController::class, 'test'])
+            ->middleware('throttle:10,1');
     });
 });

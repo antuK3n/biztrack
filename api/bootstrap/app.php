@@ -23,6 +23,16 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->append(SecurityHeaders::class);
         /*
+         * KwikPay signs the callback over the RAW field values — `remark` may be
+         * "" and is signed as "", and a value is hashed exactly as sent (docs
+         * FAQ, "My recomputed callback signature never matches"). Trimming, or
+         * turning "" into null, would change what we hash and fail every such
+         * callback. See KwikPayCallbackController.
+         */
+        $kwikpayCallback = fn (Request $request) => $request->is('api/v1/payments/kwikpay/callback');
+        $middleware->trimStrings(except: [$kwikpayCallback]);
+        $middleware->convertEmptyStringsToNull(except: [$kwikpayCallback]);
+        /*
          * API-only app: there is no named 'login' route to bounce a guest to.
          * Returning null makes Authenticate throw AuthenticationException, which
          * the JSON renderer below turns into a clean 401. Without this, any
