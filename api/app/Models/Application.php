@@ -93,6 +93,12 @@ class Application extends Model
         'decided_at' => 'datetime',
         'complexity_set_at' => 'datetime',
         'fee_profile' => 'array',
+        /*
+         * What each returned field said when the officer sent it back, plus
+         * the moment they did. Compared once at resubmission and cleared —
+         * the state of one open round, never history.
+         */
+        'returned_values' => 'array',
         // Without these, SQLite hands back 0/1 and the JSON payload says
         // `"amendment_ownership": 1`, which the officer screen renders as a
         // number rather than a ticked box.
