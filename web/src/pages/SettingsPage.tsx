@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { GENDERS } from '../lib/fieldRules'
 import type { ChangeEvent, ReactNode, SVGProps } from 'react'
 import { ChevronRightIcon } from '../components/icons'
 import { PasswordInput } from '../components/ui/PasswordInput'
@@ -478,8 +479,12 @@ export function SettingsPage() {
                 className={inputCls}
               >
                 <option value="">Not specified</option>
-                <option value="M">Male</option>
-                <option value="F">Female</option>
+                {/* The shared list, so the wording cannot drift between screens. */}
+                {GENDERS.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
+                  </option>
+                ))}
               </select>
             </ProfileField>
             <ProfileField

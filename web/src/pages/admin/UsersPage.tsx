@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { GENDERS } from '../../lib/fieldRules'
 import type { ReactNode } from 'react'
 import { admin, reference } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -1070,8 +1071,12 @@ function CreateOfficerModal({
               onChange={(e) => set('gender', e.target.value as CreateFormState['gender'])}
             >
               <option value="">Select</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
+              {/* The shared list, so the wording cannot drift between screens. */}
+              {GENDERS.map((g) => (
+                <option key={g.value} value={g.value}>
+                  {g.label}
+                </option>
+              ))}
             </select>
             <FieldError message={firstError(errors, 'gender')} />
           </label>

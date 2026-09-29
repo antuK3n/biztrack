@@ -167,10 +167,17 @@ export const MAIN_FORM_RETURN_TARGETS: ReturnTarget[] = [
   { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity?', group: B, kind: 'section', phase: 'operation' },
   { value: 'form:is_rented', label: '8. Do you pay rent for the premises?', group: B, kind: 'section', phase: 'address' },
 
+  /*
+   * The trade first. ApplyWizard asks the line-of-business table at the
+   * head of this step, before the address, because the zoning conformity
+   * judgment is about a NAMED TRADE — so an officer scanning this group in
+   * the order they read the filing meets it first too. It was fourth,
+   * after the map pin, until 29 September 2026.
+   */
+  { value: 'form:lines', label: 'Line of Business', group: L, kind: 'section', phase: 'address' },
   { value: 'form:address', label: 'House / Bldg. No. and Street', group: L, kind: 'section', phase: 'address' },
   { value: 'form:barangay', label: 'Barangay Name', group: L, kind: 'section', phase: 'address' },
   { value: 'form:map_pin', label: 'Pin on the map', group: L, kind: 'section', phase: 'address' },
-  { value: 'form:lines', label: 'Line of Business', group: L, kind: 'section', phase: 'address' },
   /*
    * `form:lessor` was here and is gone — the wizard STOPPED COLLECTING the
    * lessor block, and not one of its inputs renders any more. Offering it
