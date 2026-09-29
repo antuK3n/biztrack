@@ -2,8 +2,10 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
+  GENDERS,
   TIN_ERROR,
   emailValid,
+  genderLabel,
   lotAreaValid,
   percentValid,
   phoneValid,
@@ -12,6 +14,8 @@ import {
   tinValid,
   websiteValid,
 } from '../../lib/fieldRules'
+/* Answers saved before the API will accept a business — see its docblock. */
+import { wizardDrafts } from '../../lib/resources'
 import { mainFormTargets } from '../../lib/returnTargets'
 import { PsicPicker, type PsicPickerHandle } from '../../components/PsicPicker'
 import {
@@ -2853,7 +2857,15 @@ export function ApplyWizard() {
    * form that does not remember.
    */
   const backupRestoredRef = useRef(false)
-  const [recovered, setRecovered] = useState(false)
+  /*
+   * The form as it was OPENED, so an untouched one saves nothing.
+   *
+   * There is one scratch row per applicant per form, so without this,
+   * merely visiting a blank New Business Permit would write the empty form
+   * over the answers already saved there — opening a page would destroy
+   * work. Null until the first run of the save effect records it.
+   */
+  const openedSnapshotRef = useRef<string | null>(null)
   /*
    * Has the restore below had its turn AND landed?
    *
@@ -3253,6 +3265,28 @@ export function ApplyWizard() {
   )
 
   const draftIdParam = searchParams.get('draft')
+  /*
+   * Did the applicant ask to pick an unfinished filing back up?
+   *
+   * Only a Drafts card sets this. The dashboard's New Business Permit
+   * card links to `/apply?type=new`, and that has to mean a blank form —
+   * it said "new" and reopened the last set of answers, which is what
+   * the client reported on 29 September 2026.
+   *
+   * A flag on the URL rather than the Drafts page clearing the row on
+   * its way out: a link is something people bookmark, share and reload,
+   * and it should mean the same thing every time it is opened.
+   */
+  const resumeParam = Number(searchParams.get('resume')) || null
+  /*
+   * The unfinished filing this form is writing to, once it has one.
+   *
+   * A ref, not state: it is read inside the debounced save, which has to
+   * see the id created by the save before it. A state update would not
+   * have rendered by then, so the second save would create a SECOND row
+   * and the applicant would watch one filing split in two.
+   */
+  const scratchIdRef = useRef<number | null>(null)
   /*
    * ── Item 110 — the entry dialog ────────────────────────────────────────
    *
@@ -3812,7 +3846,18 @@ export function ApplyWizard() {
    * because the map has to search before anything is saved. Kept as one
    * expression so the two cannot describe the address differently.
    */
-  const streetAddress = [form.house_bldg_no.trim(), form.street.trim()].filter(Boolean).join(' ')
+  /*
+   * `?? ''` because a null here took the entire wizard to a blank page —
+   * this runs at component level, so one bad value in the pair is not a
+   * bad field, it is no form at all. The prefill path writes the API's
+   * nulls into `form` even though `EMPTY` says these are strings, which is
+   * how the client reached it; the restore now rebuilds on `EMPTY` too, so
+   * this is the second of two doors rather than the only one.
+   */
+  const streetAddress = [form.house_bldg_no ?? '', form.street ?? '']
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(' ')
 
   /*
    * ── Item 7 · the address suggests a pin ───────────────────────────────────
@@ -4441,7 +4486,13 @@ export function ApplyWizard() {
          * always renumbered in the same edit.
          */
         { label: '10–13. Owner / Representative', value: owner },
-        { label: '14. Gender', value: form.owner_gender },
+        /*
+         * The WORD, not the code. This summary showed "M" for an answer
+         * the applicant gave by pressing a button marked Male — on the
+         * last screen before they commit, which is the worst place to
+         * make somebody wonder whether the form understood them.
+         */
+        { label: '14. Gender', value: genderLabel(form.owner_gender) },
         /*
          * 15 to 17 are asked of EVERY structure — both arrows on the paper
          * point at its item 13 — so they are always read back, blank or not.
@@ -7238,27 +7289,136 @@ export function ApplyWizard() {
    */
   useEffect(() => {
     if (backupRestoredRef.current) return
+    /*
+     * `!resumeParam` — a fresh start reads nothing back. Without it the
+     * only button labelled "new" could not produce a new form.
+     */
+    if (!resumeParam) {
+      /*
+       * Still open the save gate. It exists to stop an empty form being
+       * written over answers that are mid-restore, and on a fresh start
+       * there are none — so leaving it shut would mean a blank form
+       * never saves anything, which is the deadlock all over again.
+       */
+      setRestoreSettled(true)
+
+      return
+    }
     if (draftIdParam || applicationId || hydrating || applicationType !== 'new') return
     backupRestoredRef.current = true
 
-    const backup = readBackup()
-    if (backup && backup.applicationType === 'new') {
-      setTitle(backup.title)
-      setForm(backup.form)
-      setFeeDraft(backup.feeDraft)
-      setConsent(backup.consent)
-      setRecovered(true)
+    /*
+     * ── Rebuilt on EMPTY, never applied wholesale ────────────────────
+     *
+     * A saved payload is data: it has been through a database, it may have
+     * been written by an older build of this form, and the one the client
+     * hit held `null` for twenty-four of forty keys. `EMPTY` gives every
+     * one of those `''`, and dozens of reads — `form.house_bldg_no.trim()`
+     * among them — rely on that. Applying the payload straight put a null
+     * where a string belonged and took the whole wizard to a blank page.
+     *
+     * So: start from the empty form and lay the payload's real answers
+     * over it. A key that is null, undefined or absent keeps the empty
+     * value; a key this build has never heard of is dropped, because
+     * `EMPTY` decides the shape rather than the stored copy.
+     */
+    const rebuild = <T extends object>(empty: T, saved: unknown): T => {
+      if (saved === null || typeof saved !== 'object') return empty
+      const from = saved as Record<string, unknown>
+      const out = { ...empty } as Record<string, unknown>
+      for (const key of Object.keys(empty)) {
+        const value = from[key]
+        if (value !== null && value !== undefined) out[key] = value
+      }
+
+      return out as T
     }
 
+    const apply = (backup: DraftBackup) => {
+      setTitle(typeof backup.title === 'string' ? backup.title : '')
+      setForm(rebuild(EMPTY, backup.form))
+      setFeeDraft(rebuild(EMPTY_FEE_PROFILE, backup.feeDraft))
+      setConsent(backup.consent === true)
+    }
+
+    let cancelled = false
     /*
-     * Set whether or not anything came back, and batched with the writes
-     * above so both land in the same commit. This is the signal the backup
-     * effect waits for — until it flips, that effect must not write, because
-     * the form it would be reading is the empty one this commit still shows.
+     * Did this run get as far as opening the gate?
+     *
+     * Not the same question as `cancelled`. That one asks whether this run
+     * was abandoned; this asks whether the work it was responsible for
+     * actually happened, which is what decides whether the ref may stay
+     * claimed.
      */
-    setRestoreSettled(true)
+    let done = false
+    void (async () => {
+      let from: 'server' | 'tab' | null = null
+
+      /*
+       * The SERVER copy outranks the tab's. Where the two differ the
+       * server's is the newer, because the tab copy only ever existed in
+       * the tab that wrote it — a laptop closed on step two and reopened
+       * anywhere else has nothing else to come back to.
+       */
+      try {
+        const saved = resumeParam === null ? null : await wizardDrafts.get(resumeParam)
+        const payload = saved?.payload as DraftBackup | undefined
+        if (!cancelled && saved && payload && payload.v === DRAFT_BACKUP_VERSION) {
+          apply(payload)
+          /*
+           * Adopted, so every later save goes back to the row this form was
+           * opened from rather than starting another one beside it.
+           */
+          scratchIdRef.current = saved.id
+          from = 'server'
+        }
+      } catch {
+        /*
+         * Offline, or the session has gone. The tab copy below is exactly
+         * the case this fallback exists for, so this is not worth a
+         * message — and an error toast on opening a blank form would be
+         * alarming about nothing.
+         */
+      }
+
+      if (!cancelled && from === null) {
+        const backup = readBackup()
+        if (backup && backup.applicationType === 'new') {
+          apply(backup)
+          from = 'tab'
+        }
+      }
+
+      if (cancelled) return
+      done = true
+      /*
+       * Nothing is said about `from`. Which copy the answers came back
+       * from is this component's business, not the applicant's — see the
+       * note where the recovery banner used to be.
+       */
+      /*
+       * Set whether or not anything came back, and after the writes above
+       * so they land first. This is the signal the save effect waits for —
+       * until it flips, that effect must not write, because the form it
+       * would be reading is the empty one still on screen.
+       */
+      setRestoreSettled(true)
+    })()
+
+    return () => {
+      cancelled = true
+      /*
+       * Hand the claim back if this run never opened the gate, or the next
+       * mount sees a ref that says "already restored" and returns without
+       * ever setting `restoreSettled` — which leaves the save effect
+       * refusing to write for the life of the page. StrictMode does
+       * exactly this on every mount in development, and it is how the
+       * client found that ticking Data Privacy saved nothing at all.
+       */
+      if (!done) backupRestoredRef.current = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftIdParam, applicationId, hydrating, applicationType])
+  }, [draftIdParam, applicationId, hydrating, applicationType, resumeParam])
 
   /*
    * Written on every edit while the server still has nothing, and dropped
@@ -7269,7 +7429,20 @@ export function ApplyWizard() {
   useEffect(() => {
     if (applicationType !== 'new' || hydrating || hydrateFailed) return
     if (applicationId) {
+      /*
+       * There is a real draft now, so both scratch copies are not just
+       * redundant but dangerous: restored later they would go OVER newer
+       * work. The server delete is idempotent and its failure is ignored —
+       * a scratch row that outlives its draft is never read, because the
+       * restore only runs when there is no draft to open.
+       */
       clearBackup()
+      const scratchId = scratchIdRef.current
+      if (scratchId !== null) {
+        scratchIdRef.current = null
+        void wizardDrafts.discard(scratchId).catch(() => {})
+      }
+
       return
     }
     /*
@@ -7286,6 +7459,20 @@ export function ApplyWizard() {
      * is already true by the time this runs in that first commit.
      */
     if (!restoreSettled) return
+
+    /*
+     * Nothing is written until something changes. The first run records
+     * the form as opened; every later one compares against it, so a blank
+     * form that stays blank never touches the saved row, and a resumed one
+     * does not rewrite itself with what it has just read.
+     */
+    if (openedSnapshotRef.current === null) {
+      openedSnapshotRef.current = snapshot
+
+      return
+    }
+    if (openedSnapshotRef.current === snapshot) return
+
     try {
       sessionStorage.setItem(
         DRAFT_BACKUP_KEY,
@@ -7307,18 +7494,67 @@ export function ApplyWizard() {
        * already saying.
        */
     }
+
+    /*
+     * ── And to the server, debounced ──────────────────────────────────
+     *
+     * The copy that actually answers the client's complaint: it survives
+     * the tab, reaches another device, and puts the filing in the drafts
+     * list before the API would accept a business.
+     *
+     * Debounced because `snapshot` changes on every keystroke batch and
+     * this is a write, not a read. The timer is cleared on the next change,
+     * so a burst of typing costs one request at the end of it.
+     *
+     * Failures are swallowed on purpose. The tab copy above has already
+     * landed, the "Not saved yet" indicator is already telling the truth,
+     * and a toast on every keystroke of a flaky connection would be worse
+     * than the silence.
+     */
+    const timer = window.setTimeout(() => {
+      const body = {
+        title: title.trim() || null,
+        payload: {
+          v: DRAFT_BACKUP_VERSION,
+          at: new Date().toISOString(),
+          applicationType,
+          title,
+          form,
+          feeDraft,
+          consent,
+        } satisfies DraftBackup as unknown as Record<string, unknown>,
+      }
+
+      /*
+       * The first change creates the row; everything after writes to it.
+       * Writing to "this user's unfinished filing of this type" is what
+       * made three starts collapse into one.
+       */
+      void (async () => {
+        try {
+          const id = scratchIdRef.current
+          if (id === null) {
+            const created = await wizardDrafts.create({
+              application_type: applicationType,
+              ...body,
+            })
+            scratchIdRef.current = created.id
+          } else {
+            await wizardDrafts.save(id, body)
+          }
+        } catch {
+          /*
+           * Swallowed on purpose. The tab copy has already landed, the
+           * "Not saved yet" indicator is telling the truth, and a toast on
+           * every keystroke of a flaky connection is worse than silence.
+           */
+        }
+      })()
+    }, 800)
+
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, applicationId, applicationType, hydrating, hydrateFailed, restoreSettled])
-
-  /** "Start blank" on the recovery notice: throw the restored answers away. */
-  function discardRecovery(): void {
-    clearBackup()
-    setTitle('')
-    setForm(EMPTY)
-    setFeeDraft(EMPTY_FEE_PROFILE)
-    setConsent(false)
-    setRecovered(false)
-  }
 
   /* Closing the tab mid-form should not silently take the answers with it. */
   useEffect(() => {
@@ -8190,27 +8426,17 @@ export function ApplyWizard() {
       </div>
 
       {/*
-        Shown only when a recovery actually happened, and only until they
-        act on it. It says what was recovered and what had NOT happened —
-        "nothing had reached the server" is the part that explains why the
-        filing is not in their drafts list, which is where somebody who
-        lost work goes looking first.
+        A recovery notice stood here until 29 September 2026, saying the
+        answers had been found in this tab and had not reached the server.
+        It was true when the only copy was in sessionStorage, and it is not
+        now: the answers are saved from the first change and the filing is
+        in the drafts list. Reopening a form and finding your work in it is
+        what a draft does, not an event to announce.
+
+        Abandoning one is the trash on its card in Drafts — the same
+        control that deletes every other draft. Clear All above is not that
+        control: it clears the inputs of the current part only.
       */}
-      {recovered && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3">
-          <p className="text-sm font-medium text-royal">
-            Recovered the answers you had typed in this tab. They had not reached the server
-            yet, so this filing is not in your drafts list.
-          </p>
-          <button
-            type="button"
-            onClick={discardRecovery}
-            className="shrink-0 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
-          >
-            Start blank
-          </button>
-        </div>
-      )}
 
       {/* ── Full section map: every step this application requires ─────── */}
       <ol className="mb-8 flex flex-wrap gap-2" aria-label="Application sections">
@@ -9736,10 +9962,8 @@ export function ApplyWizard() {
                   and Economic Organization get above.
                 */}
                 <div role="radiogroup" aria-label="Gender" className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'M', label: 'Male' },
-                    { value: 'F', label: 'Female' },
-                  ].map((opt) => {
+                  {/* The shared list — see `GENDERS`. Four screens kept a copy. */}
+                  {GENDERS.map((opt) => {
                     const selected = form.owner_gender === opt.value
                     return (
                       <button
