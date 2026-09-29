@@ -4,34 +4,49 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\PaymentMethod;
+use App\Enums\PaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PaymentResource;
 use App\Models\Application;
 use App\Models\Payment;
 use App\Models\PermitType;
 use App\Services\FeeCalculator;
+use App\Services\KwikPay\KwikPayGateway;
 use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\PaymentMode;
 use App\Support\PdfFile;
 use App\Support\PermitFees;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Fee display + simulated payment. Charge → WorkflowService::onPaymentCompleted
- * routes the application into review.
+ * Fee display + payment.
+ *
+ * Two ways to pay, chosen by App\Support\PaymentMode for each NEW payment
+ * (docs/payment-gateway.md):
+ *
+ *   simulated  PaymentGateway::charge() completes at once and
+ *              WorkflowService::onPaymentCompleted routes the application on,
+ *              in this request — unchanged from before the switch existed.
+ *   kwikpay    KwikPayGateway::open() leaves the payment PENDING and hands back
+ *              where the owner pays. Nothing moves until KwikPay confirms it —
+ *              by callback (KwikPayCallbackController) or by a query
+ *              (`check` below, and the reconciliation command).
  */
 class PaymentController extends Controller
 {
     public function __construct(
         private PaymentGateway $gateway,
         private WorkflowService $workflow,
+        private KwikPayGateway $kwikpay,
     ) {}
 
     public function fee(Request $request, Application $application): JsonResponse
@@ -120,8 +135,16 @@ class PaymentController extends Controller
     {
         $this->authorizeOwner($request, $application);
 
+        /*
+         * The methods on offer are the current mode's. Card exists only while
+         * payments are simulated; QR Ph and GoTyme only through KwikPay.
+         */
+        $mode = PaymentMode::current();
         $data = $request->validate([
-            'method' => ['required', 'in:gcash,maya,card'],
+            'method' => ['required', Rule::in(array_map(
+                fn (PaymentMethod $m) => $m->value,
+                PaymentMethod::forMode($mode),
+            ))],
         ]);
 
         /*
@@ -220,11 +243,50 @@ class PaymentController extends Controller
         }
 
         /*
+         * An online payment already waiting on KwikPay, with somewhere to pay
+         * it, is handed back rather than doubled. The owner may have paid it in
+         * their app a minute ago; a second order is how somebody pays twice.
+         * Checked whatever the mode is now: the switch decides how NEW payments
+         * are made, and resuming this one is not a new payment.
+         *
+         * One without a `pay_url` does not block: the owner was never given
+         * anywhere to pay it, so they cannot have. It stays pending for
+         * reconciliation, and a new order is safe.
+         */
+        $inFlight = $this->inFlight($application);
+        if ($inFlight) {
+            return response()->json(['data' => new PaymentResource($inFlight)]);
+        }
+
+        /*
          * Charge what is owed, never the assessment total. On the ordinary path
          * these are the same number — nothing has been paid yet, so the balance
          * IS the total — and where they differ, the total is money some of which
          * the applicant has already handed over.
          */
+        if ($mode === PaymentMode::KWIKPAY) {
+            $payment = $this->kwikpay->open($fee, PaymentMethod::from($data['method']), $balanceDue);
+
+            if ($payment->status === PaymentStatus::Failed) {
+                throw ValidationException::withMessages([
+                    'method' => ['The payment could not be started, and nothing was charged. Please try again, or choose another way to pay.'],
+                ]);
+            }
+
+            if ($payment->pay_url === null) {
+                /*
+                 * No answer, or an answer with nowhere to pay. The order may
+                 * exist at KwikPay, so it is not failed and not retried here;
+                 * reconciliation settles it either way.
+                 */
+                throw ValidationException::withMessages([
+                    'method' => ['The payment service did not answer in time. Nothing has been charged. Please try again in a few minutes.'],
+                ]);
+            }
+
+            return response()->json(['data' => new PaymentResource($payment)], 201);
+        }
+
         $payment = $this->gateway->charge($fee, PaymentMethod::from($data['method']), $balanceDue);
         Audit::log('payment.completed', $payment, ['amount' => (string) $payment->amount]);
 
@@ -233,6 +295,55 @@ class PaymentController extends Controller
         return response()->json([
             'data' => new PaymentResource($payment->fresh()),
         ], 201);
+    }
+
+    /**
+     * What the pay screen needs before the owner chooses: which mode, which
+     * methods, and whether a payment is already waiting on KwikPay. The screen
+     * reads the methods from here rather than listing them itself, because the
+     * list depends on the mode and the mode can change on a running server.
+     */
+    public function options(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+
+        $mode = PaymentMode::current();
+        $inFlight = $this->inFlight($application);
+
+        return response()->json([
+            'data' => [
+                'mode' => $mode,
+                'methods' => array_map(fn (PaymentMethod $m) => [
+                    'value' => $m->value,
+                    'label' => $m->label(),
+                ], PaymentMethod::forMode($mode)),
+                'in_progress' => $inFlight ? new PaymentResource($inFlight) : null,
+            ],
+        ]);
+    }
+
+    /** One of the caller's own payments — what the waiting screen polls. */
+    public function show(Request $request, Payment $payment): JsonResponse
+    {
+        $this->authorizePaymentOwner($request, $payment);
+
+        return response()->json(['data' => new PaymentResource($payment)]);
+    }
+
+    /**
+     * "Check payment status": ask KwikPay once, now, about this payment.
+     *
+     * The owner's way to hurry a confirmation along when they have paid and the
+     * callback has not arrived. Throttled at the route. A payment that is not a
+     * pending KwikPay one is returned as it is, without asking anybody.
+     */
+    public function check(Request $request, Payment $payment): JsonResponse
+    {
+        $this->authorizePaymentOwner($request, $payment);
+
+        $payment = $this->kwikpay->check($payment, 'owner_check');
+
+        return response()->json(['data' => new PaymentResource($payment->fresh())]);
     }
 
     /** The caller's payment history, most recent first. Paginated. */
@@ -267,6 +378,18 @@ class PaymentController extends Controller
             $app && ApplicationVisibility::canView($request->user(), $app),
             403,
             'This receipt is not yours.'
+        );
+
+        /*
+         * A receipt says money was received. A pending or failed online payment
+         * has not been, and a PDF saying otherwise is a document somebody could
+         * wave at a counter. Simulated payments are all completed, so this
+         * refuses nothing that used to work.
+         */
+        abort_unless(
+            $payment->status === PaymentStatus::Completed,
+            409,
+            'There is no receipt for this payment because it has not gone through.'
         );
 
         $fee = $app?->feeAssessment;
@@ -309,6 +432,26 @@ class PaymentController extends Controller
         $stripped = preg_replace('/\s+\([^()]*\)/u', '', $label) ?? $label;
 
         return trim(preg_replace('/\s{2,}/u', ' ', $stripped) ?? $stripped);
+    }
+
+    /** A KwikPay payment for this application still waiting, with somewhere to pay it. */
+    private function inFlight(Application $application): ?Payment
+    {
+        return Payment::query()
+            ->awaitingKwikPay()
+            ->where('application_id', $application->id)
+            ->whereNotNull('pay_url')
+            ->latest('id')
+            ->first();
+    }
+
+    private function authorizePaymentOwner(Request $request, Payment $payment): void
+    {
+        abort_unless(
+            $payment->application?->applicant_user_id === $request->user()->id,
+            403,
+            'This payment is not yours.'
+        );
     }
 
     private function authorizeOwner(Request $request, Application $application): void
