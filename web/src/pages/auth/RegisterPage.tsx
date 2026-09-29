@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { GENDERS } from '../../lib/fieldRules'
 import type { FormEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
@@ -277,8 +278,12 @@ export function RegisterPage() {
                 <option value="" disabled>
                   Select
                 </option>
-                <option value="M">Male</option>
-                <option value="F">Female</option>
+                {/* The shared list, so the wording cannot drift between screens. */}
+                {GENDERS.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>

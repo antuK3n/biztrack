@@ -25,6 +25,12 @@ import {
   formatMoney,
   formatVersionDate,
 } from '../../lib/format'
+/*
+ * The wizard's own function for item 2's heading, so the sheet reads back
+ * the question that was actually put — a cooperative is asked for its CDA
+ * number, not for "DTI / SEC / CDA".
+ */
+import { genderLabel, registrationNumberLabel } from '../../lib/fieldRules'
 import { OFFICE_FORM_INTERNAL_KEYS, officeFormFieldLabel } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
 import { otherPermitProgress } from '../../lib/status'
@@ -107,6 +113,16 @@ interface ReviewBusiness {
      */
     house_bldg_no?: string | null
     street?: string | null
+    /*
+     * Block, Lot and the lot's area. Optional on the form and optional
+     * here, but they were MISSING here rather than optional: the API has
+     * sent all three the whole time and `lib/types` Address declares them,
+     * so the sheet could not draw three answers every applicant is asked
+     * for, and nothing failed to say so.
+     */
+    block?: string | null
+    lot?: string | null
+    lot_area_sqm?: number | string | null
     city?: string | null
     province?: string | null
     postal_code?: string | null
@@ -402,6 +418,88 @@ function FieldHistory({ history, label }: { history: ApplicationCorrection[]; la
         ))}
       </ul>
     </div>
+  )
+}
+
+/**
+ * Ends a row inside a `flex-wrap` group, so the next field starts a new one.
+ *
+ * ── Why the sheet needs it and the form barely does ─────────────────────────
+ *
+ * Copied from ApplyWizard, which uses exactly this — `-my-1.5 basis-full` —
+ * once, before item 14. The form gets its other row breaks for free, because
+ * its controls are naturally the right widths: four radio chips for the form
+ * of organization, four small boxes for a TIN, segmented boxes for a phone
+ * number.
+ *
+ * This sheet renders the ANSWERS to those questions in uniform record boxes,
+ * so the widths that shaped the form's rows do not exist here. Client,
+ * 29 September 2026: *"Compare both layouts. Huge difference, right?"* —
+ * the sheet's seventeen boxes wrapped wherever they landed and grouped nothing
+ * like the form. Pinning the breaks is what makes the two read the same, and
+ * it holds at every window width rather than only at the one I tested.
+ *
+ * `basis-full` takes a whole line; `-my-1.5` pulls back the row gap either
+ * side so the break costs no vertical space. `aria-hidden`, because it is a
+ * layout device and a screen reader should hear the fields, not the geometry.
+ */
+function RowBreak() {
+  return <div className="-my-1.5 basis-full" aria-hidden="true" />
+}
+/**
+ * Section B items 1 to 4, grouped the way the form groups them.
+ *
+ * The paper asks four questions and the form draws six boxes: item 2 is
+ * Total / Male / Female inside one bordered fieldset, and item 4 is
+ * Motorized / Other inside another. One paper item, one border.
+ *
+ * Partitioned on the number the label already carries — the same number
+ * `orderedFeeFacts` sorts on — rather than on a list of which items are
+ * grouped. An item with one box stays a plain field; if the fee profile
+ * ever splits another in two, it boxes itself with no edit here.
+ */
+function FeeFactRow({ facts }: { facts: { label: string; value: string }[] }) {
+  const groups: { number: string; facts: { label: string; value: string }[] }[] = []
+  for (const fact of facts) {
+    const number = /^(\d+)\./.exec(fact.label)?.[1] ?? fact.label
+    const last = groups[groups.length - 1]
+    if (last && last.number === number) {
+      last.facts.push(fact)
+    } else {
+      groups.push({ number, facts: [fact] })
+    }
+  }
+
+  return (
+    <>
+      {groups.map((group) =>
+        group.facts.length === 1 ? (
+          <Field
+            key={group.number}
+            label={group.facts[0].label}
+            value={group.facts[0].value}
+            className="grow basis-[13rem] max-w-full"
+          />
+        ) : (
+          /* The form's own box for a multi-box item: same radius, same tint. */
+          <div
+            key={group.number}
+            className="grow basis-[21rem] max-w-full rounded-lg border border-line bg-canvas px-3 py-2"
+          >
+            <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+              {group.facts.map((fact) => (
+                <Field
+                  key={fact.label}
+                  label={fact.label}
+                  value={fact.value}
+                  className="grow basis-[8rem] max-w-full"
+                />
+              ))}
+            </div>
+          </div>
+        ),
+      )}
+    </>
   )
 }
 
@@ -1243,29 +1341,29 @@ function feeProfileFacts(profile: FeeProfile): { label: string; value: string }[
     '1. Business Area (sq. m.)',
     profile.floor_area_sqm == null ? null : `${profile.floor_area_sqm} sqm`,
   )
-  put('2. Total Number of Employees', count(profile.employees))
+  put('2. Total No. of Employees', count(profile.employees))
   /*
    * The male/female split, printed beside the total it divides (BPLO item B2 on
    * the new form, B3 on the renewal, and CENRO's own MALE/FEMALE box). `count`
    * keeps a declared zero — "0 female employees" is an answer, and `put` would
    * drop the string "0" as falsy if this were formatted any other way.
    */
-  put('2. Number of Male Employees', count(profile.male_employees))
-  put('2. Number of Female Employees', count(profile.female_employees))
+  put('2. No. of Employees — Male', count(profile.male_employees))
+  put('2. No. of Employees — Female', count(profile.female_employees))
   /*
    * Item B3, and it was missing outright. The column has been filled since the
    * wizard started asking, and the figure is not decoration: the Revenue Code
    * reads it, and it is the one employee count an officer could plausibly
    * query against the barangay.
    */
-  put('3. Number of Employees Residing in Malabon', count(profile.employees_in_lgu))
+  put('3. No. of Employees Residing within Malabon', count(profile.employees_in_lgu))
   put('Storeys', count(profile.storeys))
   put('Doors', count(profile.doors))
   put('Rooms', count(profile.rooms))
   put('Beds', count(profile.beds))
   put('Market Stalls', count(profile.stall_count))
-  put('4. Motorized Delivery Units', count(profile.delivery_vehicles_motorized))
-  put('4. Other Delivery Units', count(profile.delivery_vehicles_other))
+  put('4. No. of Delivery Units — Motorized', count(profile.delivery_vehicles_motorized))
+  put('4. No. of Delivery Units — Other', count(profile.delivery_vehicles_other))
   /*
    * Business Structure is NOT put here — it is item 10 wearing another name.
    *
@@ -3789,9 +3887,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               const now = (c.new_value ?? '').trim()
 
               return (
-                <li key={i} className="text-sm">
+                <li key={i} className="flex flex-wrap items-baseline gap-x-2 text-sm">
                   <span className="font-semibold text-ink">{label}</span>
-                  <span className="ml-2 text-ink-secondary">
+                  <span className="text-ink-secondary">
                     {was === now ? (
                       // Left as it was, deliberately. Not a silent no-op.
                       <>
@@ -3805,6 +3903,27 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       </>
                     )}
                   </span>
+                  {/*
+                    WHEN, because this list is the order things happened in and
+                    nothing else on the row says so. The client's own filing has
+                    two corrections to one field a minute apart, which read as
+                    two identical rows.
+
+                    `formatDateTime` — the house date-and-time, as on the
+                    timeline and the payment rows. The short date under each
+                    field answers "when was this last changed" in a box too
+                    narrow for a time; this answers "in what order", with a
+                    full row to do it in.
+
+                    `ml-auto` pushes it to the end on a wide row and lets it
+                    wrap under on a narrow one, rather than being clamped
+                    against the value it is not part of.
+                  */}
+                  {c.at && (
+                    <span className="ml-auto whitespace-nowrap text-xs text-ink-muted">
+                      {formatDateTime(c.at)}
+                    </span>
+                  )}
                 </li>
               )
             })}
@@ -4650,20 +4769,141 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             */}
             <section className="mt-7">
               <h3 className="mb-4 text-lg font-bold text-ink">Location &amp; Zoning</h3>
-              <SubHeading>Main Office Address</SubHeading>
-              <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                {/*
-                The real columns first, `splitLine1` only as a fallback.
-                `house_bldg_no` and `street` are what the wizard sends since
-                16 September 2026; before that it asked one combined question
-                and this page guessed the split out of `line1` with a regex,
-                which reversed the two on any filing whose entire street
-                address was a number ("17" → Street "17", House "—"). The
-                fallback stays for the filings made that way.
+              {/*
+                ── The trade first, as the form asks it ──────────────────
+
+                ApplyWizard puts this table at the head of Location & Zoning,
+                before the address, and says why: the zoning conformity check
+                on that step "is a judgment about a NAMED TRADE and needs the
+                trade beside it."
+
+                It was at the FOOT of Section B until 29 September 2026 —
+                four headings below the barangay and the pin it is judged
+                against, so the officer deciding conformity read the place in
+                one section and the trade in another.
               */}
-                <Field label="House / Bldg No." targets={['form:address']} value={address?.house_bldg_no || house} className="grow basis-[10rem] max-w-full" />
-                <Field label="Street" targets={['form:address']} value={address?.street || street} className="grow basis-[32rem] max-w-full" />
-                <Field label="Barangay" targets={['form:barangay']} value={address?.barangay?.name ?? ''} className="grow basis-[12rem] max-w-full" />
+              <SubHeading>Line of Business</SubHeading>
+              {business.lines && business.lines.length > 0 ? (
+                <div className="space-y-4">
+                  {business.lines.map((line, i) => (
+                    <div key={line.id ?? i} className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                      {/*
+                      A per-line "Capitalization" stood beside this and is
+                      gone. It is the same quantity as item 6, Capital
+                      Investment, shown a few rows above — the wizard asked it
+                      per line AND per business until 16 September 2026, when
+                      the per-line question went because the paper has one box
+                      and two boxes for one figure can disagree.
+                      `business_lines.capitalization` is still filled by the
+                      API from that single figure, so this column was the same
+                      number twice on a good filing and a dash on this one.
+                    */}
+                      <Field
+                        label={`Line of Business ${business.lines!.length > 1 ? i + 1 : ''}`.trim()}
+                        value={
+                          line.psic_code ? `${line.psic_code.title} (${line.psic_code.code})` : ''
+                        }
+                      />
+                      {/*
+                       * Products / Services — the paper's own second column of
+                       * this table, on both BPLO forms and on CENRO's CEC
+                       * application. Kept inside the per-line row because that is
+                       * where it belongs: the trade above names what this line
+                       * IS, this names what it handles, and CENRO reviews the
+                       * second. Spans the row so a long list of goods is readable
+                       * rather than crushed into half the width — the row was
+                       * three columns until the duplicate per-line
+                       * capitalization came out of it.
+                       */}
+                      <Field
+                        label="Products / Services"
+                        value={line.products_services ?? ''}
+                        className="grow basis-[32rem] max-w-full"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Field
+                  label="Line of Business"
+                  value={app.permit_types.map((p) => p.name).join(', ')}
+                />
+              )}
+
+              <SubHeading>Main Office Address</SubHeading>
+              {/*
+                ── The form's own grids ────────────────────────────────────
+
+                ApplyWizard asks these in three groups: House and Street as
+                `grid sm:grid-cols-3` with Street spanning two, then Block /
+                Lot / Lot Area as another `sm:grid-cols-3`, then the barangay
+                on its own. Copied, because a single wrapping row put Street
+                beside the barangay and scattered Block and Lot wherever they
+                fitted.
+              */}
+              <div className="grid gap-3 sm:grid-cols-3">
+                {/*
+                  The real columns first, `splitLine1` only as a fallback.
+                  `house_bldg_no` and `street` are what the wizard sends since
+                  16 September 2026; before that it asked one combined question
+                  and this page guessed the split out of `line1` with a regex,
+                  which reversed the two on any filing whose entire street
+                  address was a number ("17" → Street "17", House "—"). The
+                  fallback stays for the filings made that way.
+                */}
+                <Field
+                  label="House / Bldg No."
+                  targets={['form:address']}
+                  value={address?.house_bldg_no || house}
+                  className="block"
+                />
+                <Field
+                  label="Street"
+                  targets={['form:address']}
+                  value={address?.street || street}
+                  className="block sm:col-span-2"
+                />
+              </div>
+
+              {/*
+                Block, Lot and Lot Area — asked of every applicant, on the
+                payload since the premises block was transcribed, and drawn by
+                no section of this sheet until 29 September 2026. Three
+                submitted answers the reviewing office could not see.
+
+                Optional on the form, so a blank is a question skipped rather
+                than an answer missing, and reads as the em dash every other
+                unanswered box uses.
+              */}
+              <div className="mt-3 grid gap-4 sm:grid-cols-3">
+                <Field label="Block" targets={['form:address']} value={address?.block ?? ''} className="block" />
+                <Field label="Lot" targets={['form:address']} value={address?.lot ?? ''} className="block" />
+                <Field
+                  label="Lot Area (sq. m.)"
+                  targets={['form:address']}
+                  value={address?.lot_area_sqm == null ? '' : String(address.lot_area_sqm)}
+                  className="block"
+                />
+              </div>
+
+              {/* Its own block on the form, and the answer the zoning turns on. */}
+              <div className="mt-3">
+                <Field
+                  label="Barangay"
+                  targets={['form:barangay']}
+                  value={address?.barangay?.name ?? ''}
+                  className="block sm:max-w-[22rem]"
+                />
+              </div>
+
+              {/*
+                Not the form's questions. The applicant is asked for none of
+                these — every address this system licenses is in Malabon, which
+                has one postal code — so they are record fields the API fills
+                and cannot take a place in the form's grid above. Kept, because
+                an officer transcribing onto paper still needs them.
+              */}
+              <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
                 <Field label="City / Municipality" value={address?.city ?? 'Malabon City'} className="grow basis-[12rem] max-w-full" />
                 <Field label="Province" value={address?.province ?? 'Metro Manila'} className="grow basis-[12rem] max-w-full" />
                 <Field label="Postal Code" value={address?.postal_code ?? ''} className="grow basis-[8rem] max-w-full" />
@@ -4717,6 +4957,46 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   No map pin was recorded on this filing.
                 </p>
               )}
+
+              {/*
+                ── After the map, as the form asks them ──────────────────
+
+                The wizard puts the landmark immediately below the barangay
+                zoning map and the two contacts under it, and the sheet now
+                does the same.
+
+                The landmark is `address.line2`. It has been on the payload
+                the whole time and no section drew it — an answer the
+                applicant gave about how to FIND the premises, withheld from
+                the inspector who has to. The contacts came from "Premises &
+                Contact" in Section B; the form asks them here, beside the
+                address they are the fallback for.
+              */}
+              {/* Its own block below the map on the form, as here. */}
+              <div className="mt-5">
+                <Field
+                  label="Locational Group / Landmark"
+                  targets={['form:address']}
+                  value={address?.line2 ?? ''}
+                  className="block"
+                />
+              </div>
+
+              {/* `grid sm:grid-cols-2`, the pair's own shape on the form. */}
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field
+                  label="Emergency Contact Person"
+                  targets={['form:emergency_contact_name']}
+                  value={business.emergency_contact_name ?? ''}
+                  className="block"
+                />
+                <Field
+                  label="Emergency Contact Number"
+                  targets={['form:emergency_contact_number']}
+                  value={business.emergency_contact_number ?? ''}
+                  className="block"
+                />
+              </div>
             </section>
 
             {/* A — Business Information & Registration */}
@@ -4739,139 +5019,203 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 1072px page with a permanently blank 288px beside it.
               */}
                 {/*
-                ── The paper's own item numbers, in the paper's own order ──────
+                ── The paper's numbering was here, and is gone ────────────────
 
-                MCG-BPLO-FO-001 section A runs 1 to 16; thirteen of them are
-                asked and two are deliberately not, so the numbering skips and
-                the skips are the record of that:
+                This section followed MCG-BPLO-FO-001's own numbers, skips and
+                all — 1, 2, 3, 4, 6 … with Form of Organization at 10 — against
+                a wizard that renumbers sequentially. The argument for it was
+                that an officer holding the paper wants the paper's numbers.
 
-                  5   Main Office Address  — asked on Location & Zoning
-                  16  Residential Address  — not collected
+                The client decided the other way on 29 September 2026, and the
+                reason outweighs it: the officer's counterpart is not the blank
+                paper, it is the filing the applicant made, and every other
+                screen in the Return loop already speaks the wizard's
+                numbering. "Fix item 2" has to mean one field across the
+                picker, the applicant's correction card and this sheet — and it
+                meant the registration number on two of them and the TIN here.
 
-                Reordered to match. A numbered list that does not ascend is
-                worse than an unnumbered one — the reader stops trusting the
-                numbers and starts reading every label instead, which is the
-                work the numbers were there to save.
+                If the paper's numbers are ever wanted back, they belong
+                BESIDE these rather than instead of them.
               */}
+                {/*
+                  ── The APPLICATION FORM's order, 1 to 17 with no gaps ───────
+
+                  Checked against ApplyWizard's Section A label by label; the
+                  list is in this patch's note. It ran 1, 2, 3, 4, 6 … 10, 11/12,
+                  13, 14, 15 before — the paper's numbering, with Form of
+                  Organization tenth, which is the client's report of
+                  29 September 2026.
+
+                  One row, so the numbers can ascend across the whole section
+                  rather than restarting in each container.
+                */}
+                {/*
+                  ── The form's five rows, pinned ─────────────────────────────
+
+                  `RowBreak` is ApplyWizard's own `-my-1.5 basis-full` spacer,
+                  which it uses once, before item 14. Used at each of the form's
+                  breaks here, because the sheet has to reproduce a grouping it
+                  cannot reproduce by width alone: the form's rows are shaped by
+                  radio chips and segmented number boxes, and a record box
+                  holding "Sole Proprietorship" is not that shape.
+
+                  Pinning also means the rows survive a narrow window, where
+                  widths alone would re-wrap into an order the form never had.
+                */}
                 <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
                   <Field
-                    label="1. DTI / SEC / CDA Registration Number"
-                    className="grow basis-[13rem] max-w-full"
-                    targets={['form:registration_number']}
-                    value={business.registration_number ?? ''}
-                  />
-                  <Field label="2. Tax Identification Number (TIN)" targets={['form:tin']} value={business.tin ?? ''} className="grow basis-[13rem] max-w-full" />
-                  <Field label="3. Business Name" targets={['form:name']} value={business.name ?? ''} className="grow basis-[24rem] max-w-full" />
-                  <Field label="4. Trade Name / Franchise" targets={['form:trade_name']} value={business.trade_name ?? ''} className="grow basis-[16rem] max-w-full" />
-                  {/*
-                  Items 11 and 12 — the person the filing is in the name of,
-                  assembled the way the wizard assembles it so the two read the
-                  same. Blank parts drop out rather than leaving double spaces.
-                */}
-                  {/*
-                  Items 6 to 9. All four had columns and no input until the
-                  paper forms were transcribed, so on filings made before that
-                  they read "—" — which is the truth: nobody was asked.
-                */}
-                  <Field
-                    label="6. Telephone (Landline)"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:telephone']}
-                    value={business.address?.telephone ?? ''}
-                  />
-                  <Field label="7. Mobile Number" targets={['form:mobile_number']} value={business.address?.mobile_number ?? ''} className="grow basis-[12rem] max-w-full" />
-                  <Field label="8. E-mail Address" targets={['form:email']} value={business.address?.email ?? ''} className="grow basis-[18rem] max-w-full" />
-                  <Field label="9. Website Address" targets={['form:website']} value={business.address?.website ?? ''} className="grow basis-[14rem] max-w-full" />
-                  {/*
-                  Item 10 is "Form of Organization" on the paper, offering
-                  exactly these four, and the wizard now asks it under that name
-                  too — the client took the renaming on 24 September 2026, which
-                  the earlier note here called out as a separate decision from
-                  numbering it.
-
-                  The NUMBER stays 10. This sheet is read beside the paper and
-                  keeps the paper's numbering, skips and all — see the two at 5
-                  and 16 above. The wizard's numbers run sequentially instead,
-                  also on the client's instruction, so the two no longer agree
-                  and this is the surface that should not move: an officer is
-                  comparing it against the form in their hand.
-                */}
-                  <Field
-                    label="10. Form of Organization"
-                    className="grow basis-[13rem] max-w-full"
+                    label="1. Form of Organization"
+                    className="grow basis-[26rem] max-w-full"
                     targets={['form:registration_type']}
                     value={
                       business.registration_type ? humanizeKey(business.registration_type) : ''
                     }
                   />
                   {/*
-                  Items 11 / 12 — one question either way. The paper routes a
-                  sole proprietor to 11 and a corporation, partnership or
-                  cooperative to 12, and prints Surname, Given Name, Middle
-                  Name, Suffix and Gender across one row. Assembled the way the
-                  wizard assembles it so the two read the same, with blank
-                  parts dropping out rather than leaving double spaces.
-                */}
+                    The agency, not a slash-list. The wizard asks a cooperative
+                    for its CDA number and a corporation for its SEC number, and
+                    `registrationNumberLabel` is the function it asks with — so
+                    the officer reads back the question that was actually put,
+                    and falls back to the generic heading when the structure is
+                    not known.
+                  */}
                   <Field
-                    label="11 / 12. Owner / Representative"
-                    className="grow basis-[18rem] max-w-full"
-                    targets={[
-                      'form:owner_surname',
-                      'form:owner_given_name',
-                      'form:owner_middle_name',
-                      'form:owner_suffix',
-                    ]}
-                    value={[
-                      business.owner?.given_name,
-                      business.owner?.middle_name,
-                      business.owner?.surname,
-                      business.owner?.suffix,
-                    ]
-                      .map((part) => (part ?? '').trim())
-                      .filter(Boolean)
-                      .join(' ')}
-                  />
-                  <Field
-                    label="11 / 12. Gender"
-                    className="grow basis-[7rem] max-w-full"
-                    targets={['form:owner_gender']}
-                    value={business.owner?.gender ? humanizeKey(business.owner.gender) : ''}
-                  />
-                </div>
-                {/*
-                 * Items A13-A15, asked of EVERY structure since 16 September 2026
-                 * — both of the paper's arrows point at 13. The note here used to
-                 * say the wizard skipped them for a sole proprietorship and that a
-                 * blank meant "not applicable to this structure"; it does not, and
-                 * a blank now means the applicant left the question unanswered,
-                 * which is a gap an officer may want to chase rather than a rule.
-                 *
-                 * A sole proprietor's name arrives prefilled from their own, so a
-                 * blank 13 on one of those filings is rarer still.
-                 */}
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                  <Field
-                    label="13. Name of President / Officer in Charge"
+                    label={`2. ${registrationNumberLabel(business.registration_type ?? '')}`}
                     className="grow basis-[15rem] max-w-full"
-                    targets={['form:president_officer_name']}
-                    value={business.president_officer_name ?? ''}
+                    targets={['form:registration_number']}
+                    value={business.registration_number ?? ''}
+                  />
+
+                  <RowBreak />
+                  <Field
+                    label="3. Tax Identification Number (TIN)"
+                    targets={['form:tin']}
+                    value={business.tin ?? ''}
+                    className="grow basis-[14rem] max-w-full"
                   />
                   <Field
-                    label="14. Citizenship (of President/OIC)"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:citizenship']}
-                    value={business.citizenship ?? ''}
+                    label="4. Business Name"
+                    targets={['form:name']}
+                    value={business.name ?? ''}
+                    className="grow basis-[20rem] max-w-full"
                   />
                   <Field
-                    label="15. Capital Participation (% Filipino)"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:capital_participation']}
-                    value={
-                      business.capital_participation_filipino == null
-                        ? ''
-                        : `${business.capital_participation_filipino}%`
-                    }
+                    label="5. Trade Name / Franchise"
+                    targets={['form:trade_name']}
+                    value={business.trade_name ?? ''}
+                    className="grow basis-[14rem] max-w-full"
                   />
+
+                  <RowBreak />
+                  {/*
+                    Items 6 to 9. All four had columns and no input until the
+                    paper forms were transcribed, so on filings made before that
+                    they read "—" — which is the truth: nobody was asked.
+                  */}
+                  <Field
+                    label="6. Telephone (Landline)"
+                    className="grow basis-[11rem] max-w-full"
+                    targets={['form:telephone']}
+                    value={business.address?.telephone ?? ''}
+                  />
+                  <Field
+                    label="7. Mobile Number"
+                    targets={['form:mobile_number']}
+                    value={business.address?.mobile_number ?? ''}
+                    className="grow basis-[11rem] max-w-full"
+                  />
+                  <Field
+                    label="8. E-mail Address"
+                    targets={['form:email']}
+                    value={business.address?.email ?? ''}
+                    className="grow basis-[14rem] max-w-full"
+                  />
+                  <Field
+                    label="9. Website Address"
+                    targets={['form:website']}
+                    value={business.address?.website ?? ''}
+                    className="grow basis-[12rem] max-w-full"
+                  />
+
+                  <RowBreak />
+                  {/*
+                    Items 10 to 13 — four boxes, because the form asks four, and
+                    at the form's own widths: 11rem, 11rem, 11rem, 7rem. They
+                    were one assembled "Owner / Representative" line, which
+                    presented as a single answer what the applicant gave as four.
+                  */}
+                  <Field
+                    label="10. Surname"
+                    className="grow basis-[11rem] max-w-full"
+                    targets={['form:owner_surname']}
+                    value={business.owner?.surname ?? ''}
+                  />
+                  <Field
+                    label="11. Given Name"
+                    className="grow basis-[11rem] max-w-full"
+                    targets={['form:owner_given_name']}
+                    value={business.owner?.given_name ?? ''}
+                  />
+                  <Field
+                    label="12. Middle Name"
+                    className="grow basis-[11rem] max-w-full"
+                    targets={['form:owner_middle_name']}
+                    value={business.owner?.middle_name ?? ''}
+                  />
+                  <Field
+                    label="13. Suffix"
+                    className="grow basis-[7rem] max-w-full"
+                    targets={['form:owner_suffix']}
+                    value={business.owner?.suffix ?? ''}
+                  />
+
+                  {/* The form's own break, in the form's own place. */}
+                  <RowBreak />
+                  {/*
+                    The word, not the code. `humanizeKey` has no idea 'M' is
+                    short for anything and returned it unchanged.
+                  */}
+                  <Field
+                    label="14. Gender"
+                    className="shrink-0 basis-[8rem] max-w-full"
+                    targets={['form:owner_gender']}
+                    value={genderLabel(business.owner?.gender)}
+                  />
+                  {/*
+                    ── The officer box ──────────────────────────────────────
+
+                    `rounded-xl border border-line p-3`, copied from the form,
+                    and the border is not decoration: 15 to 17 are about the
+                    PRESIDENT OR OFFICER IN CHARGE, who is a different person
+                    from the owner named in 10 to 13 immediately above. Run
+                    together, seven name-ish boxes read as one person's details.
+                  */}
+                  <div className="grow basis-[34rem] max-w-full rounded-xl border border-line p-3">
+                    <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                      <Field
+                        label="15. Name of President / Officer in Charge"
+                        className="grow basis-[15rem] max-w-full"
+                        targets={['form:president_officer_name']}
+                        value={business.president_officer_name ?? ''}
+                      />
+                      <Field
+                        label="16. Citizenship (of President/OIC)"
+                        className="grow basis-[11rem] max-w-full"
+                        targets={['form:citizenship']}
+                        value={business.citizenship ?? ''}
+                      />
+                      <Field
+                        label="17. Capital Participation (% Filipino)"
+                        className="grow basis-[11rem] max-w-full"
+                        targets={['form:capital_participation']}
+                        value={
+                          business.capital_participation_filipino == null
+                            ? ''
+                            : `${business.capital_participation_filipino}%`
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
                 {/*
                  * Items B6 and B8 were printed here and have moved to Section B.
@@ -4929,10 +5273,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 sorts the whole of Section B on the paper's own numbering.
               */}
               <div className="mb-6 flex flex-wrap items-start gap-x-4 gap-y-3">
-                {orderedFeeFacts.map((fact) => (
-                  <Field key={fact.label} label={fact.label} value={fact.value} />
-                ))}
+                {/*
+                  Row 1 — items 1 to 4, with 2 and 4 in the form's own boxes.
+                */}
+                <FeeFactRow facts={orderedFeeFacts} />
+
+                {/*
+                  Row 2 — item 5 alone, as the form gives it: a six-option
+                  radiogroup across the width, not a box in a row of boxes.
+                */}
+                <RowBreak />
                 <Field
+                  className="basis-full max-w-full"
                   label="5. Economic Organization"
                   value={
                     business.economic_organization
@@ -4968,8 +5320,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 year's gross sales rather than on capital, which is why the
                 wizard does not ask a renewal for it either.
               */}
+                {/* Row 3 — items 6, 7 and 8, as the form's last row. */}
+                <RowBreak />
                 <Field
                   label="6. Capital Investment"
+                  className="grow basis-[13rem] max-w-full"
                   targets={['form:capital_investment']}
                   value={
                     business.capital_investment == null || business.capital_investment === ''
@@ -4977,7 +5332,32 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       : formatMoney(Number(business.capital_investment))
                   }
                 />
+                <Field
+                  label="7. Tax Incentives from a Government Entity"
+                  targets={['form:has_tax_incentives']}
+                  value={
+                    business.has_tax_incentives == null
+                      ? ''
+                      : business.has_tax_incentives
+                        ? 'Yes — certificate required'
+                        : 'No'
+                  }
+                />
                 {/*
+                  Item 8, in the row with the rest. It was under a "Premises &
+                  Contact" heading at the foot of the section, so Section B's
+                  numbers ran 1 to 7 and then jumped a heading to reach 8.
+                */}
+                <Field
+                  label="8. Do you pay rent for occupying a place of business?"
+                  targets={['form:is_rented']}
+                  value={business.is_rented == null ? '' : business.is_rented ? 'Yes' : 'No'}
+                  className="grow basis-[20rem] max-w-full"
+                />
+                {/*
+                  After the numbered run, not through it. It was between items 6
+                  and 7, so the row read 5, 6, <unnumbered>, 7, 8.
+
                   MCG-BPLO-FO-002's own box, at the foot of its page 1, and a
                   renewal's alone — FO-001 does not print one, so on a new
                   filing this would report a default nobody chose.
@@ -4999,66 +5379,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     }
                   />
                 )}
-                <Field
-                  label="7. Tax Incentives from a Government Entity"
-                  targets={['form:has_tax_incentives']}
-                  value={
-                    business.has_tax_incentives == null
-                      ? ''
-                      : business.has_tax_incentives
-                        ? 'Yes — certificate required'
-                        : 'No'
-                  }
-                />
               </div>
 
-              <SubHeading>Line of Business</SubHeading>
-              {business.lines && business.lines.length > 0 ? (
-                <div className="space-y-4">
-                  {business.lines.map((line, i) => (
-                    <div key={line.id ?? i} className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                      {/*
-                      A per-line "Capitalization" stood beside this and is
-                      gone. It is the same quantity as item 6, Capital
-                      Investment, shown a few rows above — the wizard asked it
-                      per line AND per business until 16 September 2026, when
-                      the per-line question went because the paper has one box
-                      and two boxes for one figure can disagree.
-                      `business_lines.capitalization` is still filled by the
-                      API from that single figure, so this column was the same
-                      number twice on a good filing and a dash on this one.
-                    */}
-                      <Field
-                        label={`Line of Business ${business.lines!.length > 1 ? i + 1 : ''}`.trim()}
-                        value={
-                          line.psic_code ? `${line.psic_code.title} (${line.psic_code.code})` : ''
-                        }
-                      />
-                      {/*
-                       * Products / Services — the paper's own second column of
-                       * this table, on both BPLO forms and on CENRO's CEC
-                       * application. Kept inside the per-line row because that is
-                       * where it belongs: the trade above names what this line
-                       * IS, this names what it handles, and CENRO reviews the
-                       * second. Spans the row so a long list of goods is readable
-                       * rather than crushed into half the width — the row was
-                       * three columns until the duplicate per-line
-                       * capitalization came out of it.
-                       */}
-                      <Field
-                        label="Products / Services"
-                        value={line.products_services ?? ''}
-                        className="grow basis-[32rem] max-w-full"
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Field
-                  label="Line of Business"
-                  value={app.permit_types.map((p) => p.name).join(', ')}
-                />
-              )}
 
               {/*
                * The premises, and who to ring — asked of every applicant and
@@ -5077,28 +5399,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                * rather than as an owned building. The one-line statement is
                * printed either way, so the sheet always says which it is.
                */}
-              <SubHeading>Premises &amp; Contact</SubHeading>
-              <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                <Field
-                  // Item 8 asks "Do you pay rent for occupying a place of
-                  // business?", so the answer is Yes or No — "Rented"/"Owned"
-                  // answered a question the paper does not put, and the wizard
-                  // stopped putting it on 16 September 2026.
-                  label="8. Do you pay rent for occupying a place of business?"
-                  targets={['form:is_rented']}
-                  value={business.is_rented == null ? '' : business.is_rented ? 'Yes' : 'No'}
-                />
-                <Field
-                  label="Emergency Contact Person"
-                  targets={['form:emergency_contact_name']}
-                  value={business.emergency_contact_name ?? ''}
-                />
-                <Field
-                  label="Emergency Contact Number"
-                  targets={['form:emergency_contact_number']}
-                  value={business.emergency_contact_number ?? ''}
-                />
-              </div>
+              {/*
+                Item 8 asks "Do you pay rent for occupying a place of
+                business?", so the answer is Yes or No — "Rented"/"Owned"
+                answered a question the paper does not put, and the wizard
+                stopped putting it on 16 September 2026.
+
+                It sits in the numbered Section B row above now, where the
+                form puts it. The emergency contacts that shared this
+                "Premises & Contact" heading have gone to Location & Zoning,
+                which is the step that asks them. The two were together only
+                because they had been drawn together.
+              */}
               {/*
               ── Four rows removed, because nothing fills them any more ────────
               *

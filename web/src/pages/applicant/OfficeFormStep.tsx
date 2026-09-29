@@ -3,6 +3,7 @@ import { targetsInclude } from '../../lib/returnTargets'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
 import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
+import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { OfficeFormRequirement } from '../../lib/types'
 import { ACCEPT_ATTR } from './uploads'
@@ -1924,7 +1925,11 @@ function CecFields({
               </FieldError>
             )}
           </div>
-          <DerivedField label={<>Sex<FromApplicationTag /></>} value={business.ownerSex} />
+          {/* The word. `ownerSex` carries the stored 'M' or 'F'. */}
+          <DerivedField
+            label={<>Sex<FromApplicationTag /></>}
+            value={genderLabel(business.ownerSex)}
+          />
         </div>
 
         {/* LINE OF BUSINESS | PRODUCTS/SERVICES | CONTACT NUMBERS */}
