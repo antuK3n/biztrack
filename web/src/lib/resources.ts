@@ -850,6 +850,12 @@ export const payments = {
   get: (id: number) => unwrap<Payment>(api.get(`/payments/${id}`)),
   /** Ask the payment service once, now, whether this payment has gone through. */
   check: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/check`)),
+  /**
+   * "Pay a different way". The server asks the payment service once first, so
+   * the answer can be `completed` (it was paid after all), `failed`, or
+   * `pending` with `set_aside` — in the last two a new payment can be started.
+   */
+  abandon: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/abandon`)),
   history: (params: PageParams = {}) => unwrap<Payment[]>(api.get('/payments', { params })),
   /** Same history, keeping the page meta. */
   historyPage: (params: PageParams = {}) => unwrapPaged<Payment>(api.get('/payments', { params })),

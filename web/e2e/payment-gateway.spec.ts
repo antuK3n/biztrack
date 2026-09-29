@@ -269,6 +269,66 @@ test.describe('online payment through the practice KwikPay', () => {
   })
 })
 
+test.describe('paying a different way', () => {
+  test.beforeEach(async ({ browser }) => {
+    const switched = await setMode(browser, 'kwikpay')
+    test.skip(!switched.ok, switched.reason)
+  })
+
+  test('set aside after a warning, pay another way, and a late first payment shows as paid twice', async ({
+    page,
+    context,
+  }) => {
+    const appId = await makeBilledApplication(page)
+    await openPayPage(page, appId)
+
+    // Start with Maya, then leave the payment page without paying.
+    await page.getByRole('button', { name: 'Maya', exact: true }).click()
+    await page.getByRole('button', { name: 'Pay Online' }).click()
+    await expect(page).toHaveURL(/\/fake-kwikpay\/pay\//, { timeout: 30_000 })
+    const firstPaymentPage = page.url()
+    await openPayPageWaiting(page, appId)
+
+    // The escape asks first, and "Keep waiting" changes nothing.
+    await page.getByRole('button', { name: 'Pay a different way' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Pay a different way?' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(
+      'If you already paid with Maya, wait for it to be confirmed instead — paying again could charge you twice.',
+    )
+    await shot(page, 'online-pay-differently-dialog')
+    await dialog.getByRole('button', { name: 'Keep waiting' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByText('Waiting for your payment')).toBeVisible()
+
+    // Confirmed: the practice gateway still says "waiting", so it is set aside.
+    await page.getByRole('button', { name: 'Pay a different way' }).click()
+    await dialog.getByRole('button', { name: "I haven't paid — choose another way" }).click()
+    await expect(page.getByRole('heading', { name: 'Tax Order of Payment' })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText(/is set aside\. If it goes through after all, BPLO will contact you/)).toBeVisible()
+    await shot(page, 'online-set-aside')
+
+    // Pay with GCash, a new order, and it goes through.
+    await page.getByRole('button', { name: 'GCash', exact: true }).click()
+    await page.getByRole('button', { name: 'Pay Online' }).click()
+    await expect(page).toHaveURL(/\/fake-kwikpay\/pay\//, { timeout: 30_000 })
+    expect(page.url(), 'the second payment reused the first order').not.toBe(firstPaymentPage)
+    await page.getByRole('button', { name: /^Pay / }).click()
+    await expect(page.getByText('Paid', { exact: true })).toBeVisible({ timeout: 30_000 })
+
+    // Then the Maya payment goes through after all: history says paid twice.
+    const late = await context.newPage()
+    await late.goto(firstPaymentPage)
+    await late.getByRole('button', { name: /^Pay / }).click()
+    await late.close()
+
+    await page.goto('/profile?tab=payments')
+    await expect(page.getByText(/paid twice, BPLO will contact you about a refund/)).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+})
+
 /** Back on the pay screen with a payment in flight: it resumes, not re-offers. */
 async function openPayPageWaiting(page: Page, appId: number) {
   await page.goto(`/applications/${appId}/pay`)

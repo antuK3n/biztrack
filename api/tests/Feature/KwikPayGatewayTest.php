@@ -41,6 +41,7 @@ beforeEach(function () {
 
     // Nothing may leave the test process, whatever a test forgets to fake.
     Http::preventStrayRequests();
+    $GLOBALS['kpQueryFaked'] = false;
 });
 
 /** A filing BPLO has approved, owned by the demo applicant — ready to pay. */
@@ -385,17 +386,37 @@ it('refuses callbacks from outside the allowlist when one is set', function () {
 
 /* ── Reconciliation ──────────────────────────────────────────────────────── */
 
+/*
+ * What /api/query answers, changeable within a test. Http::fake stubs are
+ * matched first-registered-first, so registering a second stub for the same
+ * URL would be silently ignored; one stub reads this instead.
+ */
 function kpQueryAnswers(string $status, ?float $amount = null, int $http = 200): void
 {
+    $GLOBALS['kpQuery'] = compact('status', 'amount', 'http');
+
+    if ($GLOBALS['kpQueryFaked'] ?? false) {
+        return;
+    }
+    $GLOBALS['kpQueryFaked'] = true;
+
     Http::fake([
-        KP_BASE.'/api/query' => fn (HttpRequest $r) => $status === '0'
-            ? Http::response(['status' => '0', 'message' => 'Order not found'], $http)
-            : Http::response([
-                'status' => $status,
-                'message' => 'x',
-                'order_id' => $r['order_id'],
-                'amount' => $amount ?? 0,
-            ], $http),
+        KP_BASE.'/api/query' => function (HttpRequest $r) {
+            ['status' => $status, 'amount' => $amount, 'http' => $http] = $GLOBALS['kpQuery'];
+
+            if ($status === 'timeout') {
+                throw new ConnectionException('cURL error 28: Operation timed out');
+            }
+
+            return $status === '0'
+                ? Http::response(['status' => '0', 'message' => 'Order not found'], $http)
+                : Http::response([
+                    'status' => $status,
+                    'message' => 'x',
+                    'order_id' => $r['order_id'],
+                    'amount' => $amount ?? 0,
+                ], $http);
+        },
     ]);
 }
 
@@ -623,4 +644,153 @@ it('keeps simulated payments exactly as they were: completed at once, no gateway
     expect($res->json('data.pay_url'))->toBeNull();
     expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
     Http::assertNothingSent();
+});
+
+/* ── "Pay a different way" ───────────────────────────────────────────────── */
+
+function kpAbandon(Payment $payment)
+{
+    return test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/payments/{$payment->id}/abandon");
+}
+
+it('completes instead of setting aside when KwikPay says the payment went through', function () {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('5', (float) $payment->amount);
+
+    $res = kpAbandon($payment)->assertOk();
+
+    expect($res->json('data.status'))->toBe('completed');
+    expect($payment->fresh()->abandoned_at)->toBeNull();
+    expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
+});
+
+it('marks the payment failed and frees a new one when KwikPay says it failed', function () {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('3');
+
+    expect(kpAbandon($payment)->assertOk()->json('data.status'))->toBe('failed');
+
+    $options = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$app->id}/payment-options")->assertOk();
+    expect($options->json('data.in_progress'))->toBeNull();
+});
+
+it('sets the payment aside, still pending, when KwikPay says it is waiting, unknown, or does not answer', function (string $answer) {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers($answer, (float) $payment->amount, $answer === '0' ? 404 : 200);
+
+    $res = kpAbandon($payment)->assertOk();
+
+    // Not failed: the order may still be paid.
+    expect($res->json('data.status'))->toBe('pending');
+    expect($res->json('data.set_aside'))->toBeTrue();
+    expect($res->json('data.pay_url'))->toBeNull();
+    $payment->refresh();
+    expect($payment->status)->toBe(PaymentStatus::Pending);
+    expect($payment->abandoned_at)->not->toBeNull();
+    expect(AuditLog::where('action', 'payment.abandoned')->where('auditable_id', $payment->id)->count())->toBe(1);
+
+    // No longer blocks: Pay opens a NEW order with a new order id.
+    kpTransferAccepts();
+    $new = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'maya'])
+        ->assertCreated();
+    expect($new->json('data.id'))->not->toBe($payment->id);
+    expect(Payment::find($new->json('data.id'))->gateway_order_id)->not->toBe($payment->gateway_order_id);
+
+    // …and it is still reconciled.
+    kpQueryAnswers('3');
+    $this->travel(3)->hours();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Failed);
+})->with(['1', '0', 'timeout']);
+
+it('flags a double payment when a set-aside payment turns out paid after the new one', function () {
+    $app = kpFiling();
+    $first = kpOpen($app);
+    kpQueryAnswers('1');
+    kpAbandon($first)->assertOk();
+
+    // The owner pays the second way, and it completes.
+    kpTransferAccepts();
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'maya'])
+        ->assertCreated();
+    $second = Payment::where('application_id', $app->id)->latest('id')->first();
+    kpPostCallback(kpCallback($second))->assertOk();
+    expect($second->fresh()->status)->toBe(PaymentStatus::Completed);
+    $history = $app->fresh()->statusHistory()->count();
+
+    // Then the set-aside one's callback arrives: it WAS paid too.
+    kpPostCallback(kpCallback($first))->assertOk();
+
+    $first->refresh();
+    expect($first->status)->toBe(PaymentStatus::Completed);
+    expect($first->refund_review_at)->not->toBeNull();
+    // The application does not move a second time.
+    expect($app->fresh()->statusHistory()->count())->toBe($history);
+    expect(AuditLog::where('action', 'payment.double_paid')->where('auditable_id', $first->id)->count())->toBe(1);
+
+    foreach (['admin@biztrack.local', 'bplo@biztrack.local'] as $email) {
+        $user = User::where('email', $email)->firstOrFail();
+        expect(AppNotification::where('user_id', $user->id)->where('type', 'payment_double_paid')->count())->toBe(1);
+    }
+
+    // The owner sees it in their payment history.
+    $mine = collect($this->withHeaders(authAs('owner@biztrack.local'))->getJson('/api/v1/payments?per_page=100')->json('data'));
+    expect($mine->firstWhere('id', $first->id)['refund_review'])->toBeTrue();
+    expect($mine->firstWhere('id', $second->id)['refund_review'])->toBeFalse();
+});
+
+it('does not flag anything when a set-aside payment completes and nothing else was paid', function () {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('1');
+    kpAbandon($payment)->assertOk();
+
+    kpPostCallback(kpCallback($payment))->assertOk();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Completed);
+    expect($payment->fresh()->refund_review_at)->toBeNull();
+    expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
+});
+
+it('lets only the owner set a payment aside', function () {
+    $payment = kpOpen(kpFiling());
+
+    foreach (['juan@biztrack.local', 'bplo@biztrack.local', 'admin@biztrack.local'] as $email) {
+        $this->withHeaders(authAs($email))->postJson("/api/v1/payments/{$payment->id}/abandon")->assertForbidden();
+    }
+    expect($payment->fresh()->abandoned_at)->toBeNull();
+});
+
+it('allows at most three set-asides per application per hour', function () {
+    $app = kpFiling();
+    PaymentMode::set(PaymentMode::KWIKPAY);
+
+    for ($i = 0; $i < 3; $i++) {
+        kpTransferAccepts();
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+        kpQueryAnswers('1');
+        kpAbandon(Payment::where('application_id', $app->id)->latest('id')->first())->assertOk();
+    }
+
+    kpTransferAccepts();
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+    $fourth = Payment::where('application_id', $app->id)->latest('id')->first();
+    kpQueryAnswers('1');
+
+    $res = kpAbandon($fourth)->assertStatus(422);
+    expect($res->json('errors.payment.0'))->toContain('several times in the last hour');
+    expect($fourth->fresh()->abandoned_at)->toBeNull();
+
+    $this->travel(61)->minutes();
+    kpAbandon($fourth)->assertOk();
+    expect($fourth->fresh()->abandoned_at)->not->toBeNull();
 });

@@ -19,7 +19,8 @@ class PaymentResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $pending = $this->status === PaymentStatus::Pending;
+        // Set aside: still pending at KwikPay, but the owner is not sent back to it.
+        $pending = $this->status === PaymentStatus::Pending && $this->abandoned_at === null;
 
         return [
             'id' => $this->id,
@@ -32,6 +33,10 @@ class PaymentResource extends JsonResource
             'pay_url' => $pending ? $this->pay_url : null,
             'pay_url_kind' => $pending ? $this->pay_url_kind : null,
             'created_at' => optional($this->created_at)->toISOString(),
+            // Owner chose "Pay a different way"; still being checked.
+            'set_aside' => $this->abandoned_at !== null,
+            // Paid twice for one bill; staff are reviewing a refund.
+            'refund_review' => $this->refund_review_at !== null,
             'application' => $this->whenLoaded('application', fn () => [
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,

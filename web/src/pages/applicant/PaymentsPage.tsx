@@ -297,9 +297,13 @@ export function PaymentHistory() {
                           * beside it would read as paid with the date missing.
                           */}
                         {p.status === 'completed'
-                          ? `Paid: ${formatDate(p.paid_at)}`
+                          ? p.refund_review
+                            ? `Paid: ${formatDate(p.paid_at)} · paid twice, BPLO will contact you about a refund`
+                            : `Paid: ${formatDate(p.paid_at)}`
                           : p.status === 'pending'
-                            ? 'Waiting for the payment to be confirmed'
+                            ? p.set_aside
+                              ? 'Set aside — still being checked with the payment service'
+                              : 'Waiting for the payment to be confirmed'
                             : p.status === 'failed'
                               ? 'Did not go through'
                               : 'Refunded'}
