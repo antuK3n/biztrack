@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\VerifyController;
+use App\Http\Controllers\Api\WizardDraftController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -56,6 +57,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('businesses', [BusinessController::class, 'index']);
         Route::post('businesses', [BusinessController::class, 'store']);
         Route::put('businesses/{business}', [BusinessController::class, 'update']);
+
+        /*
+         * ── Answers saved before they can be a draft ──────────────────
+         *
+         * The wizard cannot create a draft until the API will accept a
+         * business, which is not until its third step — so two steps of
+         * typing lived only in the tab. These hold that typing.
+         *
+         * Same permission as the three above, because it is the same
+         * people filling in the same form one step earlier. Every action
+         * is scoped to the caller's own user id inside the controller,
+         * with no id in the path: a request cannot name somebody else's
+         * row, so there is no ownership check to forget.
+         */
+        Route::get('wizard-drafts', [WizardDraftController::class, 'index']);
+        Route::post('wizard-drafts', [WizardDraftController::class, 'store']);
+        Route::get('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'show']);
+        Route::put('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'update']);
+        Route::delete('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'destroy']);
     });
     // Show allowed for owner OR officer with application.view_all (checked in controller)
     Route::get('businesses/{business}', [BusinessController::class, 'show']);

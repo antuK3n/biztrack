@@ -6,9 +6,83 @@ import { EmptyState, ErrorState, LinkButton, SkeletonList } from '../../componen
 import { FilterPills, PageTitle, ProtoModal, SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatDate } from '../../lib/format'
-import { applications } from '../../lib/resources'
+import { applications, wizardDrafts } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { ApplicationListItem, ApplicationType } from '../../lib/types'
+import type { ApplicationType } from '../../lib/types'
+
+/**
+ * What one draft card is called, before repeats are numbered.
+ *
+ * The applicant's own title wins; a draft they never renamed keeps showing
+ * the business it is for. A draft whose business was removed falls through
+ * to the generic name rather than telling its own author the register
+ * dropped them — they find that out on the filing itself, with the context
+ * to understand it.
+ *
+ * Shared with the unfinished cards, so the two kinds cannot drift into
+ * different fallbacks: they did, and the client asked for one rule.
+ */
+function draftName(title: string | null | undefined, business?: string | null): string {
+  return title?.trim() || business?.trim() || 'My Application'
+}
+
+/**
+ * Number the repeats: "Store", "Store (1)", "Store (2)".
+ *
+ * Three renewals of one business are three cards with one name, and the
+ * list gave no way to tell them apart. Client, 29 September 2026: *"if they
+ * are multiple similar names, then there should be (1), (2), and so on."*
+ *
+ * The FIRST keeps the bare name — the convention a file manager uses, and
+ * the one that leaves a person with a single draft unaffected.
+ *
+ * Keyed on a stable id and assigned in STARTED order, deliberately. Doing
+ * it in display order would renumber every card whenever the sort control
+ * changes, so the draft somebody has been calling "(2)" silently becomes
+ * "(1)".
+ */
+function numberRepeats(
+  entries: { key: string; name: string; startedAt: string | null }[],
+): Map<string, string> {
+  const byStart = [...entries].sort(
+    (a, b) => Date.parse(a.startedAt ?? '') - Date.parse(b.startedAt ?? ''),
+  )
+
+  const seen = new Map<string, number>()
+  const names = new Map<string, string>()
+  for (const entry of byStart) {
+    const count = seen.get(entry.name) ?? 0
+    seen.set(entry.name, count + 1)
+    names.set(entry.key, count === 0 ? entry.name : `${entry.name} (${count})`)
+  }
+
+  return names
+}
+
+/**
+ * One card on this page, whichever table it came from.
+ *
+ * A draft the city holds and a filing saved before it could be one are the
+ * same thing to somebody reading this grid: work they started and want to
+ * get back to. They differ only in how Resume and Delete are carried out,
+ * so each card carries its own way of doing both and nothing above them has
+ * to know which kind it is holding.
+ *
+ * Normalising here is what stops a rule being applied to one kind and
+ * forgotten for the other — the filter, sort, numbering, empty state and
+ * confirm dialog all read this one array.
+ */
+type DraftCard = {
+  key: string
+  name: string
+  applicationType: ApplicationType
+  /** When it was begun. Drives "Started" and the repeat numbering. */
+  startedAt: string | null
+  /** When it was last written. Drives the default "Last worked on" sort. */
+  workedAt: string | null
+  resumeTo: string
+  remove: () => Promise<void>
+}
 
 /* Application Drafts — PDF p20: filter pills + trash, cards on the deep-blue panel. */
 
@@ -66,6 +140,13 @@ function TrashIcon({ size = 24, ...props }: SVGProps<SVGSVGElement> & { size?: n
 
 export function DraftsPage() {
   const { data, loading, error, reload } = useAsync(() => applications.list({ status: 'draft' }), [])
+  /*
+   * Filings started but not yet a draft — see `wizardDrafts`. Loaded
+   * separately because they are a different thing from a different table,
+   * and a failure to fetch them must not take the real drafts down with
+   * it: `?? []` means the page degrades to what it has always shown.
+   */
+  const started = useAsync(() => wizardDrafts.list(), [])
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<'worked' | 'recent' | 'oldest'>('worked')
   /*
@@ -74,16 +155,22 @@ export function DraftsPage() {
    * name back up from the list would go wrong in exactly the case that matters
    * — the list reloading underneath an open dialog.
    */
-  const [confirming, setConfirming] = useState<ApplicationListItem | null>(null)
+  const [confirming, setConfirming] = useState<DraftCard | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
+  /*
+   * One path for both kinds. The unfinished cards used to delete on the
+   * first click while a draft asked first — the same trash icon, in the
+   * same corner of the same grid, meaning two different things depending on
+   * which card it was over.
+   */
   async function confirmDelete() {
     if (confirming === null) return
     setDeleting(true)
     setDeleteError(null)
     try {
-      await applications.destroy(confirming.id)
+      await confirming.remove()
       setConfirming(null)
       /*
        * Reloaded rather than spliced out of `visible`. The server decides what
@@ -93,6 +180,7 @@ export function DraftsPage() {
        * list while still sitting in the register.
        */
       reload()
+      started.reload()
     } catch (err) {
       // Kept OPEN on failure, with the reason. Closing the dialog on an error
       // leaves the draft on screen with no explanation, which reads as the
@@ -103,8 +191,58 @@ export function DraftsPage() {
     }
   }
 
-  const drafts = data ?? []
-  const byType = filter === 'all' ? drafts : drafts.filter((d) => d.application_type === filter)
+  /*
+   * ── Both sources, flattened into one list of cards ──────────────────────
+   *
+   * A draft the city holds and a filing saved before it could be one are one
+   * thing to the person reading this grid. Normalised here so the filter, the
+   * sort, the numbering and the delete cannot be applied to one kind and
+   * forgotten for the other.
+   */
+  const cards: DraftCard[] = [
+    ...(data ?? []).map((d) => ({
+      key: `draft-${d.id}`,
+      name: draftName(d.title, d.business?.name),
+      applicationType: d.application_type,
+      startedAt: d.created_at,
+      workedAt: d.updated_at,
+      resumeTo: `/apply?draft=${d.id}`,
+      remove: async () => {
+        await applications.destroy(d.id)
+      },
+    })),
+    /*
+     * An unfinished filing has one date, not two: the wizard rewrites the
+     * whole row on every save, so "started" and "last worked on" are the same
+     * moment. Both fields take it rather than one being left null, so it
+     * sorts sensibly under either order instead of falling to the bottom.
+     */
+    ...(started.data ?? []).map((d) => ({
+      key: `started-${d.id}`,
+      name: draftName(d.title),
+      applicationType: d.application_type as ApplicationType,
+      startedAt: d.updated_at,
+      workedAt: d.updated_at,
+      /*
+       * `resume` carries the row's id, so this card opens THIS filing.
+       * `/apply?type=new` with no `resume` is a blank form, because that is
+       * what the dashboard's New Business Permit card links to.
+       */
+      resumeTo: `/apply?type=${d.application_type}&resume=${d.id}`,
+      remove: async () => {
+        await wizardDrafts.discard(d.id)
+      },
+    })),
+  ]
+
+  const byType =
+    filter === 'all' ? cards : cards.filter((c) => c.applicationType === filter)
+
+  /* Repeats numbered across the whole list — see `numberRepeats`. */
+  const cardNames = numberRepeats(
+    byType.map((c) => ({ key: c.key, name: c.name, startedAt: c.startedAt })),
+  )
+
   /*
    * ── Three orders, and the default is the one people open this page for ──
    *
@@ -118,14 +256,17 @@ export function DraftsPage() {
    * drafts going gets no help from the order they were begun in — the
    * oldest is as likely as any to be the live one.
    *
-   * Copied rather than sorted in place: `data` is the hook's array and
-   * sorting it would reorder the source of a memo-free render.
+   * Unfinished filings sort with everything else rather than being pinned to
+   * the front. They were pinned, and that was the last of the special cases
+   * the client asked to be rid of: a sort control that some cards ignore is a
+   * sort control the reader cannot trust.
    */
   const visible = [...byType].sort((a, b) => {
     if (sort === 'worked') {
-      return Date.parse(b.updated_at) - Date.parse(a.updated_at)
+      return Date.parse(b.workedAt ?? '') - Date.parse(a.workedAt ?? '')
     }
-    const diff = Date.parse(a.created_at) - Date.parse(b.created_at)
+    const diff = Date.parse(a.startedAt ?? '') - Date.parse(b.startedAt ?? '')
+
     return sort === 'recent' ? -diff : diff
   })
 
@@ -202,14 +343,9 @@ export function DraftsPage() {
               className="grid gap-6 *:min-w-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
               {visible.map((d) => {
-                const Icon = TYPE_ICON[d.application_type] ?? FilePlusIcon
-                // The applicant's own title wins; a draft they never renamed
-                // keeps showing the business it is for. A draft whose business
-                // was removed falls through to the generic name rather than
-                // telling its own author the register dropped them — they will
-                // find that out on the filing itself, with the context to
-                // understand it.
-                const name = d.title?.trim() || d.business?.name || 'My Application'
+                const Icon = TYPE_ICON[d.applicationType] ?? FilePlusIcon
+                /* `draftName` held the rule; `cardNames` numbers the repeats. */
+                const name = cardNames.get(d.key) ?? d.name
                 return (
                   /*
                    * `relative`, because the delete button is positioned over
@@ -219,9 +355,9 @@ export function DraftsPage() {
                    * the handler — the one interaction where being taken
                    * somewhere unexpected is worst.
                    */
-                  <li key={d.id} className="group relative">
+                  <li key={d.key} className="group relative">
                     <Link
-                      to={`/apply?draft=${d.id}`}
+                      to={d.resumeTo}
                       className="block overflow-hidden rounded-md bg-white shadow-card transition-shadow hover:shadow-raised"
                     >
                       <div className="flex h-44 items-center justify-center text-royal-deep">
@@ -236,15 +372,15 @@ export function DraftsPage() {
                           <PencilIcon size={17} className="shrink-0 text-royal-deep" />
                         </div>
                         {/*
-                          `created_at` is the day the draft was started, not
-                          the day it was last touched — the API does not expose
-                          an updated_at. Labelling it "Edited" told an applicant
-                          who worked on this draft an hour ago that they last
-                          edited it three weeks back, which is the sort of thing
-                          that makes someone doubt their work was saved.
+                          When it was BEGUN, not when it was last touched.
+                          Labelling it "Edited" told an applicant who worked on
+                          this draft an hour ago that they last edited it three
+                          weeks back, which is the sort of thing that makes
+                          someone doubt their work was saved. The last-touched
+                          date is what the default sort uses instead.
                         */}
                         <p className="mt-1 text-xs text-ink-secondary">
-                          Started: {formatDate(d.created_at)}
+                          Started: {formatDate(d.startedAt)}
                         </p>
                       </div>
                     </Link>
@@ -313,7 +449,7 @@ export function DraftsPage() {
         >
           <p className="text-sm text-ink">
             <span className="font-bold">
-              {confirming.title?.trim() || confirming.business?.name || 'My Application'}
+              {cardNames.get(confirming.key) ?? confirming.name}
             </span>{' '}
             will be removed from your drafts.
           </p>
