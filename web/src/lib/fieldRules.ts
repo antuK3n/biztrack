@@ -300,3 +300,42 @@ export function scalarFieldRule(code: string): FieldRule {
     }
   )
 }
+
+/**
+ * The two sexes the register records, as code and as words.
+ *
+ * ── Why the column keeps the code ───────────────────────────────────────────
+ *
+ * `business_owners.gender` and `users.gender` hold 'M' or 'F', and the API
+ * validates `in:M,F` in three controllers. That is the right thing for a
+ * column to hold: a short stable value that does not move when the wording
+ * does, and that nothing has to parse a word back out of.
+ *
+ * ── Why this list exists ────────────────────────────────────────────────────
+ *
+ * Because the pairing was written five times — the wizard's radiogroup and the
+ * `<option>` pairs in RegisterPage, SettingsPage and UsersPage — while three
+ * other screens printed the raw code at the reader. Client, 29 September 2026:
+ * *"it is M or F only, while the application form asks for Male or Female.
+ * Kindly apply consistency."*
+ *
+ * Controls build their options from this; displays read `genderLabel` off it.
+ * One list, so a sixth screen cannot invent a sixth wording.
+ */
+export const GENDERS: { value: string; label: string }[] = [
+  { value: 'M', label: 'Male' },
+  { value: 'F', label: 'Female' },
+]
+
+/**
+ * 'M' as "Male", for anywhere a stored sex is shown to a person.
+ *
+ * An unrecognised code comes back as itself rather than as a blank or a guess:
+ * if the register ever holds something this build does not know, an officer
+ * should see the value and be able to ask about it, not be told nothing.
+ */
+export function genderLabel(code: string | null | undefined): string {
+  if (!code) return ''
+
+  return GENDERS.find((g) => g.value === code)?.label ?? code
+}
