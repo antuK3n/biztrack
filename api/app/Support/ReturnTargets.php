@@ -184,6 +184,188 @@ final class ReturnTargets
         return $answered;
     }
 
+    /**
+     * A human-readable value for one target on this filing, or null.
+     *
+     * Null means "this target has no single value worth showing" — a document
+     * code, an office-form key, or `form:fee_profile`, which is a dozen
+     * questions under one pointer. The caller skips those.
+     *
+     * Display text, deliberately. Nothing reads it back: it becomes
+     * `old_value` / `new_value` on an `ApplicationCorrection`, which the
+     * officer's sheet prints. A section target cannot round-trip through one
+     * column — that is why it sends the applicant to the wizard — so composing
+     * a sentence here is the honest rendering rather than a lossy one.
+     */
+    public static function displayValue(\App\Models\Application $app, string $code): ?string
+    {
+        $business = $app->business;
+        if ($business === null) {
+            return null;
+        }
+
+        /* The scalar half: one column, already mapped. */
+        if (isset(self::SCALAR_FIELDS[$code])) {
+            [$relation, $column] = self::SCALAR_FIELDS[$code];
+            $record = match ($relation) {
+                'business' => $business,
+                'address' => $business->address,
+                'owner' => $business->owners->firstWhere('is_primary', true),
+                default => null,
+            };
+
+            $value = $record?->{$column};
+
+            return $value === null || $value === '' ? null : (string) $value;
+        }
+
+        $address = $business->address;
+        $profile = is_array($app->fee_profile) ? $app->fee_profile : [];
+
+        /* A fee-profile figure, which is where Section B items 1-4 live. */
+        $figure = function (string $key) use ($profile): ?string {
+            $value = $profile[$key] ?? null;
+
+            return $value === null || $value === '' ? null : (string) $value;
+        };
+
+        $yesNo = fn (?bool $value) => $value === null ? null : ($value ? 'Yes' : 'No');
+
+        return match ($code) {
+            'form:registration_type' => self::words($business->registration_type),
+            'form:owner_gender' => self::words(
+                $business->owners->firstWhere('is_primary', true)?->gender,
+            ),
+            'form:economic_organization' => $business->economic_organization === 'others'
+                ? 'Others — '.($business->economic_organization_others ?: 'unspecified')
+                : self::words($business->economic_organization),
+            'form:has_tax_incentives' => $yesNo(
+                $business->has_tax_incentives === null ? null : (bool) $business->has_tax_incentives,
+            ),
+            'form:is_rented' => $yesNo(
+                $business->is_rented === null ? null : (bool) $business->is_rented,
+            ),
+
+            /* Location & Zoning. Composed, because each is several boxes. */
+            'form:barangay' => $address?->barangay?->name,
+            'form:address' => self::joinParts([
+                $address?->house_bldg_no,
+                $address?->street,
+                $address?->block === null || $address->block === '' ? null : 'Block '.$address->block,
+                $address?->lot === null || $address->lot === '' ? null : 'Lot '.$address->lot,
+            ]),
+            'form:map_pin' => $address?->latitude === null || $address?->longitude === null
+                ? null
+                : number_format((float) $address->latitude, 6).', '
+                    .number_format((float) $address->longitude, 6),
+            /*
+             * The trades, in the order they were declared. A table rendered as
+             * a list: the officer is being told WHICH line changed, and the
+             * wizard is where the detail behind each one lives.
+             */
+            'form:lines' => self::joinParts(
+                $business->lines->map(fn ($line) => trim((string) $line->line_of_business))->all(),
+                '; ',
+            ),
+
+            /* Section B items 1-4, which are `fee_profile` keys, not columns. */
+            'form:floor_area_sqm' => $figure('floor_area_sqm'),
+            'form:employees' => self::joinParts([
+                $figure('employees') === null ? null : $figure('employees').' total',
+                $figure('male_employees') === null ? null : $figure('male_employees').' male',
+                $figure('female_employees') === null ? null : $figure('female_employees').' female',
+            ]),
+            'form:employees_in_lgu' => $figure('employees_in_lgu'),
+            'form:delivery_units' => self::joinParts([
+                $figure('delivery_vehicles_motorized') === null
+                    ? null
+                    : $figure('delivery_vehicles_motorized').' motorized',
+                $figure('delivery_vehicles_other') === null
+                    ? null
+                    : $figure('delivery_vehicles_other').' other',
+            ]),
+
+            /*
+             * `form:fee_profile` and every code from another namespace — a
+             * document type, an office-form key, a permit code. Not one value,
+             * so not one before-and-after.
+             */
+            default => null,
+        };
+    }
+
+    /** `sole_proprietorship` as "Sole Proprietorship", and null stays null. */
+    private static function words(?string $key): ?string
+    {
+        if ($key === null || trim($key) === '') {
+            return null;
+        }
+
+        return ucwords(str_replace('_', ' ', trim($key)));
+    }
+
+    /**
+     * Join the parts that have something in them.
+     *
+     * Blank parts drop out rather than leaving "17,  , Block " — the same rule
+     * the wizard and the officer's sheet use when they assemble a name or an
+     * address out of optional boxes.
+     *
+     * @param  list<string|null>  $parts
+     */
+    private static function joinParts(array $parts, string $glue = ' '): ?string
+    {
+        $kept = array_values(array_filter(
+            array_map(fn ($part) => $part === null ? '' : trim((string) $part), $parts),
+            fn (string $part) => $part !== '',
+        ));
+
+        return $kept === [] ? null : implode($glue, $kept);
+    }
+
+    /**
+     * What every named target on this filing says right now.
+     *
+     * Targets with no single value are left out entirely rather than stored as
+     * null, so the map is a record of what CAN be compared. A code that
+     * appears here at return time and not at resubmission has genuinely been
+     * emptied; one that never appears was never comparable.
+     *
+     * @param  list<string>  $codes
+     * @return array<string, string|null>
+     */
+    public static function snapshot(\App\Models\Application $app, array $codes): array
+    {
+        $values = [];
+        foreach ($codes as $code) {
+            if (isset(self::SCALAR_FIELDS[$code]) || self::isComposable($code)) {
+                $values[$code] = self::displayValue($app, $code);
+            }
+        }
+
+        return $values;
+    }
+
+    /** Does this code have a value `displayValue` knows how to compose? */
+    private static function isComposable(string $code): bool
+    {
+        return in_array($code, [
+            'form:registration_type',
+            'form:owner_gender',
+            'form:economic_organization',
+            'form:has_tax_incentives',
+            'form:is_rented',
+            'form:barangay',
+            'form:address',
+            'form:map_pin',
+            'form:lines',
+            'form:floor_area_sqm',
+            'form:employees',
+            'form:employees_in_lgu',
+            'form:delivery_units',
+        ], true);
+    }
+
     /** The column a scalar code writes, or null when it is not one. */
     public static function column(string $code): ?string
     {

@@ -27,6 +27,7 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
+use App\Support\ReturnTargets;
 use App\Support\Audit;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
@@ -941,8 +942,88 @@ class WorkflowService
                 ]);
             }
 
+            /*
+             * ── What each named field says, as the officer saw it ──────
+             *
+             * Compared once at resubmission to record what the applicant
+             * changed. Captured HERE rather than diffed on save because
+             * `PUT /applications/{id}` is the wizard's autosave, and
+             * diffing there would write a correction row per keystroke
+             * batch instead of one per field per round.
+             *
+             * This is the only record a SECTION target ever gets. Scalars
+             * have the correction card, which writes its own rows as it
+             * saves; the wizard fields had nothing, so a filing fixed
+             * there came back looking untouched.
+             *
+             * `at` is stored with the values so the comparison can tell
+             * which targets the card has already accounted for.
+             */
+            $app->forceFill([
+                'returned_values' => [
+                    'at' => now()->toISOString(),
+                    'values' => ReturnTargets::snapshot(
+                        $app->load(['business.address.barangay', 'business.owners', 'business.lines']),
+                        ReturnTargets::parse($target),
+                    ),
+                ],
+            ])->save();
+
             $this->transition($app, ApplicationStatus::Returned, $remarks);
         });
+    }
+
+    /**
+     * Record what the applicant changed in the wizard, against the snapshot
+     * taken when the filing was returned.
+     *
+     * Unchanged fields are recorded too, on `corrections()`'s own reasoning:
+     * *"The applicant looked at this and left it as it was" is an answer, and
+     * an officer who asked about a field needs to see that rather than an
+     * empty list that reads as "they ignored me".*
+     */
+    private function recordWizardCorrections(Application $app): void
+    {
+        $snapshot = $app->returned_values;
+        if (! is_array($snapshot) || ! is_array($snapshot['values'] ?? null)) {
+            return;
+        }
+
+        $since = $snapshot['at'] ?? null;
+        $app->load(['business.address.barangay', 'business.owners', 'business.lines']);
+
+        /*
+         * Targets the correction card already wrote a row for this round.
+         * Without this a scalar fixed on the card would be recorded twice —
+         * once correctly by `corrections()`, once here with the same pair.
+         */
+        $alreadyRecorded = $since === null
+            ? []
+            : ApplicationCorrection::where('application_id', $app->id)
+                /*
+                 * Parsed, not passed as the raw ISO string. `toISOString()` gives
+                 * "2026-09-29T12:00:00.000000Z" and the column holds
+                 * "2026-09-29 12:00:00" — compared as text those never match, so
+                 * the guard silently caught nothing and every scalar corrected on
+                 * the card was recorded a second time here. Caught by
+                 * ReturnedFieldsAreCorrectedTest: "2 records were found."
+                 */
+                ->where('created_at', '>=', Carbon::parse($since))
+                ->pluck('target')
+                ->all();
+
+        foreach ($snapshot['values'] as $code => $was) {
+            if (in_array($code, $alreadyRecorded, true)) {
+                continue;
+            }
+
+            ApplicationCorrection::create([
+                'application_id' => $app->id,
+                'target' => $code,
+                'old_value' => $was,
+                'new_value' => ReturnTargets::displayValue($app, $code),
+            ]);
+        }
     }
 
     /** B: resubmit a returned form. returned → for_approval. */
@@ -960,9 +1041,26 @@ class WorkflowService
             ->first()?->officer;
 
         DB::transaction(function () use ($app) {
+            /*
+             * BEFORE the assignments are cleared and before the snapshot is
+             * dropped: this is the only moment both halves of the comparison
+             * exist. Inside the transaction, so a filing cannot reach the
+             * office as resubmitted with no record of what changed.
+             */
+            $this->recordWizardCorrections($app);
+
             $app->assignments()
                 ->where('status', AssignmentStatus::Returned->value)
                 ->update(['status' => AssignmentStatus::Pending->value, 'remarks' => null]);
+
+            /*
+             * The round is over. `returned_values` is the state of ONE open
+             * return, not history — the history is `application_corrections`
+             * — and a snapshot left behind would be compared again on the
+             * next resubmission against values nobody was asked about.
+             */
+            $app->forceFill(['returned_values' => null])->save();
+
             $this->transition($app, ApplicationStatus::ForApproval, 'Applicant resubmitted revisions.');
         });
 
