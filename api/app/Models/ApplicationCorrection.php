@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ApplicationCorrection extends Model
 {
-    protected $fillable = ['application_id', 'target', 'old_value', 'new_value'];
+    protected $fillable = ['application_id', 'permit_type_id', 'target', 'old_value', 'new_value'];
 
     public function application(): BelongsTo
     {

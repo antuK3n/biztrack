@@ -92,6 +92,7 @@ class Application extends Model
         'deadline_at' => 'datetime',
         'decided_at' => 'datetime',
         'complexity_set_at' => 'datetime',
+        'last_opened_at' => 'datetime',
         'fee_profile' => 'array',
         /*
          * What each returned field said when the officer sent it back, plus

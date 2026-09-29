@@ -56,6 +56,24 @@ final class SheetRequirements
         };
     }
 
+    /**
+     * Every checklist slot in the system, keyed by permit type code.
+     *
+     * SANITARY is absent because it has no checklist of its own, which is
+     * the same reason `for()` returns null for it.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function allSlots(): array
+    {
+        return [
+            'ZONING' => ZoningRequirements::slotCodes(),
+            'CEC' => CecRequirements::slotCodes(),
+            'FSIC' => FsicRequirements::slotCodes(),
+            'OCCUPANCY' => OccupancyRequirements::slotCodes(),
+        ];
+    }
+
     /** The document type behind one slot, created on demand. */
     public static function documentType(string $permitTypeCode, string $code): DocumentType
     {

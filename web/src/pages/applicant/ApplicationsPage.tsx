@@ -8,7 +8,9 @@ import {
   SortFilter,
   type SortFilterOption,
 } from '../../components/ui/Proto'
-import { businessName, formatDateTime, formatRelative } from '../../lib/format'
+import { ClearanceCorrections } from './ClearanceCorrections'
+import { MainFormCorrections } from './MainFormCorrections'
+import { businessName, formatDateTime } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
 import {
   AMENDMENT_NOTE,
@@ -538,26 +540,111 @@ function RejectionNote({
  * the boxes. The status page names each field beside its own input, which is
  * where naming them is actually useful.
  */
-function ReturnedNote({ app }: { app: ApplicationListItem }) {
+function ReturnedNote({
+  app,
+  onCorrect,
+}: {
+  app: ApplicationListItem
+  /** Open the correction dialog here, rather than navigating to it. */
+  onCorrect: () => void
+}) {
   return (
     <div className="mt-2 rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-4 py-3">
       <p className="text-sm font-bold text-ink">BPLO sent this back for correction</p>
       <p className="mt-0.5 text-sm text-ink-secondary">
         Open it to see which fields to correct, then resubmit.
       </p>
-      <Link
-        to={`/applications/${app.id}`}
-        /*
-          Named for the filing, on RejectionNote's reasoning: a list of links
-          all reading "Fix and resubmit" cannot be chosen between by a screen
-          reader user.
-        */
+      {/*
+        Opens here, not on the filing's page. The client, 30 September 2026:
+        the page behind the dialog was doing nothing the dialog did not.
+      */}
+      <button
+        type="button"
+        onClick={onCorrect}
         aria-label={`Fix and resubmit the application for ${businessName(app.business)}`}
-        /* Same reactive control as the row's, so the two read alike. */
         className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
       >
         Fix and resubmit →
-      </Link>
+      </button>
+    </div>
+  )
+}
+
+/**
+ * One or more office clearances sent back, on a collapsed card.
+ *
+ * `ReturnedNote` above, for the other five offices. The client asked for it
+ * on 30 September 2026 — *"I also want it to have something like this, not
+ * just for BPLO returns"* — and the reasoning that put the BPLO one here
+ * carries across whole: a card showing a status pill and a permit count
+ * looks the same whether an office is working on the filing or waiting on
+ * the applicant, and that is the one difference worth seeing from the list.
+ *
+ * Separate from `ReturnedNote` because the repair is somewhere else. A
+ * returned form is fixed on the status page where the correction boxes are;
+ * a returned clearance is fixed on that office's own sheet.
+ *
+ * With more than one returned, the link goes to the clearance stage rather
+ * than picking one of them — the applicant has two repairs to make and the
+ * grid is where both are reachable.
+ */
+function ReturnedClearanceNote({
+  app,
+  returned,
+  onCorrect,
+}: {
+  app: ApplicationListItem
+  /** The clearances sitting at `returned`; never empty. */
+  returned: ApplicationListItem['permit_types']
+  /** Open the correction dialog here, rather than navigating to it. */
+  onCorrect: (code: string) => void
+}) {
+  const one = returned.length === 1 ? returned[0] : null
+
+  return (
+    <div className="mt-2 rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-4 py-3">
+      <p className="text-sm font-bold text-ink">
+        {/*
+          Refused reads differently from returned, and the difference
+          matters to the applicant: a refusal suspends their Business
+          Permit while it stands. Both are answered the same way.
+        */}
+        {one !== null
+          ? `${one.name} was ${one.status === 'rejected' ? 'refused' : 'sent back for correction'}`
+          : `${returned.length} clearances need your attention`}
+      </p>
+      <p className="mt-0.5 text-sm text-ink-secondary">
+        {/*
+          The list payload has no room for the officer's words — see the
+          note on ReturnedNote for why it is not widened — so this says
+          where they are rather than inventing a summary of them.
+        */}
+        Open{' '}
+        {one !== null ? 'the form' : 'them'} to see what to correct, then resubmit.
+      </p>
+      {/*
+        Opens here, not on another page. One returned clearance is answered
+        in the dialog; several go to the stage, because the applicant has
+        two repairs to make and the grid is where both are reachable.
+      */}
+      {one !== null ? (
+        <button
+          type="button"
+          onClick={() => onCorrect(one.code)}
+          aria-label={`Fix and resubmit ${one.name} for ${businessName(app.business)}`}
+          className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+        >
+          Fix and resubmit →
+        </button>
+      ) : (
+        <Link
+          to={`/applications/${app.id}/clearances`}
+          aria-label={`Fix and resubmit the clearances for ${businessName(app.business)}`}
+          className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+        >
+          Fix and resubmit →
+        </Link>
+      )}
     </div>
   )
 }
@@ -958,11 +1045,14 @@ function ApplicationRow({
   permitTypesByCode,
   detail,
   onExpand,
+  onChanged,
 }: {
   app: ApplicationListItem
   permitTypesByCode: Map<string, PermitType>
   detail: Application | undefined
   onExpand: (id: number) => void
+  /** Re-read this filing after the applicant has resubmitted something. */
+  onChanged: () => void
 }) {
   /*
    * Which permit timelines are open, as "<application id>:<permit code>".
@@ -982,6 +1072,45 @@ function ApplicationRow({
   const [open, setOpen] = useState(false)
   const pending = app.status === 'pending_payment'
   const rejected = app.status === 'rejected'
+  /*
+   * The clearances an office has sent back.
+   *
+   * BUSINESS is excluded: it is the filing's outcome rather than one of the
+   * five, and a returned MAIN FORM is `app.status`, which `ReturnedNote`
+   * already answers. Counting it here would put two rose banners on one card
+   * saying the same thing twice.
+   */
+  /*
+   * Clearances waiting on the applicant: returned, and — since 30 September
+   * 2026 — refused. Both are answered the same way, by changing what the
+   * office asked about and sending the sheet back, and both now carry the
+   * pointer that says which rows those are.
+   *
+   * BUSINESS is excluded: it is the filing's outcome rather than one of the
+   * five, and a returned MAIN FORM is `app.status`, which `ReturnedNote`
+   * already answers.
+   */
+  const returnedClearances = (app.permit_types ?? []).filter(
+    (pt) =>
+      (pt.status === 'returned' || pt.status === 'rejected') && pt.code !== 'BUSINESS',
+  )
+  /*
+   * Which returned clearance the applicant is answering, or null.
+   *
+   * Held here rather than in the URL: the dialog belongs to this card, and
+   * the tracking page shows every filing the applicant has. A query
+   * parameter would have to name the filing as well as the permit to say
+   * which card it meant.
+   */
+  const [correcting, setCorrecting] = useState<string | null>(null)
+  /*
+   * And the MAIN FORM's own return, which is a different dialog: BPLO names
+   * fields on the application, not documents on an office checklist.
+   *
+   * Needs the DETAIL payload — the pointer is on the assignments — so the
+   * press asks for it if the card has not already fetched it.
+   */
+  const [correctingForm, setCorrectingForm] = useState(false)
   /*
    * ── The block stopped being about payment ─────────────────────────────────
    *
@@ -1261,7 +1390,68 @@ function ApplicationRow({
         replace it outright, though: it is inside `open`, and a collapsed card
         would go back to showing nothing to act on.
       */}
-      {app.status === 'returned' && !open && <ReturnedNote app={app} />}
+      {app.status === 'returned' && !open && (
+        <ReturnedNote
+          app={app}
+          onCorrect={() => {
+            /*
+              The banner shows on a COLLAPSED card, which has not fetched the
+              filing yet — and the dialog is drawn from the detail payload.
+              Asking for it on the press is what makes opening in place
+              possible at all; the dialog appears when it lands.
+            */
+            onExpand(app.id)
+            setCorrectingForm(true)
+          }}
+        />
+      )}
+      {/*
+        And the same for the other five offices.
+
+        CLOSED ONLY, for the reason above: open, each returned permit's own
+        row carries the officer's actual words and the field they named, so
+        this would be a worse duplicate stacked on a better one.
+
+        Not while the FORM is returned. Both can be true at once — BPLO
+        sends the form back while a clearance is already out — and two rose
+        banners on one card is a card that has stopped saying anything. The
+        form is the one that blocks everything else, so it speaks first.
+      */}
+      {app.status !== 'returned' && !open && returnedClearances.length > 0 && (
+        <ReturnedClearanceNote
+          app={app}
+          returned={returnedClearances}
+          onCorrect={setCorrecting}
+        />
+      )}
+      {/*
+        The correction dialog, on this page. The office named one document;
+        it does not need a page of its own, which is what the client kept
+        arriving at. The filing's pointer and checklist are fetched on the
+        press — see ClearanceCorrections for why they cannot come off the
+        list payload.
+      */}
+      {/*
+        BPLO's return, on this page. `detail` is fetched lazily per card, so
+        the press asks for it first — the dialog cannot be drawn from the
+        list payload, which carries no assignments.
+      */}
+      {correctingForm && detail !== undefined && (
+        <MainFormCorrections
+          app={detail}
+          onClose={() => setCorrectingForm(false)}
+          onDone={onChanged}
+        />
+      )}
+      {correcting !== null && (
+        <ClearanceCorrections
+          applicationId={app.id}
+          code={correcting}
+          onClose={() => setCorrecting(null)}
+          /* The row behind the dialog still says Returned until it is re-read. */
+          onDone={onChanged}
+        />
+      )}
 
       {open && (
         <>
@@ -1328,7 +1518,6 @@ function ApplicationRow({
               const note = mainFormReturned
                 ? (detail?.assignments?.find((a) => a.remarks)?.remarks?.trim() ?? '')
                 : (full?.remarks?.trim() ?? '')
-              const returnedAt = full?.returned_at ?? null
               const historyKey = `${app.id}:${pt.code}`
               const historyOpen = openHistory.has(historyKey)
 
@@ -1343,9 +1532,14 @@ function ApplicationRow({
                     which is the one coloured thing on the row that MEANS
                     something.
                   */
-                  className={`relative rounded-lg bg-white px-4 py-2.5 shadow-card transition-colors hover:bg-royal-tint/50 ${
-                    returned ? 'border-l-4 border-s-rose' : ''
-                  }`}
+                  /*
+                    No rose bar on a returned row, since 30 September 2026.
+                    The badge says Returned in rose and the note underneath
+                    says who asked and for what; the bar was the same fact a
+                    third time, and the client had the two rows side by side
+                    and asked for one shape.
+                  */
+                  className="relative rounded-lg bg-white px-4 py-2.5 shadow-card transition-colors hover:bg-royal-tint/50"
                 >
                   {/*
                     The row's own control, under the content and over the
@@ -1481,15 +1675,23 @@ function ApplicationRow({
                     <div className="relative z-20 mt-2 pl-[7rem]">
                       <p className="text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
-                          {mainFormReturned ? 'BPLO' : 'This office'} asked for changes
                           {/*
-                          `?? null` first, then a null test. `full` is undefined
-                          until the detail lands, and `full?.returned_at !== null`
-                          is TRUE for undefined — which would have printed the
-                          word "changes" followed by a stray space and a colon
-                          while the fetch was in flight.
-                        */}
-                          {returnedAt !== null && ` ${formatRelative(returnedAt)}`}:
+                            No date, since 30 September 2026.
+
+                            It was printed only when `returned_at` was on the
+                            payload — true of a clearance row, not of the main
+                            form's — so one line of code said "asked for changes
+                            17 minutes ago" on one row and "asked for changes" on
+                            the next, decided by which endpoint happened to carry
+                            a column rather than by anything the applicant did.
+                            The client put the two side by side and asked for one
+                            shape, following BPLO's.
+
+                            Nothing is lost that was worth keeping here: the line
+                            is about WHO asked and WHAT for, and the history
+                            behind the row carries when.
+                          */}
+                          {mainFormReturned ? 'BPLO' : 'This office'} asked for changes:
                         </span>{' '}
                         {/*
                         The officer's own words, in quotes so it is plainly a
@@ -1505,17 +1707,37 @@ function ApplicationRow({
                         {note !== '' && <span className="italic">“{note}”</span>}
                       </p>
                       {/*
-                        A returned CLEARANCE is fixed on the clearance stage;
-                        a returned FORM is fixed on the status page, where the
-                        correction boxes are. One link, two destinations,
-                        because they are two different repairs.
+                        A returned CLEARANCE is fixed on that office's own
+                        sheet; a returned FORM is fixed on the status page,
+                        where the correction boxes are. One link, two
+                        destinations, because they are two different repairs.
+
+                        The clearance half pointed at the card GRID until 30
+                        September 2026, which is a menu rather than a repair:
+                        the client pressed it expecting the form they had been
+                        asked to correct and got six cards. `pt.code` names the
+                        permit this row is about, so two offices returning the
+                        same filing give two rows pointing at two sheets.
                       */}
+                      {/*
+                        A returned CLEARANCE opens the dialog here; a
+                        returned FORM still goes to the status page, where
+                        its own correction boxes are. Two repairs, two
+                        destinations — and only one of them needs a page.
+                      */}
+                      {!mainFormReturned && (
+                        <button
+                          type="button"
+                          onClick={() => setCorrecting(pt.code)}
+                          aria-label={`Fix and resubmit ${pt.name} for ${businessName(app.business)}`}
+                          className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                        >
+                          Fix and resubmit →
+                        </button>
+                      )}
+                      {mainFormReturned && (
                       <Link
-                        to={
-                          mainFormReturned
-                            ? `/applications/${app.id}`
-                            : `/applications/${app.id}/clearances`
-                        }
+                        to={`/applications/${app.id}`}
                         /*
                           A real control, not underlined text: the client asked
                           for the same reactive treatment the permit boxes got —
@@ -1526,6 +1748,7 @@ function ApplicationRow({
                       >
                         Fix and resubmit →
                       </Link>
+                      )}
                     </div>
                   )}
                 </li>
@@ -1654,6 +1877,19 @@ export function ApplicationsPage() {
    * below does — both see an empty cache and both fetch.
    */
   const [requested] = useState(() => new Set<number>())
+
+  /*
+   * Re-read one filing after the applicant has changed it.
+   *
+   * `loadDetail` fetches once and remembers, which is right for expanding a
+   * row and wrong after a resubmission: the row behind the dialog still says
+   * Returned until both the list and the detail are read again.
+   */
+  function refreshFiling(id: number) {
+    requested.delete(id)
+    loadDetail(id)
+    void reload()
+  }
 
   function loadDetail(id: number) {
     if (requested.has(id)) return
@@ -1847,6 +2083,7 @@ export function ApplicationsPage() {
                 permitTypesByCode={permitTypesByCode}
                 detail={detailCache[app.id]}
                 onExpand={loadDetail}
+                onChanged={() => refreshFiling(app.id)}
               />
             ))}
           </ul>

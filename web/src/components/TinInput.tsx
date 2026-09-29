@@ -303,19 +303,16 @@ export function TinInput({
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
         {/*
-          Optional is stated, not left as the absence of an asterisk.
+          An "Optional" badge sat here from 27 September 2026 until the
+          client had it removed on the 29th.
 
-          This is the only question on Section A that may be skipped, and
-          until 27 September 2026 it looked exactly like one that may not —
-          `required={false}` drew no glyph and no word, so the label was
-          silent and a floating note under the boxes was carrying the fact.
-          Said here it costs no height and covers nothing.
+          Worth knowing why it existed: this is the only question in
+          Section A that may be skipped, and without the badge nothing on
+          the label says so — a required field carries a red asterisk and
+          the word "required" for a screen reader, so an optional one is
+          marked only by the absence of both. If that reads as an oversight
+          again, a badge is the fix that was tried.
         */}
-        {!required && (
-          <span className="ml-1.5 rounded bg-line/70 px-1.5 py-0.5 text-[11px] font-medium text-ink-secondary">
-            Optional
-          </span>
-        )}
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
         {required && (
           <>

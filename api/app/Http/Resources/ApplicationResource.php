@@ -380,6 +380,38 @@ class ApplicationResource extends JsonResource
                              * cannot is half a feature. Both doors, one builder.
                              */
                             'requirements' => SheetRequirements::for($this->resource, $type->code),
+                            /*
+                             * What the applicant changed on the rows this
+                             * office last asked about — was and now.
+                             *
+                             * Without it a resubmitted sheet is
+                             * indistinguishable from the one the office sent
+                             * back, which is the complaint that produced the
+                             * whole Return feature and was answered for BPLO
+                             * on 29 September 2026 and for the offices on the
+                             * 30th.
+                             *
+                             * It includes rows that did NOT change, and that
+                             * is the point of it here: the resubmit gate
+                             * deliberately lets a file the office called wrong
+                             * come back identical — blocking that would trap
+                             * an applicant whose document was right — so this
+                             * is how the office finds out rather than reading
+                             * the document again to discover it.
+                             */
+                            'corrections' => \App\Models\ApplicationCorrection::where(
+                                'application_id',
+                                $this->resource->id,
+                            )
+                                ->where('permit_type_id', $type->id)
+                                ->orderByDesc('id')
+                                ->get()
+                                ->map(fn ($c) => [
+                                    'target' => $c->target,
+                                    'old_value' => $c->old_value,
+                                    'new_value' => $c->new_value,
+                                    'at' => optional($c->created_at)->toISOString(),
+                                ])->all(),
                         ];
                     })->values()
                 : [],
@@ -556,11 +588,35 @@ class ApplicationResource extends JsonResource
              * officer reading back what they asked — and a list would make
              * all of them build the same index.
              */
+            /*
+             * The MAIN FORM's notes only, on the same reasoning as
+             * `corrections` below — and missed when that filter was added.
+             *
+             * The offices record theirs in the same table since 30 September
+             * 2026, marked with the permit they belong to; BPLO's carry a
+             * null. Unfiltered, a filing whose zoning sheet had been returned
+             * handed the main form notes keyed `ZONING_REQ_TAX_DECLARATION` —
+             * harmless only because no main-form target is spelled that way,
+             * which is luck rather than a rule.
+             */
             'return_notes' => $this->relationLoaded('returnNotes')
-                ? $this->returnNotes->pluck('note', 'target')->all()
+                ? $this->returnNotes
+                    ->whereNull('permit_type_id')
+                    ->pluck('note', 'target')
+                    ->all()
                 : (object) [],
+            /*
+             * The MAIN FORM's corrections only.
+             *
+             * Since 30 September 2026 the offices record theirs in the same
+             * table, marked with the permit they belong to; BPLO's carry a
+             * null. Unfiltered, this block would hand the officer's sheet
+             * rows like `ZONING_LEASE_TITLE` and get away with it only
+             * because `mainFormTargetLabel` skips codes it does not know.
+             * An office's are on its own clearance row.
+             */
             'corrections' => $this->relationLoaded('corrections')
-                ? $this->corrections->map(fn ($c) => [
+                ? $this->corrections->whereNull('permit_type_id')->values()->map(fn ($c) => [
                     'target' => $c->target,
                     'old_value' => $c->old_value,
                     'new_value' => $c->new_value,

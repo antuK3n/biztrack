@@ -22,7 +22,7 @@ use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\VerifyController;
-use App\Http\Controllers\Api\WizardDraftController;
+use App\Http\Controllers\Api\DraftController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -71,11 +71,11 @@ Route::middleware('auth:sanctum')->group(function () {
          * with no id in the path: a request cannot name somebody else's
          * row, so there is no ownership check to forget.
          */
-        Route::get('wizard-drafts', [WizardDraftController::class, 'index']);
-        Route::post('wizard-drafts', [WizardDraftController::class, 'store']);
-        Route::get('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'show']);
-        Route::put('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'update']);
-        Route::delete('wizard-drafts/{wizardDraft}', [WizardDraftController::class, 'destroy']);
+        Route::get('wizard-drafts', [DraftController::class, 'index']);
+        Route::post('wizard-drafts', [DraftController::class, 'store']);
+        Route::get('wizard-drafts/{wizardDraft}', [DraftController::class, 'show']);
+        Route::put('wizard-drafts/{wizardDraft}', [DraftController::class, 'update']);
+        Route::delete('wizard-drafts/{wizardDraft}', [DraftController::class, 'destroy']);
     });
     // Show allowed for owner OR officer with application.view_all (checked in controller)
     Route::get('businesses/{business}', [BusinessController::class, 'show']);
@@ -275,6 +275,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('assignments/{assignment}/release', [AssignmentController::class, 'release']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
+        /*
+         * Change what an open return asks for, without returning again.
+         *
+         * The same permission as Return, because it is the same act by the
+         * same officer on the same case — an amendment to an instruction they
+         * have already given. A second Return is not legal (Returned goes
+         * only forward) and should not be: the filing is on the applicant's
+         * desk, and bouncing it would interrupt a repair already under way.
+         */
+        Route::post('assignments/{assignment}/amend-return', [AssignmentController::class, 'amendReturn']);
         /*
          * The office's third answer, on the same permission as its other two.
          *

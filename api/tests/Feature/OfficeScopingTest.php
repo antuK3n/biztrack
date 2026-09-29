@@ -117,6 +117,9 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
     $workflow = app(WorkflowService::class);
     foreach (PermitType::whereIn('code', $permitCodes)->where('code', '!=', 'BUSINESS')->get() as $type) {
         $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist($app, $type);
         $workflow->submitClearanceForm($app, $type);
     }
 

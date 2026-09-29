@@ -91,6 +91,9 @@ function clearanceAwaitingItsOffice(string $code): array
 
     // Applied for and handed in, so an office is holding something to send back.
     $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app->fresh(), $type);
     $workflow->submitClearanceForm($app->fresh(), $type);
 
     return [$app->fresh(), $workflow, $type];

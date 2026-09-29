@@ -47,6 +47,21 @@ class ApplicationPermitType extends Model
          * on the re-read. See the migration for why that cannot be one column.
          */
         'rejected_at', 'rejection_note', 'rejection_remedy',
+        /*
+         * What the sheet said when this office last handed it back.
+         *
+         * MISSING from this list until 30 September 2026, which made every
+         * write to it a silent no-op: `update()` drops an unfillable key
+         * without a word, so `returnClearance` stored its snapshot, got no
+         * error, and left null in the column. `recordClearanceCorrections`
+         * then read null and recorded nothing, so an office that returned a
+         * sheet never learned what the applicant changed — the feature
+         * looked built and did nothing.
+         *
+         * Found by the refusal work, which needed the same column to refuse
+         * an untouched re-submission and could not get a value to stick.
+         */
+        'returned_state',
     ];
 
     protected $casts = [
@@ -57,6 +72,13 @@ class ApplicationPermitType extends Model
         // string, and the resources format these for the wire.
         'returned_at' => 'datetime',
         'rejected_at' => 'datetime',
+        /*
+         * What each row this office asked about said when it sent the sheet
+         * back. Compared once at the resubmission and cleared — the state of
+         * one open round, never history. The history is in
+         * `application_corrections`.
+         */
+        'returned_state' => 'array',
     ];
 
     public function application(): BelongsTo

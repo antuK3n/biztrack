@@ -2709,16 +2709,35 @@ export function ApplyWizard() {
    */
   const suggestedTitle = useMemo(() => {
     const business = form.name.trim()
-    const year = new Date().getFullYear()
-    const named = (base: string) => (business ? `${base} — ${business}` : base)
 
+    /*
+     * ── The business name alone, once there is one ───────────────────
+     *
+     * It read "2026 Renewal — Pedro's Snack Bar" until 29 September 2026.
+     * The prefix named the KIND of filing, which earned its place while a
+     * drafts card showed nothing else — three cards saying "Pedro's Snack
+     * Bar" gave no clue which was the renewal.
+     *
+     * The card carries a type label of its own now, so the prefix is the
+     * same fact twice; and it was the half that survived truncation,
+     * pushing the words that actually tell two drafts apart off the end.
+     *
+     * A suggestion, not a rule: `titleEdited` stops this replacing a name
+     * the applicant has typed, exactly as before.
+     */
+    if (business !== '') {
+      return business
+    }
+
+    /* Nothing to name it after yet — say what kind of thing it is. */
+    const year = new Date().getFullYear()
     switch (applicationType) {
       case 'renewal':
-        return named(`${year} Renewal`)
+        return `${year} Renewal`
       case 'amendment':
-        return named(`${year} Amendment`)
+        return `${year} Amendment`
       default:
-        return named('New Business Permit')
+        return 'New Business Permit'
     }
   }, [form.name, applicationType])
 
@@ -4430,30 +4449,20 @@ export function ApplyWizard() {
         {
           label: '3. Tax Identification Number (TIN)',
           /*
-           * The one row on this summary that says something when it is empty.
+           * An em dash like every other blank, since 30 September 2026.
            *
-           * Every other blank is a question the applicant chose to skip and an
-           * em dash is the whole story. This blank has a consequence attached
-           * to it, and the Confirm step is the last place it can be mentioned
-           * before that becomes news rather than a choice.
+           * This row carried the consequence of a blank TIN — first "an
+           * officer will ask for it under Other Requirements" (24 September,
+           * withdrawn on the 27th as a thing nothing in the system did), then
+           * "you will be asked for it once BPLO approves this form". The
+           * client moved it to a modal on the press that skips the question,
+           * which is where the choice is actually made; by the Confirm step
+           * the applicant has filled in eleven more sections and a
+           * consequence arriving here is news rather than a decision.
            *
-           * ── It used to name the wrong consequence ────────────────────────
-           *
-           * "an officer will ask for it under Other Requirements", from
-           * 24 September 2026 until the client questioned it on the 27th.
-           * Nothing in the system does that — there is no TIN document type
-           * and no code that creates one — and it framed a FIELD as an
-           * attachment, so an applicant who skipped item 3 was told to expect
-           * a document request while an applicant who filled it in was asked
-           * for nothing. Same requirement, two different kinds.
-           *
-           * What actually happens is a targeted return: `form:tin` is a
-           * return target, so BPLO sends the form back pointed at item 3 and
-           * the applicant fills the box in. Described here in those terms.
+           * See TIN_SKIPPED_NOTICE and `next()`.
            */
-          value:
-            form.tin.trim() ||
-            'Not given — you will be asked for it once BPLO approves this form.',
+          value: form.tin,
         },
         { label: '4. Business Name', value: form.name },
         { label: '5. Trade Name / Franchise', value: form.trade_name },
@@ -6015,17 +6024,29 @@ export function ApplyWizard() {
         ? 'Enter the name your business trades under. Repeat your business name if they are the same.'
         : '',
     /*
-     * Nothing to complain about before a structure is chosen: the field is not
-     * being asked yet, and an error on a question that has not been put is just
-     * noise. Once it is asked, the error names that one agency rather than
-     * listing all three.
+     * Before a structure is chosen this field is read-only, and reaching it
+     * says why — the client, 30 September 2026, having clicked a closed box
+     * that did nothing at all. Still silent until they reach it: an error on
+     * a question nobody has approached is noise.
+     *
+     * Once the field IS being asked, the error names that one agency rather
+     * than listing all three.
      */
     registration_number: !registrationAgencyInfo
-      ? ''
+      ? touched.registration_number
+        ? 'Select a Form of Organization first.'
+        : ''
       : form.registration_number.trim()
         ? registrationNumberValid(form.registration_number)
           ? ''
-          : `Enter your ${registrationNumberLabel} as it is printed on your certificate — letters, numbers, spaces and dashes, and at least one digit.`
+          : /*
+               The rule they broke, and nothing else. This named the field,
+               cited the certificate and then listed four character classes
+               and a digit minimum, which the client called too long on 30
+               September 2026 — and the field's own label is directly above
+               the error, so naming it again spent a clause on nothing.
+            */
+            'Use letters, numbers, spaces or dashes, with at least one digit.'
         : touched.registration_number
           ? `Enter your ${registrationNumberLabel}.`
           : '',
@@ -6440,7 +6461,38 @@ export function ApplyWizard() {
    * every route out of a step saves it.
    */
 
+  /*
+   * Shown once per visit to the business step, not once per press.
+   *
+   * A warning that reappears every time is a gate wearing a warning's
+   * clothes, and the TIN has been optional since BPLO said so on 24
+   * September 2026.
+   */
+  const [tinNoticeOpen, setTinNoticeOpen] = useState(false)
+  const tinNoticeSeen = useRef(false)
+
   async function next() {
+    /*
+     * A blank TIN is said once, here, on the press that skips it.
+     *
+     * Not a refusal — Continue advances — so this reads the gate the same
+     * way the button does and only speaks after the step is otherwise
+     * clear. Warning about the TIN while three other fields are still
+     * empty would put a consequence in front of somebody who is not
+     * leaving the step anyway.
+     */
+    if (
+      phase === 'business' &&
+      stepMissing.length === 0 &&
+      !form.tin.trim() &&
+      !tinNoticeSeen.current
+    ) {
+      tinNoticeSeen.current = true
+      setTinNoticeOpen(true)
+
+      return
+    }
+
     /*
      * The amendment step gates on its requested changes, and the box the
      * applicant was typing in has only just blurred — so flush first and read
@@ -6614,6 +6666,8 @@ export function ApplyWizard() {
     code: OfficeFormCode,
     documentCode: string,
     file: File | null,
+    /* Which file to remove; a row holds several since 30 September 2026. */
+    documentId?: number,
   ) {
     if (applicationId === null) return
 
@@ -6632,7 +6686,7 @@ export function ApplyWizard() {
       const result =
         file !== null
           ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
-          : await officeForms.removeRequirement(applicationId, code, documentCode)
+          : await officeForms.removeRequirement(applicationId, code, documentCode, documentId)
 
       setOfficeReqs((all) => ({ ...all, [code]: result.requirements }))
     } catch (err) {
@@ -9517,6 +9571,15 @@ export function ApplyWizard() {
                   value={form.registration_number}
                   onChange={(e) => update('registration_number', e.target.value)}
                   onBlur={() => touch('registration_number')}
+                  /*
+                    Reaching a closed field is enough to be told why it is
+                    closed. Focus and not click, so tabbing to it answers
+                    too — and `readOnly` rather than `disabled` is what
+                    makes either possible; a disabled input takes neither.
+                  */
+                  onFocus={() => {
+                    if (!registrationAgencyInfo) touch('registration_number')
+                  }}
                   placeholder={registrationAgencyInfo?.placeholder ?? ''}
                   /*
                    * Inert until the question it depends on is answered — item
@@ -11794,8 +11857,8 @@ export function ApplyWizard() {
             onChange={(next) => void saveOfficeForm('ZONING', next)}
             requirements={officeReqs.ZONING ?? []}
             requirementBusy={officeReqBusy}
-            onRequirementChange={(documentCode, file) =>
-              void changeOfficeRequirement('ZONING', documentCode, file)
+            onRequirementChange={(documentCode, file, documentId) =>
+              changeOfficeRequirement('ZONING', documentCode, file, documentId)
             }
             onDeclarationTemplate={() => void downloadZoningDeclaration()}
           />
@@ -11836,11 +11899,12 @@ export function ApplyWizard() {
             }
             requirements={officeReqs[officeStepCode(phase) as string] ?? []}
             requirementBusy={officeReqBusy}
-            onRequirementChange={(documentCode, file) =>
-              void changeOfficeRequirement(
+            onRequirementChange={(documentCode, file, documentId) =>
+              changeOfficeRequirement(
                 officeStepCode(phase) as OfficeFormCode,
                 documentCode,
                 file,
+                documentId,
               )
             }
             onDeclarationTemplate={
@@ -12093,6 +12157,32 @@ export function ApplyWizard() {
         upload posts straight to /clearances/{code}/held, so unlike the old
         wizard there is no file waiting in the browser for a draft to exist.
       */}
+
+      {/* ── WARNING · a TIN left blank (30 September 2026) ─────────────── */}
+      {tinNoticeOpen && (
+        <ProtoModal
+          title="WARNING"
+          cancelLabel="Enter it now"
+          confirmLabel="Continue"
+          onCancel={() => setTinNoticeOpen(false)}
+          /*
+            Continue advances. The TIN has been optional since BPLO said so
+            on 24 September 2026, so this states a consequence rather than
+            refusing — and stating it here, on the press that skips the
+            question, is the point: it used to sit on the Confirm step,
+            eleven sections later, where it arrived as news.
+          */
+          onConfirm={() => {
+            setTinNoticeOpen(false)
+            void next()
+          }}
+        >
+          <p className="text-center text-base">
+            Without a TIN, it becomes an Other Requirement you must submit before
+            your next business renewal.
+          </p>
+        </ProtoModal>
+      )}
 
       {/* ── WARNING · Clear All (p35) ──────────────────────────────────── */}
       {showClear && (

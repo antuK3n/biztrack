@@ -2,6 +2,8 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
+use App\Models\DocumentType;
 use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -311,4 +313,62 @@ function filingReturnedAbout(string $targets): Application
     app(WorkflowService::class)->returnMainForm($app, 'Please correct these.', $targets);
 
     return $app->fresh();
+}
+
+/**
+ * Give a filing every document its office checklist asks for.
+ *
+ * Since 30 September 2026 `WorkflowService::submitClearanceForm` refuses a
+ * sheet whose checklist is not complete, on the client's instruction that the
+ * documentary requirements are required. A test about something else entirely
+ * — routing, fees, inspection order — still has to get the sheet in, and the
+ * factories build filings with no attachments at all.
+ *
+ * Production filings do not look like that: the wizard will not let a business
+ * permit application be submitted without its required documents, so by the
+ * time the applicant reaches an office sheet the carried rows are already
+ * answered. This is the test fixture catching up with that, not a way around
+ * the rule — the rule runs, and these documents satisfy it.
+ *
+ * Two kinds of row are filled. An `upload` row has a slot of its own, named by
+ * `code`. A `carried` row is answered by a business-permit attachment, named
+ * by `carried_from`. A `sheet` row is the form itself and never blocks. A row
+ * answered by a PERMIT rather than a document — CENRO's previous-year CEC — is
+ * not something a file can satisfy, so a test that needs it issues the permit.
+ */
+function satisfyChecklist(Application $application, PermitType|string $type): Application
+{
+    $code = $type instanceof PermitType ? $type->code : $type;
+
+    foreach (App\Support\SheetRequirements::for($application, $code) ?? [] as $row) {
+        if (($row['blocking'] ?? false) !== true || ($row['satisfied'] ?? false) === true) {
+            continue;
+        }
+
+        $documentCode = $row['code'] ?? $row['carried_from'] ?? null;
+        if ($documentCode === null) {
+            continue;
+        }
+
+        $typeId = $row['code'] !== null
+            // An upload slot's document type is made on demand, exactly as the
+            // upload endpoint makes it.
+            ? App\Support\SheetRequirements::documentType($code, $row['code'])->id
+            : DocumentType::where('code', $documentCode)->value('id');
+
+        if ($typeId === null) {
+            continue;
+        }
+
+        ApplicationDocument::create([
+            'application_id' => $application->id,
+            'document_type_id' => $typeId,
+            'original_filename' => strtolower($documentCode).'.pdf',
+            'stored_path' => 'private/documents/test/'.strtolower($documentCode).'.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+        ]);
+    }
+
+    return $application->fresh();
 }
