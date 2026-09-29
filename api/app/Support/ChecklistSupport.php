@@ -68,6 +68,32 @@ final class ChecklistSupport
     }
 
     /**
+     * EVERY file under each code, newest first.
+     *
+     * `uploads()` above answers "the one file for this slot", which was
+     * the whole model until 30 September 2026: the office upload endpoint
+     * deleted the previous file on every press. The business permit form
+     * has always taken many per requirement, and the client asked for
+     * these to match it.
+     *
+     * Kept separate rather than changing `uploads()`, which four
+     * producers call expecting one row each.
+     *
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public static function uploadsAll(Application $application, string $codePrefix): array
+    {
+        return ApplicationDocument::with('documentType:id,code')
+            ->where('application_id', $application->id)
+            ->whereHas('documentType', fn ($q) => $q->where('code', 'like', $codePrefix.'%'))
+            ->latest('id')
+            ->get()
+            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
+            ->map(fn ($group) => $group->map(fn ($d) => self::describe($d))->values()->all())
+            ->all();
+    }
+
+    /**
      * The BPLO attachments that already answer a checklist row.
      *
      * `permit_type_id` null, deliberately: a checklist upload leaves that
@@ -87,6 +113,31 @@ final class ChecklistSupport
             ->get()
             ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
             ->map(fn ($group) => self::describe($group->first()))
+            ->all();
+    }
+
+    /**
+     * EVERY business-permit attachment under each carryable code.
+     *
+     * `carried()` above answers "the one file", and that is what a row
+     * showed until 30 September 2026 — so a lease attached to the
+     * business permit as two pages appeared on an office checklist as
+     * one, with the second page nowhere on the screen and no way to tell
+     * it was there. The business permit form has always taken many per
+     * requirement; this is the checklist catching up with it.
+     *
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public static function carriedAll(Application $application): array
+    {
+        return ApplicationDocument::with('documentType:id,code')
+            ->where('application_id', $application->id)
+            ->whereNull('permit_type_id')
+            ->whereHas('documentType', fn ($q) => $q->whereIn('code', self::CARRYABLE))
+            ->latest('id')
+            ->get()
+            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
+            ->map(fn ($group) => $group->map(fn ($d) => self::describe($d))->values()->all())
             ->all();
     }
 
@@ -135,7 +186,9 @@ final class ChecklistSupport
         callable $applies,
     ): array {
         $uploaded = self::uploads($application, $codePrefix);
+        $everyUpload = self::uploadsAll($application, $codePrefix);
         $carried = self::carried($application);
+        $carriedAll = self::carriedAll($application);
         $submitted = self::sheetSubmitted($application, $permitTypeCode);
 
         $out = [];
@@ -159,31 +212,137 @@ final class ChecklistSupport
 
             $out[] = [
                 'key' => $row['key'],
-                'code' => $source === 'upload' ? $code : null,
+                /*
+                 * The slot this row uploads into. Null only on a `sheet`
+                 * row, which is the form itself.
+                 *
+                 * A carried row had none until 30 September 2026 — the
+                 * business permit answered it, so asking again was asking
+                 * twice. What that missed is the applicant with a
+                 * two-page lease and one page attached, and, once every
+                 * documentary row began blocking the submit, the
+                 * applicant with an empty carried row and no way on earth
+                 * to fill it: `DocumentController::store` allows Draft and
+                 * Returned, and this stage is reached only once the filing
+                 * is paid.
+                 */
+                'code' => $source === 'sheet' ? null : $code,
                 'label' => $row['label'],
                 'note' => $row['note'],
                 'source' => $source,
-                'satisfied' => $source === 'sheet' ? $submitted : $document !== null,
                 /*
-                 * Whether an unsatisfied row stops the sheet being handed in.
-                 * Emitted per row rather than kept as a list of keys in the
-                 * browser, for the reason this whole layer exists: the
-                 * applicant's sheet and the officer's review screen must read
-                 * one rule, not two.
+                 * The business-permit attachment that answers this row,
+                 * when one does. `code` above is null on a carried row —
+                 * there is no slot to upload into — so without this the
+                 * payload said which document is missing only in the
+                 * row's prose, which is not something a caller can act
+                 * on. Null on the rows where the question does not
+                 * arise: an upload row IS its own source, and a sheet
+                 * row is this form.
                  */
-                'blocking' => $row['blocking'] ?? false,
+                'carried_from' => $source === 'carried' ? $row['carried_from'] : null,
+                /*
+                 * A carried row is answered by the business permit's copy OR
+                 * by one added here — the second half is what keeps a
+                 * blocking carried row from being a dead end.
+                 */
+                'satisfied' => match ($source) {
+                    'sheet' => $submitted,
+                    'carried' => $document !== null || ($everyUpload[$code] ?? []) !== [],
+                    default => $document !== null,
+                },
+                /*
+                 * Whether an unsatisfied row stops the sheet being handed
+                 * in. Everything the office asks for does.
+                 *
+                 * This defaulted to FALSE until 30 September 2026, with
+                 * the declaration the one exception, on the reading that
+                 * the paper is a counter checklist a clerk ticks on
+                 * receipt rather than a gate. The client reversed it from
+                 * the Locational Clearance screen — *"Are the documentary
+                 * fields here not required? Make sure they are required"*
+                 * — and the reversal is the LGU's own logic: the office
+                 * cannot act on a filing missing the documents its
+                 * decision rests on, so accepting one only buys the
+                 * applicant a return trip and a second wait.
+                 *
+                 * Not a flat `true`. A `sheet` row IS this form, and its
+                 * `satisfied` above is $submitted — false at the moment of
+                 * submitting. Blocking on it would mean the sheet could
+                 * never be handed in, because what it waits for is the act
+                 * it is refusing. A row may still opt out by saying so.
+                 *
+                 * Emitted per row rather than kept as a list of keys in
+                 * the browser, for the reason this layer exists: the
+                 * applicant's sheet, the server's refusal and the
+                 * officer's review screen read one rule, not three.
+                 */
+                'blocking' => $row['blocking'] ?? (
+                    $source !== 'sheet' && ! self::statedAsConditional($row['label'])
+                ),
                 'document' => $document,
+                /*
+                 * All of them. An upload slot takes as many files as the
+                 * applicant sends, matching the business permit form; a
+                 * carried row is one file by nature and a sheet row is
+                 * none, so both are expressed as the list they are.
+                 */
+                /*
+                 * Every file answering this row. A carried row lists what
+                 * the business permit holds FIRST — that is the copy the
+                 * office already has — then anything added here.
+                 */
+                'documents' => match ($source) {
+                    'upload' => $everyUpload[$code] ?? [],
+                    'carried' => array_merge(
+                        $carriedAll[$row['carried_from']] ?? [],
+                        $everyUpload[$code] ?? [],
+                    ),
+                    default => [],
+                },
+                /*
+                 * Which of those belong to the business permit. Remove on
+                 * this sheet means "I attached the wrong page to this
+                 * checklist", never "take it off my business permit", so
+                 * the screen offers it on nothing in this list.
+                 */
+                'carried_document_ids' => $source === 'carried'
+                    ? array_column($carriedAll[$row['carried_from']] ?? [], 'id')
+                    : [],
             ];
         }
 
         return $out;
     }
 
+    /**
+     * Does the paper's own wording make this row conditional?
+     *
+     * FSIC's list carries "(if necessary)" and "(if required)"; OBO's carries
+     * "(if the building differs from the approved plan)". Those are the LGU
+     * saying the row may not apply, and refusing a submit over one would be a
+     * rule BizTrack invented — an unclearable one, because an applicant it
+     * does not apply to has nothing to attach.
+     *
+     * Matched on the label because the label IS the paper's wording, which
+     * keeps the asterisk on screen, the gate and the paper in agreement
+     * without anybody having to remember to flag a new row.
+     */
+    public static function statedAsConditional(string $label): bool
+    {
+        return str_contains($label, '(if ');
+    }
+
     /** Does this prefix + rows set accept a file under `$code`? */
     public static function accepts(array $rows, string $codePrefix, string $code): bool
     {
         foreach ($rows as $row) {
-            if (($row['carried_from'] ?? null) === null && $codePrefix.$row['key'] === $code) {
+            /*
+             * A `sheet` row is the form itself and takes nothing. Every
+             * other row has a slot, INCLUDING a carried one — see the
+             * note on `carried_document_ids` in `build()`.
+             */
+            if (($row['carried_from'] ?? null) !== 'sheet' && $codePrefix.$row['key'] === $code) {
                 return true;
             }
         }

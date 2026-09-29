@@ -191,9 +191,21 @@ class OfficeFormController extends Controller
         ]);
         Audit::log('document.uploaded', $document);
 
-        // One file per slot: uploading again replaces, so CPDD never has to work
-        // out which of two tax declarations is the live one.
-        $this->forgetRequirement($application, $documentCode, $document->id);
+        /*
+         * It ADDS. This replaced — `forgetRequirement(…, $document->id)`
+         * deleted every other file under the code — on the reasoning that
+         * CPDD should never have to work out which of two tax declarations
+         * is the live one.
+         *
+         * The business permit form has always taken many files per
+         * requirement, and the client asked for these to match it on 30
+         * September 2026. The old rule also destroyed silently: the second
+         * page of a lease deleted the first, with nothing said.
+         *
+         * The officer's question is answered by order instead — the list is
+         * newest first — and by Remove, which now takes one file rather
+         * than clearing the slot.
+         */
 
         return response()->json([
             'data' => [
@@ -271,7 +283,27 @@ class OfficeFormController extends Controller
     ): JsonResponse {
         [$permitType] = $this->authorizeRequirementWrite($request, $application, $permitTypeCode, $documentCode);
 
-        $this->forgetRequirement($application, $documentCode, null);
+        $data = $request->validate([
+            /*
+             * WHICH file. A slot held one until 30 September 2026, so
+             * clearing the code was the same thing as removing the file;
+             * now that it holds several, Remove beside the second page of a
+             * lease would take the first page with it.
+             *
+             * Optional, so a client that has not been updated still clears
+             * the slot — which is what it has always done and what its
+             * button says. Making it required would turn an open tab into a
+             * 422 on a control that worked a minute ago.
+             */
+            'document_id' => ['sometimes', 'nullable', 'integer'],
+        ]);
+
+        $this->forgetRequirement(
+            $application,
+            $documentCode,
+            null,
+            $data['document_id'] ?? null,
+        );
 
         return response()->json([
             'data' => [
@@ -328,10 +360,27 @@ class OfficeFormController extends Controller
      * downloadable through /documents/{id}/download for as long as it is there
      * — the same reasoning, and the same failure, as HeldPermits::forget.
      */
-    private function forgetRequirement(Application $application, string $documentCode, ?int $keepId): void
-    {
+    /**
+     * Take files off a checklist slot.
+     *
+     * `$keepId` spares one — it existed for the replace-on-upload rule,
+     * which is gone. `$onlyId` removes exactly one and leaves the rest,
+     * which is what Remove means now that a slot holds several. Neither
+     * given, the whole slot is cleared, which is what an un-updated client
+     * asks for.
+     */
+    private function forgetRequirement(
+        Application $application,
+        string $documentCode,
+        ?int $keepId,
+        ?int $onlyId = null,
+    ): void {
         $query = ApplicationDocument::where('application_id', $application->id)
             ->whereHas('documentType', fn ($q) => $q->where('code', $documentCode));
+
+        if ($onlyId !== null) {
+            $query->whereKey($onlyId);
+        }
 
         if ($keepId !== null) {
             $query->whereKeyNot($keepId);

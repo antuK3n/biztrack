@@ -125,6 +125,12 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
         // Nobody new: applying opened a form, it did not file a permit.
         expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe($routed);
 
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],
@@ -317,6 +323,12 @@ it('routes one queue item per office, and only as that office’s permit is file
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1);
 
     foreach (array_keys(HAPPY_PATH_OFFICE) as $code) {
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],

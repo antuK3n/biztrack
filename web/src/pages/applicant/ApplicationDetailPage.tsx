@@ -14,18 +14,13 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import {
-  registrationNumberHint,
-  registrationNumberLabel,
-  scalarFieldRule,
-} from '../../lib/fieldRules'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
-import { applications, documents, officeForms } from '../../lib/resources'
-import { ACCEPT_ATTR, MAX_UPLOAD_BYTES, fileRejection, uploadErrorMessage } from './uploads'
+import { applications, officeForms } from '../../lib/resources'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
+import { MainFormCorrections } from './MainFormCorrections'
 import { OfficeFormSheet, OFFICE_FORM_META, hasOfficeForm } from './OfficeFormStep'
 import { carriedOverBusiness } from './carriedOver'
 import type { OfficeForm } from '../../lib/types'
@@ -115,205 +110,6 @@ function MessageIcon({ size = 26 }: { size?: number }) {
  * sits under a sentence that says so rather than leaving an applicant to infer
  * it from four green rows and a fifth that is still pending.
  */
-/**
- * One correction box, carrying its own field's rule.
- *
- * The rule comes from `lib/fieldRules`, which the WIZARD imports too — so a
- * TIN is checked here exactly as it is checked on the form that first asked
- * for it, because it is the same function and not a second copy of it.
- * Client, 28 September 2026: *"this should carry the validation rules from
- * their application fields as well. Ensure consistency."*
- *
- * The message waits for `touched`. A field that says "enter a valid TIN" on
- * the first keystroke is telling somebody they are wrong for having started.
- */
-function CorrectionInput({
-  code,
-  label,
-  value,
-  touched,
-  onChange,
-  onBlur,
-}: {
-  code: string
-  label: string
-  value: string
-  touched: boolean
-  onChange: (value: string) => void
-  onBlur: () => void
-}) {
-  const rule = scalarFieldRule(code)
-  const error = touched ? rule.validate(value) : undefined
-  const errorId = `correction-error-${code.replace(/[^a-z0-9]/gi, '-')}`
-
-  /*
-   * A field the form asks as a CHOICE gets a choice here. Citizenship is
-   * the case: free text would let a correction put back the very spelling
-   * spread the select exists to prevent, on a field the city's register
-   * counts.
-   *
-   * Picking "Other" clears the box rather than storing the word "Other",
-   * so the applicant types the nationality itself — the same two-step the
-   * form uses.
-   */
-  const known = rule.choices?.some((c) => c.value === value) ?? false
-  if (rule.choices) {
-    return (
-      <>
-        <select
-          value={known ? value : value === '' ? '' : 'Other'}
-          onChange={(e) => onChange(e.target.value === 'Other' ? '' : e.target.value)}
-          onBlur={onBlur}
-          aria-label={label}
-          className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-        >
-          <option value="">Select</option>
-          {rule.choices.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-        {/* Only for the rare answer, so the common one stays one click. */}
-        {!known && (
-          <input
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onBlur={onBlur}
-            placeholder="Which nationality"
-            maxLength={rule.maxLength}
-            aria-label={`${label} — other`}
-            className="mt-2 w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
-          />
-        )}
-        {error && (
-          <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
-            {error}
-          </p>
-        )}
-      </>
-    )
-  }
-
-  return (
-    <>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        /* Mirrors the wizard's own input, so the phone keypad matches. */
-        inputMode={rule.inputMode}
-        maxLength={rule.maxLength}
-        aria-label={label}
-        aria-invalid={error !== undefined}
-        aria-describedby={error ? errorId : undefined}
-        className={`w-full rounded-lg border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 ${
-          error ? 'border-s-red focus:ring-s-red' : 'border-input-border focus:ring-royal'
-        }`}
-      />
-      {error && (
-        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
-          {error}
-        </p>
-      )}
-    </>
-  )
-}
-/**
- * Re-upload one document BPLO sent the filing back about.
- *
- * ── The same box Section C gave them ────────────────────────────────────────
- *
- * `fileRejection`, `ACCEPT_ATTR` and `MAX_UPLOAD_BYTES` are imported from
- * `./uploads`, which is the module Section C's own uploader uses. Client,
- * 29 September 2026: *"the documentary requirement fields in the application
- * forms should have the same allowable file size with their resubmission
- * field counterparts."* They do, because it is the same constant and the same
- * check — not a matching limit retyped here, which would agree today and
- * drift the first time one of them moved.
- *
- * ── It uploads on choose, and does not wait for the resubmit ────────────────
- *
- * `documents.upload` APPENDS a new file against the document type rather than
- * replacing the old one, which is what the officer wants: the previous copy is
- * the evidence of what was refused, and the newest is what they will read.
- * Uploading immediately also means a large file's progress is not hidden
- * behind a Submit that appears to hang.
- */
-function DocumentCorrection({
-  applicationId,
-  documentType,
-  note,
-  onUploaded,
-}: {
-  applicationId: number
-  documentType: { id: number; code: string; name: string }
-  note: string | null
-  /** Names the document, so the card can tell which returns are answered. */
-  onUploaded: (code: string) => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
-
-  async function choose(file: File | null) {
-    if (!file) return
-
-    /* The form's own rule, run before the request rather than after it. */
-    const rejection = fileRejection(file)
-    if (rejection) {
-      setError(rejection)
-
-      return
-    }
-
-    setBusy(true)
-    setError(null)
-    try {
-      await documents.upload(applicationId, documentType.id, file)
-      setDone(file.name)
-      onUploaded(documentType.code)
-    } catch (err) {
-      setError(uploadErrorMessage(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div>
-      <p className="text-[13px] font-semibold text-ink">
-        {documentType.name}{' '}
-        <span aria-hidden="true" className="text-s-red">
-          *
-        </span>
-        <span className="sr-only">(required)</span>
-      </p>
-      {note && <p className="mt-0.5 text-xs text-ink-secondary">{note}</p>}
-      <input
-        type="file"
-        accept={ACCEPT_ATTR}
-        disabled={busy}
-        onChange={(e) => void choose(e.target.files?.[0] ?? null)}
-        aria-label={`Re-upload ${documentType.name}`}
-        className="mt-1.5 block w-full text-sm text-ink file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-royal/30 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-royal hover:file:bg-royal-tint"
-      />
-      {/* The limit said out loud, in the same words the form uses. */}
-      <p className="mt-1 text-xs text-ink-muted">
-        PDF, JPG or PNG, up to {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.
-      </p>
-      {busy && <p className="mt-1 text-xs text-ink-secondary">Uploading…</p>}
-      {done && !busy && (
-        <p className="mt-1 text-xs font-medium text-s-green">Uploaded {done}.</p>
-      )}
-      {error && (
-        <p role="alert" className="mt-1 text-xs font-medium text-s-red">
-          {error}
-        </p>
-      )}
-    </div>
-  )
-}
 function OfficeVisits({ app }: { app: Application }) {
   /*
    * Highest id per department. `reduce` rather than a sort, because the payload
@@ -582,36 +378,13 @@ export function ApplicationDetailPage() {
   const { data: timeline } = useAsync<TimelineEntry[]>(() => applications.timeline(appId), [appId])
 
   /*
-   * ── The corrections the applicant is typing ───────────────────────────
+   * Is the correction dialog up?
    *
-   * Up here with the other hooks, and NOT beside the card that reads them:
-   * the card is below `if (loading)` and `if (!app) return`, and a hook
-   * after an early return is called on some renders and not others. React
-   * matches hooks by call order, so the three would land on other state's
-   * slots the moment the fetch resolved.
-   *
-   * Seeded blank, NOT with the current value. Prefilling would mean the
-   * commonest action — press the button without touching anything —
-   * silently resubmits the exact value BPLO just rejected. An empty box
-   * asks the question the officer asked.
+   * Open on arrival, because a returned filing is why the applicant is on
+   * this page — "Fix and resubmit" from the list lands here. Closable to
+   * read the rest of the filing, and reopened from the card below.
    */
-  const [corrections, setCorrections] = useState<Record<string, string>>({})
-  /*
-   * A box the applicant has left. Its rule is not shown before that — an
-   * "enter a valid TIN" that appears on the first keystroke is telling
-   * somebody they are wrong for having started.
-   */
-  const [touchedCorrections, setTouchedCorrections] = useState<Record<string, boolean>>({})
-  /*
-   * Documents re-uploaded in this sitting, by code. Not read from the
-   * payload: `documents.upload` APPENDS, so a returned document always has
-   * an older file against it and counting rows could never tell a fresh
-   * answer from the copy that was refused.
-   */
-  const [uploadedDocs, setUploadedDocs] = useState<string[]>([])
-
-  const [savingCorrections, setSavingCorrections] = useState(false)
-  const [correctionError, setCorrectionError] = useState<string | null>(null)
+  const [correctionsOpen, setCorrectionsOpen] = useState(true)
   /*
    * The sheets the applicant handed to the five offices (checklist item 24).
    *
@@ -736,9 +509,6 @@ export function ApplicationDetailPage() {
   const returnedScalars = returnedFields.filter(
     (t) => t.kind === 'scalar' && !derivedHere.includes(t.value),
   )
-  const returnedSections = returnedFields.filter(
-    (t) => t.kind === 'section' || derivedHere.includes(t.value),
-  )
 
   /*
    * ── Documents BPLO sent back ──────────────────────────────────────────
@@ -765,84 +535,6 @@ export function ApplicationDetailPage() {
         })()
       : []
 
-  /*
-   * Every field BPLO named, answered and valid.
-   *
-   * Gates the Submit button AND hides the bare Resubmit further down, so
-   * there is no route back to BPLO that skips the corrections. `validate`
-   * is the field's own rule from `lib/fieldRules` — the same one the
-   * application form applies — so "filled in" means filled in ACCEPTABLY,
-   * not merely non-empty.
-   */
-  const correctionsComplete =
-    returnedScalars.every(
-      (t) =>
-        (corrections[t.value] ?? '').trim() !== ''
-        && scalarFieldRule(t.value).validate(corrections[t.value] ?? '') === undefined,
-    )
-    && returnedDocuments.every((dt) => uploadedDocs.includes(dt.code))
-
-  async function submitCorrections() {
-    setCorrectionError(null)
-
-    /*
-     * Every ticked field has to carry something. The API would accept a blank
-     * — a cleared trade name is a real correction for some fields — but an
-     * UNTOUCHED box is far more likely to be an oversight than an intention,
-     * and resubmitting on an oversight costs the applicant another round trip.
-     */
-    const missing = returnedScalars.filter((t) => (corrections[t.value] ?? '').trim() === '')
-    if (missing.length > 0) {
-      setCorrectionError(
-        `Answer every field BPLO asked about: ${missing.map((t) => t.label).join(', ')}.`,
-      )
-
-      return
-    }
-
-    /*
-     * And every answer has to satisfy its own field's rule — the same rule
-     * the wizard applies, from `lib/fieldRules`. Re-run over ALL of them
-     * rather than trusting the live messages: a box nobody touched shows no
-     * message and can still be wrong.
-     */
-    const firstBad = returnedScalars
-      .map((t) => ({ t, error: scalarFieldRule(t.value).validate(corrections[t.value] ?? '') }))
-      .find((r) => r.error !== undefined)
-    if (firstBad) {
-      setTouchedCorrections((prev) => ({ ...prev, [firstBad.t.value]: true }))
-      setCorrectionError(`${firstBad.t.label}: ${firstBad.error}`)
-
-      return
-    }
-
-    setSavingCorrections(true)
-    try {
-      // `app` is non-null past the guard above, but the closure cannot carry
-      // that narrowing, so it is re-established here rather than asserted.
-      if (!app) return
-      /*
-       * `corrections` writes the scalars and resubmits in one transaction,
-       * but refuses a filing that was returned about no single field. A
-       * document-only return has none — its uploads were saved as they were
-       * chosen — so that filing resubmits directly.
-       */
-      if (returnedScalars.length > 0) {
-        const fields: Record<string, string> = {}
-        for (const t of returnedScalars) fields[t.value] = (corrections[t.value] ?? '').trim()
-        await applications.corrections(app.id, fields)
-      } else {
-        await applications.resubmit(app.id)
-      }
-      // Correcting resubmits, so the whole page changes state — reload rather
-      // than patching, which would leave the status card stale.
-      reload()
-    } catch (err) {
-      setCorrectionError(toApiError(err).message)
-    } finally {
-      setSavingCorrections(false)
-    }
-  }
 
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
   const remarks: { who: string; text: string; fields: string[] }[] = [
@@ -1284,10 +976,18 @@ export function ApplicationDetailPage() {
               to a balance any more: the Tax Order of Payment prices all five up
               front.
             */}
+            {/*
+              This ended "your Business Permit is released once every one of
+              them is approved", which is not what happens: the permit is
+              issued when the payment clears — see
+              `WorkflowService::releaseOutcomePermit` and its audit note,
+              "Released on payment." The clearance screen carried the same
+              claim and the client caught it there on 29 September 2026.
+            */}
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once BPLO approves this application and you have paid. Each goes to its
-              own office, and your payment covers all five — your Business Permit is released once
-              every one of them is approved.
+              These open once BPLO approves this application and you have paid. Each is a
+              separate certificate from its own city office, and your payment already covers
+              all five.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}
@@ -1366,182 +1066,45 @@ export function ApplicationDetailPage() {
           ACT on; everything below it is history and status. See the note at
           the head of this patch for why it lives on this page at all.
         */}
-        {(returnedFields.length > 0 || returnedDocuments.length > 0) && (
+        {/*
+          The same dialog the five office sheets use. Its CONTENTS are
+          unchanged — the boxes, the uploads, the section note, the
+          completeness rule — and only the shell around them moved, because
+          the shell is what kept diverging from the clearance copy of it.
+        */}
+        {/*
+          A way back in. Closing the dialog to read the filing behind it must
+          not strand somebody with a return they can no longer answer.
+        */}
+        {!correctionsOpen && (returnedFields.length > 0 || returnedDocuments.length > 0) && (
           <section className="mt-8">
             <div className="border-b border-ink/50 pb-2">
               <h2 className="text-2xl font-bold text-ink">What you need to correct</h2>
             </div>
             <div className="mt-5 rounded-xl bg-white px-6 py-5 shadow-card">
               <p className="text-sm text-ink-secondary">
-                {/*
-                  Counts documents too. It counted `returnedFields` alone —
-                  the wizard's own targets — so a filing returned about one
-                  document announced it was returned about nothing.
-                */}
                 BPLO returned this application about{' '}
                 {returnedFields.length + returnedDocuments.length === 1
                   ? 'one item'
                   : `${returnedFields.length + returnedDocuments.length} items`}
-                . Everything else you filed stays as it is.
+                .
               </p>
-
-              {returnedScalars.length > 0 && (
-                <div className="mt-4 space-y-4">
-                  {returnedScalars.map((t) => (
-                    <label key={t.value} className="block">
-                      <span className="block text-[13px] font-semibold text-ink">
-                        {/*
-                          The registration number is named for the AGENCY that
-                          issued it, exactly as the form names it — a
-                          cooperative is asked for its CDA number, not for a
-                          generic one. Every other field keeps the picker's
-                          own label, which already matches the form.
-                        */}
-                        {t.value === 'form:registration_number'
-                          ? `2. ${registrationNumberLabel(app.business?.registration_type)}`
-                          : t.label}{' '}
-                        {/*
-                          The same marker the application form uses on a
-                          required question. These are the strongest
-                          requirement in the system — an office has asked for
-                          them by name — and carried nothing until now.
-
-                          The glyph is decoration and the word is the signal,
-                          which is why the screen-reader text is spelled out
-                          rather than left as a bare asterisk.
-                        */}
-                        <span aria-hidden="true" className="text-s-red">
-                          *
-                        </span>
-                        <span className="sr-only">(required)</span>
-                      </span>
-                      {/*
-                        What BPLO said about THIS field, between its name and
-                        its box.
-
-                        Client, 27 September 2026: *"Allow to put 1
-                        comment/remark per field selected, not just 1 remark
-                        for all fields."* With one remark covering three
-                        fields the applicant had to work out which clause
-                        belonged to which box — the pointer answered "which
-                        field" and the prose put the matching straight back.
-
-                        Absent for a filing returned with plain prose, where
-                        the whole remark is in the Remarks section below.
-                      */}
-                      {(app.return_notes ?? {})[t.value] && (
-                        <span className="mb-1.5 mt-0.5 block text-xs text-ink-secondary">
-                          {(app.return_notes ?? {})[t.value]}
-                        </span>
-                      )}
-                      {/*
-                        Which certificate to copy it from — the form's own
-                        hint, shown only where there is one to give.
-                      */}
-                      {t.value === 'form:registration_number'
-                        && registrationNumberHint(app.business?.registration_type) && (
-                        <span className="mb-1.5 block text-xs text-ink-muted">
-                          {registrationNumberHint(app.business?.registration_type)}
-                        </span>
-                      )}
-                      {!(app.return_notes ?? {})[t.value] && <span className="mb-1.5 block" />}
-                      <CorrectionInput
-                        code={t.value}
-                        label={t.label}
-                        value={corrections[t.value] ?? ''}
-                        touched={Boolean(touchedCorrections[t.value])}
-                        onChange={(v) =>
-                          setCorrections((prev) => ({ ...prev, [t.value]: v }))
-                        }
-                        onBlur={() =>
-                          setTouchedCorrections((prev) => ({ ...prev, [t.value]: true }))
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {/*
-                A returned DOCUMENT gets the same upload box Section C gave
-                it — same accepted formats and same size limit, from the
-                same module, so a change to the limit moves both.
-              */}
-              {returnedDocuments.length > 0 && (
-                <div className="mt-4 space-y-4">
-                  {returnedDocuments.map((dt) => (
-                    <DocumentCorrection
-                      key={dt.code}
-                      applicationId={app.id}
-                      documentType={dt}
-                      note={(app.return_notes ?? {})[dt.code] ?? null}
-                      onUploaded={(code) =>
-                        setUploadedDocs((prev) =>
-                          prev.includes(code) ? prev : [...prev, code],
-                        )
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/*
-                The section targets. Named rather than silently dropped: an
-                applicant told to fix three things and shown two boxes would
-                resubmit believing they had finished.
-              */}
-              {returnedSections.length > 0 && (
-                <div className="mt-4 rounded-lg border border-input-border bg-royal-tint px-4 py-3">
-                  <p className="text-xs font-semibold text-royal">
-                    These are whole sections, so they are corrected on the form itself:
-                  </p>
-                  {/* Each with its own remark, the same as the boxes above. */}
-                  <ul className="mt-1.5 space-y-1">
-                    {returnedSections.map((t) => (
-                      <li key={t.value} className="text-xs text-ink-secondary">
-                        <span className="font-semibold text-ink">{t.label}</span>
-                        {(app.return_notes ?? {})[t.value] && (
-                          <> — {(app.return_notes ?? {})[t.value]}</>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    to={`/apply?draft=${app.id}`}
-                    className="mt-1.5 inline-block text-xs font-semibold text-royal underline underline-offset-2"
-                  >
-                    Open the application form
-                  </Link>
-                </div>
-              )}
-
-              {correctionError && (
-                <p className="mt-3 text-sm font-medium text-s-red">{correctionError}</p>
-              )}
-
-              {/*
-                Shown whenever there is anything to answer, not just boxes.
-                Gated on the scalars alone it vanished on a document-only
-                return, leaving the applicant an upload and no way to send it.
-              */}
-              {(returnedScalars.length > 0 || returnedDocuments.length > 0) && (
-                <button
-                  type="button"
-                  onClick={submitCorrections}
-                  disabled={savingCorrections || !correctionsComplete}
-                  /*
-                    `disabled`, not `aria-disabled`: unlike Approve on the
-                    officer's sheet there is no rule to explain here beyond
-                    the empty boxes directly above, which say it themselves
-                    and carry their own messages once touched.
-                  */
-                  className="mt-5 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingCorrections ? 'Sending…' : 'Submit corrections'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setCorrectionsOpen(true)}
+                className="mt-3 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+              >
+                Fix and resubmit
+              </button>
             </div>
           </section>
+        )}
+        {correctionsOpen && (
+          <MainFormCorrections
+            app={app}
+            onClose={() => setCorrectionsOpen(false)}
+            onDone={reload}
+          />
         )}
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (

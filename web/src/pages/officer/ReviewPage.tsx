@@ -31,7 +31,12 @@ import {
  * number, not for "DTI / SEC / CDA".
  */
 import { genderLabel, registrationNumberLabel } from '../../lib/fieldRules'
-import { OFFICE_FORM_INTERNAL_KEYS, officeFormFieldLabel } from '../applicant/OfficeFormStep'
+import {
+  OFFICE_FORM_INTERNAL_KEYS,
+  officeFormFieldLabel,
+  officeFormFieldRank,
+  officeFormMeta,
+} from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
 import { otherPermitProgress } from '../../lib/status'
 import {
@@ -49,6 +54,7 @@ import type {
   AppDocument,
   Application,
   ApplicationCorrection,
+  ClearanceCorrection,
   FeeProfile,
   OfficeFormRequirement,
   Permit,
@@ -594,8 +600,27 @@ function Field({
  * the filing, and what satisfies each is a file the applicant attached. The
  * office acts on this by approving or returning the clearance.
  */
-function RequirementsRead({ code, rows }: { code?: string; rows: OfficeFormRequirement[] }) {
+function RequirementsRead({
+  code,
+  rows,
+  corrections = [],
+}: {
+  code?: string
+  rows: OfficeFormRequirement[]
+  /** What the applicant changed on the rows this office last returned. */
+  corrections?: ClearanceCorrection[]
+}) {
   const outstanding = rows.filter((r) => !r.satisfied).length
+
+  /*
+   * The newest change per row. The payload is newest-first, so the first
+   * one seen for a code is the one that answers this office's last return;
+   * anything older belongs to a round already settled.
+   */
+  const changed = new Map<string, ClearanceCorrection>()
+  for (const c of corrections) {
+    if (!changed.has(c.target)) changed.set(c.target, c)
+  }
 
   return (
     <div className="mt-4 rounded-lg border border-line bg-white px-4 py-3">
@@ -613,27 +638,121 @@ function RequirementsRead({ code, rows }: { code?: string; rows: OfficeFormRequi
           ? 'Everything on this list is on the filing.'
           : `${outstanding} of ${rows.length} not on the filing. The files are under Uploaded Requirements below.`}
       </p>
-      <ul className="mt-3 space-y-2">
-        {rows.map((row) => (
-          <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-            <span
-              aria-hidden
-              className={`shrink-0 font-bold ${row.satisfied ? 'text-s-green' : 'text-ink-muted'}`}
-            >
-              {row.satisfied ? '✓' : '—'}
-            </span>
-            <span className="font-medium text-ink">{row.label}</span>
-            {row.document !== null ? (
-              <span className="break-all text-xs text-ink-secondary">{row.document.filename}</span>
-            ) : row.reference ? (
-              <span className="tnum text-xs text-ink-secondary">{row.reference}</span>
+      {/*
+        BPLO's Section C row, the component itself — not a copy of it.
+
+        The client, 30 September 2026, comparing the two screens: *"Layout
+        seems to be very different again with the BPLO admin. FIX THIS."*
+        The previous attempt rewrote the markup by eye and drifted on the
+        first edit. There is one row component now, so there is nothing left
+        to drift.
+      */}
+      <ul className="mt-3 space-y-2.5">
+        {rows.map((row) => {
+          /*
+            Every file on the row. `documents` is the list the API sends;
+            `document` is its first, and the fallback keeps the sheet
+            rendering against a payload from before 30 September 2026.
+          */
+          const files = row.documents ?? (row.document === null ? [] : [row.document])
+
+          /*
+            Whether this row moved since the office returned it.
+
+            UNCHANGED is shown rather than hidden, and it is the case worth
+            showing: the resubmit gate lets a file the office called wrong
+            come back identical — refusing would trap an applicant whose
+            document was right, since a returned clearance can only go back
+            to For Approval and no office can wave one through — so this is
+            how the office learns it, instead of opening the file again to
+            find out.
+          */
+          const moved = row.code === null ? undefined : changed.get(row.code)
+          const was = (moved?.old_value ?? '').trim()
+          const now = (moved?.new_value ?? '').trim()
+          const footer =
+            moved === undefined ? undefined : was === now ? (
+              <p className="text-xs font-semibold text-s-orange">
+                Unchanged since you returned it
+              </p>
             ) : (
-              <span className="text-xs text-ink-muted">
-                {row.source === 'sheet' ? 'not submitted yet' : 'not on file'}
-              </span>
-            )}
-          </li>
-        ))}
+              <p className="text-xs text-ink-secondary">
+                <span className="font-semibold text-s-green">Changed</span> — was{' '}
+                <span className="line-through">{was === '' ? 'nothing attached' : was}</span>
+              </p>
+            )
+
+          /*
+            Nothing attached. <DocumentRow> needs a document, and a checklist
+            row without one still has to appear — that is what a checklist is
+            for — so it gets the same shell with the meta line saying what is
+            missing instead of a filename.
+          */
+          if (files.length === 0) {
+            return (
+              <li key={row.key} className="rounded-lg border border-line bg-white px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
+                    <FileGlyph />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-ink">{row.label}</p>
+                    <p className="truncate text-xs text-ink-muted">
+                      {row.reference
+                        ? row.reference
+                        : row.source === 'sheet'
+                          ? 'This sheet. It counts as complete once the applicant submits it.'
+                          : 'Not on file.'}
+                    </p>
+                  </div>
+                </div>
+                {footer !== undefined && (
+                  <div className="mt-2.5 border-t border-line pt-2.5">{footer}</div>
+                )}
+              </li>
+            )
+          }
+
+          /*
+            Adapted into the shape <DocumentRow> reads. A checklist file
+            carries `filename` and `uploaded_at` where an application document
+            carries `original_filename` and `created_at`; the requirement's
+            own label stands in for the document type's name, which is what
+            the row is called on this sheet.
+
+            Newest first, as the API sends them, so the head of the list is
+            the current copy and the rest fold away behind it — the same
+            treatment Section C gives a requirement answered more than once.
+          */
+          const [current, ...earlier] = files
+          const asDocument = (file: (typeof files)[number]): AppDocument => ({
+            id: file.id,
+            document_type: { id: 0, code: row.code ?? row.key, name: row.label },
+            original_filename: file.filename,
+            size_bytes: file.size_bytes ?? 0,
+            created_at: file.uploaded_at ?? '',
+            download_url: '',
+          })
+
+          return (
+            <DocumentRow
+              key={row.key}
+              group={{
+                code: row.code ?? row.key,
+                current: asDocument(current),
+                earlier: earlier.map(asDocument),
+                /*
+                  Section C badges a copy that arrived after the filing was
+                  returned. The office sheet says the same thing in its own
+                  footer, with the before-and-after the correction records —
+                  so badging it here as well would say it twice.
+                */
+                resubmitted: false,
+              }}
+              footer={footer}
+            />
+          )
+        })}
       </ul>
     </div>
   )
@@ -683,7 +802,18 @@ type RequirementGroup = {
  * refused copy is the evidence of what was refused, and a remark that points
  * at a deleted file cannot be checked by anybody.
  */
-function DocumentRow({ group }: { group: RequirementGroup }) {
+function DocumentRow({
+  group,
+  footer,
+}: {
+  group: RequirementGroup
+  /*
+   * An extra line under the row. The office sheet puts "Changed — was…"
+   * here on a requirement it asked about; BPLO passes nothing and the row
+   * renders exactly as it did before.
+   */
+  footer?: ReactNode
+}) {
   const { current, earlier, resubmitted } = group
   const [showEarlier, setShowEarlier] = useState(false)
 
@@ -790,6 +920,10 @@ function DocumentRow({ group }: { group: RequirementGroup }) {
           </ul>
         </div>
       )}
+
+      {footer !== undefined && (
+        <div className="mt-2.5 border-t border-line pt-2.5">{footer}</div>
+      )}
     </li>
   )
 }
@@ -847,6 +981,19 @@ const REMARK_COPY = {
     confirm: 'Return application',
     confirmCls: 'bg-royal hover:bg-royal-hover',
   },
+  /*
+   * Changing an instruction already given, which is not a return: the
+   * filing is with the applicant and stays there, nothing transitions,
+   * and the history does not record a second round. Reusing Return's
+   * words put "Return application" on a button that returns nothing.
+   */
+  amend: {
+    heading: 'Change what you asked for',
+    label: 'What the applicant must fix',
+    help: 'No field is ticked, so the applicant reopens the whole form and sees this on their Track page.',
+    confirm: 'Save changes',
+    confirmCls: 'bg-royal hover:bg-royal-hover',
+  },
 } as const
 
 /**
@@ -868,13 +1015,15 @@ function RemarkPopup({
   officer,
   initialText,
   targets,
+  initialPicked = [],
+  initialNotes = {},
   submitting,
   error,
   onCancel,
   onConfirm,
   chrome = 'panel',
 }: {
-  action: 'reject' | 'reject_permit' | 'return'
+  action: 'reject' | 'reject_permit' | 'return' | 'amend'
   officer: string
   /**
    * Evaluator Remarks, carried in rather than discarded (SEP-6).
@@ -904,6 +1053,16 @@ function RemarkPopup({
    * which case the control is not rendered at all.
    */
   targets: { value: string; label: string; group?: string }[]
+  /**
+   * The codes to open with ticked, and what was said about each.
+   *
+   * Empty for a fresh Return. Filled when AMENDING, because the officer is
+   * editing an instruction rather than writing one: the pointer is
+   * replaced wholesale on every write, so an officer who opened a blank
+   * list to add one field would silently drop the other two.
+   */
+  initialPicked?: string[]
+  initialNotes?: Record<string, string>
   submitting: boolean
   error: string | null
   onCancel: () => void
@@ -938,7 +1097,19 @@ function RemarkPopup({
    * way the applicant will meet it, and two officers ticking the same three
    * fields store the same string.
    */
-  const [picked, setPicked] = useState<string[]>([])
+  /*
+   * Seeded once, from the return being amended. `useState`'s initialiser
+   * rather than an effect: the composer is mounted fresh each time it
+   * opens, so there is nothing to re-sync and an effect would only add a
+   * way for the officer's own edits to be overwritten under them.
+   *
+   * Filtered against `targets`, so a pointer naming a field this sheet no
+   * longer offers — a requirement retired since the return — does not tick
+   * a box that is not there and cannot be unticked.
+   */
+  const [picked, setPicked] = useState<string[]>(() =>
+    targets.map((t) => t.value).filter((v) => initialPicked.includes(v)),
+  )
   const togglePicked = (value: string) =>
     setPicked((prev) =>
       prev.includes(value)
@@ -951,7 +1122,7 @@ function RemarkPopup({
    * unticks by accident and ticks again gets their sentence back; only the
    * currently picked codes are ever read or sent.
    */
-  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [notes, setNotes] = useState<Record<string, string>>(initialNotes)
   const [remedy, setRemedy] = useState('')
   /*
    * A refusal costs the applicant their business permit, so it may not be
@@ -1604,7 +1775,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * office's; `return` asks for a correction and is everybody's. See
    * `sendRemark`, which dispatches on this and nothing else.
    */
-  const [popup, setPopup] = useState<'reject' | 'reject_permit' | 'return' | null>(null)
+  const [popup, setPopup] = useState<
+    'reject' | 'reject_permit' | 'return' | 'amend' | null
+  >(null)
   /*
    * Separate from `popup`, which selects between the two REMARK composers
    * and carries a textarea with it. Approve asks a yes/no question and
@@ -2111,15 +2284,66 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   ]
 
   const returnTargets = [
-    ...ownOfficeForms.flatMap((form) => [
-      ...(form.requirements ?? [])
-        .filter((row) => row.source === 'upload' && row.code !== null)
-        .map((row) => ({ value: row.code as string, label: row.label })),
-      ...Object.keys(form.form_data ?? {}).map((key) => ({
-        value: key,
-        label: humanizeKey(key),
-      })),
-    ]),
+    ...ownOfficeForms.flatMap((form) => {
+      const meta = officeFormMeta(form.permit_type_code)
+      // The paper's own two halves, named as the paper names them.
+      const answerGroup = meta?.title ?? 'This office’s form'
+      const documentGroup =
+        form.permit_type_code === 'CEC'
+          ? 'Requirements for Application'
+          : 'Checklist of Requirements'
+
+      return [
+        /*
+         * The answers first, because that is the order the paper asks —
+         * the questions, then the checklist stapled behind them.
+         */
+        ...Object.keys(form.form_data ?? {})
+          /*
+           * Not every key is a question. `authorized_representative_source`
+           * records which control the name came from, and the client read
+           * it straight off this list as "Authorized Representative
+           * Source" — an office being offered the chance to return a
+           * filing about a field the applicant has never seen.
+           */
+          .filter((key) => !OFFICE_FORM_INTERNAL_KEYS.includes(key))
+          .sort(
+            (a, b) =>
+              officeFormFieldRank(form.permit_type_code, a) -
+              officeFormFieldRank(form.permit_type_code, b),
+          )
+          .map((key) => ({
+            value: key,
+            /*
+             * The paper's wording, not the key's. `humanizeKey` gave
+             * "Total Floor Area Sqm" for a box CPDD prints as "Floor Area
+             * to be Utilized (sq. m.)", so an officer reading down the
+             * form could not find the row they wanted to tick.
+             */
+            label: officeFormFieldLabel(form.permit_type_code, key),
+            group: answerGroup,
+          })),
+        /*
+         * Every documentary row, carried ones included.
+         *
+         * This asked for `source === 'upload'`, which left the TCT, the
+         * DTI/SEC certificate and the location sketch off the list —
+         * correctly at the time, since a carried row had no slot and
+         * nothing to send back to. They have one as of 30 September 2026,
+         * so an office can ask for a better copy of any of them.
+         *
+         * The `sheet` row is still excluded: it IS the form, and "return
+         * the form" is what ticking nothing already means.
+         */
+        ...(form.requirements ?? [])
+          .filter((row) => row.source !== 'sheet' && row.code !== null)
+          .map((row) => ({
+            value: row.code as string,
+            label: row.label,
+            group: documentGroup,
+          })),
+      ]
+    }),
     /*
      * ── BPLO's targets at Final Approval are the CLEARANCES ─────────────────
      *
@@ -2534,9 +2758,34 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * drift from the rule `refreshReadiness` applies. `open_requirements` is
    * optional on the wire; an older payload omits the clause rather than
    * claiming zero.
+   *
+   * ── Who is told, and about which filings ──────────────────────────────
+   *
+   * Narrowed twice on 30 September 2026, both times because the banner was
+   * describing an act that was not going to happen.
+   *
+   * It was gated on the filing's status alone, so the five clearance
+   * offices were shown it as well — told that a decision which is not
+   * theirs to make is not ready, on a sheet where they have work of their
+   * own still open. The client reported it from the zoning seat.
+   *
+   * And on a NEW application nobody signs at the end at all: the Business
+   * Permit is released the moment the last clearance lands. The clearances
+   * block further down says the same thing in its own note. So the banner
+   * was naming a step that does not exist and then reporting that it had
+   * not been reached.
+   *
+   * What is left is the case it was written for: BPLO, on a renewal,
+   * looking at a filing that has stopped moving and wanting to know why
+   * there is no Approve button.
    */
   const notReadyToSign = (() => {
     if (app.status !== 'awaiting_other_permits') return null
+    // An office's sheet folds the filed application away; BPLO's does not.
+    // That is the nearest thing this screen has to "am I BPLO", and it is
+    // already the flag the rest of the sheet branches on.
+    if (foldsFiledSheet) return null
+    if (app.application_type !== 'renewal') return null
 
     const permits = otherPermitProgress(app.permit_types)
     const openPermits = permits.total - permits.approved
@@ -3276,7 +3525,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
        * it does not end the filing, and it does suspend the business permit
        * the applicant is already holding. No `target` — see the client.
        */
-      else if (popup === 'reject_permit') await assignments.reject(assignmentId, text, remedy)
+      /*
+       * Refusing names its rows too, since 30 September 2026. The applicant
+       * reads a refusal in the same dialog they read a return in, so the
+       * more serious decision stops being the vaguer one.
+       */
+      else if (popup === 'reject_permit')
+        await assignments.reject(assignmentId, text, remedy, target, notes)
+      /*
+       * Amending is the same composer against a different endpoint. The
+       * filing is already with the applicant, so this replaces what was
+       * asked for instead of sending it back a second time — which is not
+       * legal and should not be, since a repair may be under way.
+       */
+      else if (popup === 'amend')
+        await assignments.amendReturn(assignmentId, text, target, notes)
       else await assignments.return(assignmentId, text, target, notes)
       setPopup(null)
       reload()
@@ -3516,6 +3779,38 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * clearance at Final Approval; neither is a `ClearanceStatus` move.
    */
   const mayReturn = !withApplicant && (canReject || data.clearance?.status === 'for_approval')
+  /*
+   * May this office change what it already asked for?
+   *
+   * Only while the thing it returned is still returned — which is exactly
+   * when Return itself is withheld. `amendReturn` refuses anything else
+   * server-side, so this is the screen agreeing with the rule rather than
+   * inventing one: offering a button that answers 422 is the shape this
+   * page has been bitten by before.
+   */
+  /*
+   * What this office last asked for, for the amend composer to open on.
+   *
+   * BPLO's pointer is on its assignment and its notes on the filing; an
+   * office's are on its own permit row, because one filing carries six
+   * permits and each office's question is about its own.
+   */
+  const openReturnTargets = (
+    canReject ? (data.remarks_target ?? '') : (data.clearance?.return_target ?? '')
+  )
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t !== '')
+  /* The whole-filing sentence this office last wrote, for the same reason. */
+  const openReturnRemark = canReject ? data.remarks : (data.clearance?.return_remark ?? null)
+  const openReturnNotes = canReject
+    ? (app.return_notes ?? {})
+    : (data.clearance?.return_notes ?? {})
+
+  const mayAmendReturn =
+    canReject
+      ? app.status === 'returned'
+      : data.clearance?.status === 'returned'
 
   /**
    * The one thing this seat's buttons cannot say about themselves.
@@ -3807,6 +4102,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                  * enters a processing clock, so demanding a tier first would
                  * block an officer for a field nothing will ever measure.
                  */}
+                {/*
+                  The one thing an office CAN do while the applicant holds
+                  the filing: change what it asked for.
+
+                  A second Return is not offered and should not be — the
+                  filing is not the office's to send back, and bouncing it
+                  would interrupt a repair already under way. But an officer
+                  who spots a second problem, or reads their own remark back
+                  and finds it unclear, had nothing at all until now: they
+                  waited for the resubmission and returned it again, and the
+                  applicant paid for the omission with a whole extra round
+                  trip. See WorkflowService::amendMainFormReturn.
+                */}
+                {withApplicant && mayAmendReturn && (
+                  <button
+                    type="button"
+                    onClick={() => setPopup('amend')}
+                    disabled={busy}
+                    className="rounded-md border border-royal px-5 py-2.5 text-sm font-semibold text-royal transition-colors hover:bg-royal-tint disabled:opacity-60"
+                  >
+                    Change what you asked for
+                  </button>
+                )}
                 {/*
                   Withheld while the applicant holds it. `approveMainForm`
                   refuses anything that is not For Approval, so before this
@@ -4497,9 +4815,22 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
              * one label for a box BFP calls "Type of Occupancy / Business
              * Nature" and OBO calls "Use / Character of Occupancy".
              */
-            const entries = Object.entries(form.form_data ?? {}).filter(
-              ([key]) => !OFFICE_FORM_INTERNAL_KEYS.includes(key),
-            )
+            const entries = Object.entries(form.form_data ?? {})
+              .filter(([key]) => !OFFICE_FORM_INTERNAL_KEYS.includes(key))
+              /*
+               * In the order the office's own paper asks, not the order
+               * the applicant happened to type. `form_data` is JSON and
+               * its key order is an accident of filling-in, so an officer
+               * reconciling this against the printed form was reading
+               * down one and hunting in the other — the fault the client
+               * had fixed on BPLO's sheet in September, which the five
+               * clearance offices never got.
+               */
+              .sort(
+                ([a], [b]) =>
+                  officeFormFieldRank(form.permit_type_code, a) -
+                  officeFormFieldRank(form.permit_type_code, b),
+              )
             return (
               <section
                 key={form.permit_type_code}
@@ -4512,6 +4843,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <h2 className="mt-1 text-[15px] font-bold text-ink">
                   {form.permit_type_name ?? form.permit_type_code} — the clearance you are deciding
                 </h2>
+                {/*
+                  The paper this sheet IS, named the way the applicant's
+                  own screen names it. An officer reconciling the two
+                  should be able to see at a glance that they are looking
+                  at the same form, and the form code is how that is said
+                  in the office.
+                */}
+                {officeFormMeta(form.permit_type_code) !== undefined && (
+                  <p className="mt-0.5 text-xs text-ink-secondary">
+                    {officeFormMeta(form.permit_type_code)?.title} ·{' '}
+                    <span className="tnum">{officeFormMeta(form.permit_type_code)?.ref}</span>
+                  </p>
+                )}
                 {form.form_saved === false && (
                   <p className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-3 py-2 text-sm leading-relaxed text-ink">
                     <span className="font-semibold">Not filled in yet.</span> The applicant has
@@ -4541,7 +4885,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                  * the moment the disclosure below went in.
                  */}
                 {form.requirements && form.requirements.length > 0 && (
-                  <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
+                  <RequirementsRead
+                    code={form.permit_type_code}
+                    rows={form.requirements}
+                    corrections={form.corrections ?? []}
+                  />
                 )}
                 <p className="mt-3 text-xs text-ink-muted">
                   The applicant’s own filing — address, line of business, uploaded requirements and
@@ -6015,13 +6363,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             className="sticky top-8 hidden w-72 shrink-0 space-y-4 lg:block"
             aria-label="Remarks"
           >
-            {popup && popup !== 'return' && (
+            {/* Return and Amend are both dialogs; only the refusals sit here. */}
+            {popup && popup !== 'return' && popup !== 'amend' && (
               <RemarkPopup
                 action={popup}
                 officer={officerName}
                 initialText={remarks}
-                /* Only a return points at something, and a return is a dialog now. */
-                targets={[]}
+                /*
+                  A refusal points at rows too, since 30 September 2026. A
+                  plain Reject (BPLO ending the filing) still names nothing —
+                  it is about the application, not about a field.
+                */
+                targets={popup === 'reject_permit' ? returnTargets : []}
                 submitting={busy}
                 error={actionError}
                 onCancel={() => setPopup(null)}
@@ -6043,13 +6396,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
        * passed to both. Seeding only one of them would make the carried-through
        * remark (SEP-6) appear on a desktop and vanish on a phone.
        */}
-      {popup && popup !== 'return' && (
+      {popup && popup !== 'return' && popup !== 'amend' && (
         <div className="fixed inset-x-4 bottom-6 z-40 lg:hidden">
           <RemarkPopup
             action={popup}
             officer={officerName}
             initialText={remarks}
-            targets={[]}
+            targets={popup === 'reject_permit' ? returnTargets : []}
             submitting={busy}
             error={actionError}
             onCancel={() => setPopup(null)}
@@ -6095,13 +6448,34 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           </p>
         </ProtoModal>
       )}
-      {popup === 'return' && (
+      {/*
+        One composer for both acts. Return sends the filing back; Amend
+        corrects what was asked of an applicant already holding it. Same
+        question, same field picker, same notes — so the same control, with
+        the endpoint chosen in `sendRemark`.
+      */}
+      {(popup === 'return' || popup === 'amend') && (
         <RemarkPopup
           chrome="modal"
-          action="return"
+          /* Its own heading and button; the two acts are not the same. */
+          action={popup === 'amend' ? 'amend' : 'return'}
           officer={officerName}
-          initialText={remarks}
+          /*
+            Amending opens on the remark already given, so an officer
+            adding a field does not have to retype the sentence — and
+            cannot accidentally replace it with a blank one, since the
+            whole instruction is rewritten on every save.
+          */
+          initialText={popup === 'amend' ? (openReturnRemark ?? remarks) : remarks}
           targets={returnTargets}
+          /*
+            Amending opens on what was asked for; a fresh Return opens
+            blank. The pointer survives a resubmission on purpose — so the
+            officer can see what the last round was about — and seeding a
+            NEW return from it would re-ask last round's questions.
+          */
+          initialPicked={popup === 'amend' ? openReturnTargets : []}
+          initialNotes={popup === 'amend' ? openReturnNotes : {}}
           submitting={busy}
           error={actionError}
           onCancel={() => setPopup(null)}

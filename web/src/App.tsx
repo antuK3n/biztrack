@@ -338,6 +338,19 @@ export default function App() {
             gesture here, not a piece of local state that a refresh loses.
           */}
           <Route path="/applications/:id/clearances" element={<ClearanceStagePage />} />
+          {/*
+            One office's sheet, on a page of its own.
+
+            Same component: the code names which of the six is open, and
+            the route without one shows the cards. The client asked for
+            this on 30 September 2026 after Fix and resubmit dropped them
+            at the card grid rather than at the form they had been asked
+            to correct.
+          */}
+          <Route
+            path="/applications/:id/clearances/:code"
+            element={<ClearanceStagePage />}
+          />
           <Route path="/drafts" element={<DraftsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/permits" element={<PermitsPage />} />

@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { SVGProps } from 'react'
-import { AmendIcon, DraftsIcon, FilePlusIcon, RenewIcon } from '../../components/icons'
+import { AmendIcon, CalendarIcon, DraftsIcon, FilePlusIcon } from '../../components/icons'
 import { EmptyState, ErrorState, LinkButton, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoModal, SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { formatDate } from '../../lib/format'
+import { formatDateTime, formatTileDateTime } from '../../lib/format'
 import { applications, wizardDrafts } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { ApplicationType } from '../../lib/types'
@@ -78,10 +78,21 @@ type DraftCard = {
   applicationType: ApplicationType
   /** When it was begun. Drives "Started" and the repeat numbering. */
   startedAt: string | null
-  /** When it was last written. Drives the default "Last worked on" sort. */
-  workedAt: string | null
+  /**
+   * When it was last OPENED, or null if it never has been.
+   *
+   * Drives the default sort and the second line on the card. A separate
+   * fact from the last write: an autosave moves `updated_at` and leaves
+   * this alone, which is what lets the option be called "Last opened" and
+   * mean it.
+   */
+  openedAt: string | null
   resumeTo: string
+  /** The name the applicant set, if any — what the rename box opens with. */
+  ownTitle: string | null
   remove: () => Promise<void>
+  /** Never blank: this screen will not save an empty name. */
+  rename: (title: string) => Promise<void>
 }
 
 /* Application Drafts — PDF p20: filter pills + trash, cards on the deep-blue panel. */
@@ -95,8 +106,33 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'amendment', label: 'Amendment' },
 ]
 
-const TYPE_ICON = { new: FilePlusIcon, renewal: RenewIcon, amendment: AmendIcon } as const
+/*
+ * `CalendarIcon` for a renewal, not `RenewIcon`.
+ *
+ * A circular arrow is among the most learned marks in software and it
+ * means refresh. Renewing a permit is a yearly act with a date attached,
+ * so the old glyph was arguing with what every reader already knows it
+ * for. `RenewIcon` is still right where a renewal is an ACTION being
+ * offered; on a card describing what a draft IS, the calendar says it.
+ */
+const TYPE_ICON = { new: FilePlusIcon, renewal: CalendarIcon, amendment: AmendIcon } as const
 
+/*
+ * Each card names its own kind.
+ *
+ * Colouring the three apart was the other option and the palette is
+ * against it: rose is Returned, teal is For Final Approval, purple is For
+ * Approval, orange is Pending Payment. Spending those on draft TYPE would
+ * have an amendment card and a returned filing wearing one colour for two
+ * unrelated reasons. A word cannot be misread that way.
+ */
+/*
+ * A pencil for the rename control.
+ *
+ * This was here before, as decoration in the card's hero band, and went
+ * with it — a picture of a pencil beside a card that is already a link
+ * says the same thing twice. It is a button now, so it is back.
+ */
 function PencilIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
     <svg
@@ -115,6 +151,12 @@ function PencilIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size?: 
       <path d="M17.8 3.7a2 2 0 0 1 2.8 2.8L13 14.1l-3.7.7.7-3.6 7.8-7.5Z" />
     </svg>
   )
+}
+
+const TYPE_LABEL: Record<ApplicationType, string> = {
+  new: 'New Permit',
+  renewal: 'Renewal',
+  amendment: 'Amendment',
 }
 
 function TrashIcon({ size = 24, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
@@ -148,7 +190,7 @@ export function DraftsPage() {
    */
   const started = useAsync(() => wizardDrafts.list(), [])
   const [filter, setFilter] = useState<Filter>('all')
-  const [sort, setSort] = useState<'worked' | 'recent' | 'oldest'>('worked')
+  const [sort, setSort] = useState<'opened' | 'recent' | 'oldest'>('opened')
   /*
    * The draft the confirmation modal is asking about, held whole rather than by
    * id: the dialog names it ("Delete 'Pedro's Snack Bar'?"), and looking the
@@ -158,6 +200,39 @@ export function DraftsPage() {
   const [confirming, setConfirming] = useState<DraftCard | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /*
+   * The draft being renamed, held whole for the same reason `confirming`
+   * is: the dialog names it, and looking the name back up from the list
+   * goes wrong exactly when the list reloads under an open dialog.
+   */
+  const [renaming, setRenaming] = useState<DraftCard | null>(null)
+  const [renameTo, setRenameTo] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
+
+  async function confirmRename() {
+    if (renaming === null) return
+    /*
+     * The disabled button is not the guard — Enter in the box calls this
+     * directly, and a keyboard is how somebody would actually reach a
+     * state the pointer cannot.
+     */
+    const name = renameTo.trim()
+    if (name === '') return
+
+    setRenameBusy(true)
+    setRenameError(null)
+    try {
+      await renaming.rename(name)
+      setRenaming(null)
+      reload()
+      started.reload()
+    } catch (err) {
+      setRenameError(toApiError(err).message)
+    } finally {
+      setRenameBusy(false)
+    }
+  }
 
   /*
    * One path for both kinds. The unfinished cards used to delete on the
@@ -205,10 +280,20 @@ export function DraftsPage() {
       name: draftName(d.title, d.business?.name),
       applicationType: d.application_type,
       startedAt: d.created_at,
-      workedAt: d.updated_at,
+      /*
+       * Falls back to the last write for a draft nobody has opened since
+       * the column shipped. The COLUMN stays null — inventing a date there
+       * would record something nothing observed — but a card has to show
+       * the reader their best available answer rather than a dash.
+       */
+      openedAt: d.last_opened_at ?? d.updated_at,
       resumeTo: `/apply?draft=${d.id}`,
+      ownTitle: d.title ?? null,
       remove: async () => {
         await applications.destroy(d.id)
+      },
+      rename: async (title: string) => {
+        await applications.update(d.id, { title })
       },
     })),
     /*
@@ -222,15 +307,19 @@ export function DraftsPage() {
       name: draftName(d.title),
       applicationType: d.application_type as ApplicationType,
       startedAt: d.updated_at,
-      workedAt: d.updated_at,
+      openedAt: d.last_opened_at ?? d.updated_at,
       /*
        * `resume` carries the row's id, so this card opens THIS filing.
        * `/apply?type=new` with no `resume` is a blank form, because that is
        * what the dashboard's New Business Permit card links to.
        */
       resumeTo: `/apply?type=${d.application_type}&resume=${d.id}`,
+      ownTitle: d.title ?? null,
       remove: async () => {
         await wizardDrafts.discard(d.id)
+      },
+      rename: async (title: string) => {
+        await wizardDrafts.rename(d.id, title)
       },
     })),
   ]
@@ -251,10 +340,17 @@ export function DraftsPage() {
    * `updated_at`, which was wrong: the column has existed since the table
    * was created (`timestamps()`) and was simply never serialised.
    *
-   * "Last worked on" leads and is the default, because it answers the
+   * "Last opened" leads and is the default, because it answers the
    * question somebody arrives with: where was I? An applicant with six
    * drafts going gets no help from the order they were begun in — the
    * oldest is as likely as any to be the live one.
+   *
+   * It was "Last worked on" and read `updated_at`, which moves on SAVE.
+   * The client asked for the name to change on 29 September 2026 and said
+   * the rule should follow it, which was the right call: the note here
+   * warned that renaming alone is "the difference between a label and a
+   * small lie". `last_opened_at` is stamped when a draft is opened and by
+   * nothing else, so the label and the measurement agree.
    *
    * Unfinished filings sort with everything else rather than being pinned to
    * the front. They were pinned, and that was the last of the special cases
@@ -262,8 +358,8 @@ export function DraftsPage() {
    * sort control the reader cannot trust.
    */
   const visible = [...byType].sort((a, b) => {
-    if (sort === 'worked') {
-      return Date.parse(b.workedAt ?? '') - Date.parse(a.workedAt ?? '')
+    if (sort === 'opened') {
+      return Date.parse(b.openedAt ?? '') - Date.parse(a.openedAt ?? '')
     }
     const diff = Date.parse(a.startedAt ?? '') - Date.parse(b.startedAt ?? '')
 
@@ -285,12 +381,15 @@ export function DraftsPage() {
               value: sort,
               options: [
                 /*
-                 * "Last worked on" rather than "Last accessed": the date it
-                 * reads moves when the draft is SAVED, and opening one to
-                 * read it saves nothing. Naming it for what it measures is
-                 * the difference between a label and a small lie.
+                 * "Last opened", and it reads a column that moves only when
+                 * a draft is opened. The note here used to explain why the
+                 * option could NOT be called this — it read `updated_at`,
+                 * which moves on save — and warned that naming it otherwise
+                 * would be "the difference between a label and a small lie".
+                 * The client asked for the name; the measurement came with
+                 * it.
                  */
-                { value: 'worked', label: 'Last worked on' },
+                { value: 'opened', label: 'Last opened' },
                 { value: 'recent', label: 'Newest first' },
                 { value: 'oldest', label: 'Oldest first' },
               ],
@@ -355,32 +454,93 @@ export function DraftsPage() {
                    * the handler — the one interaction where being taken
                    * somewhere unexpected is worst.
                    */
-                  <li key={d.key} className="group relative">
+                  <li key={d.key} className="group relative h-full">
+                    {/*
+                      `h-full` and a flex column so the card fills its grid
+                      row: the footer below takes `mt-auto`, which is what
+                      puts the dates on one line across the row instead of
+                      leaving each card its own height.
+                    */}
                     <Link
                       to={d.resumeTo}
-                      className="block overflow-hidden rounded-md bg-white shadow-card transition-shadow hover:shadow-raised"
+                      className="flex h-full flex-col overflow-hidden rounded-md bg-white shadow-card transition-shadow hover:shadow-raised"
                     >
-                      <div className="flex h-44 items-center justify-center text-royal-deep">
-                        <Icon size={80} strokeWidth={1.5} />
-                      </div>
-                      <div className="bg-canvas px-4 py-3">
-                        <div className="flex items-center justify-between gap-2">
-                          {/* min-w-0 or the flex item refuses to go below the
-                              title's nowrap width and the tile grows past the
-                              panel it sits in, which is what truncate is for. */}
-                          <p className="min-w-0 truncate text-[15px] font-bold text-ink">{name}</p>
-                          <PencilIcon size={17} className="shrink-0 text-royal-deep" />
+                      {/*
+                        ── The name is the hero ─────────────────────────────
+
+                        An 80px glyph filled a 176px band above this until 29
+                        September 2026, so the biggest thing on the card told
+                        the reader the least — two New Permit drafts were one
+                        identical picture twice, told apart only by the caption
+                        underneath. The icon is a marker now, beside the word
+                        it marks, and the business name has the room.
+
+                        `pr-9` keeps the type row clear of the delete button,
+                        which is positioned over this corner.
+                      */}
+                      <div className="px-4 pb-3 pt-3.5">
+                        <div className="flex items-center gap-2 pr-[4.25rem]">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-royal-tint text-royal-deep">
+                            <Icon size={16} strokeWidth={1.75} />
+                          </span>
+                          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-royal">
+                            {TYPE_LABEL[d.applicationType] ?? 'Application'}
+                          </span>
                         </div>
                         {/*
-                          When it was BEGUN, not when it was last touched.
-                          Labelling it "Edited" told an applicant who worked on
-                          this draft an hour ago that they last edited it three
-                          weeks back, which is the sort of thing that makes
-                          someone doubt their work was saved. The last-touched
-                          date is what the default sort uses instead.
+                          Two lines before it clips, not one. These names run
+                          "2026 Amendment — Pedro's Snack Bar (3)", and a
+                          single truncated line cuts exactly the part that
+                          tells two of them apart.
                         */}
-                        <p className="mt-1 text-xs text-ink-secondary">
-                          Started: {formatDate(d.startedAt)}
+                        {/*
+                          One line, cut with an ellipsis. The cards are then
+                          the same height because there is nothing left to
+                          vary, rather than because a two-line floor was
+                          propped under a one-line name.
+
+                          `title` carries the whole name: the ellipsis says
+                          there is more, so there has to be somewhere to read
+                          it.
+                        */}
+                        <p
+                          title={name}
+                          className="mt-2 truncate text-[15px] font-bold leading-snug text-ink"
+                        >
+                          {name}
+                        </p>
+                      </div>
+                      <div className="mt-auto bg-canvas px-4 py-3">
+                        {/*
+                          Both facts, because they answer different questions
+                          and a card showing only one invites the reader to
+                          assume it is the other. Labelling the start date
+                          "Edited" once told an applicant who worked on a draft
+                          an hour ago that they last edited it three weeks
+                          back, which is the sort of thing that makes somebody
+                          doubt their work was saved.
+
+                          With a time: two drafts begun the same afternoon read
+                          as one date, and the client asked for the hour.
+                        */}
+                        <p
+                          title={formatDateTime(d.startedAt)}
+                          className="mt-1 truncate whitespace-nowrap text-xs text-ink-secondary"
+                        >
+                          Started: {formatTileDateTime(d.startedAt)}
+                        </p>
+                        {/*
+                          `truncate whitespace-nowrap`: on a tile too narrow
+                          for it, this cuts off with an ellipsis instead of
+                          breaking after the date and leaving "PM" alone on a
+                          second line. The full timestamp, year and all, is on
+                          the title attribute.
+                        */}
+                        <p
+                          title={formatDateTime(d.openedAt)}
+                          className="truncate whitespace-nowrap text-xs text-ink-secondary"
+                        >
+                          Last opened: {formatTileDateTime(d.openedAt)}
                         </p>
                       </div>
                     </Link>
@@ -396,6 +556,29 @@ export function DraftsPage() {
                       reader moving through four cards otherwise hears "Delete
                       draft" four times with no way to tell them apart.
                     */}
+                    {/*
+                      Rename sits beside delete, for the reason the client
+                      asked for it at all: a list of four cards called "New
+                      Business Permit" is where you NOTICE the problem, so it
+                      should be where you can fix it. The wizard's title box
+                      always allowed this and made you open the filing first.
+
+                      Both buttons are siblings of the Link, never children:
+                      a <button> inside an <a> is invalid HTML and in
+                      practice opens the draft on its way to the handler.
+                    */}
+                    <button
+                      type="button"
+                      aria-label={`Rename draft: ${name}`}
+                      onClick={() => {
+                        setRenameError(null)
+                        setRenameTo(d.ownTitle ?? '')
+                        setRenaming(d)
+                      }}
+                      className="absolute right-10 top-2 rounded-md bg-white/90 p-1.5 text-ink-muted shadow-card transition-colors hover:bg-royal-tint hover:text-royal focus-visible:bg-royal-tint focus-visible:text-royal group-hover:text-ink-secondary"
+                    >
+                      <PencilIcon size={18} />
+                    </button>
                     <button
                       type="button"
                       aria-label={`Delete draft: ${name}`}
@@ -433,6 +616,47 @@ export function DraftsPage() {
         again" is true from where the applicant stands, which is the only place
         that matters here.
       */}
+      {renaming !== null && (
+        <ProtoModal
+          title="Rename this draft"
+          cancelLabel="Cancel"
+          confirmLabel={renameBusy ? 'Saving…' : 'Save name'}
+          confirmDisabled={renameBusy || renameTo.trim() === ''}
+          onCancel={() => {
+            if (renameBusy) return
+            setRenaming(null)
+            setRenameError(null)
+          }}
+          onConfirm={() => void confirmRename()}
+        >
+          <label className="block">
+            <span className="mb-1.5 block text-[13px] font-semibold text-ink">Draft name</span>
+            <input
+              autoFocus
+              value={renameTo}
+              maxLength={120}
+              onChange={(e) => setRenameTo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void confirmRename()
+                }
+              }}
+              placeholder={renaming.name}
+              className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+            />
+          </label>
+          {renameError !== null && (
+            <p
+              role="alert"
+              className="mt-3 rounded-md border border-s-red bg-s-red-tint px-3 py-2 text-sm text-ink"
+            >
+              {renameError}
+            </p>
+          )}
+        </ProtoModal>
+      )}
+
       {confirming !== null && (
         <ProtoModal
           title="Delete this draft?"
@@ -453,10 +677,14 @@ export function DraftsPage() {
             </span>{' '}
             will be removed from your drafts.
           </p>
+          {/*
+            What goes, and whether it comes back. Four lines stood here and
+            the middle of them reassured the reader that nothing had been
+            submitted to the LGU — a worry nobody has while deleting a
+            DRAFT, since a filing already sent is not in this list.
+          */}
           <p className="mt-2 text-sm text-ink-secondary">
-            The answers you have filled in and any documents you attached to it go with it. Nothing
-            has been submitted to the LGU, so there is nothing to cancel — but you will have to
-            start this application again if you want it back.
+            Its answers and documents go with it, and this cannot be undone.
           </p>
           {deleteError !== null && (
             <p

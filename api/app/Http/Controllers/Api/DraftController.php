@@ -40,7 +40,7 @@ use Illuminate\Http\Request;
  * never become a filing; the wizard creates a proper draft through those
  * endpoints and then deletes this.
  */
-class WizardDraftController extends Controller
+class DraftController extends Controller
 {
     /** Every unfinished filing this applicant has, newest first. */
     public function index(Request $request): JsonResponse
@@ -87,6 +87,16 @@ class WizardDraftController extends Controller
     {
         $draft = $this->ownedOrFail($request, $wizardDraft);
 
+        /*
+         * This endpoint is only ever called to resume one, so reaching it
+         * IS opening it. `saveQuietly` and `timestamps = false` keep
+         * `updated_at` for saves alone — otherwise the two dates on the
+         * card would always be the same and the sort would mean nothing.
+         */
+        $draft->timestamps = false;
+        $draft->forceFill(['last_opened_at' => now()])->saveQuietly();
+        $draft->timestamps = true;
+
         return response()->json(['data' => [
             ...$this->summary($draft),
             'payload' => $draft->payload,
@@ -94,19 +104,42 @@ class WizardDraftController extends Controller
     }
 
     /** Replace its answers. */
+    /**
+     * Replace its answers, its title, or just the title.
+     *
+     * The wizard sends both on every save. The drafts list renames one and
+     * knows nothing about the payload — so `payload` is optional here, and
+     * omitting it leaves the answers alone. Requiring it would make a
+     * rename resend a form the caller never loaded, and getting that wrong
+     * writes a stale copy over the applicant's work.
+     */
     public function update(Request $request, int $wizardDraft): JsonResponse
     {
         $draft = $this->ownedOrFail($request, $wizardDraft);
-        $data = $request->validate($this->payloadRules());
+        $data = $request->validate($this->payloadRules(requirePayload: false));
 
-        if ($tooBig = $this->refuseIfHuge($data['payload'])) {
-            return $tooBig;
+        $changes = [];
+
+        if (array_key_exists('payload', $data)) {
+            if ($tooBig = $this->refuseIfHuge($data['payload'])) {
+                return $tooBig;
+            }
+            $changes['payload'] = $data['payload'];
         }
 
-        $draft->update([
-            'title' => $data['title'] ?? null,
-            'payload' => $data['payload'],
-        ]);
+        /*
+         * `array_key_exists`, not `??`: a caller that sends `title: null`
+         * is clearing the name, and one that omits the key is not talking
+         * about the name at all. Collapsing those would have every payload
+         * save silently wipe a title the applicant chose.
+         */
+        if (array_key_exists('title', $data)) {
+            $changes['title'] = $data['title'];
+        }
+
+        if ($changes !== []) {
+            $draft->update($changes);
+        }
 
         return response()->json(['data' => $this->summary($draft)]);
     }
@@ -135,10 +168,10 @@ class WizardDraftController extends Controller
      *
      * @return array<string, list<string>>
      */
-    private function payloadRules(): array
+    private function payloadRules(bool $requirePayload = true): array
     {
         return [
-            'payload' => ['required', 'array'],
+            'payload' => [$requirePayload ? 'required' : 'sometimes', 'array'],
             'title' => ['nullable', 'string', 'max:255'],
         ];
     }
@@ -176,6 +209,8 @@ class WizardDraftController extends Controller
             'application_type' => $draft->application_type,
             'title' => $draft->title,
             'updated_at' => optional($draft->updated_at)->toISOString(),
+            /* When it was last RESUMED, which is a different fact. */
+            'last_opened_at' => optional($draft->last_opened_at)->toISOString(),
         ];
     }
 }

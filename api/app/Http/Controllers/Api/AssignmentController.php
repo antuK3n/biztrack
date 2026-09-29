@@ -11,6 +11,7 @@ use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\AssignmentResource;
 use App\Models\ApplicationAssignment;
 use App\Models\ComplianceCheck;
+use App\Models\PermitType;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Audit;
@@ -128,6 +129,7 @@ class AssignmentController extends Controller
 
         $this->scopeToDepartment($request, $query);
         $this->scopeToHolder($request, $query);
+        $this->hideUnsubmittedClearances($query);
 
         $assignmentStatuses = $this->assignmentStatuses($request);
         if ($assignmentStatuses !== []) {
@@ -351,6 +353,47 @@ class AssignmentController extends Controller
     }
 
     /**
+     * Drop an assignment for a clearance the applicant has not submitted.
+     *
+     * The client, 30 September 2026, reading CPDO's queue: *"How come there
+     * is Not yet submitted here? There should be no things listed here that
+     * are NOT YET SUBMITTED."* They checked the applicant's side first —
+     * the Zoning sheet genuinely had never been sent.
+     *
+     * These are filings from the model where PAYMENT routed all six offices
+     * at once, so the assignment exists and the paperwork never followed.
+     * Nothing made since produces one: `startClearance()` routes the office
+     * and moves the permit in a single transaction. The row was previously
+     * left visible on the reasoning that its chip stated its own status —
+     * but there is nothing behind it to read or approve, it counts against
+     * the tab badge, and the queue's oldest-first sort puts the least
+     * actionable row on the screen at the very top.
+     *
+     * ── Why it is not a flat `status != not_started` ────────────────────
+     *
+     * BPLO's Business Permit pivot sits at `not_started` for exactly as
+     * long as BPLO's own first review is open, so a flat filter would empty
+     * the one queue that is never empty. What is excluded is a CLEARANCE
+     * its issuing office has not been handed; `OUTCOME_CODE` is the
+     * filing's result rather than one of the five, and it stays.
+     *
+     * `whereColumn` ties the permit's issuing office to the assignment's
+     * own department, so an office is judged on its own clearance and never
+     * on one beside it — the same join the `clearance_status` filter makes,
+     * and for the same reason.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<ApplicationAssignment>  $query
+     */
+    private function hideUnsubmittedClearances($query): void
+    {
+        $query->whereDoesntHave('application.permitTypes', function ($q) {
+            $q->whereColumn('permit_types.issuing_department_id', 'application_assignments.department_id')
+                ->where('permit_types.code', '!=', PermitType::OUTCOME_CODE)
+                ->where('application_permit_types.status', ClearanceStatus::NotStarted->value);
+        });
+    }
+
+    /**
      * The `clearance_status` filter — this office's own permit on the filing.
      *
      * @return list<string>
@@ -409,6 +452,12 @@ class AssignmentController extends Controller
 
         $counts = ApplicationAssignment::query()
             ->tap(fn ($q) => $this->scopeToDepartment($request, $q))
+            /*
+             * The same exclusion the list applies. A badge counting rows
+             * the list then refuses to show is the bug this method's own
+             * note warns about, one filter further down.
+             */
+            ->tap(fn ($q) => $this->hideUnsubmittedClearances($q))
             ->when(
                 $assignmentStatuses !== [],
                 fn ($q) => $q->whereIn('application_assignments.status', $assignmentStatuses),
@@ -465,6 +514,18 @@ class AssignmentController extends Controller
              * the omission read on screen as "nothing was corrected".
              */
             'application.corrections',
+            /*
+             * What BPLO said about each field it last asked about.
+             *
+             * `ApplicationResource` serialises this only when the relation is
+             * loaded and sends an empty object otherwise — the deliberate
+             * choice described above, and the trap it warns about caught this
+             * screen on 30 September 2026: the amend composer opened with the
+             * right fields ticked and every remark box blank, because an
+             * unloaded relation reads exactly like an office that wrote no
+             * notes.
+             */
+            'application.returnNotes',
             /*
              * Who set the RA 11032 tier, for the For Office Use Only panel. One
              * constant query, and without it the sheet cannot tell an officer
@@ -586,13 +647,29 @@ class AssignmentController extends Controller
              * one time it matters is the one time it is hardest to write.
              */
             'remedy' => ['required', 'string', 'max:1000'],
+            /*
+             * Which rows the refusal is about, optional, exactly as on
+             * Return. A refusal can be about the business rather than
+             * about one answer — "the premises are not zoned for this"
+             * names no field — so requiring a tick would make the
+             * officer invent one.
+             */
+            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:4000'],
+            'remarks_notes' => ['sometimes', 'array'],
+            'remarks_notes.*' => ['nullable', 'string', 'max:1000'],
         ], [
             'reason.required' => 'Say why this permit cannot be granted. The applicant is shown this.',
             'remedy.required' => 'Say what would settle it, so the applicant knows what to do next.',
         ]);
 
         // Decide, then record who decided — the order approve() explains.
-        $this->workflow->rejectAssignment($assignment, $data['reason'], $data['remedy']);
+        $this->workflow->rejectAssignment(
+            $assignment,
+            $data['reason'],
+            $data['remedy'],
+            $data['remarks_target'] ?? null,
+            $data['remarks_notes'] ?? [],
+        );
         $this->recordHolder($request, $assignment);
 
         return response()->json([
@@ -618,13 +695,22 @@ class AssignmentController extends Controller
              * nothing here worth a 422.
              */
             /*
-             * Several codes, comma-separated, since 27 September 2026 —
-             * the client ruled that a return names the FIELDS the applicant
-             * must correct. 600 rather than 120: a code averages 25
-             * characters and the old cap silently cut a five-field return in
-             * half at the database.
+             * Several codes, comma-separated, since 27 September 2026 — the
+             * client ruled that a return names the FIELDS the applicant must
+             * correct.
+             *
+             * 4000, and it was 600, which the form outgrew: the wizard has 32
+             * main-form targets and they join to 605 characters before a
+             * single Section C document code is added. An officer who ticked
+             * most of the form, wrote a note on each and pressed Return got a
+             * 422 naming `remarks_target` — a thing no screen calls anything
+             * — with no way to learn that unticking fields would fix it.
+             *
+             * Both columns behind this are `text`, so the cap is a guard
+             * against a runaway body rather than a real width. It is set well
+             * clear of every field and document on the largest filing.
              */
-            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:600'],
+            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:4000'],
             /*
              * One remark per returned field, keyed by the same code as
              * `remarks_target`. Not validated against a list, for the reason
@@ -638,6 +724,47 @@ class AssignmentController extends Controller
         ]);
 
         $this->workflow->returnAssignment(
+            $assignment,
+            $data['remarks'],
+            $data['remarks_target'] ?? null,
+            $data['remarks_notes'] ?? [],
+        );
+        $this->recordHolder($request, $assignment);
+
+        return response()->json([
+            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
+        ]);
+    }
+
+    /**
+     * Change what an open return asks for, without returning again.
+     *
+     * An officer returns a filing and then spots a second problem, or reads
+     * their own remark back and finds it unclear. A second Return is not
+     * legal — `ApplicationStatus::Returned` goes only forward, and a filing
+     * on the applicant's desk is not the office's to send back — so this
+     * corrects the instruction where it stands.
+     *
+     * Same validation as `return()` deliberately: it is the same box, filled
+     * in by the same officer, and a limit that differed between the two
+     * would be a trap discoverable only by hitting it.
+     *
+     * Same holder check too. Amending what an office asked for is acting on
+     * the case, so it belongs to whoever is holding it.
+     */
+    public function amendReturn(Request $request, ApplicationAssignment $assignment): JsonResponse
+    {
+        $this->authorizeHolder($request, $assignment);
+        $data = $request->validate([
+            'remarks' => ['required', 'string', 'max:1000'],
+            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:4000'],
+            'remarks_notes' => ['sometimes', 'array'],
+            'remarks_notes.*' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'remarks.required' => 'Explain what the applicant needs to fix.',
+        ]);
+
+        $this->workflow->amendReturn(
             $assignment,
             $data['remarks'],
             $data['remarks_target'] ?? null,

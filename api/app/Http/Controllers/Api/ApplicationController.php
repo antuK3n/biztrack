@@ -298,6 +298,24 @@ class ApplicationController extends Controller
     {
         $this->authorizeView($request, $application);
 
+        /*
+         * ── When the APPLICANT opened their own draft ─────────────────
+         *
+         * The drafts list sorts on this, under an option the client asked
+         * to call "Last opened" — so it has to be opens that move it, not
+         * saves. `updated_at` answers the other question and is left alone.
+         *
+         * Narrow on purpose. Only a DRAFT, because a submitted filing is
+         * not something anybody resumes; only its OWNER, because an
+         * officer reading a filing has not opened the applicant's draft;
+         * and `timestamps: false` so this write does not move `updated_at`
+         * and turn every read into a phantom edit.
+         */
+        if ($application->status === ApplicationStatus::Draft
+            && $application->applicant_user_id === $request->user()?->id) {
+            $application->forceFill(['last_opened_at' => now()])->saveQuietly();
+        }
+
         return response()->json([
             'data' => new ApplicationResource($application->load($this->fullEager)),
         ]);

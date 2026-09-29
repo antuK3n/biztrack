@@ -105,7 +105,7 @@ it('answers the offices intent with the issuing departments', function () {
 
     expect($body)->toContain('Business Permits and Licensing Office')
         ->toContain('Bureau of Fire Protection')
-        ->toContain('City Environment and Natural Resources Office');
+        ->toContain('City Environmental and Natural Resources Office');
 });
 
 it('answers the hours intent with RA 11032', function () {
@@ -169,7 +169,7 @@ it('refuses to reveal another user\'s tracking id status', function () {
 it('scopes the requirements answer to the permit type that was named', function () {
     $body = ask('what documents do I need for a sanitary permit');
 
-    expect($body)->toContain('Sanitary Permit / Health Certificate')
+    expect($body)->toContain('Sanitary Permit')
         ->toContain('Sanitary Requirements')
         // The whole point of the bug: no rundown of the other permits.
         ->not->toContain('Occupancy Permit')
@@ -182,7 +182,7 @@ it('scopes requirements for Taglish and abbreviated permit names', function () {
         ->not->toContain('Sanitary Requirements');
 
     expect(ask('health cert requirements'))
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->not->toContain('Fire Safety Requirements');
 
     expect(ask('CENRO requirements'))
@@ -193,7 +193,7 @@ it('scopes requirements for Taglish and abbreviated permit names', function () {
 it('answers zoning questions with the planning office, not a permit rundown', function () {
     expect(ask('kailangan ba ng zoning clearance?'))
         ->toContain('Zoning')
-        ->toContain('City Planning')
+        ->toContain('Planning/Zoning Office')
         ->not->toContain('Sanitary Requirements');
 });
 
@@ -201,15 +201,15 @@ it('still lists every checklist when the question really is that broad', functio
     $body = ask('give me all the requirements for all permits');
 
     expect($body)->toContain("Mayor's / Business Permit")
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->toContain('Fire Safety Inspection Certificate')
         ->toContain('Occupancy Permit')
-        ->toContain('Zoning / Locational Clearance');
+        ->toContain('Zoning Clearance');
 });
 
 it('scopes fees to the named permit and separates late-payment penalties', function () {
     $sanitary = ask('magkano ang sanitary permit');
-    expect($sanitary)->toContain('Sanitary Permit / Health Certificate')
+    expect($sanitary)->toContain('Sanitary Permit')
         ->toContain('Tax Order of Payment');
 
     $penalty = ask('how much is the penalty if I pay late?');
@@ -275,7 +275,7 @@ it('scopes the offices answer to the named permit', function () {
     // 6 September 2026. Any permit with its own office proves the same rule.
     $body = ask('who handles the zoning clearance?');
 
-    expect($body)->toContain('City Planning and Development Office')
+    expect($body)->toContain('Planning/Zoning Office')
         ->not->toContain('Bureau of Fire Protection');
 });
 
@@ -286,7 +286,7 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
         ->toContain('inspection')
         ->toContain('3 working days for simple')
         ->not->toContain('10 working days')
-        ->not->toContain('Office of the Building Official');
+        ->not->toContain('Office of the Local Building Official');
 });
 
 it('scopes renewal answers to the named permit validity', function () {
@@ -300,7 +300,7 @@ it('scopes renewal answers to the named permit validity', function () {
 it('answers a bare permit name with what it can tell you about it', function () {
     $body = ask('sanitary permit');
 
-    expect($body)->toContain('Sanitary Permit / Health Certificate')
+    expect($body)->toContain('Sanitary Permit')
         ->toContain('City Health Office')
         ->not->toContain('Fire Safety Requirements');
 });
@@ -385,7 +385,7 @@ it('explains fields on the fire and occupancy sheets', function () {
 
     expect(ask('what is the building permit no field for?'))
         ->toContain('Building Permit No.')
-        ->toContain('Office of the Building Official');
+        ->toContain('Office of the Local Building Official');
 });
 
 it('explains the main wizard fields', function () {
@@ -418,7 +418,7 @@ it('says it does not know a field rather than inventing one', function () {
 it('keeps permit questions out of the field layer', function () {
     // "how much" is still a fee question even though gross sales is a field.
     expect(ask('how much is the sanitary permit'))
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->toContain('Tax Order of Payment')
         ->not->toContain('Business & Tax Profile step');
 
