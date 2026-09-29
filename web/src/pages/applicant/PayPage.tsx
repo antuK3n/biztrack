@@ -370,7 +370,9 @@ export function PayPage() {
                       : 'border-input-border bg-input text-ink hover:brightness-95'
                   }`}
                 >
-                  {m.label}
+                  {/* The short name the rest of the app uses ("Card", as the
+                      chip always read), the server's own label as fallback. */}
+                  {paymentMethodLabel(m.value) === m.value ? m.label : paymentMethodLabel(m.value)}
                 </button>
               )
             })}
