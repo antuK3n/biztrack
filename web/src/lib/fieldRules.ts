@@ -56,6 +56,55 @@ export function registrationNumberValid(raw: string): boolean {
   return trimmed.length >= 4 && /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-/]*$/.test(trimmed)
 }
 
+/**
+ * SEC's own prefixes, and the only per-agency rule worth enforcing.
+ *
+ * `CS` + year + serial has been the domestic corporation format since 2013
+ * (CS2019-12345). `A` covers stock corporations registered 1946–1985, `CN`
+ * non-stock 1986–2012, and `FS` / `FN` foreign branches since 2000. Between
+ * them those five cover every era SEC has registered in, which is why one
+ * of them is required: a number with no letters belongs to no period.
+ *
+ * That allowance existed for a day and cost exactly what it was meant to
+ * prevent — the client typed `11111111` under Partnership and the form took
+ * it. "SEC might have issued plain serials" was caution against no evidence,
+ * and the evidence is the prefix table.
+ *
+ * Still a PREFIX check rather than a full pattern. Matching
+ * `CS20\d\d-\d{5}` would reject a 1970s `A`-prefixed corporation and
+ * anything SEC has ever punctuated differently; this catches what
+ * applicants actually get wrong — a transposed `SC2019-…`, a DTI number
+ * typed under Corporation, or a bare serial — and lets every genuine
+ * certificate through.
+ */
+const SEC_PREFIXES = ['CS', 'CN', 'FS', 'FN', 'A']
+
+export function secNumberValid(raw: string): boolean {
+  const letters = raw.trim().toUpperCase().match(/^[A-Z]+/)?.[0]
+
+  return letters !== undefined && SEC_PREFIXES.includes(letters)
+}
+
+/**
+ * The agency's own rule, where it has one worth applying.
+ *
+ * Only SEC does. DTI publishes no format for a Business Name number — its own
+ * verification guidance calls it an "alphanumeric sequence" and stops there —
+ * and CDA numbers begin `9520-` only for cooperatives registered under the
+ * 2008 Code, so demanding it would refuse the oldest co-ops in the city.
+ * Inventing a pattern for either would reject real certificates and read as
+ * the system calling an applicant's papers fake.
+ */
+export function registrationNumberAgencyError(
+  value: string,
+  structure?: string | null,
+): string | undefined {
+  const agency = structure ? AGENCY_BY_STRUCTURE[structure]?.agency : undefined
+  if (agency !== 'SEC' || value.trim() === '') return undefined
+
+  return secNumberValid(value) ? undefined : 'SEC numbers start with CS, CN, A, FS or FN.'
+}
+
 /** 9 digits, or 12 to 14 with a branch code. Separators are ignored. */
 export function tinValid(raw: string): boolean {
   const trimmed = raw.trim()
@@ -157,9 +206,15 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
   'form:registration_number': {
     validate: (v) =>
       required(v, 'The registration number')
+      /*
+       * The same words the form uses. The agency-specific check is not
+       * applied here: a correction box knows the field, not the Form of
+       * Organization, and guessing the agency to enforce SEC prefixes on a
+       * DTI number would reject a real certificate.
+       */
       ?? (registrationNumberValid(v)
         ? undefined
-        : 'Enter the number as printed on the certificate — at least four characters, including a digit.'),
+        : 'Use letters, numbers, spaces or dashes, with at least one digit.'),
     maxLength: 60,
   },
   'form:tin': {
@@ -174,7 +229,12 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
     maxLength: 255,
   },
   'form:trade_name': {
-    validate: (v) => required(v, 'The trade name'),
+    /*
+     * Optional since 30 September 2026, so a blank one is an answer. A
+     * business trading under its registered name has no second name, and
+     * demanding one here would contradict the form, which stopped asking.
+     */
+    validate: () => undefined,
     maxLength: 255,
   },
   'form:telephone': {
@@ -264,6 +324,29 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
  * not look usual" shapes, which are about typing a number into a fresh
  * form; a correction card needs to name the right certificate and no more.
  */
+/**
+ * The four structures the form offers, in the order it offers them.
+ *
+ * Exported because two screens now ask the question: the wizard asks the
+ * applicant, and the officer's review sheet offers the same four when an
+ * admin corrects the answer. One list, so a fifth structure cannot reach
+ * one screen and miss the other.
+ *
+ * `agency` rides along because it is a property of the structure and not
+ * of the screen — it is what `AGENCY_BY_STRUCTURE` below keys on, and
+ * what decides whether the number is asked for as DTI, SEC or CDA.
+ */
+export const ORGANIZATION_FORMS: {
+  value: string
+  label: string
+  agency: 'DTI' | 'SEC' | 'CDA'
+}[] = [
+  { value: 'sole_proprietorship', label: 'Sole Proprietorship', agency: 'DTI' },
+  { value: 'partnership', label: 'Partnership', agency: 'SEC' },
+  { value: 'corporation', label: 'Corporation', agency: 'SEC' },
+  { value: 'cooperative', label: 'Cooperative', agency: 'CDA' },
+]
+
 const AGENCY_BY_STRUCTURE: Record<string, { agency: string; certificate: string }> = {
   sole_proprietorship: { agency: 'DTI', certificate: 'Certificate of Business Name Registration' },
   partnership: { agency: 'SEC', certificate: 'SEC certificate' },
