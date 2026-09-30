@@ -6,8 +6,10 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\AuditLog;
+use App\Models\Business;
 use App\Models\Department;
 use App\Models\Inspection;
+use App\Models\Permit;
 use App\Models\User;
 
 /*
@@ -230,6 +232,33 @@ it('opens each list on the rows that are worth seeing first', function () {
     $sortedScheduled = $scheduled;
     rsort($sortedScheduled);
     expect(array_values($scheduled))->toBe(array_values($sortedScheduled), 'inspections are not newest-first');
+});
+
+/*
+ * The owner's business list feeds the renewal and amendment choosers, one page
+ * of 200, so a business that can be renewed has to be on it: permit holders
+ * first, the rest newest-first behind them (BusinessController::index). The
+ * newest businesses here are made WITHOUT permits, so newest-first alone would
+ * put them on top and fail.
+ */
+it('lists an owner’s businesses that hold a permit ahead of the ones that do not', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $template = Business::where('owner_user_id', $owner->id)->firstOrFail();
+    foreach (range(1, 3) as $i) {
+        $copy = $template->replicate(['ban']);
+        $copy->name = "No Permit Yet {$i}";
+        $copy->created_at = now()->addMinutes($i);
+        $copy->save();
+    }
+
+    $rows = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/businesses?per_page=200')->assertOk()->json('data');
+    $holds = collect($rows)->map(fn ($r) => Permit::where('business_id', $r['id'])->exists())->values()->all();
+
+    expect($holds)->toContain(true)->toContain(false);
+    $sorted = $holds;
+    rsort($sorted);
+    expect($holds)->toBe($sorted, 'a business with no permit is listed ahead of one that has one');
 });
 
 it('counts unread notifications across every page, not just the one returned', function () {
