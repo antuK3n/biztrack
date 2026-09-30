@@ -12,7 +12,7 @@ import { Alert } from '../../components/ui/Alert'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
-import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
+import { PillButton, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
@@ -399,7 +399,6 @@ export function ApplicationDetailPage() {
     [appId],
   )
 
-  const [confirmCancel, setConfirmCancel] = useState(false)
   const [showFees, setShowFees] = useState(false)
   const [action, setAction] = useState<'resubmit' | 'cancel' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -412,21 +411,6 @@ export function ApplicationDetailPage() {
       setData(updated)
       setBanner('Your application was resubmitted. An officer will review it again.')
       reload()
-    } catch (err) {
-      setActionError(toApiError(err).message)
-    } finally {
-      setAction(null)
-    }
-  }
-
-  async function runCancel() {
-    setAction('cancel')
-    setActionError(null)
-    try {
-      const updated = await applications.cancel(appId)
-      setData(updated)
-      setConfirmCancel(false)
-      setBanner('This application was cancelled.')
     } catch (err) {
       setActionError(toApiError(err).message)
     } finally {
@@ -537,9 +521,14 @@ export function ApplicationDetailPage() {
 
 
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
-  const remarks: { who: string; text: string; fields: string[] }[] = [
+  const remarks: {
+    who: string
+    text: string
+    fields: string[]
+    items: { label: string; note: string }[]
+  }[] = [
     ...(app.rejection_reason
-      ? [{ who: 'Reason for rejection', text: app.rejection_reason, fields: [] }]
+      ? [{ who: 'Reason for rejection', text: app.rejection_reason, fields: [], items: [] }]
       : []),
     ...app.assignments
       .filter((a) => a.remarks)
@@ -562,6 +551,18 @@ export function ApplicationDetailPage() {
          * seen one.
          */
         fields: mainFormTargets(a.remarks_target).map((t) => t.label),
+        /*
+         * The office's note per named field, which is what the composed
+         * `text` above is a flattening of. Kept apart so the screen can
+         * show two returned fields as two things rather than as one
+         * sentence with a semicolon in it.
+         *
+         * Empty for a return written as plain prose, and for one whose
+         * notes predate them — both fall back to `text`.
+         */
+        items: mainFormTargets(a.remarks_target)
+          .map((t) => ({ label: t.label, note: (app.return_notes ?? {})[t.value] ?? '' }))
+          .filter((it) => it.note.trim() !== ''),
       })),
   ]
 
@@ -1115,14 +1116,42 @@ export function ApplicationDetailPage() {
             <ul className="mt-5 space-y-4">
               {(remarks.length > 0
                 ? remarks
-                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.', fields: [] }]
+                : [
+                    {
+                      who: 'Reviewing office',
+                      text: 'No detailed remarks were recorded.',
+                      fields: [],
+                      items: [],
+                    },
+                  ]
               ).map((r, i) => (
                 <li
                   key={i}
                   className="flex flex-wrap items-baseline gap-x-8 gap-y-1 rounded-xl bg-white px-6 py-4 shadow-card"
                 >
                   <span className="text-sm italic text-ink-muted underline underline-offset-2">{r.who}:</span>
-                  <span className="text-sm text-ink">{r.text}</span>
+                  {/*
+                    One box per field the office named. The single `text`
+                    below is the same thing flattened — "…: Blurred; …:
+                    Blurred" — which is right for a notification and wrong
+                    here, where the applicant is working through the items
+                    one at a time.
+                  */}
+                  {r.items.length > 0 ? (
+                    <ul className="basis-full space-y-2">
+                      {r.items.map((it) => (
+                        <li
+                          key={it.label}
+                          className="rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2"
+                        >
+                          <p className="text-sm font-semibold text-ink">{it.label}</p>
+                          <p className="mt-0.5 text-sm italic text-ink-secondary">“{it.note}”</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-sm text-ink">{r.text}</span>
+                  )}
                   {/*
                     The field the office named, when it named one.
 
@@ -1138,14 +1167,15 @@ export function ApplicationDetailPage() {
                     Franchise" on the form that reopens. That is the whole point
                     of the pointer: a lookup instead of a hunt.
                   */}
-                  {r.fields.map((label) => (
+                  {r.items.length === 0 &&
+                    r.fields.map((label) => (
                     <span
                       key={label}
                       className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink"
                     >
                       Fix: {label}
-                    </span>
-                  ))}
+                      </span>
+                    ))}
                 </li>
               ))}
             </ul>
@@ -1219,32 +1249,20 @@ export function ApplicationDetailPage() {
         )}
 
         {/*
-          CLR-4 — the statuses the API will actually cancel, and only those.
+          The Cancel control stood here and is gone — 30 September 2026, on
+          the client's decision, alongside the abandonment sweep that now
+          removes a filing left untouched for its window
+          (`applications:purge-abandoned`).
 
-          This list read ['draft', 'submitted', 'under_review', 'returned'] and
-          disagreed with ApplicationController::cancel at both ends. On
-          `under_review` and `returned` the button was offered and the request
-          came back 422 "This application can no longer be cancelled" — a dead
-          control, and on a returned filing the one an applicant is most likely
-          to reach for. On `pending_payment` the API allows it and the button
-          was not there, so a filing could be abandoned only by paying for it
-          first.
-
-          Copied from the enum list in ApplicationController::cancel and worth
-          re-reading if that list moves; there is no shared source for it, which
-          is how the two drifted in the first place.
+          The ENDPOINT is still routed and still owner-authorised, so this
+          is reversible without touching the server. If it comes back, the
+          list of statuses must be derived from one source: this one read
+          ['draft', 'submitted', 'pending_payment'] while the API accepted
+          draft, for_approval, returned and pending_payment — `submitted`
+          had not been a status since September and never matched, and the
+          button was missing from the two states where a filing is actually
+          abandoned.
         */}
-        {['draft', 'submitted', 'pending_payment'].includes(status) && (
-          <div className="mt-8 text-center">
-            <button
-              type="button"
-              onClick={() => setConfirmCancel(true)}
-              className="text-sm font-semibold text-s-red underline underline-offset-2"
-            >
-              Cancel application
-            </button>
-          </div>
-        )}
 
         {/* ── Messages thread (v2) ─────────────────────────────────────── */}
         {status !== 'draft' && <MessagesPanel applicationId={app.id} />}
@@ -1252,22 +1270,6 @@ export function ApplicationDetailPage() {
 
       {showFees && <FeeDialog app={app} onClose={() => setShowFees(false)} />}
 
-      {confirmCancel && (
-        <ProtoModal
-          title="WARNING"
-          tone="red"
-          cancelLabel="Keep it"
-          confirmLabel="Cancel application"
-          confirmDisabled={action === 'cancel'}
-          onCancel={() => setConfirmCancel(false)}
-          onConfirm={runCancel}
-        >
-          <p className="text-center text-base">
-            Cancelling stops all processing for <span className="tnum font-semibold">{app.tracking_id}</span>.
-            This can’t be undone.
-          </p>
-        </ProtoModal>
-      )}
     </div>
   )
 }

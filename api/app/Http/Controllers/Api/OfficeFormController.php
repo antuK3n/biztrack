@@ -175,20 +175,44 @@ class OfficeFormController extends Controller
         ]);
 
         $file = $request->file('file');
-        $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
-        $filename = Str::uuid()->toString().'.'.$ext;
-        $directory = "private/documents/{$application->id}";
+        $typeId = SheetRequirements::documentType($permitTypeCode, $documentCode)->id;
 
-        Storage::disk('local')->putFileAs($directory, $file, $filename);
+        /*
+         * The same bytes twice is not a second copy — see the longer note
+         * on `DocumentController::store`, which does this for the business
+         * permit's own requirements. A slot here takes as many files as
+         * the applicant has, and two identical ones are not two: nobody
+         * can act on the difference, because there is none.
+         *
+         * Against the NEWEST only, so A-then-B-then-A still records that
+         * the applicant went back to the first version.
+         */
+        $hash = hash_file('sha256', $file->getRealPath());
+        $sameAgain = ApplicationDocument::where('application_id', $application->id)
+            ->where('document_type_id', $typeId)
+            ->whereNull('permit_type_id')
+            ->latest('id')
+            ->first();
 
-        $document = ApplicationDocument::create([
-            'application_id' => $application->id,
-            'document_type_id' => SheetRequirements::documentType($permitTypeCode, $documentCode)->id,
-            'original_filename' => $file->getClientOriginalName(),
-            'stored_path' => "{$directory}/{$filename}",
-            'mime_type' => $file->getClientMimeType(),
-            'size_bytes' => $file->getSize(),
-        ]);
+        if ($sameAgain === null || $sameAgain->file_hash !== $hash) {
+            $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+            $filename = Str::uuid()->toString().'.'.$ext;
+            $directory = "private/documents/{$application->id}";
+
+            Storage::disk('local')->putFileAs($directory, $file, $filename);
+
+            $document = ApplicationDocument::create([
+                'application_id' => $application->id,
+                'document_type_id' => $typeId,
+                'original_filename' => $file->getClientOriginalName(),
+                'stored_path' => "{$directory}/{$filename}",
+                'mime_type' => $file->getClientMimeType(),
+                'size_bytes' => $file->getSize(),
+                'file_hash' => $hash,
+            ]);
+        } else {
+            $document = $sameAgain;
+        }
         Audit::log('document.uploaded', $document);
 
         /*
