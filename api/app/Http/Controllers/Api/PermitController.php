@@ -310,14 +310,21 @@ class PermitController extends Controller
          * rows, and equal keys without a tiebreak shuffle between pages - a
          * reader paging the register then sees one row twice and another not
          * at all.
+         *
+         * A blank sorts as the lowest value: first ascending, last descending.
+         * That is what SQLite always did with NULL, and it is stated here
+         * because PostgreSQL does the reverse by default — a permit from the
+         * old register has no tracking ID, and after an import there are
+         * thousands of them to land at the wrong end of the table.
          */
         $sort = $request->query('sort');
         $dir = $request->query('dir') === 'asc' ? 'asc' : 'desc';
+        $nulls = $dir === 'asc' ? 'nulls first' : 'nulls last';
 
         if ($sort !== null && isset(self::SORTS[$sort])) {
-            $query->orderByRaw(self::SORTS[$sort].' '.$dir);
+            $query->orderByRaw(self::SORTS[$sort].' '.$dir.' '.$nulls);
         } else {
-            $query->orderByDesc('issued_at');
+            $query->orderByRaw('issued_at desc nulls last');
         }
 
         $permits = $query->orderByDesc('id')->paginate($this->perPage($request));
