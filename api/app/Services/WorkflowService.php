@@ -536,6 +536,60 @@ class WorkflowService
          * same June sanitary fee twice, and whichever bill was paid, the other
          * would still be claiming it.
          */
+        /*
+         * ── This filing's OWN lateness ───────────────────────────────────
+         *
+         * A business permit's term ends on 20 January (`RenewalSeason`), so
+         * a renewal filed on the 21st is late and Secs. 8A.04/8A.05 attach.
+         * Client, 1 October 2026: *"Day after 20 January."*
+         *
+         * Charged on the WHOLE assessment — business tax and every
+         * regulatory and permit line on this bill. Client, same date:
+         * *"The whole assessment."* That is also the plain reading of Sec.
+         * 8A.04's "amount due", and the tax is the largest thing being paid
+         * late, so excluding it would leave the surcharge charging a
+         * fraction of what was actually owed.
+         *
+         * Computed BEFORE the sweep, and so on this filing's own lines
+         * only. The deferred rows coming in below already carry a penalty
+         * frozen at their own filing; surcharging them again here would
+         * charge one late sanitary permit twice — once for being renewed
+         * late in June, once for arriving on a January bill that was
+         * itself late — which is two penalties for one default.
+         *
+         * The prior permit is the BUSINESS one: a renewal carrying five
+         * clearances alongside it is late or not by the business permit's
+         * term, which is the one anchored to the season.
+         */
+        $outcome = $app->permitTypes
+            ->firstWhere(fn (PermitType $pt) => $pt->code === PermitType::OUTCOME_CODE);
+
+        if ($outcome !== null && $total > 0.0) {
+            $own = $this->latePenaltyFor($app, $this->priorPermitFor($app, $outcome), $total);
+
+            if ($own['surcharge'] > 0.0) {
+                $items[] = [
+                    'label' => 'Surcharge for late renewal (25%, Sec. 8A.04)',
+                    'amount' => $own['surcharge'],
+                ];
+                $total = round($total + $own['surcharge'], 2);
+            }
+            if ($own['interest'] > 0.0) {
+                $items[] = [
+                    /*
+                     * The month count is printed. An applicant handed an
+                     * interest line with no period on it cannot check it,
+                     * and 8A.05 caps the count at 36 — a bill that has hit
+                     * the cap should say so rather than look arbitrary.
+                     */
+                    'label' => 'Interest on late renewal (2%/month \u00d7 '
+                        .$own['months_counted'].', Sec. 8A.05)',
+                    'amount' => $own['interest'],
+                ];
+                $total = round($total + $own['interest'], 2);
+            }
+        }
+
         $swept = $this->sweepDeferredFees($app);
         foreach ($swept as $fee) {
             $items[] = [
@@ -550,6 +604,32 @@ class WorkflowService
                 'amount' => (float) $fee->amount,
             ];
             $total = round($total + (float) $fee->amount, 2);
+
+            /*
+             * The penalty this row was already carrying, as its own line
+             * under the fee it belongs to.
+             *
+             * Read off the row, never recomputed: it was frozen at the late
+             * renewal's filing date (see `latePenaltyFor`), and re-deriving
+             * it here would make the figure depend on when BPLO happened to
+             * draw the bill.
+             *
+             * Its own line rather than folded into the fee, so the sanitary
+             * permit still reads at the ordinance's price and the penalty is
+             * visible as a penalty. An applicant who is being charged extra
+             * should be able to see what for and dispute it.
+             */
+            $penalty = round((float) $fee->surcharge + (float) $fee->interest, 2);
+            if ($penalty > 0.0) {
+                $items[] = [
+                    'label' => 'Late surcharge and interest \u2014 '
+                        .($fee->permitType?->name ?? 'permit')
+                        .' ('.$fee->months_late.' month'
+                        .($fee->months_late === 1 ? '' : 's').' late)',
+                    'amount' => $penalty,
+                ];
+                $total = round($total + $penalty, 2);
+            }
         }
 
         return FeeAssessment::updateOrCreate(
@@ -4169,11 +4249,16 @@ class WorkflowService
             return;
         }
 
+        $penalty = $this->latePenaltyFor($app, $this->priorPermitFor($app, $type), $amount);
+
         UnbilledPermitFee::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
             [
                 'business_id' => $app->business_id,
                 'amount' => $amount,
+                'surcharge' => $penalty['surcharge'],
+                'interest' => $penalty['interest'],
+                'months_late' => $penalty['months_counted'],
                 'incurred_at' => now(),
             ],
         );
@@ -4181,7 +4266,72 @@ class WorkflowService
         Audit::log('permit_fee.deferred', $app, [
             'permit_type' => $type->code,
             'amount' => $amount,
+            'surcharge' => $penalty['surcharge'],
+            'interest' => $penalty['interest'],
+            'months_late' => $penalty['months_counted'],
         ]);
+    }
+
+    /**
+     * How late this filing was against the permit it renews, priced.
+     *
+     * Secs. 8A.04 and 8A.05: 25% of the amount due, once, plus 2% a month
+     * on fee-plus-surcharge, the interest capped at 36 months. The
+     * arithmetic is `FeeCalculator::latePenalty`, which has implemented
+     * exactly this since the revenue code was transcribed and which nothing
+     * had ever called — the ordinance was in the database and in a unit
+     * test, and no bill BizTrack issued carried a peso of it.
+     *
+     * ── Counted to SUBMISSION, not to issue ────────────────────────────
+     *
+     * This runs when the permit is issued, which is weeks after the
+     * applicant filed: the office has to review the sheet, schedule an
+     * inspection and conduct it. Counting to today would charge the
+     * applicant 2% a month for the office's own queue, and would make the
+     * penalty depend on how busy CHO was — two businesses equally late
+     * paying different amounts. `submitted_at` is the moment the applicant
+     * did the only thing they control.
+     *
+     * ── And frozen there ───────────────────────────────────────────────
+     *
+     * Client, 1 October 2026, choosing between counting to the filing and
+     * counting to the January payment: *"Expiry -> filing, frozen."* The
+     * months between issue and the January bill add nothing, because that
+     * wait is the city's collection scheme rather than the applicant's
+     * delay — a clearance renewed out of season is issued unbilled by
+     * rule, and billing interest across a deferral nobody asked for would
+     * penalise obeying the process.
+     *
+     * Returns zeros rather than null when nothing is owed, so callers do
+     * not each have to decide what an absent penalty looks like.
+     *
+     * @return array{surcharge: float, interest: float, months_counted: int, total: float}
+     */
+    private function latePenaltyFor(Application $app, ?Permit $prior, float $amount): array
+    {
+        $none = ['surcharge' => 0.0, 'interest' => 0.0, 'months_counted' => 0, 'total' => $amount];
+
+        if ($prior?->valid_until === null || $amount <= 0.0) {
+            return $none;
+        }
+
+        $expired = CarbonImmutable::parse($prior->valid_until)->endOfDay();
+        $filed = CarbonImmutable::parse($app->submitted_at ?? $app->created_at ?? now());
+
+        if ($filed->lessThanOrEqualTo($expired)) {
+            return $none;
+        }
+
+        /*
+         * Whole months, rounded UP, so a filing one day past expiry is one
+         * month late rather than none. Sec. 8A.05 charges "per month or
+         * fraction thereof", which is that rule and not a rounding choice
+         * of ours; `diffInMonths` alone would give nought and the surcharge
+         * would arrive with no interest beside it for a whole month.
+         */
+        $months = (int) ceil($expired->floatDiffInMonths($filed));
+
+        return app(FeeCalculator::class)->latePenalty($amount, max(1, $months));
     }
 
     /**
