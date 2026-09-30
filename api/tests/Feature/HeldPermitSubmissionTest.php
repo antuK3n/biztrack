@@ -107,14 +107,25 @@ it('replaces an earlier certificate for the same clearance', function () {
     $appId = heldPermitDraft();
     $sanitary = sanitaryType();
 
+    /*
+     * `createWithContent`, not `create`, and the two contents differ.
+     *
+     * `UploadedFile::fake()->create()` sets a size and writes NO BYTES, so
+     * two files made that way are byte-identical whatever they are named.
+     * Since 30 September 2026 an upload matching the newest copy of the
+     * same requirement is answered with the copy already held rather than
+     * stored again — right for an applicant who sends one file twice, and
+     * it would silently turn this case into that one, leaving the test
+     * asserting replacement while the code deduplicated.
+     */
     $first = $this->postJson("/api/v1/applications/{$appId}/documents", [
         'permit_type_id' => $sanitary->id,
-        'file' => UploadedFile::fake()->create('old-sanitary.pdf', 20, 'application/pdf'),
+        'file' => UploadedFile::fake()->createWithContent('old-sanitary.pdf', 'the certificate first sent'),
     ])->assertCreated()->json('data');
 
     $second = $this->postJson("/api/v1/applications/{$appId}/documents", [
         'permit_type_id' => $sanitary->id,
-        'file' => UploadedFile::fake()->create('new-sanitary.pdf', 20, 'application/pdf'),
+        'file' => UploadedFile::fake()->createWithContent('new-sanitary.pdf', 'the certificate sent to replace it'),
     ])->assertCreated()->json('data');
 
     $held = ApplicationDocument::where('application_id', $appId)
