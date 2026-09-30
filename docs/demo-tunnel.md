@@ -103,8 +103,8 @@ still do not run it for you. Two things the check deliberately does:
 
 ### What this branch needs, in order
 
-`ken/checklist-0927` (at `2c77033`) adds these seven, all dated 2026-09-27.
-The list is `git diff --name-status c49395a 2c77033 -- api/database/migrations`,
+`ken/checklist-0927` (at `97e1eb2`) adds these eight: seven dated 2026-09-27 and the home address from 2026-09-28.
+The list is `git diff --name-status c49395a 97e1eb2 -- api/database/migrations`,
 where `c49395a` is the `dev` commit the checklist branch was started from.
 Nothing was modified or removed, only added. The order is the order Laravel
 runs them, which is by the full filename (three share the `000100` prefix):
@@ -116,6 +116,8 @@ runs them, which is by the full filename (three share the `000100` prefix):
 5. `2026_09_27_000110_record_each_import_of_the_old_register`: a `legacy_imports` table and one permission row.
 6. `2026_09_27_000120_keep_what_was_removed_in_the_audit_log`: `audit_logs.snapshot`. **Sign-in 500s until this one runs.**
 7. `2026_09_27_000130_give_reporting_tools_stable_views`: three read-only views.
+8. `2026_09_28_000100_give_owners_a_home_address`: five nullable columns on
+   `users` (Register 2). Additive; existing owners are prompted to fill them in.
 
 If the register is also behind `dev` itself, the preflight lists those too.
 Trust its list over this one.
@@ -144,6 +146,7 @@ DB_DATABASE="$DB" php artisan migrate --path=database/migrations/2026_09_27_0001
 DB_DATABASE="$DB" php artisan migrate --path=database/migrations/2026_09_27_000110_record_each_import_of_the_old_register.php --force
 DB_DATABASE="$DB" php artisan migrate --path=database/migrations/2026_09_27_000120_keep_what_was_removed_in_the_audit_log.php --force
 DB_DATABASE="$DB" php artisan migrate --path=database/migrations/2026_09_27_000130_give_reporting_tools_stable_views.php --force
+DB_DATABASE="$DB" php artisan migrate --path=database/migrations/2026_09_28_000100_give_owners_a_home_address.php --force
 
 # 4. Row counts after, and compare.
 "$PRE" counts "$DB" > /tmp/biztrack-counts-after.txt
@@ -154,8 +157,9 @@ diff /tmp/biztrack-counts-before.txt /tmp/biztrack-counts-after.txt
 ```
 
 Reading the diff: new tables (`email_codes`, `legacy_owners`,
-`legacy_imports`), new rows in `permissions` / `role_permissions`, and seven
-more rows in `migrations` are expected. **Any existing table with fewer rows
+`legacy_imports`), new rows in `permissions` / `role_permissions`, and eight
+more rows in `migrations` are expected. `users` keeps its row count; it only
+gains columns. **Any existing table with fewer rows
 is not.** Stop there, and restore the backup before anyone files again.
 
 Stop at the first migration that fails. Do not skip it and carry on.
