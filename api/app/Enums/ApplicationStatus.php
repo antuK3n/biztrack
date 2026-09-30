@@ -288,6 +288,43 @@ enum ApplicationStatus: string
     }
 
     /**
+     * Is this filing waiting on the APPLICANT rather than on an office?
+     *
+     * The question the abandonment sweep asks, and the reason it is here
+     * rather than in the command: a status added later is somebody's move,
+     * and whoever adds it should decide whose while they are looking at
+     * this table.
+     *
+     * ── What is deliberately NOT on this list ──────────────────────────
+     *
+     * `ForApproval` — BPLO is reading the form. An applicant who filed and
+     * waited has done everything asked of them, and a sweep that removed
+     * their filing would be punishing them for the office's backlog. That
+     * is also the one case RA 11032 puts a clock on, and the clock runs
+     * against the city.
+     *
+     * `AwaitingOtherPermits` — mixed. The applicant applies for each
+     * clearance, but the offices then hold them for days at a time, and
+     * from the outside a filing sitting there may be waiting on either.
+     * Sweeping it would eventually delete a filing whose last five days
+     * were CENRO's.
+     *
+     * `ForFinalApproval` — BPLO's, by definition.
+     *
+     * Written as a list of the applicant's states rather than "not one of
+     * the office's", so a status added later is nobody's until somebody
+     * says so — the safe default for a rule that removes records.
+     */
+    public function awaitsApplicant(): bool
+    {
+        return in_array($this, [
+            self::Draft,
+            self::Returned,
+            self::PendingPayment,
+        ], true);
+    }
+
+    /**
      * Has the applicant paid? True for every status at or past the payment.
      *
      * Asked by the clearance stage (its gate is payment, per the client's
