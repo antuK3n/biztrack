@@ -203,6 +203,26 @@ it('keeps the unscoped summary and CSV export to the two cross-office readers', 
     }
 });
 
+it('counts the summary’s filings by calendar month on whichever database is connected', function () {
+    // Two filings moved into a known month, one out of the twelve-month window.
+    $month = now()->subMonths(2)->startOfMonth()->addDays(3);
+    $moved = Application::orderBy('id')->take(3)->get();
+    expect($moved)->toHaveCount(3);
+    foreach ($moved->values() as $i => $app) {
+        $app->forceFill(['created_at' => $i === 2 ? now()->subMonths(14) : $month->copy()->addDays($i)])->saveQuietly();
+    }
+
+    $months = collect(test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/summary')->assertOk()->json('data.applications_by_month'));
+
+    $expected = Application::where('created_at', '>=', now()->subMonths(11)->startOfMonth())->get()
+        ->countBy(fn ($a) => $a->created_at->format('Y-m'))->sortKeys();
+
+    expect($months->pluck('month')->all())->each->toMatch('/^\d{4}-\d{2}$/')
+        ->and($months->pluck('count', 'month')->all())->toBe($expected->all())
+        ->and($months->firstWhere('month', $month->format('Y-m'))['count'])->toBeGreaterThanOrEqual(2);
+});
+
 /* ── precomputation follows the menu ──────────────────────────────────── */
 
 it('precomputes every office at every window the dashboard offers', function () {

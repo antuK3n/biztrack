@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\ChatbotConversation;
 use App\Models\ChatbotMessage;
 use App\Services\ChatbotResponder;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -99,19 +98,17 @@ class ChatbotController extends Controller
     /**
      * The user's one conversation, opened on first use. user_id is unique, so a
      * second request that raced this one loses the insert and re-reads instead.
+     *
+     * createOrFirst rather than create-then-catch, because this runs inside
+     * store()'s transaction. On PostgreSQL a failed INSERT aborts the whole
+     * transaction, so the re-read after catching the violation failed too
+     * ("current transaction is aborted") and the message was lost with a 500.
+     * createOrFirst fences the insert in a savepoint, which rolls back alone.
      */
     private function conversationFor(int $userId): ChatbotConversation
     {
-        $conversation = ChatbotConversation::forUser($userId);
-        if ($conversation) {
-            return $conversation;
-        }
-
-        try {
-            return ChatbotConversation::create(['user_id' => $userId, 'started_at' => now()]);
-        } catch (UniqueConstraintViolationException $e) {
-            return ChatbotConversation::forUser($userId) ?? throw $e;
-        }
+        return ChatbotConversation::forUser($userId)
+            ?? ChatbotConversation::createOrFirst(['user_id' => $userId], ['started_at' => now()]);
     }
 
     private function serialize(ChatbotMessage $message): array

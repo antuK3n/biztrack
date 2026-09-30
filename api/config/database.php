@@ -112,7 +112,15 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'search_path' => 'public',
+            /*
+             * Azure Database for PostgreSQL refuses unencrypted connections, so
+             * production sets DB_SSLMODE=require at least. verify-full also
+             * checks the server is who it says it is, and needs the CA bundle
+             * Azure publishes, named by DB_SSLROOTCERT. Unset, the option is
+             * left out of the DSN entirely. docs/postgres.md.
+             */
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'sslrootcert' => env('DB_SSLROOTCERT'),
         ],
 
         'sqlsrv' => [

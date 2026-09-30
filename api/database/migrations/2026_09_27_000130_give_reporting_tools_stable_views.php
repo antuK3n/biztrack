@@ -36,7 +36,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Soft-deleted businesses are excluded, as every screen excludes them.
  *
- * ── A trap for later migrations (SQLite only) ──────────────────────────────
+ * ── A trap for later migrations (both engines) ─────────────────────────────
  *
  * On SQLite, Laravel's `->change()` rebuilds a table by creating a copy,
  * dropping the original and renaming the copy back. SQLite validates every
@@ -44,13 +44,17 @@ use Illuminate\Support\Facades\DB;
  * fails validation — so a later `->change()` on businesses, permits, payments,
  * applications, business_addresses, barangays, permit_types, departments,
  * users or legacy_owners would stop with "error in view report_…" (measured on
- * a copy of the register before the fix below). PostgreSQL is not affected:
- * `ALTER COLUMN` does not rebuild.
+ * a copy of the register before the fix below). PostgreSQL does not rebuild,
+ * but it refuses ALTER COLUMN … TYPE (which `->change()` always emits) and
+ * DROP COLUMN on any column a view reads — measured on PostgreSQL 16, 30
+ * September 2026. This paragraph used to say PostgreSQL was unaffected; it
+ * was wrong.
  *
  * App\Support\ReportViews handles it, so a later migration needs to do
- * nothing: on SQLite the views are dropped when `artisan migrate` starts and
- * re-created by this `up()` when it ends (AppServiceProvider). This `up()`
- * therefore starts by dropping whatever is there, so running it twice is safe.
+ * nothing: on either engine the views are dropped when `artisan migrate`
+ * starts and re-created by this `up()` when it ends (AppServiceProvider), with
+ * their PostgreSQL grants put back. This `up()` therefore starts by dropping
+ * whatever is there, so running it twice is safe.
  * Change a view by editing it here AND in a new migration that re-runs the
  * CREATE — never by editing only this file, which production has already run.
  */

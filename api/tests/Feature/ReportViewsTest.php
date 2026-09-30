@@ -8,8 +8,10 @@ use App\Support\LegacyImport\Sources\OdbcSource;
 use App\Support\ReportViews;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /*
  * Migration 2 (OUT) — stable views for ODBC reporting tools (Ken's checklist,
@@ -55,13 +57,81 @@ it('shows an imported, unclaimed business with the old register’s owner name',
         ->and($permit->issuing_office)->not->toBeNull();
 });
 
-it('steps the views aside while migrations run on SQLite, and puts them back after', function () {
+/** The report views that exist right now, on whichever engine is connected. */
+function reportViewNames(): array
+{
+    return collect(Schema::getViews())->pluck('name')
+        ->filter(fn ($name) => str_starts_with($name, 'report_'))
+        ->sort()->values()->all();
+}
+
+/*
+ * Both engines, not only SQLite. SQLite cannot rebuild a table a view reads;
+ * PostgreSQL cannot ALTER COLUMN … TYPE or DROP COLUMN one. Either way a later
+ * `->change()` on a reported table would fail unless the views step aside.
+ */
+it('steps the views aside while migrations run, and puts them back after', function () {
     event(new MigrationsStarted('up'));
-    expect(DB::select("SELECT name FROM sqlite_master WHERE type = 'view' AND name LIKE 'report_%'"))->toBe([]);
+    expect(reportViewNames())->toBe([]);
 
     event(new MigrationsEnded('up'));
-    expect(collect(DB::select("SELECT name FROM sqlite_master WHERE type = 'view'"))->pluck('name')->sort()->values()->all())
-        ->toBe(collect(ReportViews::NAMES)->sort()->values()->all());
+    expect(reportViewNames())->toBe(collect(ReportViews::NAMES)->sort()->values()->all());
+});
+
+it('leaves the views alone when migrate only pretends', function () {
+    event(new MigrationsStarted('up', ['pretend' => true]));
+    expect(reportViewNames())->toBe(collect(ReportViews::NAMES)->sort()->values()->all());
+    event(new MigrationsEnded('up', ['pretend' => true]));
+});
+
+/*
+ * `payments` because no other table points a foreign key at it: SQLite's
+ * rebuild drops the table, and inside the test's open transaction it cannot
+ * switch foreign keys off to do that with rows pointing in. A real migration
+ * runs outside one. Widening the column is the smallest change that is still a
+ * real ALTER on both engines.
+ */
+it('lets a migration change a column the views read', function () {
+    event(new MigrationsStarted('up'));
+    Schema::table('payments', fn (Blueprint $t) => $t->string('method', 300)->change());
+    event(new MigrationsEnded('up'));
+
+    expect(DB::table('report_payments')->count())
+        ->toBe(Payment::whereHas('application', fn ($a) => $a->whereHas('business'))->count());
+});
+
+/*
+ * A re-created view has lost its grants, and the reporting login reads nothing
+ * BUT the views — so a deploy that migrated would lock Excel and Power BI out
+ * without a word. PostgreSQL only: SQLite has no logins.
+ */
+it('gives the reporting login its access back after the views are re-created', function () {
+    if (DB::getDriverName() !== 'pgsql') {
+        $this->markTestSkipped('Grants exist only on PostgreSQL.');
+    }
+
+    // Roles are cluster-wide; created inside the test's transaction, so the
+    // rollback takes them away again.
+    $configured = 'report_cfg_'.bin2hex(random_bytes(4));
+    $other = 'report_other_'.bin2hex(random_bytes(4));
+    DB::statement("CREATE ROLE {$configured} NOLOGIN");
+    DB::statement("CREATE ROLE {$other} NOLOGIN");
+    config(['biztrack.report_role' => $configured]);
+    // The other role holds a grant when the run starts, and must keep it.
+    DB::statement("GRANT SELECT ON report_permits TO {$other}");
+
+    event(new MigrationsStarted('up'));
+    event(new MigrationsEnded('up'));
+
+    $can = fn (string $role, string $view) => (bool) DB::selectOne(
+        "SELECT has_table_privilege(?, ?, 'SELECT') AS ok", [$role, $view]
+    )->ok;
+
+    foreach (ReportViews::NAMES as $view) {
+        expect($can($configured, $view))->toBeTrue("{$configured} lost SELECT on {$view}");
+    }
+    expect($can($other, 'report_permits'))->toBeTrue()
+        ->and($can($other, 'report_businesses'))->toBeFalse();
 });
 
 it('prints a read-only role limited to the report views, and never asks for its password', function () {
