@@ -92,15 +92,20 @@ class BusinessController extends Controller
              * would move that dead end earlier and make it silent.
              *
              * So the answer remains ordering: the businesses that can be renewed
-             * surface first, the rest stay reachable behind them. `withCount`
+             * surface first, the rest stay reachable behind them. An EXISTS
              * rather than a join because `permits` is many-per-business and a
              * join would multiply the page.
+             *
+             * It was `withCount('permits')` and ORDER BY CASE WHEN
+             * permits_count > 0. SQLite lets ORDER BY reach a select alias
+             * inside an expression; PostgreSQL does not, so the owner's
+             * business list answered 500 on the production database. The count
+             * was read by nothing but this sort.
              */
             // Named in the amendment chooser, so it must arrive with the
             // list rather than a request per row. One constant query.
             ->with('currentBusinessPermit')
-            ->withCount('permits')
-            ->orderByRaw('CASE WHEN permits_count > 0 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN EXISTS (SELECT 1 FROM permits WHERE permits.business_id = businesses.id) THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
