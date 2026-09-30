@@ -4,7 +4,10 @@
 # Built on the server itself (1 GB RAM + 2 GB swap), so the build skips
 # `tsc -b`: types are checked on a developer machine before anything is
 # pushed, and the full type-check does not fit in this server's memory.
-FROM node:22-alpine AS build
+# Node 24 = npm 11, the same npm that writes package-lock.json on the
+# developer machines; npm 10 reads optional wasm packages differently and
+# refuses the lock.
+FROM node:24-alpine AS build
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
