@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
   GENDERS,
+  ORGANIZATION_FORMS,
   TIN_ERROR,
   emailValid,
   genderLabel,
@@ -943,16 +944,17 @@ type RegistrationAgency = 'DTI' | 'SEC' | 'CDA'
  * The API stores the structure in `businesses.registration_type` and derives the
  * agency the same way (Business::REGISTRAR_BY_FORM).
  */
+/*
+ * The list moved to `lib/fieldRules` on 30 September 2026, when the
+ * officer's review sheet began offering the same four as a correction
+ * control. Kept under its own name here because eight call sites below
+ * read it, and renaming them would bury the one-line change that matters.
+ */
 const REGISTRATION_TYPES: {
   value: string
   label: string
   agency: RegistrationAgency
-}[] = [
-  { value: 'sole_proprietorship', label: 'Sole Proprietorship', agency: 'DTI' },
-  { value: 'partnership', label: 'Partnership', agency: 'SEC' },
-  { value: 'corporation', label: 'Corporation', agency: 'SEC' },
-  { value: 'cooperative', label: 'Cooperative', agency: 'CDA' },
-]
+}[] = ORGANIZATION_FORMS
 
 /**
  * How each agency's number is asked for. The label is what the input is called
@@ -1045,14 +1047,22 @@ const REGISTRATION_AGENCIES: Record<
  * there is no point telling somebody their number is unusual underneath a
  * message telling them it is not a number.
  */
-function registrationNumberUnusual(agency: RegistrationAgency | null, raw: string): boolean {
-  const trimmed = raw.trim()
-  if (agency === null || trimmed === '' || !registrationNumberValid(trimmed)) return false
-  const { shape } = REGISTRATION_AGENCIES[agency]
-  if (shape === null) return false
-
-  return !shape.test(trimmed.replace(/[\s.]/g, ''))
-}
+/*
+ * `registrationNumberUnusual()` stood here and is gone with the advisory
+ * note it fed — 30 September 2026, at the client's request.
+ *
+ * The `shape` regexes in REGISTRATION_AGENCIES above are deliberately KEPT.
+ * They are the only record anyone here has of what these three numbers
+ * actually look like, gathered from the agencies' own registers, and the
+ * next person asked for per-agency validation should read them first. On
+ * 30 September I did not: I researched SEC off a web summary, required one
+ * of five prefixes, and would have refused the four other prefixes those
+ * regexes record — CEO, ASO, AS, PP — along with every bare-numeric
+ * registration SEC has issued. The asymmetry that argues against enforcing
+ * any of it is worth repeating: a refused applicant cannot file at all,
+ * while a mistyped number is caught by the officer who opens the uploaded
+ * certificate a few days later.
+ */
 
 /** The agency that registers a structure, or null while none is chosen. */
 function agencyFor(registrationType: string): RegistrationAgency | null {
@@ -5221,7 +5231,14 @@ export function ApplyWizard() {
           else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
           if (!form.email.trim()) missing.push('E-mail Address')
           else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
-          if (!form.trade_name.trim()) missing.push('Trade Name / Franchise')
+          /*
+           * Item 5 is OPTIONAL as of 30 September 2026, on the client's
+           * decision. The server always accepted a blank one and the permit
+           * already omits the row when there is none; what this check
+           * demanded of most filers was their own business name, typed a
+           * second time. A business that trades under its registered name
+           * has no second name to give.
+           */
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
           }
@@ -6019,10 +6036,12 @@ export function ApplyWizard() {
      * on this step: complaining about an empty field the moment focus lands
      * in it is telling somebody off for not having typed yet.
      */
-    trade_name:
-      touched.trade_name && !form.trade_name.trim()
-        ? 'Enter the name your business trades under. Repeat your business name if they are the same.'
-        : '',
+    /*
+     * Nothing is said about a blank one. It is optional, and a business
+     * trading under its registered name has no second name to give — the
+     * old message asked them to type the first one again.
+     */
+    trade_name: '',
     /*
      * Before a structure is chosen this field is read-only, and reaching it
      * says why — the client, 30 September 2026, having clicked a closed box
@@ -9676,21 +9695,25 @@ export function ApplyWizard() {
                 </FieldError>
               )}
               {/*
-                * The advisory shape check (items 21 and 26). Not an error, not
-                * red, and it blocks nothing — see registrationNumberUnusual for
-                * why refusing an unusual number would be worse than accepting a
-                * wrong one. Rendered only once the applicant has left the field,
-                * so it does not fire at every keystroke of a number being typed,
-                * and never at the same time as the hard error above it.
+                * The advisory shape note stood here and is gone —
+                * 30 September 2026, at the client's request.
+                *
+                * It read "that does not look like the usual CDA format
+                * (9520-15005879). Check it against your certificate — we will
+                * accept it either way", which tells somebody their number may
+                * be wrong and then says it does not matter. A reader either
+                * ignores it or re-checks a certificate that is very likely
+                * fine: `9520-` is one of CDA's four series and belongs to
+                * cooperatives registered under the 2008 Code, so the note fired
+                * on the oldest co-ops in the city and was wrong about all of
+                * them.
+                *
+                * The `shape` regexes themselves stay. They are the best record
+                * anyone here has of what these numbers look like, and the next
+                * person to be asked for per-agency validation should read them
+                * before reaching for a web summary — see the note on
+                * `registrationNumberUnusual` for what that cost.
                 */}
-              {!fieldErrors.registration_number &&
-                touched.registration_number &&
-                registrationNumberUnusual(registrationAgency, form.registration_number) && (
-                  <p className="mt-1 text-xs text-s-orange" aria-live="polite">
-                    {registrationAgencyInfo?.unusual} Check it against your certificate — we will
-                    accept it either way.
-                  </p>
-                )}
             </div>
               {/*
                * Item 105 — four boxes of three digits, not one box with
@@ -9781,7 +9804,7 @@ export function ApplyWizard() {
               </div>
             <div className="grow basis-[12rem] max-w-full">
               <label className="block">
-                <FieldLabel required>5. Trade Name / Franchise</FieldLabel>
+                <FieldLabel>5. Trade Name / Franchise</FieldLabel>
                 <input
                   value={form.trade_name}
                   onChange={(e) => update('trade_name', e.target.value)}
@@ -10228,16 +10251,14 @@ export function ApplyWizard() {
                           onChange={(e) => update('capital_participation_filipino', e.target.value)}
                           onBlur={() => touch('capital_participation_filipino')}
                           /*
-                           * A locked box with nothing in it and a red asterisk
-                           * beside it reads as broken — reported on
-                           * 27 September 2026 from the one state where it
-                           * happens: Other chosen in item 16, nationality not
-                           * yet typed, so there is nothing to derive from yet.
-                           * The placeholder says where the figure comes from
-                           * instead of leaving the applicant to guess why the
-                           * box refuses them.
+                           * No placeholder while the box is derived. "Follows
+                           * item 16" went in on 27 September 2026 so a locked,
+                           * empty box with a red asterisk would not read as
+                           * broken; the client had it removed on 30 September.
+                           * The hint below the field already says where the
+                           * figure comes from, so this was saying it twice.
                            */
-                          placeholder={oicIsProprietor ? 'Follows item 16' : 'e.g. 100'}
+                          placeholder={oicIsProprietor ? '' : 'e.g. 100'}
                           readOnly={oicIsProprietor}
                           aria-readonly={oicIsProprietor || undefined}
                           aria-describedby={
