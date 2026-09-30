@@ -208,8 +208,8 @@ class AssignmentController extends Controller
          */
         if ($q = $request->query('q')) {
             $query->whereHas('application', function ($a) use ($q) {
-                $a->where('tracking_id', 'like', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"));
+                $a->whereLike('tracking_id', "%{$q}%")
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
             });
         }
 
