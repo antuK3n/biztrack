@@ -42,9 +42,9 @@ class AppServiceProvider extends ServiceProvider
                 : Limit::perMinute(10)->by($request->ip());
         });
 
-        // The reporting views step aside while migrations run on SQLite, so a
-        // later `->change()` can rebuild the tables they read. See ReportViews.
-        Event::listen(MigrationsStarted::class, fn () => ReportViews::suspend());
-        Event::listen(MigrationsEnded::class, fn () => ReportViews::resume());
+        // The reporting views step aside while migrations run, so a later
+        // `->change()` can alter the tables they read. See ReportViews.
+        Event::listen(MigrationsStarted::class, fn (MigrationsStarted $e) => ReportViews::suspend($e));
+        Event::listen(MigrationsEnded::class, fn (MigrationsEnded $e) => ReportViews::resume($e));
     }
 }
