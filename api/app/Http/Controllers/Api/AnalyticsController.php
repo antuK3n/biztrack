@@ -333,9 +333,9 @@ class AnalyticsController extends Controller
         $byType = Application::select('application_type', DB::raw('count(*) as c'))
             ->groupBy('application_type')->pluck('c', 'application_type');
 
-        // Applications per month (last 12 months) — SQLite strftime.
+        // Applications per month (last 12 months).
         $byMonth = Application::select(
-            DB::raw("strftime('%Y-%m', created_at) as month"),
+            DB::raw($this->yearMonth('created_at').' as month'),
             DB::raw('count(*) as count')
         )
             ->where('created_at', '>=', now()->subMonths(11)->startOfMonth())
@@ -370,6 +370,26 @@ class AnalyticsController extends Controller
             'expiring_permits' => $expiringPermits,
             'simulated_revenue' => round($simulatedRevenue, 2),
         ];
+    }
+
+    /**
+     * `YYYY-MM` of a timestamp column, in the SQL of whichever engine is
+     * connected.
+     *
+     * This was `strftime('%Y-%m', …)` alone, which is SQLite's and nothing
+     * else's: on PostgreSQL, the production database, the summary and its CSV
+     * export answered 500 ("function strftime does not exist"). There is no
+     * date-formatting function the two engines share, so the one line that
+     * differs is chosen here. The column is a constant from this file, never
+     * input.
+     */
+    private function yearMonth(string $column): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'pgsql' => "to_char({$column}, 'YYYY-MM')",
+            'mysql', 'mariadb' => "date_format({$column}, '%Y-%m')",
+            default => "strftime('%Y-%m', {$column})",
+        };
     }
 
     /** Mean days from `submitted` to `approved` per application, from status history. */
