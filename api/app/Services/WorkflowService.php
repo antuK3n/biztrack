@@ -27,15 +27,15 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
-use App\Support\ClearanceSnapshot;
-use App\Support\ReturnTargets;
-use App\Support\SheetRequirements;
 use App\Support\Audit;
+use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
 use App\Support\PermitFace;
 use App\Support\Ra11032;
 use App\Support\RenewalSeason;
+use App\Support\ReturnTargets;
+use App\Support\SheetRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -852,8 +852,7 @@ class WorkflowService
             'requested_by_user_id' => null,
             'department_id' => $this->bploDepartmentId(),
             'title' => 'Tax Identification Number (TIN)',
-            'description' =>
-                'You left the Tax Identification Number (TIN) blank on your application form. '
+            'description' => 'You left the Tax Identification Number (TIN) blank on your application form. '
                 .'Type it in your reply below — there is no document to attach. '
                 .'It is the TIN of the owner or the registered entity, as printed on your BIR papers, '
                 .'like 123-456-789-000.',
@@ -893,16 +892,16 @@ class WorkflowService
     /** BPLO returns the main form for revision. for_approval → returned. */
     /**
      * @param  string|null  $target  Which field the applicant must fix, as a
-     *   code the system owns. Null is a perfectly good return — the prose is
-     *   never parsed to derive one, the same rule `returnClearance` follows.
+     *                               code the system owns. Null is a perfectly good return — the prose is
+     *                               never parsed to derive one, the same rule `returnClearance` follows.
      */
     /**
      * @param  array<string, string>  $notes  One remark per returned field,
-     *   keyed by the same `form:` code as $target. Client, 27 September
-     *   2026: *"Allow to put 1 comment/remark per field selected, not just 1
-     *   remark for all fields."* Empty is still valid — a return that names
-     *   no fields carries prose alone, as every return did before the
-     *   picker existed.
+     *                                        keyed by the same `form:` code as $target. Client, 27 September
+     *                                        2026: *"Allow to put 1 comment/remark per field selected, not just 1
+     *                                        remark for all fields."* Empty is still valid — a return that names
+     *                                        no fields carries prose alone, as every return did before the
+     *                                        picker existed.
      */
     public function returnMainForm(
         Application $app,
@@ -1039,6 +1038,23 @@ class WorkflowService
                 ],
             ])->save();
         });
+
+        /*
+         * Told, because otherwise nobody is. A return notifies and a
+         * refusal notifies; changing what either of them asked for used to
+         * be silent, so an office could add a second field and the one
+         * person who has to act on it would find out only by reopening a
+         * dialog they believe they have already answered.
+         *
+         * Outside the transaction, like every other notification here: a
+         * message that cannot be unsent has no business inside something
+         * that can be rolled back.
+         */
+        $this->notify->applicationStatus(
+            $app,
+            $app->status,
+            'BPLO changed what needs correcting: '.$remarks,
+        );
     }
 
     /**
@@ -1057,13 +1073,27 @@ class WorkflowService
         ?string $target = null,
         array $notes = [],
     ): void {
-        if ($row->status !== ClearanceStatus::Returned) {
+        /*
+         * Returned OR Rejected. Both are with the applicant, and a refusal
+         * is the one that most needs correcting: it suspends the business
+         * permit while it stands, so an officer who ticked the wrong row or
+         * wrote an unusable remedy is holding a trading business shut over
+         * a mistake they cannot take back.
+         */
+        if (! in_array($row->status, [ClearanceStatus::Returned, ClearanceStatus::Rejected], true)) {
             throw ValidationException::withMessages([
-                'status' => ['This permit is not with the applicant, so there is no return to change.'],
+                'status' => ['This permit is not with the applicant, so there is nothing to change.'],
             ]);
         }
 
         DB::transaction(function () use ($row, $remarks, $target, $notes) {
+            /*
+             * `rejected_at`, `rejection_note` and `rejection_remedy` are NOT
+             * touched. On a refusal the officer is correcting WHICH rows they
+             * meant; the refusal itself stands, and rewriting its record from
+             * an amend would lose the fact that this permit was refused —
+             * which is what the office re-reading it needs most.
+             */
             $row->update([
                 'remarks' => $remarks,
                 'remarks_target' => $target,
@@ -1085,6 +1115,13 @@ class WorkflowService
                 ->delete();
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
         });
+
+        /* Told, for the reason `amendMainFormReturn` gives at length. */
+        $this->notify->applicationStatus(
+            $row->application,
+            $row->application->status,
+            $row->permitType->name.': the office changed what needs correcting — '.$remarks,
+        );
     }
 
     /**
@@ -1357,6 +1394,7 @@ class WorkflowService
             ]);
         }
     }
+
     /** B: resubmit a returned form. returned → for_approval. */
     public function resubmit(Application $app): void
     {
@@ -2178,11 +2216,11 @@ class WorkflowService
      */
     /**
      * @param  array<string, string>  $notes  One remark per returned row,
-     *   keyed by the same code as $target. The officer's UI refuses to send
-     *   a return until every ticked row has one, and until 30 September
-     *   2026 this method had nowhere to put them — so an office typed three
-     *   notes and the applicant got one paragraph with all three run
-     *   together and the rows themselves blank.
+     *                                        keyed by the same code as $target. The officer's UI refuses to send
+     *                                        a return until every ticked row has one, and until 30 September
+     *                                        2026 this method had nowhere to put them — so an office typed three
+     *                                        notes and the applicant got one paragraph with all three run
+     *                                        together and the rows themselves blank.
      */
     public function returnClearance(
         ApplicationPermitType $row,
@@ -3893,12 +3931,13 @@ class WorkflowService
 
         $this->rejectClearance($row, $reason, $remedy, $target, $notes);
     }
+
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
     /**
      * @param  array<string, string>  $notes  One remark per returned field —
-     *   only meaningful on the BPLO main-form branch below, which is the only
-     *   return that names wizard fields. Passed straight through rather than
-     *   inspected here: `returnMainForm` owns what a note means.
+     *                                        only meaningful on the BPLO main-form branch below, which is the only
+     *                                        return that names wizard fields. Passed straight through rather than
+     *                                        inspected here: `returnMainForm` owns what a note means.
      */
     /**
      * Change what an already-returned filing is being asked for.
