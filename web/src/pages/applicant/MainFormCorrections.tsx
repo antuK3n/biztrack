@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { toApiError } from '../../lib/api'
 import { Link } from 'react-router-dom'
+import { DocumentActions } from '../../components/DocumentActions'
+import { CheckCircleFilledIcon, UploadIcon } from '../../components/icons'
 import {
   registrationNumberHint,
   registrationNumberLabel,
@@ -9,7 +11,7 @@ import {
 } from '../../lib/fieldRules'
 import { applications, documents } from '../../lib/resources'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
-import type { Application } from '../../lib/types'
+import type { Application, UploadedDocument } from '../../lib/types'
 import { ACCEPT_ATTR, MAX_UPLOAD_BYTES, fileRejection, uploadErrorMessage } from './uploads'
 
 /*
@@ -176,25 +178,58 @@ function DocumentCorrection({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
+  /*
+   * Every file sent in this sitting — the DOCUMENTS, not their names.
+   *
+   * Names were enough to say "it arrived" and nothing else: no id meant no
+   * View, no Download, no Remove, where Section C offers all three on the
+   * same requirement. `documents.upload` returns the stored row, so the id
+   * was there to keep all along.
+   */
+  const [done, setDone] = useState<UploadedDocument[]>([])
 
-  async function choose(file: File | null) {
-    if (!file) return
-
-    /* The form's own rule, run before the request rather than after it. */
-    const rejection = fileRejection(file)
-    if (rejection) {
-      setError(rejection)
-
-      return
+  /*
+   * Take one back off. Only files sent in THIS sitting are listed, so
+   * this can never delete the copy the office refused — that one is the
+   * evidence of what was refused and stays on the filing.
+   */
+  async function discard(documentId: number) {
+    setBusy(true)
+    setError(null)
+    try {
+      await documents.remove(applicationId, documentId)
+      setDone((prev) => prev.filter((d) => d.id !== documentId))
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(false)
     }
+  }
+
+  async function choose(files: File[]) {
+    if (files.length === 0) return
 
     setBusy(true)
     setError(null)
     try {
-      await documents.upload(applicationId, documentType.id, file)
-      setDone(file.name)
-      onUploaded(documentType.code)
+      /*
+       * ONE AT A TIME, awaited. Fired together they race — each response
+       * carries a full snapshot and the last to arrive wins, so picking
+       * three files commonly showed one, with the rest on disk and
+       * invisible. That cost a round on the office checklist already.
+       */
+      for (const file of files) {
+        /* The form's own rule, run before the request rather than after. */
+        const rejection = fileRejection(file)
+        if (rejection) {
+          setError(rejection)
+
+          return
+        }
+        const stored = await documents.upload(applicationId, documentType.id, file)
+        setDone((prev) => [...prev, stored])
+        onUploaded(documentType.code)
+      }
     } catch (err) {
       setError(uploadErrorMessage(err))
     } finally {
@@ -222,21 +257,91 @@ function DocumentCorrection({
           “{note}”
         </p>
       )}
-      <input
-        type="file"
-        accept={ACCEPT_ATTR}
-        disabled={busy}
-        onChange={(e) => void choose(e.target.files?.[0] ?? null)}
-        aria-label={`Re-upload ${documentType.name}`}
-        className="mt-1.5 block w-full text-sm text-ink file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-royal/30 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-royal hover:file:bg-royal-tint"
-      />
-      {/* The limit said out loud, in the same words the form uses. */}
-      <p className="mt-1 text-xs text-ink-muted">
-        PDF, JPG or PNG, up to {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.
-      </p>
-      {busy && <p className="mt-1 text-xs text-ink-secondary">Uploading…</p>}
-      {done && !busy && (
-        <p className="mt-1 text-xs font-medium text-s-green">Uploaded {done}.</p>
+      {/*
+        The form's own dashed drop box, not a bare native input. This was
+        "Choose File / no file chosen" with a one-line green sentence
+        under it, against the box the same requirement has on the
+        application form — and on a screen whose whole job is "replace
+        the file they refused", showing that something arrived is the
+        one thing it has to do.
+      */}
+      <label
+        className={`mt-2 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-4 py-3 transition-colors hover:bg-input ${
+          busy ? 'pointer-events-none opacity-60' : ''
+        }`}
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+          <UploadIcon size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-ink">
+            {busy ? 'Uploading…' : 'Upload a replacement'}
+          </span>
+          {/*
+            Section C's own second line: the count once there are files,
+            the rule before that. "Choose a replacement" described a box
+            that takes one, which this does not.
+          */}
+          <span className="mt-0.5 block text-xs text-ink-muted">
+            {done.length > 0
+              ? `${done.length} file${done.length === 1 ? '' : 's'} attached · click to add another`
+              : `PDF, JPG or PNG, up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`}
+          </span>
+        </span>
+        {done.length > 0 && !busy && (
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+            <CheckCircleFilledIcon size={16} /> Uploaded
+          </span>
+        )}
+        <input
+          type="file"
+          accept={ACCEPT_ATTR}
+          /*
+            As many as they have, like the field this row is about.
+            Section C takes several per requirement — a two-page
+            certificate is two files — and this took one.
+          */
+          multiple
+          disabled={busy}
+          onChange={(e) => {
+            const chosen = Array.from(e.target.files ?? [])
+            // Let the same file be picked twice — after a rejection the
+            // input would otherwise be inert.
+            e.target.value = ''
+            void choose(chosen)
+          }}
+          aria-label={`Re-upload ${documentType.name}`}
+          className="sr-only"
+        />
+      </label>
+      {/*
+        What arrived, with the three things Section C offers on it. Sending
+        the wrong scan is the easiest mistake on this screen, and until now
+        the applicant could not open what they had just sent to check.
+      */}
+      {done.length > 0 && (
+        <ul className="mt-2 space-y-2">
+          {done.map((doc) => (
+            <li
+              key={doc.id}
+              className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-3 py-2"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                {doc.original_filename}
+              </span>
+              <DocumentActions id={doc.id} filename={doc.original_filename} />
+              <button
+                type="button"
+                onClick={() => void discard(doc.id)}
+                disabled={busy}
+                aria-label={`Remove ${doc.original_filename}`}
+                className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
       {error && (
         <p role="alert" className="mt-1 text-xs font-medium text-s-red">

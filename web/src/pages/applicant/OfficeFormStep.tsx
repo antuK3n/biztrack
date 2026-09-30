@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
@@ -468,7 +468,6 @@ export function WhatToCorrect({
 }) {
   const office = REQUIREMENTS_META[code]?.office ?? 'This office'
   /* The file just sent, per row — BPLO says "Uploaded <name>." */
-  const [uploaded, setUploaded] = useState<Record<string, string | null>>({})
 
   /*
    * A target is either a checklist slot or an answer key. The checklist is
@@ -500,6 +499,15 @@ export function WhatToCorrect({
         <div className="space-y-5">
           {items.map((item) => {
             const busy = requirementBusy === item.target
+            /*
+             * The files ON the row, which the caller keeps refreshed from
+             * each upload. Local state held their NAMES until 30 September
+             * 2026 — a worse copy of something already in hand, with no id
+             * on it, so the box could say a file had arrived and offer
+             * nothing to do with it. Reading the row also means reopening
+             * the dialog still shows them.
+             */
+            const files = item.row?.documents ?? []
 
             return (
               <div key={item.target}>
@@ -523,42 +531,102 @@ export function WhatToCorrect({
                 {item.row !== undefined ? (
                   <>
                     {/*
-                      A document. `onRequirementChange` is the checklist row's
-                      own handler, so a file put in here lands in exactly the
-                      same slot and shows up on the row below.
+                      The checklist row's own control, with the checklist
+                      row's own rules. `onRequirementChange` is its handler,
+                      so a file put in here lands in the same slot and shows
+                      on the row below.
+
+                      It took ONE file until 30 September 2026, which was me
+                      matching the wrong thing: the client asked for BPLO's
+                      LAYOUT and for the rules of the field each row is
+                      about, and a checklist slot takes as many as the
+                      applicant has. A two-page endorsement is two files.
                     */}
+                    <label
+                      className={`mt-2 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-4 py-3 transition-colors hover:bg-input ${
+                        busy || onRequirementChange === undefined
+                          ? 'pointer-events-none opacity-60'
+                          : ''
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+                        <UploadIcon size={18} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-ink">
+                          {busy ? 'Uploading…' : 'Upload a replacement'}
+                        </span>
+                        {/*
+                          The checklist row's own second line: the count once
+                          there are files, the rule before that.
+                        */}
+                        <span className="mt-0.5 block text-xs text-ink-muted">
+                          {files.length > 0
+                            ? `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
+                            : `PDF, JPG or PNG, up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`}
+                        </span>
+                      </span>
+                      {files.length > 0 && !busy && (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+                          <CheckCircleFilledIcon size={16} /> Uploaded
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept={ACCEPT_ATTR}
+                        multiple
+                        disabled={busy || onRequirementChange === undefined}
+                        aria-label={`Re-upload ${item.label}`}
+                        onChange={async (e) => {
+                          const chosen = Array.from(e.target.files ?? [])
+                          // Let the same file be picked twice — after a
+                          // rejection the input would otherwise be inert.
+                          e.target.value = ''
+                          if (item.row?.code == null) return
+                          /*
+                            One at a time, awaited. Fired together they race
+                            — each response is a full snapshot and the last
+                            to arrive wins, so three files commonly showed
+                            one, with the rest on disk and invisible.
+                          */
+                          for (const file of chosen) {
+                            await onRequirementChange?.(item.row.code, file)
+                          }
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
                     {/*
-                      One file, as BPLO's does. The office asked for a
-                      better copy of one document; the checklist row
-                      further down still takes as many as the applicant
-                      has, which is where a multi-page lease belongs.
+                      What is on the row, with the three things its own
+                      checklist entry offers. Sending the wrong scan is the
+                      easiest mistake here, and until now the applicant
+                      could not open what they had just sent to check it.
                     */}
-                    <input
-                      type="file"
-                      accept={ACCEPT_ATTR}
-                      disabled={busy || onRequirementChange === undefined}
-                      aria-label={`Re-upload ${item.label}`}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0] ?? null
-                        // Let the same file be picked twice — after a
-                        // rejection the input would otherwise be inert.
-                        e.target.value = ''
-                        if (file === null || item.row?.code == null) return
-                        setUploaded((u) => ({ ...u, [item.target]: null }))
-                        await onRequirementChange?.(item.row.code, file)
-                        setUploaded((u) => ({ ...u, [item.target]: file.name }))
-                      }}
-                      className="mt-1.5 block w-full text-sm text-ink file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-royal/30 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-royal hover:file:bg-royal-tint disabled:opacity-60"
-                    />
-                    <p className="mt-1 text-xs text-ink-muted">
-                      PDF, JPG or PNG, up to {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.
-                    </p>
-                    {busy && <p className="mt-1 text-xs text-ink-secondary">Uploading…</p>}
-                    {/* BPLO's own confirmation, in its own words. */}
-                    {uploaded[item.target] != null && !busy && (
-                      <p className="mt-1 text-xs font-medium text-s-green">
-                        Uploaded {uploaded[item.target]}.
-                      </p>
+                    {files.length > 0 && (
+                      <ul className="mt-2 space-y-2">
+                        {files.map((file) => (
+                          <li
+                            key={file.id}
+                            className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-3 py-2"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                              {file.filename}
+                            </span>
+                            <DocumentActions id={file.id} filename={file.filename} />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onRequirementChange?.(item.row!.code!, null, file.id)
+                              }
+                              disabled={busy}
+                              aria-label={`Remove ${file.filename}`}
+                              className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </>
                 ) : (

@@ -254,6 +254,8 @@ interface ClearanceStageProps {
   correctCode: OfficeFormCode | null
   /** Dismiss the dialog, clearing `?correct` with it. */
   onCorrectionsClose: () => void
+  /** Open it for one permit, from a returned card on this stage. */
+  onCorrect: (code: string) => void
   /**
    * Which office's sheet is open, straight off the URL.
    *
@@ -315,6 +317,7 @@ export function ClearanceStage({
   onOpenChange,
   correctCode,
   onCorrectionsClose,
+  onCorrect,
 }: ClearanceStageProps) {
   /**
    * May this filing hand in a certificate it already holds?
@@ -1758,6 +1761,15 @@ export function ClearanceStage({
            * Submit on the one card the applicant still had work to do on.
            */
           const handedIn = clearanceWithOffice(row.state)
+          /*
+           * Does the correction dialog answer this card?
+           *
+           * True only when the office RETURNED it and NAMED what is wrong.
+           * A return written as plain prose has nothing for the dialog to
+           * list, so the sheet stays the way in — which is why this asks
+           * about the pointer and not only about the state.
+           */
+          const answersReturn = row.state === 'returned' && (row.return_target ?? '') !== ''
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
@@ -2212,6 +2224,18 @@ export function ClearanceStage({
                   {held ? 'Copy uploaded' : 'Upload a copy'}
                 </button>
                 )}
+                {/*
+                  The form button gives way to the correction dialog on a
+                  returned card. "Finish form" describes work the applicant
+                  has already done — the form was submitted, which is how
+                  the office came to return it — and two buttons on a card
+                  naming one problem is a choice nobody asked for.
+
+                  Only when the office NAMED rows. A return written as
+                  plain prose opens no dialog, so the sheet stays the way
+                  in and the button stays with it.
+                */}
+                {!answersReturn && (
                 <button
                   type="button"
                   disabled={busy}
@@ -2267,7 +2291,31 @@ export function ClearanceStage({
                         ? 'Finish form'
                         : 'Apply'}
                 </button>
+                )}
               </div>
+
+              {/*
+                A returned card answers the return.
+
+                It drew the rose panel naming what the office asked for and
+                then offered "Finish form" — the control for a half-filled
+                sheet — so the applicant opened a whole form to replace one
+                document. The dialog that answers exactly that already
+                existed; this stage just never offered it.
+
+                Beside the form button rather than instead of it: an office
+                that returned an ANSWER is answered on the sheet, and an
+                applicant may simply want to re-read what they sent.
+              */}
+              {answersReturn && (
+                <button
+                  type="button"
+                  onClick={() => onCorrect(row.permit_type.code)}
+                  className="mt-2 w-full rounded-sm border-2 border-royal bg-royal px-3 py-2 text-sm font-semibold text-white underline underline-offset-2 transition-colors hover:bg-royal-hover"
+                >
+                  Fix and resubmit →
+                </button>
+              )}
             </li>
           )
         })}
@@ -2574,6 +2622,22 @@ export function ClearanceStagePage() {
             (prev) => {
               const next = new URLSearchParams(prev)
               next.delete('correct')
+
+              return next
+            },
+            { replace: true },
+          )
+        }
+        /*
+          Opened from a returned card. Writes the same `?correct` the
+          tracking page links to, so the dialog has one way in however the
+          applicant got here — and a reload keeps it open.
+        */
+        onCorrect={(code) =>
+          setSearch(
+            (prev) => {
+              const next = new URLSearchParams(prev)
+              next.set('correct', code)
 
               return next
             },
