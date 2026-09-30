@@ -10,8 +10,16 @@ use App\Support\Numbering;
 
 /**
  * Simulated payment gateway (master plan §5.5, guardrail §9.2). Auto-completes
- * with a PAY- reference. One interface, swappable for a real PCI-DSS gateway
- * later with no schema change. No card fields, no external SDK.
+ * with a PAY- reference. No card fields, no external SDK.
+ *
+ * Used while App\Support\PaymentMode is 'simulated' — the default, and what a
+ * presentation runs on. The real gateway sits beside it rather than behind the
+ * same method (App\Services\KwikPay\KwikPayGateway), because it cannot keep
+ * this method's promise: a KwikPay payment is not complete when the call
+ * returns, and a caller that assumed it was would move the application on
+ * before any money moved. "Swappable with no schema change" was the plan once;
+ * a real gateway needed a pending state with somewhere to pay, so it took a
+ * migration (2026_09_29_000100).
  */
 class PaymentGateway
 {

@@ -290,7 +290,23 @@ export function PaymentHistory() {
                         Ref No. : <span className="tnum">{p.reference_number}</span>
                       </span>
                       <span className="mt-0.5 block text-sm italic text-ink-muted">
-                        Paid: {formatDate(p.paid_at)}
+                        {/*
+                          * Only a completed payment was paid. An online payment
+                          * still waiting for the payment service, or one that
+                          * did not go through, has no paid date — and "Paid: —"
+                          * beside it would read as paid with the date missing.
+                          */}
+                        {p.status === 'completed'
+                          ? p.refund_review
+                            ? `Paid: ${formatDate(p.paid_at)} · paid twice, BPLO will contact you about a refund`
+                            : `Paid: ${formatDate(p.paid_at)}`
+                          : p.status === 'pending'
+                            ? p.set_aside
+                              ? 'Set aside — still being checked with the payment service'
+                              : 'Waiting for the payment to be confirmed'
+                            : p.status === 'failed'
+                              ? 'Did not go through'
+                              : 'Refunded'}
                       </span>
                     </span>
                     <span className="display-serif tnum shrink-0 text-2xl text-ink">
@@ -316,29 +332,36 @@ export function PaymentHistory() {
                     * different things under the same verb is how a receipt gets
                     * mistaken for the expander.
                     */}
-                  <span className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => viewReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-                    >
-                      <SearchIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'view'
-                        ? 'Opening…'
-                        : 'View Receipt'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      aria-label={`Save receipt ${p.reference_number} as a PDF`}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
-                    >
-                      <DownloadIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
-                    </button>
-                  </span>
+                  {/*
+                    * Receipts only for money actually received — the server
+                    * refuses the rest (PaymentController::receipt), so a button
+                    * here would only ever produce an error.
+                    */}
+                  {p.status === 'completed' && (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => viewReceipt(p)}
+                        disabled={receiptBusy?.id === p.id}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                      >
+                        <SearchIcon size={14} />
+                        {receiptBusy?.id === p.id && receiptBusy.act === 'view'
+                          ? 'Opening…'
+                          : 'View Receipt'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadReceipt(p)}
+                        disabled={receiptBusy?.id === p.id}
+                        aria-label={`Save receipt ${p.reference_number} as a PDF`}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
+                      >
+                        <DownloadIcon size={14} />
+                        {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
+                      </button>
+                    </span>
+                  )}
                 </div>
                 {open && (
                   <div className="pl-4 sm:pl-8">

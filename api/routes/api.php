@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\KwikPayCallbackController;
 use App\Http\Controllers\Api\OfficeHoursController;
+use App\Http\Controllers\FakeKwikPayController;
+use App\Services\KwikPay\FakeKwikPay;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -81,6 +84,33 @@ Route::prefix('auth')->group(function () {
 
 // Is City Hall open now? Public: the sign-in pages show it [Login 6].
 Route::get('office-hours', OfficeHoursController::class);
+
+/*
+ * KwikPay's deposit callback (docs/payment-gateway.md). Public — KwikPay holds
+ * no token of ours; the MD5 signature over the fields is the authentication,
+ * checked in KwikPayCallback. No CSRF: API routes carry none. Registered
+ * whatever the payment mode is, so a payment opened before the switch was
+ * turned off can still be confirmed after. Its raw fields are protected from
+ * TrimStrings / ConvertEmptyStringsToNull in bootstrap/app.php.
+ */
+Route::post('payments/kwikpay/callback', KwikPayCallbackController::class)
+    ->name('payments.kwikpay.callback');
+
+/*
+ * The stand-in KwikPay for demos and e2e — never on a real server. Both the
+ * registration and every action check FakeKwikPay::available() (local/testing
+ * AND KWIKPAY_FAKE=true). See FakeKwikPayController.
+ */
+if (FakeKwikPay::available()) {
+    Route::prefix('fake-kwikpay')->group(function () {
+        Route::post('api/transfer', [FakeKwikPayController::class, 'transfer']);
+        Route::post('api/query', [FakeKwikPayController::class, 'query']);
+        Route::post('api/me', [FakeKwikPayController::class, 'me']);
+        Route::get('pay/{orderId}', [FakeKwikPayController::class, 'page']);
+        Route::post('pay/{orderId}/{outcome}', [FakeKwikPayController::class, 'settle']);
+        Route::get('qr/{orderId}', [FakeKwikPayController::class, 'qr']);
+    });
+}
 
 // Workflow routes are registered in routes/workflow.php (loaded below) once
 // their controllers exist.

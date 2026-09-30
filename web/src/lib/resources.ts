@@ -55,6 +55,7 @@ import type {
   PageParams,
   Payment,
   PaymentMethod,
+  PaymentOptions,
   Permit,
   PermitRegisterRow,
   PermitType,
@@ -832,8 +833,30 @@ export const payments = {
         fee_profile: feeProfile,
       }),
     ),
+  /**
+   * Pay. In simulated mode the payment comes back `completed`; with online
+   * payment on it comes back `pending` with a `pay_url` to send the owner to or
+   * show as a QR code, and completes later (see `get` / `check`).
+   */
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
+  /**
+   * The mode, the methods it offers and any online payment already in flight.
+   * The pay screen lists what this returns rather than its own list, because
+   * the methods depend on a switch the super admin can flip at any time.
+   */
+  options: (applicationId: number) =>
+    unwrap<PaymentOptions>(api.get(`/applications/${applicationId}/payment-options`)),
+  /** One payment as the server holds it now. What the waiting screen polls. */
+  get: (id: number) => unwrap<Payment>(api.get(`/payments/${id}`)),
+  /** Ask the payment service once, now, whether this payment has gone through. */
+  check: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/check`)),
+  /**
+   * "Pay a different way". The server asks the payment service once first, so
+   * the answer can be `completed` (it was paid after all), `failed`, or
+   * `pending` with `set_aside` — in the last two a new payment can be started.
+   */
+  abandon: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/abandon`)),
   history: (params: PageParams = {}) => unwrap<Payment[]>(api.get('/payments', { params })),
   /** Same history, keeping the page meta. */
   historyPage: (params: PageParams = {}) => unwrapPaged<Payment>(api.get('/payments', { params })),
