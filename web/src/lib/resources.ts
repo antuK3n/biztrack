@@ -444,6 +444,15 @@ export const applications = {
     unwrap<Application>(api.post(`/applications/${id}/corrections`, { fields })),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
   /**
+   * An OFFICER corrects the filing's own answers, from Edit mode.
+   *
+   * The whole business goes up, not a patch: the endpoint runs the
+   * applicant's own validator, which asks for the required fields together.
+   * Every changed column is audited server-side with the officer named.
+   */
+  updateFields: (id: number, body: Record<string, unknown>) =>
+    unwrap<unknown>(api.put(`/applications/${id}/fields`, body)),
+  /**
    * Throw a DRAFT away. Refused (422) on anything already submitted, where
    * `cancel` above is the right verb — see ApplicationController::destroy for
    * why the two are different acts rather than two names for one.

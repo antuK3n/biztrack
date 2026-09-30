@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\ClearanceController;
 use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\InspectionController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
@@ -22,7 +23,6 @@ use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\VerifyController;
-use App\Http\Controllers\Api\DraftController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -285,6 +285,15 @@ Route::middleware('auth:sanctum')->group(function () {
          * desk, and bouncing it would interrupt a repair already under way.
          */
         Route::post('assignments/{assignment}/amend-return', [AssignmentController::class, 'amendReturn']);
+        /*
+         * An officer corrects the filing's own answers, in Edit mode.
+         *
+         * Same permission as the rest of review, and the same validation the
+         * APPLICANT's form applies — it calls that validator rather than
+         * carrying a copy. Every changed field is audited with the officer
+         * named: a declared answer changed by somebody else has to say so.
+         */
+        Route::put('applications/{application}/fields', [BusinessController::class, 'updateAsOfficer']);
         /*
          * The office's third answer, on the same permission as its other two.
          *
