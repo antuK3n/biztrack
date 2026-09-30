@@ -1,0 +1,21 @@
+# The web app for biztrack.page: the React build, served by nginx, which also
+# hands /api to the php-fpm container.
+#
+# Built on the server itself (1 GB RAM + 2 GB swap), so the build skips
+# `tsc -b`: types are checked on a developer machine before anything is
+# pushed, and the full type-check does not fit in this server's memory.
+FROM node:22-alpine AS build
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+# Public by design: Turnstile's site key is printed into every page anyway.
+# Empty = no captcha box, and the API skips the check when its secret is empty.
+ARG VITE_TURNSTILE_SITE_KEY=""
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
+ENV NODE_OPTIONS=--max-old-space-size=1536
+RUN npx vite build
+
+FROM nginx:1.27-alpine
+COPY infra/azure/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /web/dist /var/www/web

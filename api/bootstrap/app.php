@@ -40,6 +40,17 @@ return Application::configure(basePath: dirname(__DIR__))
          * (a tester pasting a URL into the address bar) got a 500.
          */
         $middleware->redirectGuestsTo(fn () => null);
+        /*
+         * Behind a reverse proxy every request arrives from the proxy's address,
+         * so without this the sign-in lockout and the audit log would see one
+         * visitor: a stranger's wrong passwords would lock everyone out. On the
+         * Azure server Caddy and nginx sit in front of PHP on Docker's private
+         * network, so TRUSTED_PROXIES names that network there. Unset (local
+         * dev, tests) it trusts nobody, exactly as before.
+         */
+        if (filled(env('TRUSTED_PROXIES'))) {
+            $middleware->trustProxies(at: array_map('trim', explode(',', (string) env('TRUSTED_PROXIES'))));
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
