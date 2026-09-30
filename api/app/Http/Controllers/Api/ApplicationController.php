@@ -16,6 +16,7 @@ use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
@@ -535,6 +536,41 @@ class ApplicationController extends Controller
             throw ValidationException::withMessages([
                 'prior_permit_id' => ["Say which permit you are {$verb} — pick it from this business’s permits. If it holds none, file a New Application instead."],
             ]);
+        }
+
+        /*
+         * ── And it must be renewed inside its window ─────────────────────
+         *
+         * Immediately after the gate above, because "which permit" is the
+         * more fundamental question and a filing that names none should
+         * hear that first rather than be told its unnamed permit is out of
+         * season.
+         *
+         * Both bounds are OFF by default (`config/biztrack.php`), so this
+         * refuses nothing until the LGU says what the window is — see
+         * `RenewalWindow` for why it was written before the answer arrived
+         * and why the business permit is never bound by it.
+         *
+         * Every prior permit is checked, not just the first. A renewal can
+         * carry several (`prior_permit_ids`), and passing because the one
+         * in `prior_permit_id` happened to be in season would let the rest
+         * through unexamined.
+         *
+         * At submit and on the server, for the same reasons the gate above
+         * is: drafts autosave half-answered by design, and the browser is
+         * not the only way into this endpoint.
+         */
+        if ($application->application_type === ApplicationType::Renewal) {
+            $application->loadMissing('priorPermits.permitType');
+
+            foreach ($application->priorPermits as $prior) {
+                $refusal = RenewalWindow::refusalFor($prior);
+                if ($refusal !== null) {
+                    throw ValidationException::withMessages([
+                        'prior_permit_id' => [$refusal],
+                    ]);
+                }
+            }
         }
 
         /*
