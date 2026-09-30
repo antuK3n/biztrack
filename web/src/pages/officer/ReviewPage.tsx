@@ -30,7 +30,13 @@ import {
  * the question that was actually put — a cooperative is asked for its CDA
  * number, not for "DTI / SEC / CDA".
  */
-import { genderLabel, registrationNumberLabel } from '../../lib/fieldRules'
+import {
+  GENDERS,
+  ORGANIZATION_FORMS,
+  genderLabel,
+  registrationNumberLabel,
+  scalarFieldRule,
+} from '../../lib/fieldRules'
 import {
   OFFICE_FORM_INTERNAL_KEYS,
   officeFormFieldLabel,
@@ -140,7 +146,8 @@ interface ReviewBusiness {
     /* The pin CPDD rules the locational clearance from. */
     latitude?: number | null
     longitude?: number | null
-    barangay?: { name?: string } | null
+    /* The id, not only the name: a save has to send the barangay back. */
+    barangay?: { id?: number; name?: string } | null
   } | null
   /* BPLO items B6, A13-A15 and B8/B7. Optional throughout: every business filed
    * before the wizard asked these carries null, and a sole proprietorship
@@ -170,8 +177,10 @@ interface ReviewBusiness {
   emergency_contact_number?: string | null
   lines?: {
     id: number
-    psic_code: { code: string; title: string } | null
+    psic_code: { id?: number; code: string; title: string } | null
     capitalization: string | null
+    /* Carried through a save untouched — see `saveFields`. */
+    line_of_business?: string | null
     products_services?: string | null
   }[]
 }
@@ -510,6 +519,372 @@ function FeeFactRow({ facts }: { facts: { label: string; value: string }[] }) {
 }
 
 /** One answer the applicant submitted, presented as a record, never a control. */
+/**
+ * The officer's unsaved edits, and the rules they are held to.
+ *
+ * A context rather than props, for the same reason `FieldCorrections` is
+ * one: the boxes are sixty deep in a tree that would otherwise carry a
+ * setter through every container between here and them.
+ *
+ * ── Keyed by the payload path, not by the return target ─────────────────
+ *
+ * The obvious key was the `form:` code each box already declares for the
+ * Return picker — nothing new to thread through sixty call sites. It is
+ * wrong twice. SIX boxes share `form:address` (House/Bldg No., Street,
+ * Block, Lot, Lot Area, Landmark), because a return points at "the
+ * address" as one thing — so typing in Street would have written Block.
+ * And a box DISPLAYS a formatted answer: item 1 shows "Sole
+ * Proprietorship", item 14 "Male", item 17 "100%", none of which is what
+ * the column holds.
+ *
+ * So the key is the path the API takes — `tin`, `address.street`,
+ * `owner.gender` — and the buffer is the shape of the request, which
+ * makes Save a fold rather than a translation. Null means the sheet is
+ * not in edit mode and every box renders as a record.
+ */
+const FieldEdits = createContext<{
+  values: Record<string, string>
+  errors: Record<string, string>
+  set: (key: string, value: string) => void
+} | null>(null)
+
+/** What a box offers when the sheet is being edited. */
+type FieldControl =
+  | { kind: 'text' }
+  | { kind: 'radio'; options: { value: string; label: string }[] }
+  | { kind: 'select'; options: { value: string; label: string }[] }
+
+/** What a box hands `Field` to become editable. */
+interface FieldEdit {
+  /** The path the API takes, e.g. `tin` or `address.street`. */
+  key: string
+  /** The RAW answer, where the box displays a formatted one. */
+  value?: string
+  control?: FieldControl
+}
+
+/** Yes and No, as a pair of chips — the shape the form asks them in. */
+const YES_NO: { value: string; label: string }[] = [
+  { value: '1', label: 'Yes' },
+  { value: '0', label: 'No' },
+]
+
+/** BPLO item B6's six, worded as the wizard words them. */
+const ECONOMIC_ORGANIZATIONS: { value: string; label: string }[] = [
+  { value: 'single_establishment', label: 'Single Establishment' },
+  { value: 'branch', label: 'Branch' },
+  { value: 'establishment_and_main_office', label: 'Establishment and Main Office' },
+  { value: 'main_office_only', label: 'Main Office only' },
+  { value: 'ancillary_unit', label: 'Ancillary Unit' },
+  { value: 'others', label: 'Others' },
+]
+
+/**
+ * Every answer an officer may correct, and the rule it is held to.
+ *
+ * A registry rather than a prop on each box, because the Save button has
+ * to know whether the WHOLE buffer is valid while the boxes are scattered
+ * through two thousand lines of sheet. One place to read, and one place a
+ * reviewer can check against the API's rules.
+ *
+ * `rule` names the wizard's own check. That is the client's instruction of
+ * 30 September 2026 — that these carry the validation of their original
+ * counterparts — meant the only way it cannot drift: by calling the
+ * function the form calls, not by copying what it does today.
+ *
+ * The rest carry `optional` and a length, which is what `validateBusiness`
+ * asks of them. A key ABSENT from here is not editable at all.
+ */
+const EDIT_FIELDS: Record<
+  string,
+  { rule?: string; optional?: boolean; maxLength?: number; max?: number }
+> = {
+  /* Section A — business and registration. */
+  registration_type: {},
+  registration_number: { rule: 'form:registration_number' },
+  tin: { rule: 'form:tin' },
+  name: { rule: 'form:name' },
+  trade_name: { rule: 'form:trade_name' },
+  'address.telephone': { rule: 'form:telephone' },
+  'address.mobile_number': { rule: 'form:mobile_number' },
+  'address.email': { rule: 'form:email' },
+  'address.website': { rule: 'form:website' },
+  /*
+   * Items 10 to 14. Optional at the API and optional here: the paper
+   * marks none of them required, and a blank is the applicant having
+   * cleared a prefill rather than an answer missing.
+   */
+  'owner.surname': { optional: true, maxLength: 100 },
+  'owner.given_name': { optional: true, maxLength: 100 },
+  'owner.middle_name': { optional: true, maxLength: 100 },
+  'owner.suffix': { optional: true, maxLength: 20 },
+  'owner.gender': { optional: true },
+  president_officer_name: { rule: 'form:president_officer_name' },
+  citizenship: { rule: 'form:citizenship' },
+  capital_participation_filipino: { rule: 'form:capital_participation' },
+
+  /* Section B — operation. */
+  economic_organization: { optional: true },
+  economic_organization_others: { optional: true, maxLength: 255 },
+  capital_investment: { rule: 'form:capital_investment' },
+  has_tax_incentives: {},
+  is_rented: {},
+
+  /* The premises. */
+  'address.house_bldg_no': { optional: true, maxLength: 120 },
+  'address.street': { maxLength: 255 },
+  'address.block': { optional: true, maxLength: 40 },
+  'address.lot': { optional: true, maxLength: 40 },
+  'address.lot_area_sqm': { optional: true, max: 10000000 },
+  'address.line2': { optional: true, maxLength: 255 },
+  'address.barangay_id': {},
+  emergency_contact_name: { optional: true, maxLength: 255 },
+  emergency_contact_number: { optional: true, maxLength: 40 },
+}
+
+/**
+ * What is wrong with this answer, in the words the applicant would see.
+ *
+ * Runs the wizard's rule where the field has one. The fallback is not a
+ * pass: a field with no named rule is still held to required-ness and to
+ * the column's length, which is what the API would refuse it for anyway —
+ * better said at the box than as a 422 after the confirmation dialog.
+ */
+function editFieldError(key: string, value: string): string | undefined {
+  const spec = EDIT_FIELDS[key]
+  if (spec === undefined) return undefined
+  if (spec.rule !== undefined) return scalarFieldRule(spec.rule).validate(value)
+
+  const trimmed = value.trim()
+  if (spec.optional !== true && trimmed === '') return 'This field is required.'
+  if (spec.maxLength !== undefined && trimmed.length > spec.maxLength) {
+    return `Keep this to ${spec.maxLength} characters or fewer.`
+  }
+  if (spec.max !== undefined && trimmed !== '') {
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > spec.max) {
+      return 'Enter a number, and no more than the field allows.'
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * What the form calls this field, for the confirmation dialog.
+ *
+ * Numbered as the paper numbers it. An officer about to overwrite a
+ * citizen's declaration should read the list in the words the citizen was
+ * asked in — `address.house_bldg_no` is a path, not a question.
+ */
+const EDIT_FIELD_LABELS: Record<string, string> = {
+  registration_type: '1. Form of Organization',
+  registration_number: '2. Registration Number',
+  tin: '3. Tax Identification Number (TIN)',
+  name: '4. Business Name',
+  trade_name: '5. Trade Name / Franchise',
+  'address.telephone': '6. Telephone (Landline)',
+  'address.mobile_number': '7. Mobile Number',
+  'address.email': '8. E-mail Address',
+  'address.website': '9. Website Address',
+  'owner.surname': '10. Surname',
+  'owner.given_name': '11. Given Name',
+  'owner.middle_name': '12. Middle Name',
+  'owner.suffix': '13. Suffix',
+  'owner.gender': '14. Gender',
+  president_officer_name: '15. Name of President / Officer in Charge',
+  citizenship: '16. Citizenship (of President/OIC)',
+  capital_participation_filipino: '17. Capital Participation (% Filipino)',
+  economic_organization: 'B5. Economic Organization',
+  economic_organization_others: 'B5. Economic Organization — others',
+  capital_investment: 'B6. Capital Investment',
+  has_tax_incentives: 'B7. Tax Incentives from a Government Entity',
+  is_rented: 'B8. Do you pay rent for occupying a place of business?',
+  'address.house_bldg_no': 'House / Bldg No.',
+  'address.street': 'Street',
+  'address.block': 'Block',
+  'address.lot': 'Lot',
+  'address.lot_area_sqm': 'Lot Area (sq. m.)',
+  'address.line2': 'Locational Group / Landmark',
+  'address.barangay_id': 'Barangay',
+  emergency_contact_name: 'Emergency Contact Person',
+  emergency_contact_number: 'Emergency Contact Number',
+}
+
+/** The label, or the path itself rather than a blank if one is missed. */
+function editFieldLabel(key: string): string {
+  return EDIT_FIELD_LABELS[key] ?? key
+}
+
+/**
+ * A buffered value as the officer should read it back.
+ *
+ * The buffer holds what the COLUMN holds — `sole_proprietorship`, `M`,
+ * `1` — because that is what gets posted. A confirmation dialog that
+ * printed those would be asking the officer to approve a change written
+ * in the database's words rather than the form's.
+ *
+ * The barangay is the exception: its value is an id, and the name lives
+ * in a list the page fetches, so the caller passes the lookup in.
+ */
+function editFieldDisplay(
+  key: string,
+  value: string,
+  barangays: { id: number; name: string }[],
+): string {
+  if (value.trim() === '') return '(blank)'
+
+  const from = (options: { value: string; label: string }[]) =>
+    options.find((o) => o.value === value)?.label ?? value
+
+  if (key === 'registration_type') return from(ORGANIZATION_FORMS)
+  if (key === 'owner.gender') return from(GENDERS)
+  if (key === 'economic_organization') return from(ECONOMIC_ORGANIZATIONS)
+  if (key === 'has_tax_incentives' || key === 'is_rented') return from(YES_NO)
+  if (key === 'address.barangay_id') {
+    return barangays.find((b) => String(b.id) === value)?.name ?? value
+  }
+
+  return value
+}
+
+/**
+ * One editable answer, in the shape the applicant answered it.
+ *
+ * The client, 30 September 2026: *"if radio buttons were used in the original,
+ * the admin view should also see radio buttons."* A record sheet that turns
+ * every question into a text box asks a different question from the form —
+ * "Sole Proprietorship" typed into a free field is not the choice of four the
+ * applicant was given, and it can be spelled wrong.
+ *
+ * The error comes from `scalarFieldRule`, which is the wizard's own rule for
+ * this code, so a TIN is checked here exactly as it was checked when it was
+ * first asked for. Shown under the control, as the form shows it.
+ */
+function FieldEditor({
+  fieldKey,
+  label,
+  control,
+  value,
+  error,
+  onChange,
+}: {
+  fieldKey: string
+  label: string
+  control: FieldControl
+  value: string
+  error?: string
+  onChange: (value: string) => void
+}) {
+  const invalid = error !== undefined && error !== ''
+  /*
+   * The keyboard and the length the wizard gives this field, taken from
+   * the same rule object the validation comes from. A TIN box that brings
+   * up a letter keypad on a tablet is a different field from the one the
+   * applicant filled in, whatever it validates to.
+   */
+  const rule = EDIT_FIELDS[fieldKey]?.rule
+  const hints = rule === undefined ? undefined : scalarFieldRule(rule)
+
+  if (control.kind === 'radio') {
+    return (
+      <>
+        {/*
+          The form's own chips, not a dropdown. A choice of four the applicant
+          could see at once should not become a menu the officer has to open.
+        */}
+        <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
+          {control.options.map((o) => {
+            const selected = o.value === value
+
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onChange(o.value)}
+                className={`inline-flex items-center gap-2 rounded-full border-2 px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+                  selected
+                    ? 'border-royal bg-input text-ink'
+                    : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-3 w-3 rounded-full border-2 ${
+                    selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                  }`}
+                />
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+        {invalid && <FieldEditorError id={fieldKey}>{error}</FieldEditorError>}
+      </>
+    )
+  }
+
+  if (control.kind === 'select') {
+    return (
+      <>
+        <select
+          value={value}
+          aria-label={label}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? `edit-error-${fieldKey}` : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full rounded-lg border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none ${
+            invalid ? 'border-s-red' : 'border-input-border focus:border-royal'
+          }`}
+        >
+          {/*
+            A named empty row, and not for tidiness. The barangay list is
+            fetched when Edit is switched on, so for a moment the select has
+            no option matching the filing's own barangay — without a row to
+            land on, the browser shows the FIRST barangay in the city as
+            though it were the answer on the form.
+          */}
+          <option value="">— not selected —</option>
+          {control.options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {invalid && <FieldEditorError id={fieldKey}>{error}</FieldEditorError>}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <input
+        value={value}
+        aria-label={label}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? `edit-error-${fieldKey}` : undefined}
+        inputMode={hints?.inputMode}
+        maxLength={hints?.maxLength ?? EDIT_FIELDS[fieldKey]?.maxLength}
+        onChange={(e) => onChange(e.target.value)}
+        className={`w-full rounded-lg border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none ${
+          invalid ? 'border-s-red' : 'border-input-border focus:border-royal'
+        }`}
+      />
+      {invalid && <FieldEditorError id={fieldKey}>{error}</FieldEditorError>}
+    </>
+  )
+}
+
+/** The rule's own words, under the control that broke it. */
+function FieldEditorError({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <p id={`edit-error-${id}`} role="alert" className="mt-1 text-xs font-medium text-s-red">
+      {children}
+    </p>
+  )
+}
 function Field({
   label,
   value,
@@ -534,13 +909,27 @@ function Field({
    * postal code should not be invited to grow to a third of the sheet.
    */
   className = 'grow basis-[15rem] max-w-full',
+  /*
+   * What this box becomes in Edit mode, and nothing when it is left out.
+   *
+   * Opt-in rather than derived from `targets`, because six boxes share
+   * `form:address` and several display a formatted answer — see the note
+   * on `FieldEdits`. The boxes that stay records are the ones the API has
+   * no column for: the City, the Province, the Mode of Payment, the
+   * amendment's own reference. Offering to edit those would be a promise
+   * the Save cannot keep.
+   */
+  edit,
 }: {
   label: string
   value: string
   targets?: string[]
   className?: string
+  edit?: FieldEdit
 }) {
   const corrections = useContext(FieldCorrections)
+  const edits = useContext(FieldEdits)
+  const editable = edits !== null && edit !== undefined
 
   /*
    * Flattened across the box's targets and re-sorted, so a name box corrected
@@ -574,7 +963,25 @@ function Field({
           </span>
         )}
       </dt>
-      <dd className={recordValue}>{value || '—'}</dd>
+      {editable && edits !== null && edit !== undefined ? (
+        <dd>
+          <FieldEditor
+            fieldKey={edit.key}
+            label={label}
+            control={edit.control ?? { kind: 'text' }}
+            /*
+             * The buffer first, then the RAW answer where the box was
+             * given one, and only then the printed value. An input shown
+             * "Sole Proprietorship" would post the label back.
+             */
+            value={edits.values[edit.key] ?? edit.value ?? value}
+            error={edits.errors[edit.key]}
+            onChange={(v) => edits.set(edit.key, v)}
+          />
+        </dd>
+      ) : (
+        <dd className={recordValue}>{value || '—'}</dd>
+      )}
       {history.length > 0 && <FieldHistory history={history} label={label} />}
     </dl>
   )
@@ -929,7 +1336,20 @@ function DocumentRow({
 }
 
 /** Floating white remark bubble (p56/p71). */
-function RemarkBubble({ author, remark }: { author: string; remark: string }) {
+function RemarkBubble({
+  author,
+  remark,
+  items = [],
+}: {
+  author: string
+  remark: string
+  /**
+   * The named rows and what was said about each, when the return had
+   * them. Empty for a return written as plain prose, which falls back to
+   * `remark` — the composed sentence built for the places that carry one.
+   */
+  items?: { label: string; note: string }[]
+}) {
   return (
     <div className="rounded-xl bg-white p-4 shadow-card">
       <div className="flex items-center gap-2.5">
@@ -940,7 +1360,27 @@ function RemarkBubble({ author, remark }: { author: string; remark: string }) {
         </span>
         <p className="text-sm font-bold text-ink">{author}</p>
       </div>
-      <p className="mt-2.5 rounded-lg bg-input px-3.5 py-2 text-sm text-ink">{remark}</p>
+      {/*
+        One box per field, because three returned rows are three things to
+        deal with. Run together as "A: …; B: …; C: …" they read as one
+        paragraph and the officer has to parse the semicolons to count
+        what they asked for.
+      */}
+      {items.length > 0 ? (
+        <ul className="mt-2.5 space-y-2">
+          {items.map((it) => (
+            <li
+              key={it.label}
+              className="rounded-lg border-l-4 border-s-rose bg-input px-3.5 py-2"
+            >
+              <p className="text-sm font-semibold text-ink">{it.label}</p>
+              <p className="mt-0.5 text-sm italic text-ink-secondary">“{it.note}”</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2.5 rounded-lg bg-input px-3.5 py-2 text-sm text-ink">{remark}</p>
+      )}
     </div>
   )
 }
@@ -1714,6 +2154,41 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   // Opens as a record of the filing; Edit turns on the office's own fields.
   const [mode, setMode] = useState<ReviewMode>('view')
+
+  /*
+   * ── The officer's unsaved edits ──────────────────────────────────────
+   *
+   * Held here and written nowhere until Save, which is the client's
+   * instruction and the right shape for the act: the applicant's wizard
+   * autosaves because losing a draft keystroke costs nothing, while an
+   * officer rewriting a submitted declaration is making a record, and a
+   * record is made on purpose.
+   *
+   * Keyed by the path the API takes — `tin`, `address.street`,
+   * `owner.gender` — see the note on `FieldEdits` for why not by the
+   * return target each box already declares.
+   *
+   * Up here with `mode` rather than down beside `editing`, which reads
+   * better and is illegal: that line is past this component's loading
+   * and error returns, so these hooks would be skipped on the render
+   * where the filing has not arrived yet.
+   */
+  const [fieldEdits, setFieldEdits] = useState<Record<string, string>>({})
+  const [savingFields, setSavingFields] = useState(false)
+  const [fieldSaveError, setFieldSaveError] = useState<string | null>(null)
+  const [confirmFieldSave, setConfirmFieldSave] = useState(false)
+
+  /*
+   * The barangay list, for the one answer that is a choice from the
+   * city's own table rather than a value typed in. Fetched only once the
+   * officer switches to Edit: every other reviewer opening this page
+   * would otherwise pay for a reference call nothing draws.
+   */
+  const editMode = mode === 'edit'
+  const barangaysRef = useAsync(
+    () => (editMode ? reference.barangays() : Promise.resolve([])),
+    [editMode],
+  )
 
   /**
    * Is the applicant's filed application folded away, and for whom?
@@ -2809,6 +3284,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const editing = mode === 'edit' && !decided && !heldByAnother
 
   /*
+   * The applicant's own rule for each edited field, run as it is typed.
+   * `editFieldError` reaches the wizard's `scalarFieldRule` where the
+   * field has one, so a TIN is refused here exactly as it was refused
+   * when it was first asked for — the client's instruction that these
+   * carry the rules of their counterparts.
+   */
+  const fieldEditErrors: Record<string, string> = {}
+  for (const [key, value] of Object.entries(fieldEdits)) {
+    const failed = editFieldError(key, value)
+    if (failed !== undefined) fieldEditErrors[key] = failed
+  }
+  const fieldEditsDirty = Object.keys(fieldEdits).length > 0
+  const fieldEditsValid = Object.keys(fieldEditErrors).length === 0
+
+  /*
    * Does THIS OFFICE still owe a paperwork review on this filing?
    *
    * The one predicate this screen and the queue tabs both branch on, named
@@ -3550,6 +4040,142 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     }
   }
 
+  /*
+   * Send the whole business, not a patch.
+   *
+   * The endpoint runs the APPLICANT's validator, which asks for the
+   * required fields together — a name without an address is not a valid
+   * business however few boxes the officer touched. So the current record
+   * goes up with the edits laid over it.
+   */
+  /*
+   * Send the WHOLE business, not a patch.
+   *
+   * The endpoint runs the applicant's own validator, which asks for the
+   * required fields together — a name with no barangay is not a valid
+   * business however few boxes the officer touched. So the record as it
+   * stands goes up with the buffer laid over it.
+   *
+   * That cuts both ways and the second edge is the dangerous one: the
+   * writer treats an ABSENT key as a cleared answer for most columns, so
+   * anything omitted here is destroyed rather than left alone. The map pin
+   * is the sharpest case — `syncAddressAndLines` defaults latitude and
+   * longitude to null — and CPDD rules the locational clearance off it. So
+   * the fields nobody edits are restated too, explicitly, below.
+   */
+  async function saveFields() {
+    if (!fieldEditsValid || !fieldEditsDirty) return
+    setSavingFields(true)
+    setFieldSaveError(null)
+    try {
+      /** The buffer if the officer touched it, else the record. */
+      const at = (key: string, current: string | number | null | undefined): string =>
+        fieldEdits[key] ?? (current == null ? '' : String(current))
+      /** A blank box is a cleared answer, and the column is nullable. */
+      const blank = (value: string): string | null =>
+        value.trim() === '' ? null : value.trim()
+      /** Yes/No chips hold '1' and '0'; the column holds a boolean. */
+      const flag = (key: string, current: boolean | null | undefined): boolean =>
+        key in fieldEdits ? fieldEdits[key] === '1' : current === true
+
+      const addr = business.address
+      const organization = at('economic_organization', business.economic_organization)
+
+      await applications.updateFields(app.id, {
+        name: at('name', business.name),
+        trade_name: blank(at('trade_name', business.trade_name)),
+        registration_type: blank(at('registration_type', business.registration_type)),
+        registration_number: blank(at('registration_number', business.registration_number)),
+        tin: blank(at('tin', business.tin)),
+        president_officer_name: blank(
+          at('president_officer_name', business.president_officer_name),
+        ),
+        citizenship: blank(at('citizenship', business.citizenship)),
+        capital_participation_filipino: blank(
+          at('capital_participation_filipino', business.capital_participation_filipino),
+        ),
+        economic_organization: blank(organization),
+        /* Only meaningful under "Others"; cleared with the choice. */
+        economic_organization_others:
+          organization === 'others'
+            ? blank(
+                at('economic_organization_others', business.economic_organization_others),
+              )
+            : null,
+        capital_investment: blank(at('capital_investment', business.capital_investment)),
+        has_tax_incentives: flag('has_tax_incentives', business.has_tax_incentives),
+        is_rented: flag('is_rented', business.is_rented),
+        emergency_contact_name: blank(
+          at('emergency_contact_name', business.emergency_contact_name),
+        ),
+        emergency_contact_number: blank(
+          at('emergency_contact_number', business.emergency_contact_number),
+        ),
+        /*
+         * Restated, not edited. The wizard stopped asking for the lessor
+         * on 16 September 2026 and the zoning sheet still collects it, so
+         * omitting these would blank an answer another office wrote.
+         */
+        lessor_name: business.lessor_name ?? null,
+        lessor_address: business.lessor_address ?? null,
+        lessor_contact: business.lessor_contact ?? null,
+        monthly_rental: business.monthly_rental ?? null,
+        owner: {
+          surname: blank(at('owner.surname', business.owner?.surname)),
+          given_name: blank(at('owner.given_name', business.owner?.given_name)),
+          middle_name: blank(at('owner.middle_name', business.owner?.middle_name)),
+          suffix: blank(at('owner.suffix', business.owner?.suffix)),
+          gender: blank(at('owner.gender', business.owner?.gender)),
+        },
+        address: {
+          house_bldg_no: blank(at('address.house_bldg_no', addr?.house_bldg_no)),
+          /*
+           * `street` is `sometimes|required`, so a filing made before the
+           * House/Street split — which carries the whole address in
+           * `line1` and nothing in `street` — must not send the key at
+           * all, or the validator refuses a filing for a box the officer
+           * never saw. When it is sent, `line1` is recomposed from it.
+           */
+          ...(blank(at('address.street', addr?.street)) === null
+            ? { line1: addr?.line1 ?? null }
+            : { street: at('address.street', addr?.street).trim() }),
+          line2: blank(at('address.line2', addr?.line2)),
+          block: blank(at('address.block', addr?.block)),
+          lot: blank(at('address.lot', addr?.lot)),
+          lot_area_sqm: blank(at('address.lot_area_sqm', addr?.lot_area_sqm)),
+          barangay_id: Number(at('address.barangay_id', addr?.barangay?.id)) || null,
+          telephone: blank(at('address.telephone', addr?.telephone)),
+          mobile_number: blank(at('address.mobile_number', addr?.mobile_number)),
+          email: blank(at('address.email', addr?.email)),
+          website: blank(at('address.website', addr?.website)),
+          postal_code: addr?.postal_code ?? null,
+          /* The pin CPDD rules the clearance from. Dropping it wipes it. */
+          latitude: addr?.latitude ?? null,
+          longitude: addr?.longitude ?? null,
+        },
+        /*
+         * Restated unchanged. The lines are a table with its own editor on
+         * the applicant's side, and the writer REPLACES them wholesale —
+         * so they have to go up even though no box here touches them.
+         */
+        lines: (business.lines ?? []).map((l) => ({
+          psic_code_id: l.psic_code?.id ?? null,
+          capitalization: l.capitalization,
+          line_of_business: l.line_of_business ?? null,
+          products_services: l.products_services ?? null,
+        })),
+      })
+
+      setFieldEdits({})
+      setConfirmFieldSave(false)
+      reload()
+    } catch (err) {
+      setFieldSaveError(toApiError(err).message)
+    } finally {
+      setSavingFields(false)
+    }
+  }
+
   async function saveAssessment() {
     const amount = feeValue.trim()
     if (!amount) return
@@ -3807,10 +4433,16 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     ? (app.return_notes ?? {})
     : (data.clearance?.return_notes ?? {})
 
-  const mayAmendReturn =
-    canReject
-      ? app.status === 'returned'
-      : data.clearance?.status === 'returned'
+  const mayAmendReturn = canReject
+    ? app.status === 'returned'
+    /*
+     * Returned OR refused. A refusal is the one that most needs correcting:
+     * it suspends the Business Permit while it stands, so an officer who
+     * ticked the wrong row is holding a trading business shut over a
+     * mistake. `amendClearanceReturn` accepts both, so this agrees with it
+     * rather than offering a button that answers 422.
+     */
+    : data.clearance?.status === 'returned' || data.clearance?.status === 'rejected'
 
   /**
    * The one thing this seat's buttons cannot say about themselves.
@@ -3902,6 +4534,42 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * describing a rule the screen keeps somewhere else.
    */
 
+  /*
+   * What each named row was told, keyed by its code.
+   *
+   * Both sources, because this sheet shows both kinds of return: BPLO's
+   * notes hang off the filing, an office's off its own permit row.
+   */
+  const remarkNotes: Record<string, string> = {
+    ...(app.return_notes ?? {}),
+    ...(data.clearance?.return_notes ?? {}),
+  }
+
+  /*
+   * The composed sentence broken back into its parts.
+   *
+   * Read from the pointer rather than split on "; " — an officer writing
+   * a semicolon inside a note is ordinary, and splitting would quietly
+   * turn one remark into two. Returns nothing unless EVERY code resolves,
+   * so a partial list never replaces a complete sentence.
+   */
+  const remarkItems = (target: string | null): { label: string; note: string }[] => {
+    const codes = (target ?? '')
+      .split(',')
+      .map((c) => c.trim())
+      .filter((c) => c !== '')
+    if (codes.length === 0) return []
+
+    const items = codes
+      .filter((c) => (remarkNotes[c] ?? '').trim() !== '')
+      .map((c) => ({
+        label: returnTargets.find((t) => t.value === c)?.label ?? c,
+        note: remarkNotes[c],
+      }))
+
+    return items.length === codes.length ? items : []
+  }
+
   const existingRemarks = [
     ...app.assignments
       .filter((a) => a.remarks)
@@ -3909,6 +4577,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         key: `a-${a.id}`,
         author: a.officer?.name ?? a.department.name,
         remark: a.remarks as string,
+        items: remarkItems(a.remarks_target ?? null),
       })),
     ...(app.rejection_reason
       ? [
@@ -3916,6 +4585,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             key: 'rejection',
             author: officerName,
             remark: app.rejection_reason,
+            /* A whole-filing refusal names no rows. */
+            items: [],
           },
         ]
       : []),
@@ -3947,6 +4618,22 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   }, new Map<string, ApplicationCorrection[]>())
 
   return (
+    <FieldEdits.Provider
+      /*
+       * Null outside Edit mode, which is what every box reads to decide
+       * whether it is a record or a control. One switch, so "View" cannot
+       * mean read-only in one section and editable in another.
+       */
+      value={
+        editing
+          ? {
+              values: fieldEdits,
+              errors: fieldEditErrors,
+              set: (key, value) => setFieldEdits((prev) => ({ ...prev, [key]: value })),
+            }
+          : null
+      }
+    >
     <FieldCorrections.Provider value={correctionsByTarget}>
     {/* Not re-indented: see the note in this patch — two spaces across
         2,200 lines would rewrite the sheet's blame to move nothing. */}
@@ -4012,6 +4699,71 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <FilterPills options={MODE_OPTIONS} value={mode} onChange={setMode} />
               </div>
             </div>
+            {/*
+              ── Save, and only while there is something to save ──────────
+
+              The client asked for it here, beside View/Edit, and for the
+              edits NOT to autosave. Both are the same point: an applicant
+              editing their own draft loses nothing by an early save, while
+              an officer rewriting a submitted declaration is making a
+              record, and a record is made on purpose.
+
+              Hidden rather than disabled when the buffer is empty. A
+              permanently greyed button beside two live pills reads as a
+              broken screen; its appearing the moment a box changes is
+              also the plainest way to say the change is not saved yet.
+
+              Pressable while invalid, pointing at the count. A disabled
+              button is skipped by the tab order, so the one control that
+              would explain the situation is the one a screen-reader user
+              never reaches (WCAG 3.3.1) — the same reasoning as
+              `confirmDescribedBy` on ProtoModal.
+            */}
+            {editing && fieldEditsDirty && (
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => fieldEditsValid && setConfirmFieldSave(true)}
+                  aria-describedby={fieldEditsValid ? undefined : 'field-edit-invalid'}
+                  className={`rounded-md px-7 py-2.5 text-sm font-semibold text-white shadow-card ${
+                    fieldEditsValid ? 'bg-s-green hover:brightness-110' : 'bg-ink-muted'
+                  }`}
+                >
+                  Save changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFieldEdits({})
+                    setFieldSaveError(null)
+                  }}
+                  className="rounded-md border border-line px-4 py-2.5 text-sm font-semibold text-ink-secondary hover:bg-input"
+                >
+                  Discard
+                </button>
+                {fieldEditsValid ? (
+                  <span className="text-xs font-medium text-ink-muted">
+                    {Object.keys(fieldEdits).length} unsaved
+                    {Object.keys(fieldEdits).length === 1 ? ' change' : ' changes'}
+                  </span>
+                ) : (
+                  <span
+                    id="field-edit-invalid"
+                    role="alert"
+                    className="text-xs font-semibold text-s-red"
+                  >
+                    {Object.keys(fieldEditErrors).length} field
+                    {Object.keys(fieldEditErrors).length === 1 ? '' : 's'} need fixing before
+                    this can be saved.
+                  </span>
+                )}
+                {fieldSaveError !== null && (
+                  <span role="alert" className="text-xs font-semibold text-s-red">
+                    {fieldSaveError}
+                  </span>
+                )}
+              </div>
+            )}
             {editing && (
               <>
                 {mayRejectFiling && (
@@ -5204,12 +5956,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   targets={['form:address']}
                   value={address?.house_bldg_no || house}
                   className="block"
+                  /*
+                   * The stored column, never the regex's guess. `house`
+                   * is `splitLine1`'s reading of a pre-split filing, and
+                   * saving it back would write a guess into the record as
+                   * though the applicant had typed it.
+                   */
+                  edit={{ key: 'address.house_bldg_no', value: address?.house_bldg_no ?? '' }}
                 />
                 <Field
                   label="Street"
                   targets={['form:address']}
                   value={address?.street || street}
                   className="block sm:col-span-2"
+                  edit={{ key: 'address.street', value: address?.street ?? '' }}
                 />
               </div>
 
@@ -5224,13 +5984,26 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 unanswered box uses.
               */}
               <div className="mt-3 grid gap-4 sm:grid-cols-3">
-                <Field label="Block" targets={['form:address']} value={address?.block ?? ''} className="block" />
-                <Field label="Lot" targets={['form:address']} value={address?.lot ?? ''} className="block" />
+                <Field
+                  label="Block"
+                  targets={['form:address']}
+                  value={address?.block ?? ''}
+                  className="block"
+                  edit={{ key: 'address.block' }}
+                />
+                <Field
+                  label="Lot"
+                  targets={['form:address']}
+                  value={address?.lot ?? ''}
+                  className="block"
+                  edit={{ key: 'address.lot' }}
+                />
                 <Field
                   label="Lot Area (sq. m.)"
                   targets={['form:address']}
                   value={address?.lot_area_sqm == null ? '' : String(address.lot_area_sqm)}
                   className="block"
+                  edit={{ key: 'address.lot_area_sqm' }}
                 />
               </div>
 
@@ -5241,6 +6014,40 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   targets={['form:barangay']}
                   value={address?.barangay?.name ?? ''}
                   className="block sm:max-w-[22rem]"
+                  /*
+                   * A choice from the city's own table, so a select and
+                   * not a text box — the wizard asks it the same way, and
+                   * a typed barangay is a zoning decision made against a
+                   * spelling. Empty while the list is still in flight,
+                   * which is a moment and not a state worth drawing.
+                   */
+                  edit={{
+                    key: 'address.barangay_id',
+                    value: address?.barangay?.id == null ? '' : String(address.barangay.id),
+                    control: {
+                      kind: 'select',
+                      /*
+                        The filing's own barangay while the list is still in
+                        flight, so the control never shows an empty row where
+                        the record has an answer. Replaced by the city's list
+                        the moment it lands.
+                      */
+                      options:
+                        (barangaysRef.data ?? []).length > 0
+                          ? (barangaysRef.data ?? []).map((b) => ({
+                              value: String(b.id),
+                              label: b.name,
+                            }))
+                          : address?.barangay?.id == null
+                            ? []
+                            : [
+                                {
+                                  value: String(address.barangay.id),
+                                  label: address.barangay.name ?? '',
+                                },
+                              ],
+                    },
+                  }}
                 />
               </div>
 
@@ -5327,6 +6134,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   targets={['form:address']}
                   value={address?.line2 ?? ''}
                   className="block"
+                  edit={{ key: 'address.line2' }}
                 />
               </div>
 
@@ -5337,12 +6145,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   targets={['form:emergency_contact_name']}
                   value={business.emergency_contact_name ?? ''}
                   className="block"
+                  edit={{ key: 'emergency_contact_name' }}
                 />
                 <Field
                   label="Emergency Contact Number"
                   targets={['form:emergency_contact_number']}
                   value={business.emergency_contact_number ?? ''}
                   className="block"
+                  edit={{ key: 'emergency_contact_number' }}
                 />
               </div>
             </section>
@@ -5418,6 +6228,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     value={
                       business.registration_type ? humanizeKey(business.registration_type) : ''
                     }
+                    /*
+                      Radio chips, because that is what the form gives the
+                      applicant — the client's instruction of 30 September
+                      2026. The raw value goes to the control: the box
+                      prints "Sole Proprietorship" and the column holds
+                      `sole_proprietorship`, and an input handed the label
+                      would post the label back.
+                    */
+                    edit={{
+                      key: 'registration_type',
+                      value: business.registration_type ?? '',
+                      control: { kind: 'radio', options: ORGANIZATION_FORMS },
+                    }}
                   />
                   {/*
                     The agency, not a slash-list. The wizard asks a cooperative
@@ -5428,10 +6251,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     not known.
                   */}
                   <Field
-                    label={`2. ${registrationNumberLabel(business.registration_type ?? '')}`}
+                    /*
+                      Named off the BUFFER, not the record. An officer who
+                      switches item 1 to Cooperative is then asked for a CDA
+                      number, exactly as the applicant would be — a heading
+                      still saying DTI over a box the officer has just
+                      repurposed is how a wrong number gets typed in.
+                    */
+                    label={`2. ${registrationNumberLabel(
+                      fieldEdits.registration_type ?? business.registration_type ?? '',
+                    )}`}
                     className="grow basis-[15rem] max-w-full"
                     targets={['form:registration_number']}
                     value={business.registration_number ?? ''}
+                    edit={{ key: 'registration_number' }}
                   />
 
                   <RowBreak />
@@ -5440,18 +6273,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     targets={['form:tin']}
                     value={business.tin ?? ''}
                     className="grow basis-[14rem] max-w-full"
+                    edit={{ key: 'tin' }}
                   />
                   <Field
                     label="4. Business Name"
                     targets={['form:name']}
                     value={business.name ?? ''}
                     className="grow basis-[20rem] max-w-full"
+                    edit={{ key: 'name' }}
                   />
                   <Field
                     label="5. Trade Name / Franchise"
                     targets={['form:trade_name']}
                     value={business.trade_name ?? ''}
                     className="grow basis-[14rem] max-w-full"
+                    edit={{ key: 'trade_name' }}
                   />
 
                   <RowBreak />
@@ -5465,24 +6301,28 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     className="grow basis-[11rem] max-w-full"
                     targets={['form:telephone']}
                     value={business.address?.telephone ?? ''}
+                    edit={{ key: 'address.telephone' }}
                   />
                   <Field
                     label="7. Mobile Number"
                     targets={['form:mobile_number']}
                     value={business.address?.mobile_number ?? ''}
                     className="grow basis-[11rem] max-w-full"
+                    edit={{ key: 'address.mobile_number' }}
                   />
                   <Field
                     label="8. E-mail Address"
                     targets={['form:email']}
                     value={business.address?.email ?? ''}
                     className="grow basis-[14rem] max-w-full"
+                    edit={{ key: 'address.email' }}
                   />
                   <Field
                     label="9. Website Address"
                     targets={['form:website']}
                     value={business.address?.website ?? ''}
                     className="grow basis-[12rem] max-w-full"
+                    edit={{ key: 'address.website' }}
                   />
 
                   <RowBreak />
@@ -5497,24 +6337,28 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     className="grow basis-[11rem] max-w-full"
                     targets={['form:owner_surname']}
                     value={business.owner?.surname ?? ''}
+                    edit={{ key: 'owner.surname' }}
                   />
                   <Field
                     label="11. Given Name"
                     className="grow basis-[11rem] max-w-full"
                     targets={['form:owner_given_name']}
                     value={business.owner?.given_name ?? ''}
+                    edit={{ key: 'owner.given_name' }}
                   />
                   <Field
                     label="12. Middle Name"
                     className="grow basis-[11rem] max-w-full"
                     targets={['form:owner_middle_name']}
                     value={business.owner?.middle_name ?? ''}
+                    edit={{ key: 'owner.middle_name' }}
                   />
                   <Field
                     label="13. Suffix"
                     className="grow basis-[7rem] max-w-full"
                     targets={['form:owner_suffix']}
                     value={business.owner?.suffix ?? ''}
+                    edit={{ key: 'owner.suffix' }}
                   />
 
                   {/* The form's own break, in the form's own place. */}
@@ -5528,6 +6372,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     className="shrink-0 basis-[8rem] max-w-full"
                     targets={['form:owner_gender']}
                     value={genderLabel(business.owner?.gender)}
+                    /* Two chips, as the paper prints two boxes. The box
+                       reads "Male"; the column holds 'M'. */
+                    edit={{
+                      key: 'owner.gender',
+                      value: business.owner?.gender ?? '',
+                      control: { kind: 'radio', options: GENDERS },
+                    }}
                   />
                   {/*
                     ── The officer box ──────────────────────────────────────
@@ -5545,12 +6396,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         className="grow basis-[15rem] max-w-full"
                         targets={['form:president_officer_name']}
                         value={business.president_officer_name ?? ''}
+                        edit={{ key: 'president_officer_name' }}
                       />
                       <Field
                         label="16. Citizenship (of President/OIC)"
                         className="grow basis-[11rem] max-w-full"
                         targets={['form:citizenship']}
                         value={business.citizenship ?? ''}
+                        edit={{ key: 'citizenship' }}
                       />
                       <Field
                         label="17. Capital Participation (% Filipino)"
@@ -5561,6 +6414,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                             ? ''
                             : `${business.capital_participation_filipino}%`
                         }
+                        /* The number, not "60%" — the per cent sign is the
+                           sheet's, and the column would refuse it. */
+                        edit={{
+                          key: 'capital_participation_filipino',
+                          value:
+                            business.capital_participation_filipino == null
+                              ? ''
+                              : String(business.capital_participation_filipino),
+                        }}
                       />
                     </div>
                   </div>
@@ -5641,7 +6503,30 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         : humanizeKey(business.economic_organization)
                       : ''
                   }
+                  /* Six chips across the width, the shape the form gives
+                     item B5 — and the reason this box is `basis-full`. */
+                  edit={{
+                    key: 'economic_organization',
+                    value: business.economic_organization ?? '',
+                    control: { kind: 'radio', options: ECONOMIC_ORGANIZATIONS },
+                  }}
                 />
+                {/*
+                  "Others" is a choice that asks a second question, and the
+                  form asks it in a box that appears with the choice. Read
+                  off the BUFFER, not the record, so it appears the moment
+                  the officer picks Others rather than after a save.
+                */}
+                {editing
+                  && (fieldEdits.economic_organization
+                    ?? business.economic_organization) === 'others' && (
+                  <Field
+                    className="basis-full max-w-full"
+                    label="Others — say what it is"
+                    value={business.economic_organization_others ?? ''}
+                    edit={{ key: 'economic_organization_others' }}
+                  />
+                )}
                 {/*
                  * Item B8 (new form) / B7 (renewal).
                  *
@@ -5679,6 +6564,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       ? ''
                       : formatMoney(Number(business.capital_investment))
                   }
+                  /* The amount, not "₱250,000.00": the column takes a
+                     number and the peso sign is this sheet's doing. */
+                  edit={{
+                    key: 'capital_investment',
+                    value:
+                      business.capital_investment == null
+                        ? ''
+                        : String(business.capital_investment),
+                  }}
                 />
                 <Field
                   label="7. Tax Incentives from a Government Entity"
@@ -5690,6 +6584,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         ? 'Yes — certificate required'
                         : 'No'
                   }
+                  edit={{
+                    key: 'has_tax_incentives',
+                    /*
+                      Blank when the record is blank, so no chip is lit. A
+                      box reading — must not become a control reading "No":
+                      that turns "nobody was asked" into a declaration.
+                    */
+                    value:
+                      business.has_tax_incentives == null
+                        ? ''
+                        : business.has_tax_incentives
+                          ? '1'
+                          : '0',
+                    control: { kind: 'radio', options: YES_NO },
+                  }}
                 />
                 {/*
                   Item 8, in the row with the rest. It was under a "Premises &
@@ -5701,6 +6610,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   targets={['form:is_rented']}
                   value={business.is_rented == null ? '' : business.is_rented ? 'Yes' : 'No'}
                   className="grow basis-[20rem] max-w-full"
+                  edit={{
+                    key: 'is_rented',
+                    value:
+                      business.is_rented == null ? '' : business.is_rented ? '1' : '0',
+                    control: { kind: 'radio', options: YES_NO },
+                  }}
                 />
                 {/*
                   After the numbered run, not through it. It was between items 6
@@ -6382,7 +7297,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               />
             )}
             {existingRemarks.map((r) => (
-              <RemarkBubble key={r.key} author={r.author} remark={r.remark} />
+              <RemarkBubble key={r.key} author={r.author} remark={r.remark} items={r.items} />
             ))}
           </aside>
         )}
@@ -6482,7 +7397,49 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           onConfirm={sendRemark}
         />
       )}
+      {/*
+        ── The confirmation the client asked for ─────────────────────────
+
+        Not a formality. This writes over answers a citizen DECLARED, and
+        the ordinary way to change one is to return the filing so the
+        declarant changes it themselves. The dialog names each field it is
+        about to overwrite and says the change is recorded against the
+        officer, because both are true and an officer should be told the
+        second one before they press it rather than after.
+      */}
+      {confirmFieldSave && (
+        <ProtoModal
+          title="Save changes to this filing?"
+          confirmLabel={savingFields ? 'Saving…' : 'Save changes'}
+          confirmDisabled={savingFields || !fieldEditsValid}
+          onCancel={() => setConfirmFieldSave(false)}
+          onConfirm={() => void saveFields()}
+        >
+          <p className="text-sm text-ink-secondary">
+            You are changing {Object.keys(fieldEdits).length} answer
+            {Object.keys(fieldEdits).length === 1 ? '' : 's'} the applicant submitted. The
+            change is recorded against your account.
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {Object.entries(fieldEdits).map(([key, value]) => (
+              <li key={key} className="text-sm">
+                <span className="font-semibold text-ink">{editFieldLabel(key)}</span>
+                <span className="text-ink-muted"> → </span>
+                <span className="text-ink">
+                  {editFieldDisplay(key, value, barangaysRef.data ?? [])}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {fieldSaveError !== null && (
+            <p role="alert" className="mt-3 text-sm font-semibold text-s-red">
+              {fieldSaveError}
+            </p>
+          )}
+        </ProtoModal>
+      )}
     </div>
     </FieldCorrections.Provider>
+    </FieldEdits.Provider>
   )
 }

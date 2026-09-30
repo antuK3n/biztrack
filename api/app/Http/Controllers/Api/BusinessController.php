@@ -6,6 +6,7 @@ use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
 use App\Http\Resources\PermitResource;
+use App\Models\Application;
 use App\Models\Business;
 use App\Models\BusinessOwner;
 use App\Support\ApplicationVisibility;
@@ -162,6 +163,175 @@ class BusinessController extends Controller
 
         return response()->json([
             'data' => new BusinessResource($business->load($this->eager)),
+        ]);
+    }
+
+    /**
+     * The address and owner columns an officer can now edit, flattened.
+     *
+     * Dotted keys (`address.street`, `owner.surname`) so the audit entry
+     * reads in the same vocabulary the request used, and so a reader of
+     * the log can tell a business column from one on a related row.
+     *
+     * Reloaded from the database rather than read off the in-memory
+     * relation: `syncAddressAndLines` replaces the address row and
+     * `syncOwner` upserts the owner, so a relation loaded before the
+     * write would hand back the values it was loaded with.
+     *
+     * @return array<string, scalar|null>
+     */
+    private static function relatedSnapshot(Business $business): array
+    {
+        $address = $business->address()->first();
+        $owner = $business->owners()->where('is_primary', true)->first();
+
+        $snapshot = [];
+        foreach ([
+            'house_bldg_no', 'street', 'line1', 'line2', 'block', 'lot',
+            'lot_area_sqm', 'barangay_id', 'telephone', 'mobile_number',
+            'email', 'website',
+        ] as $column) {
+            $snapshot["address.$column"] = $address?->$column;
+        }
+        foreach (['surname', 'given_name', 'middle_name', 'suffix', 'gender'] as $column) {
+            $snapshot["owner.$column"] = $owner?->$column;
+        }
+
+        return $snapshot;
+    }
+
+    /**
+     * An OFFICER corrects the filing's own answers.
+     *
+     * The same validation and the same writer as `update()` above, reached
+     * through a different door: the applicant's rules are the rules, which
+     * is the client's instruction of 30 September 2026 and the only reading
+     * of it that cannot drift — a second copy of the rules agrees on the
+     * day it is written and not after the next paper change.
+     *
+     * ── What is different, and why ──────────────────────────────────────
+     *
+     * It hangs off the APPLICATION rather than the business, because that
+     * is what an officer is authorised against: a sanitary officer may read
+     * the filings routed to CHO, not every business in the register.
+     *
+     * It is allowed at any status the officer can still see. A filing being
+     * reviewed is the case this exists for, and the wizard's Draft-or-
+     * Returned guard is about who may edit rather than about when.
+     *
+     * Every changed field is written to `application_corrections` with the
+     * officer named. A citizen's declared answer changed by somebody else
+     * has to say so on the record, or the declaration they signed stops
+     * meaning anything — that is what a return gives for free and what a
+     * direct edit has to buy back.
+     */
+    public function updateAsOfficer(Request $request, Application $application): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless(
+            $user !== null && $user->hasPermission('application.review'),
+            403,
+            'Only a reviewing officer may correct a filing.'
+        );
+        abort_unless(
+            ApplicationVisibility::canView($user, $application),
+            403,
+            'This filing is not routed to your office.'
+        );
+
+        $business = $application->business;
+        abort_unless($business !== null, 422, 'This filing has no business on the register.');
+
+        $data = $this->validateBusiness($request, $business);
+
+        /*
+         * Read BEFORE the write, so the audit can say what each field was.
+         * Only the columns this endpoint sets; the address and the lines are
+         * recorded as a fact of change rather than value-by-value, because a
+         * line table diffed into an audit line is unreadable.
+         */
+        $watched = [
+            'name', 'trade_name', 'registration_type', 'registration_number',
+            'tin', 'is_rented', 'lessor_name', 'lessor_address',
+            'lessor_contact', 'monthly_rental',
+            'emergency_contact_name', 'emergency_contact_number',
+            'economic_organization', 'economic_organization_others',
+            'president_officer_name', 'citizenship',
+            'capital_participation_filipino', 'capital_investment',
+            'has_tax_incentives',
+        ];
+        $before = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all();
+
+        /*
+         * The address and the named owner live on their own tables, and
+         * the sheet now edits both — the barangay, the street, the block
+         * and lot, the business's own telephone, mobile and e-mail, and
+         * all five of the owner's name fields.
+         *
+         * Read the same way and for the same reason as the columns above:
+         * an officer who can change WHO OWNS a business and leave nothing
+         * on the record is the failure this entry exists to prevent.
+         */
+        $before += self::relatedSnapshot($business);
+
+        DB::transaction(function () use ($business, $data) {
+            $business->update([
+                'name' => $data['name'],
+                'trade_name' => $data['trade_name'] ?? null,
+                'registration_type' => $data['registration_type'] ?? null,
+                'form_of_organization' => self::formOfOrganization($data),
+                'registration_number' => $data['registration_number'] ?? null,
+                'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'pays_rent' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
+                ...self::paperFormFields($data),
+            ]);
+            $this->syncAddressAndLines($business, $data);
+        });
+
+        $business->refresh();
+
+        /*
+         * One row per field that actually moved. A change nobody can trace
+         * to a person is the thing that makes this endpoint dangerous, and
+         * this is the whole of the answer to it.
+         */
+        $after = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all()
+            + self::relatedSnapshot($business);
+
+        $changed = [];
+        foreach ($after as $field => $value) {
+            /*
+             * Loose, not strict. A decimal column comes back from the
+             * database as the string '100.00' where it went in as the
+             * number 100, and a strict comparison would report a change
+             * every time an officer saved without touching the field.
+             */
+            if ($before[$field] == $value) {
+                continue;
+            }
+            $changed[$field] = ['from' => $before[$field], 'to' => $value];
+        }
+
+        if ($changed !== []) {
+            Audit::log('application.fields_corrected_by_officer', $application, [
+                'officer_id' => $user->id,
+                'department' => $user->department?->code,
+                'changed' => $changed,
+            ]);
+        }
+
+        return response()->json([
+            'data' => new BusinessResource($business->fresh([
+                'address.barangay', 'lines.psicCode', 'owners',
+            ])),
+            'meta' => ['changed' => array_keys($changed)],
         ]);
     }
 
