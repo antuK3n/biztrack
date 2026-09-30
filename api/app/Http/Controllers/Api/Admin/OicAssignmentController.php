@@ -87,9 +87,13 @@ class OicAssignmentController extends Controller
              * that are at the top of this order: a filing nobody took, and one
              * somebody took and has been sitting on. Newest-first would bury
              * both under whatever happened this morning.
+             *
+             * A released review has no `assigned_at`; it leads its group, as
+             * it always did on SQLite. PostgreSQL would sort it last unless
+             * told.
              */
             ->orderByRaw('CASE WHEN officer_user_id IS NULL THEN 0 ELSE 1 END')
-            ->orderBy('assigned_at')
+            ->orderByRaw('assigned_at asc nulls first')
             ->orderBy('id')
             ->paginate($data['per_page'] ?? 50);
 
