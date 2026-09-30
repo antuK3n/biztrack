@@ -47,4 +47,68 @@ return [
      */
     'amendment_fee' => (float) env('BIZTRACK_AMENDMENT_FEE', 0),
 
+    /*
+     * When a CLEARANCE may be renewed — how early, and how late.
+     *
+     * Both null, which is exactly what the system does today: no bound at
+     * either end. Searched 1 October 2026 and there was no rule anywhere —
+     * `renewablePermits` offers every active and expired permit with no date
+     * filter, so an applicant can renew eleven months early or resurrect a
+     * permit that lapsed years ago, and nothing says otherwise.
+     *
+     * That is a default nobody chose rather than a decision, and the LGU has
+     * not been asked yet. Null keeps today's behaviour so that turning a
+     * limit on is a value here and never a code change; see
+     * App\Support\RenewalWindow for what each bound means, why the
+     * business permit is exempt, and what the applicant is told.
+     *
+     * `opens_days_before` — 30 would match the first expiry reminder,
+     * 60 the worked example in WorkflowService::issuePermitFor.
+     *
+     * `closes_months_after` — the one worth asking BPLO first. With the late
+     * surcharge now live, a permit renewed five years on bills the Sec.
+     * 8A.05 36-month interest cap, and whether the city wants that as a
+     * renewal at all is a policy question with money attached.
+     */
+    'renewal_window' => [
+        /*
+         * No early bound, and that is a decision rather than a gap.
+         *
+         * 30 days was tried on 1 October 2026 and taken out the same day,
+         * because FullLifecycleThenRenewalTest refused a filing the system is
+         * built to accept: six permits expiring 15, 60, 105, 150, 195 and 240
+         * days out, renewed as one subset. Staggered expiries are the whole
+         * reason a subset renewal exists, and a 30-day window turns that one
+         * filing into five.
+         *
+         * Nothing is protected by refusing an early renewal here. The term
+         * CONTINUES (`issuePermitFor`), so no paid-for day is lost and the
+         * city loses no revenue; the premises are inspected either way
+         * (`ClearanceService::submitHeld`); and the deferral scheme exists so
+         * the applicant makes ONE trip a year. An early bound only adds
+         * trips.
+         */
+        'opens_days_before' => env('BIZTRACK_RENEWAL_OPENS_DAYS_BEFORE'),
+        /*
+         * 36 months, and the number is Sec. 8A.05's, not a round guess.
+         *
+         * The obvious cutoff is one lapsed term, on the reasoning that a
+         * stale permit should be forced through a fresh inspection. That
+         * reasoning does not apply here: `ClearanceService::submitHeld` does
+         * NOT skip the inspection on a renewal — client, 6 September 2026,
+         * *"the LGU inspects the premises, not the paperwork"* — so the
+         * premises are visited either way and a tighter bound would buy no
+         * safety, only a longer form.
+         *
+         * What is left is deterrence. Interest accrues at 2% a month and
+         * stops at 36 months, so up to that point every further month of
+         * delay costs more and renewal is still discouraging lateness. Past
+         * it, delay is free at the margin. That is the point where renewal
+         * stops deterring anything and a New Application — full documents,
+         * BPLO reading the form, billed at submission instead of deferred —
+         * should take over.
+         */
+        'closes_months_after' => env('BIZTRACK_RENEWAL_CLOSES_MONTHS_AFTER', 36),
+    ],
+
 ];
