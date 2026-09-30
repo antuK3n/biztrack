@@ -8,6 +8,7 @@ use App\Models\Permit;
 use App\Support\Spc;
 use Database\Seeders\AnalyticsHistorySeeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /*
  * AnalyticsHistorySeeder writes demo history into a database real testers
@@ -20,12 +21,18 @@ use Illuminate\Support\Facades\DB;
  * precisely so a subclass can do this. Same code path, a couple of seconds.
  */
 
-/** Every table in the schema, and how many rows it holds right now. */
+/**
+ * Every table in the schema, and how many rows it holds right now.
+ *
+ * Asked of the schema builder rather than of `sqlite_master`, so the purge is
+ * proven on PostgreSQL — where it would actually run against a real register
+ * — as well as on SQLite.
+ */
 function tableCounts(): array
 {
     $counts = [];
-    foreach (DB::select("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name") as $row) {
-        $counts[$row->name] = (int) DB::table($row->name)->count();
+    foreach (collect(Schema::getTableListing(schemaQualified: false))->sort() as $table) {
+        $counts[$table] = (int) DB::table($table)->count();
     }
 
     return $counts;

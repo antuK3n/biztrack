@@ -110,8 +110,11 @@ it('refuses the super admin a request: asking the applicant is an office’s wor
             'department_id' => $bplo,
         ])->assertStatus(403);
 
-    // Nothing was written on the way to the 403.
-    expect(OfficerRequest::where('application_id', $app->id)->where('subject', 'Clarification')->exists())
+    // Nothing was written on the way to the 403. `subject` is the payload's
+    // name for the row's `title`; asked by the payload's name, this compared
+    // two strings on SQLite (a quoted unknown column reads as a literal there)
+    // and was false whatever had been written.
+    expect(OfficerRequest::where('application_id', $app->id)->where('title', 'Clarification')->exists())
         ->toBeFalse();
 });
 
