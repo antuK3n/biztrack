@@ -445,6 +445,30 @@ it('completes a payment KwikPay reports as 5 when reconciling', function () {
         && Signature::verify($r->data(), KP_KEY));
 });
 
+/*
+ * One run asks about at most --limit payments, so which come first decides
+ * which wait. A pending payment with no check scheduled at all (the query's
+ * whereNull branch: nothing BizTrack writes leaves one, but a row fixed by
+ * hand can) is due before any that is merely overdue. Left to the engine,
+ * SQLite did that and PostgreSQL did the opposite — NULL sorts last there —
+ * so on the production database such a row could wait behind every re-check.
+ */
+it('asks about a payment with no check scheduled before an overdue one', function () {
+    $overdue = kpOpen(kpFiling());
+    $unscheduled = kpOpen(kpFiling());
+    $overdue->forceFill(['check_attempts' => 1, 'next_check_at' => now()->addMinute()])->save();
+    $unscheduled->forceFill(['next_check_at' => null])->save();
+    kpQueryAnswers('1', (float) $unscheduled->amount);
+
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments', ['--limit' => 1])->assertSuccessful();
+
+    Http::assertSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/query')
+        && $r['order_id'] === $unscheduled->gateway_order_id);
+    Http::assertNotSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/query')
+        && $r['order_id'] === $overdue->gateway_order_id);
+});
+
 it('fails a payment KwikPay reports as 3 when reconciling', function () {
     $payment = kpOpen(kpFiling());
     kpQueryAnswers('3');

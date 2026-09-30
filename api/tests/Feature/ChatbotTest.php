@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ChatbotConversation;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 
 function ownedTrackingId(string $email): string
 {
@@ -502,4 +503,44 @@ it('never splits a user thread across two conversations', function () {
         'user_id' => $userId,
         'started_at' => now(),
     ]))->toThrow(UniqueConstraintViolationException::class);
+});
+
+/*
+ * Two first messages racing: both find no conversation, the other request's
+ * insert lands first, and this one's hits the unique index. The loser is meant
+ * to re-read and carry on. On PostgreSQL a failed statement poisons the
+ * transaction around it ("current transaction is aborted"), and the insert
+ * runs inside the one that writes the two turns — so the re-read failed too
+ * and the message was lost with a 500, unless the insert is fenced by a
+ * savepoint. SQLite has no such rule, which is why this passed there.
+ */
+it('recovers when another request opens the conversation first', function () {
+    $userId = User::where('email', 'owner@biztrack.local')->value('id');
+    ChatbotConversation::where('user_id', $userId)->delete();
+
+    // The other request, committing between this one's lookup (which found
+    // nothing) and its insert. Written right after the lookup inside store()'s
+    // transaction — the test's own wraps everything, hence level 2 — so it
+    // sits outside anything the insert itself may roll back, as a real
+    // competitor's committed row would.
+    $raced = false;
+    DB::listen(function ($query) use (&$raced, $userId) {
+        if ($raced || DB::transactionLevel() < 2
+            || ! str_starts_with($query->sql, 'select * from "chatbot_conversations"')) {
+            return;
+        }
+        $raced = true;
+        DB::table('chatbot_conversations')->insert([
+            'user_id' => $userId, 'started_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    });
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => 'hello'])
+        ->assertCreated();
+
+    $conversations = ChatbotConversation::where('user_id', $userId)->get();
+    expect($raced)->toBeTrue()
+        ->and($conversations)->toHaveCount(1)
+        ->and($conversations->first()->messages()->count())->toBe(2);
 });

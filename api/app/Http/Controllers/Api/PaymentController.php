@@ -387,7 +387,9 @@ class PaymentController extends Controller
 
         $payments = Payment::whereHas('application', fn ($q) => $q->where('applicant_user_id', $request->user()->id))
             ->with('application:id,tracking_id')
-            ->orderByDesc('paid_at')
+            // A payment not yet paid (paid_at null) after the paid ones, as it
+            // always sorted on SQLite; PostgreSQL would put it first unless told.
+            ->orderByRaw('paid_at desc nulls last')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
 

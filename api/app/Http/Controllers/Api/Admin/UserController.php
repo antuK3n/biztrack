@@ -137,8 +137,8 @@ class UserController extends Controller
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
-                ->where('name', 'like', "%{$q}%")
-                ->orWhere('email', 'like', "%{$q}%"));
+                ->whereLike('name', "%{$q}%")
+                ->orWhereLike('email', "%{$q}%"));
         }
         if ($role = $request->query('role')) {
             $query->whereHas('roles', fn ($r) => $r->where('name', $role));

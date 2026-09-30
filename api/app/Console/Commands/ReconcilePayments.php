@@ -39,7 +39,14 @@ class ReconcilePayments extends Command
             ->awaitingKwikPay()
             ->where('created_at', '<=', now()->subMinutes(KwikPayGateway::FIRST_CHECK_AFTER_MINUTES))
             ->where(fn ($q) => $q->whereNull('next_check_at')->orWhere('next_check_at', '<=', now()))
-            ->orderBy('next_check_at')
+            /*
+             * A payment with no check scheduled first, then the longest
+             * overdue. Said explicitly because the engines disagree when it is
+             * left unsaid: SQLite puts NULL first in an ascending sort and
+             * PostgreSQL puts it last, so in production a backlog of overdue
+             * re-checks could fill every run's --limit ahead of it.
+             */
+            ->orderByRaw('next_check_at asc nulls first')
             ->limit(max(1, (int) $this->option('limit')))
             ->get();
 

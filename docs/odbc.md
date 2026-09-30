@@ -111,9 +111,15 @@ a DSN whose *Database Name* is the path to a **copy** of
 logins, so there is no read-only role — always point the tool at a copy, never
 at the live file (AGENTS.md §2.2).
 
-For developers: on SQLite the views are dropped while `artisan migrate` runs
-and re-created when it ends, so a later `->change()` on a table they read does
-not fail (`App\Support\ReportViews`). PostgreSQL needs none of that.
+For developers: on both engines the views are dropped while `artisan migrate`
+runs and re-created when it ends, so a later `->change()` on a table they read
+does not fail (`App\Support\ReportViews`). PostgreSQL refuses to alter or drop
+a column a view reads, just as SQLite refuses to rebuild the table under one.
+On PostgreSQL the re-created views get their grants back: whoever held one
+when the run started, plus the role named by `DB_REPORT_ROLE` (default
+`biztrack_report`) whenever it exists. If the role was created under another
+name, set `DB_REPORT_ROLE` to it, or the next deploy that migrates will lock
+the reporting tools out.
 
 ---
 

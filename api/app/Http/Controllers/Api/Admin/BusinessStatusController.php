@@ -104,8 +104,8 @@ class BusinessStatusController extends Controller
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
-                ->where('name', 'like', "%{$q}%")
-                ->orWhereHas('owner', fn ($o) => $o->where('name', 'like', "%{$q}%")));
+                ->whereLike('name', "%{$q}%")
+                ->orWhereHas('owner', fn ($o) => $o->whereLike('name', "%{$q}%")));
         }
         if ($request->query('status') === 'retired') {
             $query->onlyTrashed();

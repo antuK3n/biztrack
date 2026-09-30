@@ -42,7 +42,7 @@ class AuditLogController extends Controller
             ->orderByDesc('id');
 
         if ($action = $request->query('action')) {
-            $query->where('action', 'like', "%{$action}%");
+            $query->whereLike('action', "%{$action}%");
         }
 
         /*
