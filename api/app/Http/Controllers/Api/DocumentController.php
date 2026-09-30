@@ -129,6 +129,41 @@ class DocumentController extends Controller
         }
 
         $file = $request->file('file');
+
+        /*
+         * ── The same bytes twice is not a second copy ──────────────────
+         *
+         * An applicant answering a return uploaded one file twice, five
+         * minutes apart, and the officer's Section C showed it as both the
+         * current copy and the newest "earlier copy" — same name, same
+         * size, same date. Nobody can act on the difference between two
+         * identical files, because there is none.
+         *
+         * Compared against the NEWEST copy only. Sending A, then B, then A
+         * again is a real statement — the applicant has gone back to the
+         * first version — and that is history worth keeping.
+         *
+         * `file_hash` has been on this table since the beginning and was
+         * never written to; this is what it was for.
+         */
+        $hash = hash_file('sha256', $file->getRealPath());
+        $sameAgain = ApplicationDocument::where('application_id', $application->id)
+            ->where('document_type_id', $documentTypeId)
+            ->when($permitType, fn ($q) => $q->where('permit_type_id', $permitType->id))
+            ->when(! $permitType, fn ($q) => $q->whereNull('permit_type_id'))
+            ->latest('id')
+            ->first();
+
+        if ($sameAgain !== null && $sameAgain->file_hash === $hash) {
+            /*
+             * Answered as a success with the copy already held. A 422 would
+             * be technically defensible and useless: the applicant has the
+             * file they meant to send on the filing, which is what they
+             * were trying to achieve.
+             */
+            return response()->json(['data' => new DocumentResource($sameAgain)], 201);
+        }
+
         $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
         $filename = Str::uuid()->toString().'.'.$ext;
         $path = "private/documents/{$application->id}/{$filename}";
@@ -147,6 +182,8 @@ class DocumentController extends Controller
             'stored_path' => $path,
             'mime_type' => $file->getClientMimeType(),
             'size_bytes' => $file->getSize(),
+            /* What the duplicate check above reads on the next upload. */
+            'file_hash' => $hash,
         ]);
 
         Audit::log('document.uploaded', $doc);
