@@ -282,17 +282,17 @@ class PermitController extends Controller
          */
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
-                $sub->where('permit_number', 'like', "%{$q}%")
+                $sub->whereLike('permit_number', "%{$q}%")
                     ->orWhereHas('business', fn ($b) => $b
-                        ->where('name', 'like', "%{$q}%")
-                        ->orWhere('ban', 'like', "%{$q}%")
+                        ->whereLike('name', "%{$q}%")
+                        ->orWhereLike('ban', "%{$q}%")
                         ->orWhereHas('owner', fn ($o) => $o
-                            ->where('first_name', 'like', "%{$q}%")
-                            ->orWhere('last_name', 'like', "%{$q}%")))
-                    ->orWhereHas('application', fn ($a) => $a->where('tracking_id', 'like', "%{$q}%"))
+                            ->whereLike('first_name', "%{$q}%")
+                            ->orWhereLike('last_name', "%{$q}%")))
+                    ->orWhereHas('application', fn ($a) => $a->whereLike('tracking_id', "%{$q}%"))
                     ->orWhereHas('permitType', fn ($t) => $t
-                        ->where('name', 'like', "%{$q}%")
-                        ->orWhere('code', 'like', "%{$q}%"));
+                        ->whereLike('name', "%{$q}%")
+                        ->orWhereLike('code', "%{$q}%"));
             });
         }
 

@@ -131,6 +131,10 @@ final class OfficePerformanceAnalytics
      * A genuine business called "Test" is conceivable; one called "E2E Wizard
      * Clearances" followed by a millisecond timestamp is not.
      *
+     * Matched ignoring case (`orWhereLike`), which is what SQLite's LIKE always
+     * did; PostgreSQL's plain LIKE would not, and "test shop" would quietly stop
+     * counting as test data on the production database.
+     *
      * @var list<string>
      */
     private const TEST_DATA_PATTERNS = ['E2E%', 'QA %', 'Test%'];
@@ -166,7 +170,7 @@ final class OfficePerformanceAnalytics
         $testShaped = static function ($query, string $column): void {
             $query->where(function ($inner) use ($column): void {
                 foreach (self::TEST_DATA_PATTERNS as $pattern) {
-                    $inner->orWhere($column, 'like', $pattern);
+                    $inner->orWhereLike($column, $pattern);
                 }
             });
         };

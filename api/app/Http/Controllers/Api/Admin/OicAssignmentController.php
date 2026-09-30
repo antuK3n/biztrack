@@ -74,8 +74,8 @@ class OicAssignmentController extends Controller
 
         if ($needle = trim($data['q'] ?? '')) {
             $query->whereHas('application', function ($a) use ($needle) {
-                $a->where('tracking_id', 'like', "%{$needle}%")
-                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$needle}%"));
+                $a->whereLike('tracking_id', "%{$needle}%")
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$needle}%"));
             });
         }
 

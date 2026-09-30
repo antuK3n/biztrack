@@ -56,6 +56,40 @@ it('finds a permit by the business name and by the filing tracking ID', function
     }
 });
 
+/*
+ * A clerk types "rxcare", not "RxCare". SQLite's LIKE ignores case for plain
+ * letters and PostgreSQL's does not, so on the production database every search
+ * box turned case-sensitive and a correct query looked like a missing record.
+ * The same term is sent three ways; all three must find the row.
+ */
+it('finds a permit whatever case the search is typed in, on either database', function () {
+    $permit = Permit::query()
+        ->whereHas('business')
+        ->whereHas('application')
+        ->with(['business', 'application'])
+        ->firstOrFail();
+    $admin = authAs('admin@biztrack.local');
+
+    foreach ([$permit->business->name, $permit->application->tracking_id, $permit->permit_number] as $term) {
+        foreach ([mb_strtolower($term), mb_strtoupper($term)] as $typed) {
+            $ids = collect(test()->withHeaders($admin)
+                ->getJson('/api/v1/permits?per_page=200&q='.urlencode($typed))
+                ->assertOk()
+                ->json('data'))->pluck('id');
+
+            expect($ids->all())->toContain($permit->id);
+        }
+    }
+
+    // The same rule on the filings list, which searches the same two columns.
+    $typed = mb_strtolower($permit->business->name);
+    $apps = collect(test()->withHeaders($admin)
+        ->getJson('/api/v1/applications?per_page=200&q='.urlencode($typed))
+        ->assertOk()
+        ->json('data'))->pluck('id');
+    expect($apps->all())->toContain($permit->application->id);
+});
+
 it('returns only permits in the status asked for', function () {
     $admin = authAs('admin@biztrack.local');
 

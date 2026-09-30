@@ -138,8 +138,8 @@ class ApplicationController extends Controller
         }
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
-                $sub->where('tracking_id', 'like', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"));
+                $sub->whereLike('tracking_id', "%{$q}%")
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
             });
         }
 
