@@ -10,11 +10,7 @@
 FROM node:24-alpine AS build
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
-# --legacy-peer-deps: the lock names @napi-rs/wasm-runtime (a WebAssembly
-# fallback for rolldown/Tailwind, unused where their native builds run) but
-# not the @emnapi peers it asks for, and a clean Linux `npm ci` refuses that.
-# This installs exactly what the lock lists and skips the peer check.
-RUN npm ci --no-audit --no-fund --legacy-peer-deps
+RUN npm ci --no-audit --no-fund
 COPY web/ ./
 # Public by design: Turnstile's site key is printed into every page anyway.
 # Empty = no captcha box, and the API skips the check when its secret is empty.
