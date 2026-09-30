@@ -1,8 +1,8 @@
 <?php
 
-use App\Models\AppNotification;
 use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
+use App\Models\AppNotification;
 use App\Models\OfficerRequest;
 
 /*
