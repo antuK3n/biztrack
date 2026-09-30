@@ -729,17 +729,45 @@ export interface FeeProfile {
   flags?: string[]
 }
 
-export type PaymentMethod = 'gcash' | 'maya' | 'card'
+/**
+ * `card` exists only while payments are simulated; `qrph` and `gotyme` only
+ * through the online gateway. Which ones are offered comes from
+ * `payments.options()`, never from a list in the page.
+ */
+export type PaymentMethod = 'gcash' | 'maya' | 'card' | 'qrph' | 'gotyme'
 
 export interface Payment {
   id: number
   reference_number: string
   amount: string
   method: PaymentMethod
-  status: string
+  status: 'pending' | 'completed' | 'failed' | 'refunded' | string
   paid_at: string | null
+  /** 'simulated' (completed at once) or 'kwikpay' (confirmed by the gateway). */
+  gateway?: 'simulated' | 'kwikpay'
+  /**
+   * Where to finish paying, only while an online payment is pending: a page to
+   * go to (`link`) or a QR image to scan (`qr`).
+   */
+  pay_url?: string | null
+  pay_url_kind?: 'link' | 'qr' | null
+  created_at?: string | null
+  /**
+   * The owner chose "Pay a different way". Still pending at the payment
+   * service (it may yet be paid), but no longer the payment being waited on.
+   */
+  set_aside?: boolean
+  /** Paid twice for one bill; staff are reviewing a refund of this one. */
+  refund_review?: boolean
   /** Present in the owner's cross-application payment history. */
   application?: { id: number; tracking_id: string }
+}
+
+export interface PaymentOptions {
+  mode: 'simulated' | 'kwikpay'
+  methods: { value: PaymentMethod; label: string }[]
+  /** An online payment already waiting, which the screen resumes. */
+  in_progress: Payment | null
 }
 
 export interface Assignment {
