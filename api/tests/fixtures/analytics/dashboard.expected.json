@@ -220,7 +220,8 @@
           "FSIC": 0,
           "ZONING": 0
         },
-        "total": 2
+        "total": 2,
+        "businesses": 2
       },
       {
         "window": "next_60d",
@@ -233,7 +234,8 @@
           "FSIC": 1,
           "ZONING": 0
         },
-        "total": 4
+        "total": 4,
+        "businesses": 4
       },
       {
         "window": "next_90d",
@@ -246,7 +248,8 @@
           "FSIC": 1,
           "ZONING": 0
         },
-        "total": 6
+        "total": 6,
+        "businesses": 6
       },
       {
         "window": "expired",
@@ -259,7 +262,8 @@
           "FSIC": 1,
           "ZONING": 2
         },
-        "total": 4
+        "total": 4,
+        "businesses": 4
       }
     ]
   },

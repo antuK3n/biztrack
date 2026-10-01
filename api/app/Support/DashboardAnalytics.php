@@ -909,14 +909,30 @@ final class DashboardAnalytics
     }
 
     /**
-     * One row per permit in the widest window, with its signed days to expiry.
+     * The expiry table's rows: one per permit still in force (with its signed
+     * days to expiry), and one per business that has let a permit type lapse.
      *
      * The buckets are cumulative. Emitting per-permit rows rather than
      * pre-bucketed counts is what lets the cumulative nesting (30 ⊂ 60 ⊂ 90) be
      * a computation compute() performs, visibly and testably, instead of an
      * assumption baked into a SQL `case` nobody re-reads.
      *
-     * @return list<array{code: string, days_to_expiry: int}>
+     * ── "Already expired" is businesses, not permit rows ────────────────────
+     *
+     * The Expired row counted every permit on the register whose date had
+     * passed. A business that has renewed every year for five years holds four
+     * expired permits and one valid one, and was counted four times as
+     * "expired" while trading lawfully. BPLO's row read 767 on the copy of the
+     * register this was measured on, against 147 businesses actually lapsed.
+     *
+     * So the expired rows are now one per (business, permit type) whose LATEST
+     * permit of that type has run out and which holds no permit of that type
+     * in force today. A latest permit that was revoked or suspended is left
+     * out: that business did not lapse, it was stopped, and the definition has
+     * always excluded revoked permits. `business_id` travels so compute() can
+     * also say how many distinct businesses that is (`businesses`).
+     *
+     * @return list<array{code: string, days_to_expiry: int, business_id: int}>
      */
     private static function expiringPermits(CarbonImmutable $today, ?array $scope = null): array
     {
@@ -924,23 +940,46 @@ final class DashboardAnalytics
             ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
-            ->whereIn('permits.status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+            // Each business's permits of one type together, oldest to latest.
+            ->orderBy('permits.business_id')
+            ->orderBy('permits.permit_type_id')
+            ->orderBy('permits.valid_until')
             ->orderBy('permits.id')
-            ->get(['permit_types.code', 'permits.valid_until']);
+            ->get(['permits.business_id', 'permits.permit_type_id', 'permit_types.code', 'permits.status', 'permits.valid_until']);
+
+        $todayDate = $today->toDateString();
+        $live = [PermitStatus::Active->value, PermitStatus::Expired->value];
 
         $out = [];
+        $groups = [];
         foreach ($rows as $row) {
-            $out[] = [
-                'code' => (string) $row->code,
+            $days = ManilaCalendar::daysBetweenDates(
+                $todayDate,
                 // Date to date: today is a Manila date and valid_until is the
-                // date printed on the permit. Diffing a Manila midnight against
-                // a UTC one was eight hours off and truncated a permit that
-                // lapsed yesterday to "0 days left".
-                'days_to_expiry' => ManilaCalendar::daysBetweenDates(
-                    $today->toDateString(),
-                    CarbonImmutable::parse($row->valid_until)->toDateString(),
-                ),
-            ];
+                // date printed on the permit.
+                CarbonImmutable::parse($row->valid_until)->toDateString(),
+            );
+
+            // Still in force, or due: one row per permit, as before.
+            if (in_array((string) $row->status, $live, true) && $days >= 0) {
+                $out[] = ['code' => (string) $row->code, 'days_to_expiry' => $days, 'business_id' => (int) $row->business_id];
+            }
+
+            $key = $row->business_id.'|'.$row->permit_type_id;
+            $groups[$key]['code'] = (string) $row->code;
+            $groups[$key]['business_id'] = (int) $row->business_id;
+            // Ordered by valid_until, so the last one written is the latest.
+            $groups[$key]['latest'] = ['status' => (string) $row->status, 'days' => $days];
+            if ($row->status === PermitStatus::Active->value && $days >= 0) {
+                $groups[$key]['in_force'] = true;
+            }
+        }
+
+        foreach ($groups as $group) {
+            $latest = $group['latest'];
+            if (! isset($group['in_force']) && $latest['days'] < 0 && in_array($latest['status'], $live, true)) {
+                $out[] = ['code' => $group['code'], 'days_to_expiry' => $latest['days'], 'business_id' => $group['business_id']];
+            }
         }
 
         return $out;
@@ -1732,10 +1771,11 @@ final class DashboardAnalytics
      *
      * 30d ⊂ 60d ⊂ 90d: a permit expiring in 20 days is counted in all three,
      * which is what the mockup's own figures do. Expired is disjoint from the
-     * three forward windows.
+     * three forward windows, and counts lapsed businesses per permit type —
+     * see expiringPermits().
      *
      * @param  list<array{code: string, label: string}>  $columns
-     * @param  list<array{code: string, days_to_expiry: int}>  $permits
+     * @param  list<array{code: string, days_to_expiry: int, business_id?: int}>  $permits
      * @param  list<int>  $windows
      * @return array<string, mixed>
      */
@@ -1764,13 +1804,17 @@ final class DashboardAnalytics
             'total' => 0,
         ];
 
-        foreach ($permits as $permit) {
+        $businesses = array_fill(0, count($rows), []);
+        foreach ($permits as $n => $permit) {
             $code = (string) $permit['code'];
             if (! array_key_exists($code, $blank)) {
                 continue;
             }
 
             $days = (int) $permit['days_to_expiry'];
+            // A fact without a business id (a snapshot or fixture written
+            // before the id travelled) stands for a business of its own.
+            $business = isset($permit['business_id']) ? 'b'.$permit['business_id'] : 'row'.$n;
 
             foreach ($rows as $index => $row) {
                 $hit = $row['expired']
@@ -1780,8 +1824,19 @@ final class DashboardAnalytics
                 if ($hit) {
                     $rows[$index]['counts'][$code]++;
                     $rows[$index]['total']++;
+                    $businesses[$index][$business] = true;
                 }
             }
+        }
+
+        /*
+         * `businesses`, beside `total`: how many distinct businesses the row
+         * is about. `total` stays the sum of the cells so the table adds up
+         * across; a business lapsed on its sanitary permit and its fire
+         * clearance is two cells and one business.
+         */
+        foreach ($rows as $index => $row) {
+            $rows[$index]['businesses'] = count($businesses[$index]);
         }
 
         return ['columns' => $columns, 'rows' => $rows];
