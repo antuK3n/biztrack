@@ -149,7 +149,9 @@ function SignatoryDialog({
       const saved = editing
         ? await admin.updateSignatory(signatory.id, body)
         : await admin.addSignatory(office.id, body)
-      onSaved(editing ? `Saved ${saved.name}.` : `Added ${saved.name} to ${office.code}.`)
+      // The name leads, not ends, each message: names end in "Jr." often
+      // enough that "Saved Juan Cruz Jr.." was the first thing a test printed.
+      onSaved(editing ? `${saved.name} is saved.` : `${saved.name} is added to ${office.code}.`)
     } catch (err) {
       const apiError = toApiError(err)
       if (apiError.status === 422 && Object.keys(apiError.errors).length > 0) setErrors(apiError.errors)
@@ -287,7 +289,7 @@ function RetireDialog({
     setFailure(null)
     try {
       await admin.retireSignatory(signatory.id)
-      onRetired(`Retired ${signatory.name}. The entry is kept on record.`)
+      onRetired(`${signatory.name} is retired. The entry is kept on record.`)
     } catch (err) {
       setFailure(toApiError(err).message)
       setBusy(false)
