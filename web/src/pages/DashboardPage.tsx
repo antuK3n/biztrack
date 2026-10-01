@@ -10,6 +10,7 @@ import {
   ShieldCheckIcon,
   UsersIcon,
 } from '../components/icons'
+import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { Logo } from '../components/Logo'
 import { AccountRestrictedModal } from '../components/ui/Proto'
 import { businesses, requests } from '../lib/resources'
@@ -112,6 +113,7 @@ function HomeCard({
 /* ── Owner home (PDF p5) ──────────────────────────────────────────────── */
 function OwnerHome() {
   const [dismissed, setDismissed] = useState(false)
+  const homeAddressMissing = useAuth((s) => s.user?.home_address_missing ?? false)
   // Confirm status exposure at runtime: BusinessResource does not currently
   // include `status`, so `b.status` may be undefined — the modal only fires
   // when a restricted status is actually present. Purely informational.
@@ -179,6 +181,12 @@ function OwnerHome() {
       <div className="mt-6">
         <Logo height={72} />
       </div>
+      {/*
+        Under the logo and above the four tiles, capped to their width: it is
+        something to finish, not a fifth place to go [checklist 2026-09-28,
+        Register 2]. Gone once the address is saved.
+      */}
+      {homeAddressMissing && <HomeAddressPrompt className="mt-10 w-full max-w-2xl" />}
       <div className="mt-14 flex flex-wrap items-start justify-center gap-8 lg:gap-12">
         <HomeCard to="/apply?type=new" icon={FilePlusIcon} label="New Business Permit" />
         <HomeCard to="/apply?type=renewal" icon={RenewIcon} label="Renew Business Permit" />
@@ -244,8 +252,9 @@ function StaffHome({ permissions }: { permissions: string[] }) {
    * /staff/login. Reported as "Records crashes". The rail beside these tiles
    * never had the bug, because it has always gone through portalPath.
    *
-   * The super admin's Analytics destination matches the rail's: Office
-   * Performance, not Processing Time (issue #102).
+   * The super admin's Analytics destination matches the rail's: the one
+   * dashboard every office reads (checklist 2026-09-27, item 1). Office
+   * Performance and Processing Time are a tab away.
    */
   const portal = activePortal()
   const cards: Card[] = [

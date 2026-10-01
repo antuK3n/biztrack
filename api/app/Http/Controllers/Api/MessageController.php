@@ -468,10 +468,25 @@ class MessageController extends Controller
 
         $this->applyNarrow($query, $user, $narrow);
 
-        // Newest activity first; a filing nobody has written on yet sorts by
-        // when it last changed, which is what the old sort_key did.
+        /*
+         * Newest activity first; a filing nobody has written on yet sorts by
+         * when it last changed, which is what the old sort_key did.
+         *
+         * The sort key is its own correlated subquery, not the
+         * `last_message_at` alias above wrapped in COALESCE. SQLite lets ORDER
+         * BY reach into a select alias inside an expression; PostgreSQL allows
+         * an alias only on its own, so the inbox answered 500 there ("column
+         * last_message_at does not exist"). MAX over no rows is one NULL row,
+         * so the COALESCE still falls back to the filing's own timestamp.
+         */
+        $activityAt = Message::query()
+            ->selectRaw('COALESCE(MAX(messages.created_at), applications.updated_at)')
+            ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+            ->whereColumn('message_threads.application_id', 'applications.id')
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user));
+
         $applications = $query
-            ->orderByRaw('COALESCE(last_message_at, applications.updated_at) DESC')
+            ->orderByDesc($activityAt)
             ->orderByDesc('applications.id')
             ->paginate($this->perPage($request));
 

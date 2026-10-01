@@ -86,12 +86,15 @@ class OfficeSignatoryController extends Controller
      */
     public function destroy(OfficeSignatory $officeSignatory): JsonResponse
     {
+        // The row as it stood, before the retire (Audit Log 1).
+        $snapshot = Audit::snapshot($officeSignatory);
+
         $officeSignatory->update(['is_active' => false]);
 
         Audit::log('office_signatory.retired', $officeSignatory, [
             'role' => $officeSignatory->role,
             'name' => $officeSignatory->name,
-        ]);
+        ], $snapshot);
 
         return response()->json(['data' => $this->present($officeSignatory->fresh())]);
     }

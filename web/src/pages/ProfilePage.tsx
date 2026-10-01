@@ -1,5 +1,8 @@
-import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useId, useRef } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ConfirmEmailCard } from '../components/EmailCode'
+import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { roleLabel } from '../components/AppShell'
 import {
   AlertCircleIcon,
@@ -11,10 +14,12 @@ import {
 import { PageTitle, ProtoCard } from '../components/ui/Proto'
 import { activePortal, portalPath } from '../lib/api'
 import { formatDate, formatMoney } from '../lib/format'
+import { formatHomeAddress } from '../lib/homeAddress'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
 import type { PageMeta, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useHoldings } from './applicant/permitHoldings'
+import { PaymentHistory } from './applicant/PaymentsPage'
 
 /*
  * Profile — the read-only account record behind the avatar menu (PDF p24–26).
@@ -206,6 +211,72 @@ function UnbilledFeesCard({ unbilled }: { unbilled: PageMeta['unbilled_fees'] })
   )
 }
 
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+/*
+ * Account and Payment history, for owners [checklist 2026-09-27, View Payment
+ * History 1]. The tab lives in the address (`?tab=payments`) so /payments can
+ * redirect straight to it, and so Back and a reload keep the reader where they
+ * were.
+ *
+ * The WAI-ARIA tabs pattern: one tab stop, arrow keys move between tabs,
+ * `aria-selected` says which is open. Solid means selected, as on every pill
+ * in the app (FilterPills), and the selected tab also carries an underline so
+ * the state is not colour alone.
+ */
+const TABS = [
+  { value: 'account', label: 'Account' },
+  { value: 'payments', label: 'Payment history' },
+] as const
+type TabValue = (typeof TABS)[number]['value']
+
+function ProfileTabs({ value, onChange, idBase }: { value: TabValue; onChange: (v: TabValue) => void; idBase: string }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = TABS.length - 1
+    const next =
+      event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
+      : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : null
+    if (next === null) return
+    event.preventDefault()
+    onChange(TABS[next].value)
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div role="tablist" aria-label="Profile sections" className="mb-6 flex gap-2.5 border-b border-line pb-3">
+      {TABS.map((tab, i) => {
+        const active = tab.value === value
+        return (
+          <button
+            key={tab.value}
+            ref={(el) => {
+              refs.current[i] = el
+            }}
+            type="button"
+            role="tab"
+            id={`${idBase}-tab-${tab.value}`}
+            aria-selected={active}
+            aria-controls={`${idBase}-panel-${tab.value}`}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(tab.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            className={`rounded-full border-2 border-royal px-5 py-1.5 text-sm font-semibold transition-colors ${
+              active ? 'bg-royal text-white underline underline-offset-4' : 'bg-white text-royal hover:bg-royal-tint'
+            }`}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ProfilePage() {
   const user = useAuth((s) => s.user) as ProfileUser | null
   const photoUrl = useProfilePhoto(user?.has_photo ?? false)
@@ -224,6 +295,12 @@ export function ProfilePage() {
   const isOfficeAccount = (user?.department ?? null) !== null
   const portal = activePortal()
   const { groups, unbilled, loading, error } = useHoldings(isOwner)
+  const [params, setParams] = useSearchParams()
+  const tabIdBase = useId()
+  // Payment history is an owner's tab; anyone else only ever sees Account.
+  const tab: TabValue = isOwner && params.get('tab') === 'payments' ? 'payments' : 'account'
+  const setTab = (next: TabValue) =>
+    setParams(next === 'account' ? {} : { tab: next }, { replace: true })
 
   if (!user) return null
 
@@ -255,6 +332,32 @@ export function ProfilePage() {
         )}
       </ProtoCard>
 
+      {isOwner && <ProfileTabs value={tab} onChange={setTab} idBase={tabIdBase} />}
+
+      {tab === 'payments' ? (
+        <div role="tabpanel" id={`${tabIdBase}-panel-payments`} aria-labelledby={`${tabIdBase}-tab-payments`}>
+          <PaymentHistory />
+        </div>
+      ) : (
+      <div
+        {...(isOwner
+          ? { role: 'tabpanel', id: `${tabIdBase}-panel-account`, 'aria-labelledby': `${tabIdBase}-tab-account` }
+          : {})}
+      >
+      {/*
+        Confirm the address, here beside it, when filing is waiting on that
+        [checklist 2026-09-27, Register 1]. Only while the API has a real
+        mailer; with mail off `email_verification_required` is always false.
+      */}
+      {user.email_verification_required && (
+        <div className="mb-6">
+          <ConfirmEmailCard user={user} />
+        </div>
+      )}
+
+      {/* Above the record it completes [checklist 2026-09-28, Register 2]. */}
+      {isOwner && user.home_address_missing && <HomeAddressPrompt className="mb-6" />}
+
       {/*
         Above Account details, below the identity card: it is money, which
         outranks a name and an e-mail the owner already knows, and it is
@@ -277,6 +380,14 @@ export function ProfilePage() {
             </span>
           </DetailRow>
           <DetailRow label="Mobile number">{user.mobile_number || 'Not set'}</DetailRow>
+          {/*
+            Owners only: staff are never asked for a home address, and a row
+            reading "Not given yet" on an officer's record would suggest they
+            owe one.
+          */}
+          {isOwner && (
+            <DetailRow label="Home address">{formatHomeAddress(user) ?? 'Not given yet'}</DetailRow>
+          )}
           {/* Shown because it is now editable on Settings. A field the account
               holds but no screen prints is the other half of item 74. */}
           <DetailRow label="Gender">{GENDER_LABELS[user.gender] ?? 'Not specified'}</DetailRow>
@@ -373,10 +484,14 @@ export function ProfilePage() {
             <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />
           </Link>
           <p className="mt-2 text-xs text-ink-muted">
-            Name, gender, mobile number and password are on the Settings page. Your email is your
-            sign-in ID — the City BPLO changes it for you.
+            {isOwner
+              ? 'Name, gender, mobile number, home address and password are on the Settings page.'
+              : 'Name, gender, mobile number and password are on the Settings page.'}{' '}
+            Your email is your sign-in ID — the City BPLO changes it for you.
           </p>
         </>
+      )}
+      </div>
       )}
     </div>
   )

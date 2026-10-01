@@ -65,7 +65,13 @@ class BusinessStatusController extends Controller
     {
         $request->validate([
             'q' => ['sometimes', 'nullable', 'string', 'max:120'],
-            'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted'],
+            /*
+             * `retired` is not a status a business can be SET to — it lists the
+             * businesses removed from the register (soft-deleted), which the
+             * roster otherwise leaves out (checklist item 21: retired records
+             * hidden by default, shown on request).
+             */
+            'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted,retired'],
             /*
              * ── Ordering, from a whitelist ──────────────────────────────────
              *
@@ -153,10 +159,12 @@ class BusinessStatusController extends Controller
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
-                ->where('name', 'like', "%{$q}%")
-                ->orWhereHas('owner', fn ($o) => $o->where('name', 'like', "%{$q}%")));
+                ->whereLike('name', "%{$q}%")
+                ->orWhereHas('owner', fn ($o) => $o->whereLike('name', "%{$q}%")));
         }
-        if ($status = $request->query('status')) {
+        if ($request->query('status') === 'retired') {
+            $query->onlyTrashed();
+        } elseif ($status = $request->query('status')) {
             $query->where('status', $status);
         }
 
@@ -263,6 +271,14 @@ class BusinessStatusController extends Controller
                 ] : null,
                 'status' => $b->status,
                 'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
+                /*
+                 * When the business was removed from the register, or null.
+                 * A retired row cannot be acted on — every action route binds
+                 * the business, and binding skips soft-deleted rows — so the
+                 * screen reads this to draw no buttons rather than buttons
+                 * that answer 404.
+                 */
+                'retired_at' => optional($b->deleted_at)->toISOString(),
                 'created_at' => optional($b->created_at)->toISOString(),
                 /*
                  * Deferred permit fees, as a total AND itemised.
@@ -412,6 +428,17 @@ class BusinessStatusController extends Controller
          * and left it alone, for this reason" is a fact worth keeping, it is
          * just not a status change.
          */
+        /*
+         * Blacklisting closes a business and suspending takes it out of
+         * operation — both retire the record, so the audit row keeps the
+         * business as it stood, with its address and lines of business, before
+         * the change (Audit Log 1). Only when the status actually moves there:
+         * re-saving a blacklisting retires nothing new.
+         */
+        $snapshot = $data['status'] !== $from && in_array($data['status'], ['blacklisted', 'suspended'], true)
+            ? Audit::snapshot($business, ['address', 'lines'])
+            : null;
+
         $changes = ['status' => $data['status']];
         if ($data['status'] !== $from) {
             $changes['status_changed_at'] = now();
@@ -442,7 +469,7 @@ class BusinessStatusController extends Controller
             'from' => $from,
             'to' => $data['status'],
             'reason' => $data['reason'],
-        ]);
+        ], $snapshot);
 
         /*
          * ── The certificates follow the business ──────────────────────────

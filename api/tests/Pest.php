@@ -23,6 +23,9 @@ pest()->extend(TestCase::class)
 
 pest()->extend(TestCase::class)->in('Unit');
 
+// Register rows with chosen timestamps, for the analytics tests.
+require_once __DIR__.'/AnalyticsFixtures.php';
+
 /**
  * Log in a seeded demo account and return its bearer token.
  *
@@ -397,4 +400,22 @@ function satisfyChecklist(Application $application, PermitType|string $type): Ap
     }
 
     return $application->fresh();
+}
+
+/**
+ * A complete home address, as registration has required of every business
+ * owner since 28 September 2026 [checklist Register 2]. Spread into a
+ * registration payload; override a part to test it.
+ *
+ * @return array<string, string>
+ */
+function homeAddress(array $overrides = []): array
+{
+    return array_merge([
+        'home_street' => '12 Gen. Luna St.',
+        'home_barangay' => 'Longos',
+        'home_city' => 'Malabon',
+        'home_province' => 'Metro Manila',
+        'home_postal_code' => '1472',
+    ], $overrides);
 }

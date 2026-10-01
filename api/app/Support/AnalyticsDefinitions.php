@@ -61,8 +61,7 @@ namespace App\Support;
  *
  * Plainer must never become looser. Every window, table and exclusion these
  * sentences name is a claim the reader can check, and shortening is not licence
- * to drop one — nor to upgrade a rule score into something the register cannot
- * support. See the renewalRisk() docblock for where that line sits.
+ * to drop one — nor to call a count or a rule-based figure a prediction.
  */
 final class AnalyticsDefinitions
 {
@@ -75,9 +74,6 @@ final class AnalyticsDefinitions
             AnalyticsDatasets::DASHBOARD => self::dashboard(),
             AnalyticsDatasets::PROCESSING_TIME => self::processingTime(),
             AnalyticsDatasets::OFFICE_PERFORMANCE => self::officePerformance(),
-            AnalyticsDatasets::RENEWAL_RISK => self::renewalRisk(),
-            AnalyticsDatasets::RENEWAL_MODEL => self::renewalModel(),
-            AnalyticsDatasets::BUSINESS_GROWTH => self::businessGrowth(),
             default => [],
         };
     }
@@ -120,15 +116,15 @@ final class AnalyticsDefinitions
              */
             'kpis.applications_ytd' => [
                 'label' => 'Applications (all time)',
-                'formula' => 'Every filing on record, counted from creation.',
-                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are included; filings removed from the register are left out.',
+                'formula' => 'Every submitted filing on record.',
+                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are left out, and so are filings removed from the register.',
                 'why' => 'The full-term workload figure: everything the office has ever been asked to process. It sits beside This Month so the total and the current load can be read together.',
             ],
 
             'kpis.applications_this_month' => [
                 'label' => 'This Month',
-                'formula' => 'Filings created since the first day of this month.',
-                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate.',
+                'formula' => 'Filings submitted since the first day of this month (Manila time).',
+                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate. Drafts not yet submitted are left out.',
                 'why' => 'Current load, for staffing the counter this week.',
             ],
 
@@ -142,14 +138,14 @@ final class AnalyticsDefinitions
             'volume' => [
                 'label' => 'Application Volume',
                 'formula' => 'Filings this month by transaction type: new, renewal, amendment. Total is the sum of the three.',
-                'covers' => 'This calendar month, counted from creation. All three types are shown even at zero, so an empty row means none were filed.',
+                'covers' => 'This calendar month (Manila time), counted from submission; drafts not yet submitted are left out. All three types are shown even at zero, so an empty row means none were filed.',
                 'why' => 'Shows what kind of work is arriving, not just how much. Renewal season and new-registration season staff differently.',
             ],
 
             'decisions.approval_rate' => [
                 'label' => 'Approval rate',
-                'formula' => 'Approved filings ÷ decided filings (approved + returned + rejected) × 100.',
-                'covers' => 'Decided filings only. Pending and cancelled filings are left out — a withdrawn filing is not a decision the office made.',
+                'formula' => 'Approved filings ÷ decided filings (approved + rejected) × 100.',
+                'covers' => 'Decided filings only. Pending, returned and cancelled filings are left out: a returned filing is back with the applicant to fix and still owed a decision, and a withdrawn one is not a decision the office made.',
                 'why' => 'Measures how the office decides, not how fast. Leaving pending filings out is why a growing backlog does not move it.',
             ],
 
@@ -159,8 +155,13 @@ final class AnalyticsDefinitions
                 // Tier", which said "tier" twice over — once in the heading and
                 // again in every bar label underneath it.
                 'label' => 'Average Processing Time (RA 11032)',
-                'formula' => 'Average working days from submission to decision, per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical.',
-                'covers' => 'Decided filings in the months set by the filter that record a tier, a submission and a decision. Working days skip weekends. Holidays are not allowed for, so a real turnaround is never faster than shown.',
+                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, For Final Approval); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
+                /*
+                 * The holiday sentence read "never faster than shown", which
+                 * is backwards: a holiday counted as a working day makes the
+                 * figure LONGER than the truth, so the truth is never slower.
+                 */
+                'covers' => 'Filings decided, or one office\'s reviews finished, in the months set by the filter, with a tier on record. Days the filing waited on the applicant to pay or to resubmit are left out; a single permit sent back by its own office still counts against that office. Working days skip weekends. Holidays are not on the register and count as working days, so a real turnaround is never slower than shown.',
                 'why' => 'RA 11032 sets a legal deadline, not an office target: going over it breaks the law. The limit here is the statutory one, never the flat deadline this system stamps on a filing — that field does not change with the tier.',
             ],
 
@@ -170,22 +171,22 @@ final class AnalyticsDefinitions
                 // same thing. The adviser's note here (§1.4) was to get rid of
                 // "Time-in-Stage", which stays gone.
                 'label' => 'Average Processing Time by Department',
-                'formula' => 'Average days from a review reaching an office to that office finishing it.',
-                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. Read this beside the review counts.',
+                'formula' => 'Average office days from a review reaching an office to that office finishing it. Only office hours count (Monday to Friday, 8:00 to 17:00): a review that arrives at 7 pm starts at 8 the next morning, weekends are not counted, and one office day is 9 office hours.',
+                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. An office with fewer than three finished reviews is not drawn. BPLO is left out: its record is stamped again at the final approval, so its time is the whole filing, not its own step.',
                 'why' => 'A permit waits on six offices in turn, so the slowest sets the total. This says which office to give people to.',
             ],
 
             'stages.bottleneck' => [
                 'label' => 'Slowest department',
                 'formula' => 'The department with the highest average, with how far above the all-department average it sits and what share of reviews it handled.',
-                'covers' => 'The same finished reviews as the panel above.',
+                'covers' => 'The same finished reviews as the panel above, and only the departments drawn there: one with fewer than three reviews is never named the slowest.',
                 'why' => 'Slowest can mean hardest or busiest. The share of reviews sits beside it so the two can be told apart before anyone is reassigned.',
             ],
 
             'compliance.ra11032_processing' => [
                 'label' => 'Processing Rate Compliance to RA 11032',
                 'formula' => 'Filings decided inside the legal deadline for their own tier ÷ decided filings that record a tier × 100.',
-                'covers' => 'The months set by the filter. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
+                'covers' => 'The months set by the filter, timed as in Average Processing Time: the applicant\'s days are left out, and one office is judged on its own review only. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
                 'why' => 'The pass rate against the law. It counts filings, so it cannot be averaged with the two cards beside it.',
             ],
 
@@ -198,36 +199,36 @@ final class AnalyticsDefinitions
 
             'compliance.renewal' => [
                 'label' => 'Renewal Compliance',
-                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100.',
-                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed against. A draft is not a renewal; it has to be submitted.',
-                'why' => 'Whether businesses renew before lapsing. When too few renewals record which permit they replace it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
+                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100. A renewal counts for a permit when the same business filed one carrying that permit type during the permit\'s term.',
+                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed for. A draft is not a renewal; it has to be submitted.',
+                'why' => 'Whether businesses renew before lapsing. When no renewal on the register can be matched to a permit that fell due it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
             ],
 
             /*
-             * There is deliberately no 'expiry' entry, and the dashboard payload
-             * still carries an `expiry` panel.
-             *
-             * The client moved "Permits Approaching Expiry" to Renewal Risk
-             * Prediction, where the officer who works that list already is, and
-             * asked for its first column to become four named states rather than
-             * three overlapping time windows. The panel is gone from this screen
-             * and its definition went with it — a definition for a figure nobody
-             * can see is the stalest kind.
-             *
-             * The KEY stayed. DashboardAnalytics::computeExpiry() still runs and
-             * `expiry` is still on the dashboard payload: it was part of the
-             * published response shape before the panel moved, so removing it is
-             * a breaking change for anything still reading it, not a tidy-up.
-             *
-             * That removal is now a decision this codebase can make on its own —
-             * there is no second implementation to coordinate with any more. It
-             * needs a check that nothing reads `expiry`, the golden fixture
-             * re-frozen, and then the key and computeExpiry() can both go.
-             * Until someone does that, the key stays and this comment is why.
-             *
-             * AnalyticsDefinitionsTest's panel list drops `expiry` to match. Do
-             * not add it back without a screen to put it on.
+             * `expiry` is back on this screen. It moved to Renewal Risk
+             * Prediction and came back when that screen was removed (checklist
+             * 2026-09-27, item 6): a register of what falls due in the next 30,
+             * 60 and 90 days is the list an office plans its renewal season from,
+             * and the dashboard is now the only place it could live.
              */
+            'expiry' => [
+                'label' => 'Permits Approaching Expiry',
+                'formula' => 'Permits still in force that expire within 30, 60 and 90 days of today, per permit type. The Expired row counts businesses whose latest permit of that type has run out, with no newer one in force.',
+                'covers' => 'The windows nest: a permit 20 days out is counted in all three. A business that renewed is not expired, however many old permits it holds, and one lapsed on two permit types is one business in two columns. A closed business, and a permit that was revoked or suspended, are left out.',
+                'why' => 'How much renewal work is coming, and for which office, before it arrives at the counter.',
+            ],
+
+            /*
+             * From Business Growth Analysis's Closure Trend, which drew closures
+             * alone. Moved with the new registrations beside it, because a
+             * closure count only means something next to what came in.
+             */
+            'business_movement' => [
+                'label' => 'New and Closed Businesses',
+                'formula' => 'Businesses registered each month, and businesses removed from the register or blacklisted each month, across the window.',
+                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month, and so is the current one, which is marked as still running rather than read as a drop.',
+                'why' => 'Whether the register is growing or only replacing what it loses.',
+            ],
 
             'top_barangays' => [
                 'label' => 'Top Five Barangays by Active Businesses',
@@ -270,12 +271,12 @@ final class AnalyticsDefinitions
                 'label' => 'Pass rate',
                 'formula' => 'Inspections passed ÷ inspections completed × 100.',
                 'covers' => 'Completed inspections only, never the ones merely scheduled. One not yet carried out has no result, and counting it as a fail would punish an office for its own backlog.',
-                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog.',
+                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog. A cancelled visit is not counted as scheduled; a rescheduled one is, because it is still owed.',
             ],
 
             'officer_activity.mean_response_hours' => [
                 'label' => 'Response time',
-                'formula' => 'Average hours from an unanswered applicant message to the next reply from an officer.',
+                'formula' => 'Average office hours from an unanswered applicant message to the next reply from an officer. Only office hours count (Monday to Friday, 8:00 to 17:00), so a message sent at night starts waiting when the office opens.',
                 'covers' => 'Replies sent in the months set by the filter. Only the first unanswered message starts the clock, so three follow-ups are one wait. Conversations still waiting are counted separately.',
                 'why' => 'How long an applicant waits to be spoken to. The middle wait and the number still waiting sit beside it, because an average hides both long waits and unanswered questions.',
             ],
@@ -309,7 +310,7 @@ final class AnalyticsDefinitions
             'map' => [
                 'label' => 'Business locations',
                 'formula' => 'Business locations plotted from recorded coordinates, marked by whether the business holds a valid permit today.',
-                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn.',
+                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn. For one office, its businesses are those with a filing sent to it or a permit it issued, including permits brought over from the old register; the other panels on this page use the same set.',
                 'why' => 'Turns the barangay ranking into something that can be walked. Lapsed permits are drawn rather than hidden, since a cluster of them is the pattern worth seeing.',
             ],
         ];
@@ -439,471 +440,54 @@ final class AnalyticsDefinitions
     }
 
     /**
-     * Keys are dot paths into the renewal-risk payload.
+     * The dashboard's definitions as one office reads them.
      *
-     * Read the honesty constraint in docs/r-integration-spec.md before editing
-     * a word of this. The paper and the mockup both described this column as an
-     * "Estimated Probability of Delayed Renewal" and printed percentages
-     * against it. No model exists: nothing here is fitted on historical
-     * outcomes, there is no outcome variable, and there is no calibration to
-     * report. What exists is a weighted rule score whose every rule is printed
-     * on the same screen.
+     * Scoped to an office, three figures count only the permit that office
+     * issues, but their info buttons still said "Business Permit Compliance"
+     * and "a valid permit of every type" — true for the whole city, wrong in
+     * CHO's view, where the number is about sanitary permits. The permit's own
+     * name comes from the register (permit_types), never from this file.
      *
-     * So these entries may not call the score a probability, a prediction, a
-     * likelihood or a confidence, and may not render it as a percentage. The
-     * risk is concrete rather than academic: an officer who reads "88%" as
-     * calibrated will act on it as calibrated, and the register cannot support
-     * that. The score's only claim is ordinal — it sorts, it does not forecast.
-     *
-     * This is also the one section where SHORTENING can break the constraint.
-     * "How likely a business is to renew late" is shorter than the honest
-     * sentence and is exactly the claim the score cannot make.
-     * AnalyticsDefinitionsTest bans the vocabulary, but no test can ban a
-     * paraphrase. Where brevity and honesty pull apart here, honesty wins and
-     * the sentence stays long — which is why `at_risk.score` is the longest
-     * entry in this file.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     * @param  array<string, array<string, string>>  $definitions
+     * @return array<string, array<string, string>>
      */
-    private static function renewalRisk(): array
+    public static function forOffice(array $definitions, ?string $office): array
     {
-        return [
-            'at_risk' => [
-                'label' => 'Businesses Requiring Review',
-                'formula' => 'Permits falling due in the period set by the filter, scored against five rules and listed worst first. Ties go to the earlier expiry.',
-                'covers' => 'Active and expired permits whose cover ends between 60 days ago and the end of the period — a permit that quietly expired last month is the case most worth chasing. Revoked and suspended permits are left out. The band counts below cover every permit scored, not only the rows listed.',
-                'why' => 'The follow-up list. Ordered by score rather than by date, so a permit expiring in a fortnight with nothing filed and fees outstanding comes before one expiring next week whose renewal is already approved.',
-            ],
+        if ($office === null) {
+            return $definitions;
+        }
 
-            'at_risk.score' => [
-                'label' => 'Renewal Risk Index',
-                /*
-                 * The client's own wording, near enough verbatim, with one
-                 * substitution that is worth explaining because it looks like
-                 * an edit for its own sake.
-                 *
-                 * They wrote: "A higher score means more warning signs — it is
-                 * not a prediction, and it does not say how likely a renewal is
-                 * to be late." That is exactly the claim this screen must make,
-                 * and it CANNOT be written that way: AnalyticsDefinitionsTest
-                 * fails the build on the substring `predict`, and `prediction`
-                 * contains it. The guard cannot tell a denial from an
-                 * assertion, so the sentence denying the forecast trips the test
-                 * that exists to stop the forecast being claimed.
-                 *
-                 * Weakening the guard to allow negated forms would be the wrong
-                 * trade — it is a blunt instrument on purpose, and every draft
-                 * of this text that has drifted toward a probability claim was
-                 * caught by exactly that bluntness. So the meaning is kept and
-                 * the banned stem is not used: "it does not say what any one
-                 * business will do next" says the same thing.
-                 *
-                 * `likely` is deliberately still allowed by the test as
-                 * ordinary English; `likelihood` is not. Do not reach for
-                 * either here — the sentence does not need them.
-                 */
-                'formula' => 'Each permit is checked against five things: how soon it expires, whether a renewal has been filed, whether this business has renewed late before, open compliance findings, and unpaid fees. Each adds points, up to 100 — a score, not a percentage.',
-                'covers' => 'A higher score means more warning signs. Nothing here is fitted to past outcomes: the register never records whether a business ended up renewing late, so there is no past result to work from and no accuracy figure to quote. The number sorts a queue. It does not say what any one business will do next.',
-                'why' => 'A score lets a hundred permits be worked in the order that matters instead of by date alone. Every rule and its points are printed below the table, so an officer can disagree with the ranking on the merits.',
-            ],
+        $permit = \Illuminate\Support\Facades\DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            ->where('departments.code', $office)
+            ->orderBy('permit_types.id')
+            ->value('permit_types.name');
+        if ($permit === null) {
+            return $definitions;
+        }
+        $permit = (string) $permit;
 
-            'at_risk.drivers' => [
-                'label' => 'Why this permit is listed',
-                'formula' => 'The rules that scored above zero for this permit, heaviest first.',
-                'covers' => 'Only the top few are shown. Two rules are deliberately gentle: a business in its first renewal cycle picks up half the late-renewal points rather than none, and a permit with no renewal filed picks up nothing on fees, since the progress rule already counts that.',
-                'why' => 'The reason is what an officer acts on — "no renewal filed" and "fees unsettled" are two different phone calls.',
-            ],
-
-            'at_risk.days_to_expiry' => [
-                'label' => 'Expires',
-                'formula' => 'Calendar days from today to the permit\'s validity date; negative once it has passed.',
-                'covers' => 'The date on the permit, not on any renewal filed against it.',
-                'why' => 'The hard deadline behind the score. It sits beside the score so the reader can see when a high score is urgency and when it is accumulated neglect.',
-            ],
-
-            'at_risk.barangay' => [
-                'label' => 'Barangay',
-                'formula' => 'The barangay recorded on the business\'s registered location.',
-                'covers' => 'A business with no location on record reads as not recorded rather than being dropped. One with several location rows shows one of them.',
-                'why' => 'Follow-up is done on foot. Grouping by barangay turns the list into a route.',
-            ],
-
-            'counts.high' => [
-                'label' => 'High Risk',
-                'formula' => 'Permits scoring 50 or above.',
-                'covers' => 'Every permit scored in the window, not only those in the table.',
-                'why' => 'The size of the immediate follow-up queue, which decides whether this week\'s chasing needs help.',
-            ],
-
-            'counts.moderate' => [
-                'label' => 'Moderate Risk',
-                'formula' => 'Permits scoring 25 up to 49.',
-                'covers' => 'Every permit scored in the window.',
-                'why' => 'The reminder queue — cases a notice usually settles without a call. This band growing while the high band holds steady is an early warning.',
-            ],
-
-            'counts.low' => [
-                'label' => 'Low Risk',
-                'formula' => 'Permits scoring under 25.',
-                'covers' => 'Every permit scored in the window. A permit not yet due with nothing else against it lands here: the progress rule is switched off entirely more than 30 days out, and without that the whole register would score at least Moderate.',
-                'why' => 'The band that makes the other two mean something. If nearly every permit is high risk, none of them is.',
-            ],
-
-            /*
-             * The panel the client moved off the Analytics Dashboard, with its
-             * first column rebuilt.
-             *
-             * Two things about this wording carry weight. First, it must not
-             * read as a fifth risk band — the cards above this table count risk
-             * LEVEL and this table counts permit STATE, they are different axes
-             * over the same permits, and `lifecycle.near_expiry` says so in as
-             * many words because that is the pair most easily confused. Second,
-             * `lifecycle.pending_renewal` is the entry that has to explain the
-             * axis change at all: it is the one state that is not a date, and it
-             * is the reason the client asked for named states instead of
-             * 30/60/90.
-             */
-            'lifecycle' => [
-                'label' => 'Permits Approaching Expiry',
-                'formula' => 'Every permit on the watchlist put into one of four states, counted per permit type. The first state that fits wins: lapsed, then renewal filed and undecided, then inside 30 days, then everything else.',
-                'covers' => 'The same permits the risk levels above are counted from, so the four totals add up to the number of permits scored. Each permit is in exactly one state.',
-                'why' => 'Who needs chasing today. A permit 12 days out with a renewal already lodged and one 12 days out with nothing filed used to share a column, and they are two different phone calls.',
-            ],
-
-            'lifecycle.active' => [
-                'label' => 'Active / Compliant',
-                'formula' => 'In force and more than 30 days from expiry — or already renewed, whatever the date.',
-                'covers' => 'Permits whose renewal has been approved are counted here: the replacement has been issued, so nothing is left to chase.',
-                'why' => 'The baseline the other three are read against. If almost every permit were near expiry, none of them would stand out.',
-            ],
-
-            'lifecycle.near_expiry' => [
-                'label' => 'Near Expiry',
-                'formula' => 'Expires within 30 days, with no renewal submitted against it.',
-                'covers' => 'Thirty days is the mark the first automatic reminder goes out on, and the same mark the score starts counting a missing renewal from. A renewal saved as a draft, or one that was rejected, counts as nothing submitted.',
-                'why' => 'The chase list. This is a different thing from the risk levels in the table above: those rank how much is wrong with a permit, this says where the permit stands.',
-            ],
-
-            'lifecycle.pending_renewal' => [
-                'label' => 'Pending Renewal',
-                'formula' => 'A renewal was submitted against the permit and no decision has been made on it. The expiry date does not come into this one.',
-                'covers' => 'Submitted filings, including ones returned to the applicant for corrections. A draft has never reached the LGU, so it is not counted. An approved renewal is a decision, so it moves to Active.',
-                'why' => 'These businesses are already being handled and do not need ringing. It is the only state here about the paperwork rather than the calendar, which is why the four states are more useful than three date ranges.',
-            ],
-
-            'lifecycle.overdue' => [
-                'label' => 'Overdue / Expired',
-                'formula' => 'The expiry date has passed. Counted here even when a renewal is under review.',
-                'covers' => 'Permits that lapsed within the last 60 days. Anything older has left the watchlist and is not in any of these four counts.',
-                'why' => 'The business is trading without cover today, and a filing in the queue does not give that cover back. That is why this state outranks the other three.',
-            ],
-
-            'reminders_sent' => [
-                'label' => 'Reminders Sent',
-                'formula' => 'Expiry notices already sent against these permits — the 60, 30 and 7 day warnings, and the renewal-due notice.',
-                'covers' => 'Counted from notices recorded as sent, so it reads zero until the nightly permit scan has run. That zero is true: nothing has gone out. Lapse notices are not counted, because they report a change of status rather than asking anyone to renew.',
-                'why' => 'Separates a business that has ignored three warnings from one that has had none. Same score, opposite conversations.',
-            ],
-
-            'actions' => [
-                'label' => 'Recommended Actions',
-                'formula' => 'Each band\'s count, carried through to the action it implies: immediate follow-up above 50, a reminder from 25, monitoring below that.',
-                'covers' => 'All scored permits. The action follows from the band alone — it restates the score, and is not a second judgement about the business.',
-                'why' => 'Requested directly in review: "kaya ako sinusunod, ng risk — so dapat meron ka diyan." A risk figure with no action attached leaves each officer to invent their own response.',
-            ],
-
-            /*
-             * Asked on review: "Is this the predictive model formula? Why
-             * points are set that way?" Both halves are answered here and on
-             * the panel itself, because it is the question this screen gets
-             * asked in front of a room.
-             *
-             * It is a rule book, not a fit. And the weights are a judgement
-             * nobody at the city has signed off yet — stated plainly rather
-             * than dressed in a rationale we would have had to invent. See D1
-             * in docs/questions-for-malabon.md.
-             *
-             * Note the vocabulary this must dodge: the test below this file
-             * bans probability / likelihood / predict / forecast / confidence
-             * on this dataset INCLUDING in denials, so the disclaimer is
-             * phrased as "not a fitted model" rather than "not a prediction".
-             */
-            'rulebook' => [
-                'label' => 'What drives the score',
-                'formula' => 'Five rules, each with a fixed maximum, added together to give the score. Not a fitted model — every number in it is set in advance rather than estimated from past outcomes, so any row can be recomputed by hand.',
-                'covers' => 'The rules as the scorer applies them, read from the same constants the scoring runs on. The weights are the project team\'s judgement of what matters at renewal; BPLO has not reviewed or approved them.',
-                'why' => 'This panel is why the score is allowed to exist. A number built out of other numbers is only defensible if a reader can take it apart — and if the reader is told whose judgement set the parts.',
-            ],
-
-            'scored_permits' => [
-                'label' => 'Permits scored',
-                'formula' => 'All permits that fell inside the window and were put through the rules.',
-                'covers' => 'The total the three band counts are out of. It is larger than the table, which lists only the leading rows.',
-                'why' => 'Stated so the band counts can be read as shares. Forty high-risk permits out of sixty is a different office from forty out of four thousand.',
-            ],
-
-            'methodology' => [
-                'label' => 'Scoring method',
-                'formula' => 'The five rules in plain words, shipped from the scorer rather than written on the screen.',
-                'covers' => 'The whole screen.',
-                'why' => 'It travels with the figure, so a screenshot cannot separate the caveat from the number. It says the score counts warning signs already on the register rather than reaching past today.',
-            ],
+        $rate = [
+            'formula' => "Businesses holding a valid {$permit} today ÷ businesses ever issued one × 100.",
+            'covers' => "Every business ever issued a {$permit}. One never issued it is left out of both sides.",
         ];
+
+        foreach (['kpis.compliance_rate', 'compliance.permit_validity'] as $key) {
+            if (isset($definitions[$key])) {
+                $definitions[$key] = array_replace($definitions[$key], $rate);
+            }
+        }
+        if (isset($definitions['compliance.permit_validity'])) {
+            $definitions['compliance.permit_validity']['label'] = "{$permit} Compliance";
+        }
+        if (isset($definitions['kpis.compliance_rate']['why'])) {
+            $definitions['kpis.compliance_rate']['why'] = "The one number leadership asks for. The {$permit} Compliance card below shows the same rate with its counts.";
+        }
+        if (isset($definitions['kpis.active_businesses'])) {
+            $definitions['kpis.active_businesses']['formula'] = "Businesses holding a {$permit} still in force today.";
+        }
+
+        return $definitions;
     }
 
-    /**
-     * Keys are dot paths into the business-growth payload.
-     *
-     * The trap on this screen is that its panels do not all count the same
-     * population. Registrations and the barangay ranking include businesses
-     * later removed from the register, because they were genuinely registered
-     * in the period; the industry breakdown excludes them, because it describes
-     * what is trading now. Both are defensible and the difference is invisible
-     * in the bars, so each entry says which population it is over.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
-    private static function businessGrowth(): array
-    {
-        return [
-            'growth_rate' => [
-                'label' => 'Business Growth Rate',
-                'formula' => 'New registrations this period minus the period before, divided by the period before, as a percentage.',
-                'covers' => 'Counted from the registration date. Businesses since removed are still counted — they were registered at the time. When the earlier period had none at all this reads as no prior period rather than as growth.',
-                'why' => 'Whether the register is growing against its own recent past. Both plain counts sit beside it, because on small numbers a big percentage swing is mostly chance.',
-            ],
-
-            'registrations' => [
-                'label' => 'New registrations',
-                'formula' => 'Businesses whose registration date falls inside the period.',
-                'covers' => 'Dated from creation, so a business that registered and filed nothing still counts.',
-                'why' => 'The raw figure under the growth rate, and the one an annual report is written from.',
-            ],
-
-            'closures' => [
-                'label' => 'Closures (Period)',
-                'formula' => 'Businesses removed from the register or blacklisted during the period.',
-                'covers' => 'Dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record is left out.',
-                'why' => 'The other half of growth. Read beside new registrations it says whether the register is really growing or only replacing what it loses.',
-            ],
-
-            'status_summary' => [
-                'label' => 'Business Status Summary',
-                'formula' => 'Every business ever registered, sorted into one of four states as things stand today: closed if struck off or blacklisted, inactive if never permitted, active if it holds a permit in force, expired otherwise.',
-                'covers' => 'Blacklisting is the only admin status counted here; a suspension is temporary, so a suspended business is still read from its permits. A suspended or revoked permit makes a business expired, never active.',
-                'why' => 'How much of the register is live. The four states are checked in a fixed order, so a business lands in exactly one.',
-            ],
-
-            'cohort_survival' => [
-                /*
-                 * Was "Cohort survival", which left the panel headed "Business
-                 * Renewal Performance" opening a popover with a different name on
-                 * it — the client's screenshot was of exactly that. The paper's §4
-                 * table names this report once, and this is the name.
-                 *
-                 * "Kaplan-Meier", "censoring" and "cohort" are all gone from the
-                 * reader-facing text. They name the method, not the figure. What
-                 * an officer has to know is which businesses were followed and
-                 * which were set aside, and that is now said in plain words.
-                 */
-                'label' => 'Business Renewal Performance',
-                'formula' => 'Of the businesses that reached a given renewal, the share that came through every earlier renewal with no gap in cover. Carried forward one renewal at a time.',
-                'covers' => 'Mayor\'s permits only, so a year with sanitary and fire renewals too counts once. Cover is unbroken if the next permit starts within a day of the last, and lapsed once the gap passes 30 days. A business still inside its permit is set aside, not counted as a lapse — one registered last month has had no renewal to miss. Removed businesses and revoked or suspended permits are left out.',
-                'why' => 'How well the city holds on to its businesses across renewal cycles. It describes what this group did, not what any business will do next.',
-            ],
-
-            'cohort_survival.survival' => [
-                'label' => 'Business Renewal Performance',
-                'formula' => 'The share still renewing without a gap at the furthest renewal any business has reached.',
-                'covers' => 'That furthest renewal only, which may rest on very few businesses — the number that got there is shown beside it for exactly that reason.',
-                'why' => 'One number for how well the city holds on to its businesses over time. It is the hardest figure here to read at a glance, which is why the count behind it is never shown without it.',
-            ],
-
-            'top_barangays' => [
-                'label' => 'Top Growing Barangays',
-                'formula' => 'New registrations per barangay this period against the period before, ranked by the increase.',
-                'covers' => 'Only businesses with a barangay on record. Ranked by the change rather than the total, so the busiest barangay appears only if it also grew. A barangay with none last period shows a plain count rather than a rise from nothing.',
-                'why' => 'Where new commercial activity is appearing, which is where inspection and outreach effort should move next.',
-            ],
-
-            'closure_trend' => [
-                'label' => 'Business Closure Trend',
-                'formula' => 'Registrations removed or blacklisted each month across the period.',
-                'covers' => 'Dated by the removal or the blacklisting, as above. A blacklisting with no date on record counts as closed on the summary but cannot be placed in a month, so it is not drawn here. Lifting a blacklisting takes its point back off. The first month is only a part month because the period starts mid-month, so its point sits low for a reason that has nothing to do with closures.',
-                'why' => 'One period\'s closure count cannot say whether closures are rising. The month-by-month shape can.',
-            ],
-
-            /*
-             * One definition for one panel, and the lens toggle does not get a
-             * second. The three lenses are three orderings of the same figures
-             * over the same six slots — swapping the ranking does not change
-             * what a point on the chart means — and a second info button beside
-             * the first would announce a near-identical explanation to a
-             * screen-reader user for no gain. The same reasoning already keeps
-             * the Top Growing Barangay summary card from carrying one; see the
-             * note in BusinessGrowthPage.tsx.
-             *
-             * What DID have to change is the text: the criterion for appearing
-             * on this chart is the whole of the question this panel was asked,
-             * so it is now stated here as well as on the screen.
-             */
-            'industry_growth' => [
-                'label' => 'Business Industry Growth Trend',
-                'formula' => 'Lines of business on record, grouped by PSIC code — the national numbering for industries — with this period\'s new registrations against the period before. Six lines are drawn, chosen by the lens above the chart: Largest ranks by how many businesses carry the line today, Fastest growing and Fastest declining rank by the change between the two periods.',
-                'covers' => 'Counted per declared line, not per business: one declaring three lines appears under all three. Businesses removed from the register are left out here, unlike the registration and barangay figures, because this panel describes what is trading now. The two change lenses rank only lines carrying at least '.BusinessGrowthAnalytics::INDUSTRY_LENS_MIN_BUSINESSES.' businesses — below that a single filing swings the figure more than a real trend would, and the count left out is printed under the chart. Where fewer than six lines qualify, fewer are drawn and the chart says so rather than making the number up.',
-                'why' => 'What kind of city this is becoming. Six is a limit, not a shortlist: the register holds 135 PSIC codes and no palette keeps that many series apart, so the honest move is to let the reader pick which six. The biggest lines and the fastest-moving ones are different questions and the same chart could only ever answer one of them at a time.',
-            ],
-        ];
-    }
-
-    /**
-     * The fitted model that sits beside the rule score.
-     *
-     * ── THE ONE PLACE THE WORD "PROBABILITY" IS ALLOWED, AND WHY ────────────
-     *
-     * renewalRisk() above may not use it. AnalyticsDefinitionsTest fails the
-     * build on probability, probable, likelihood, predict, forecast or
-     * confidence appearing anywhere in those definitions, and that ban is not
-     * lifted, not loosened and not scoped away — it still covers every word of
-     * every renewal-risk definition, because the rule score is still a weighted
-     * rule score with nothing fitted behind it and an officer who reads "88%" as
-     * a rate will act on it as one.
-     *
-     * These definitions describe a different object, and the difference is not a
-     * matter of tone. The figure here is fitted to outcomes recovered from
-     * permit history (RenewalOutcomes), evaluated on a period of the register the
-     * fit never saw, and reported with the AUC, Brier score and calibration
-     * reading that say how far it can be trusted. That is what earns a figure the
-     * name, and the test now enforces the earning: this dataset may use the word
-     * only in entries that also carry the evidence, and only while the payload
-     * ships metrics beside it.
-     *
-     * Two claims are therefore made carefully and never merged:
-     *
-     *  - it IS a probability in the ordinary sense — a fitted estimate of how
-     *    often permits in this position turned out to be renewed late;
-     *  - it is NOT yet a well calibrated one. The evaluation says the figures run
-     *    high and the worst decile is out by 22 points, so `metrics.calibrated`
-     *    is false and the screen says in plain words that the number should be
-     *    read as a ranking with a scale rather than as a rate. When that flag
-     *    turns true the wording on screen changes with it.
-     *
-     * And the sentence that outranks all of it, which is why `training_data` has
-     * an entry of its own here: the history this was fitted on was generated by
-     * the analytics seeder, so what the coefficients describe is the seeder.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
-    private static function renewalModel(): array
-    {
-        return [
-            'training_data' => [
-                'label' => 'What this model was trained on',
-                'formula' => 'Renewal outcomes recovered from the permit table: a renewal counts as late when the '
-                    .'next permit of the same type began more than a day after the previous one lapsed.',
-                'covers' => 'The renewal history in this register was generated for testing rather than loaded from '
-                    .'the city, so every figure on this panel measures the method against generated behaviour. It is '
-                    .'the first thing to know about the numbers below and it is stated above them, not here.',
-                'why' => 'A model is only ever as good as what it was fitted to. Quoting an accuracy figure without '
-                    .'saying whose behaviour it was measured on is the easiest way to mislead a reader who is doing '
-                    .'nothing wrong.',
-            ],
-
-            'estimates' => [
-                'label' => 'Estimated chance of a late renewal',
-                'formula' => 'The fitted probability that the next permit begins more than a day after this one '
-                    .'lapses, from a logistic regression over five signals: time to expiry, renewal progress, this '
-                    .'business\'s earlier renewals, open compliance findings and unsettled fees.',
-                'covers' => 'Only permits where there is still something to estimate. A permit that has already '
-                    .'lapsed is late — a fact, not an estimate — and one whose renewal is already approved has '
-                    .'nothing left to wait for; both are listed with the reason in place of a number. The figure is '
-                    .'conditional on no renewal having been granted yet, which is the position of every permit an '
-                    .'officer would be chasing.',
-                'why' => 'The rule score beside it ranks permits by warning signs and is unchanged. This one answers '
-                    .'a different question — how often permits in this position actually turned out late — and it '
-                    .'can be wrong in a way the rule score cannot, which is why the accuracy figures are on the same '
-                    .'screen rather than in a report nobody opens.',
-            ],
-
-            'metrics.auc' => [
-                'label' => 'AUC',
-                'formula' => 'The chance that a cycle which turned out late was scored above one that did not, '
-                    .'measured on the newer cycles the model was not fitted on. 0.5 is a coin toss; 1.0 is perfect '
-                    .'separation.',
-                'covers' => 'Pooled across every lead time, which flatters it: permits closer to expiry are far more '
-                    .'often late, so a model that knew nothing but the date would still score well here. The '
-                    .'per-horizon table below removes the date from the comparison and is the honest reading of what '
-                    .'the other four signals add.',
-                'why' => 'It says whether the ordering is any good. It says nothing about whether the numbers '
-                    .'themselves are right — that is what the Brier score and the calibration reading are for.',
-            ],
-
-            'metrics.brier' => [
-                'label' => 'Brier score',
-                'formula' => 'The average squared distance between the figure given and what happened, over the '
-                    .'evaluation period. Lower is better; 0 is perfect.',
-                'covers' => 'Shown against the score for always guessing the training period\'s own late rate, so '
-                    .'the improvement over knowing nothing is visible rather than implied.',
-                'why' => 'Unlike AUC this punishes being confident and wrong, which is the failure an officer would '
-                    .'actually feel — a business rung twice about a renewal that was never at risk.',
-            ],
-
-            'calibration' => [
-                'label' => 'Calibration',
-                'formula' => 'The evaluation cycles sorted into ten equal groups by the figure they were given, with '
-                    .'the rate that actually turned out late in each. The two columns match when the figures can be '
-                    .'read as rates.',
-                'covers' => 'The newer cycles only, never the ones the model was fitted on. The sentence above the '
-                    .'table states the finding, including when the finding is that the figures are out.',
-                'why' => 'A model can rank perfectly and still be wrong about the numbers — saying 90% where it '
-                    .'means 40% would leave the AUC untouched and every staffing decision made from the figure '
-                    .'wrong. This is the check that catches it.',
-            ],
-
-            'coefficients' => [
-                'label' => 'What the model learned',
-                'formula' => 'One row per signal, with the direction and size of its effect on the odds of a late '
-                    .'renewal, holding the others still. Above 1 raises the chance, below 1 lowers it.',
-                'covers' => 'Only signals that varied enough in the training period to be estimated. A signal that '
-                    .'was the same on every training row, or one whose cases all went the same way, is named in the '
-                    .'list of what was left out rather than shown with a figure that would be meaningless.',
-                'why' => 'This is why the model is a regression and not something stronger. An officer can read a '
-                    .'row here, disagree with it, and be right — which is not possible with a method whose reasoning '
-                    .'cannot be printed.',
-            ],
-
-            'horizon_auc' => [
-                'label' => 'Accuracy by time to expiry',
-                'formula' => 'AUC recomputed within each lead time separately, so every permit in the comparison is '
-                    .'the same distance from expiry.',
-                'covers' => 'The evaluation cycles, split by how far out they were measured. The last row is blank '
-                    .'where every cycle at that distance turned out late, because there is nothing left to separate.',
-                'why' => 'The single most useful check on this screen. Holding the date still removes the one signal '
-                    .'nobody needed a model for; whatever separation is left is what the other four signals '
-                    .'contribute, and if these sat at 0.5 the model would be the calendar wearing a coat.',
-            ],
-
-            'split' => [
-                'label' => 'How the data was split',
-                'formula' => 'Cycles are ordered by the expiry date of the permit being renewed; the older 70% train '
-                    .'the model and the newer 30% test it. Never a random split.',
-                'covers' => 'Every measurement of one cycle stays on the same side of the cut, so nothing about a '
-                    .'business can be learned and then tested on itself.',
-                'why' => 'A random split would let the model see 2026 while being marked on 2025 — the future '
-                    .'explaining the past. Every accuracy figure that comes out of one is too good, and the amount '
-                    .'it is too good by cannot be measured afterwards.',
-            ],
-
-            'training' => [
-                'label' => 'Cycles fitted',
-                'formula' => 'Completed renewal cycles in the training period, each measured at up to seven points '
-                    .'before its permit expired.',
-                'covers' => 'Only cycles whose outcome had settled: a permit still in force, or one that lapsed too '
-                    .'recently for a late renewal to have shown up yet, is left out rather than counted as punctual. '
-                    .'The count of what was left out is shown beside it.',
-                'why' => 'The sample size behind everything else on the screen. A reader told how many cycles were '
-                    .'used and not how many were dropped has been handed a number with no denominator.',
-            ],
-        ];
-    }
 }

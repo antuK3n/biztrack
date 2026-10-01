@@ -7,6 +7,19 @@ import { Alert } from '../../components/ui/Alert'
 import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
 import { api, toApiError } from '../../lib/api'
+import {
+  EMPTY_HOME_ADDRESS,
+  HOME_ADDRESS_AUTOCOMPLETE,
+  HOME_ADDRESS_FIELDS,
+  HOME_ADDRESS_HINTS,
+  HOME_ADDRESS_LABELS,
+  HOME_ADDRESS_REQUIRED,
+  ZIP_DIGITS,
+  homeAddressPayload,
+  validateHomeAddressField,
+  type HomeAddressField,
+  type HomeAddressValues,
+} from '../../lib/homeAddress'
 import type { User } from '../../lib/types'
 import {
   normalizeMobile,
@@ -19,7 +32,7 @@ import {
 import { useAuth } from '../../stores/auth'
 import { PrivacyNoticeDialog } from './PrivacyNoticeDialog'
 
-interface FormValues {
+interface FormValues extends HomeAddressValues {
   first_name: string
   middle_name: string
   last_name: string
@@ -30,6 +43,8 @@ interface FormValues {
   password: string
   password_confirmation: string
   data_privacy_consent: boolean
+  /** Optional: a number from before BizTrack, to claim an imported business. */
+  claim_number: string
 }
 
 type FieldName = keyof FormValues
@@ -46,6 +61,8 @@ const initialValues: FormValues = {
   password: '',
   password_confirmation: '',
   data_privacy_consent: false,
+  claim_number: '',
+  ...EMPTY_HOME_ADDRESS,
 }
 
 const ALL_FIELDS = Object.keys(initialValues) as FieldName[]
@@ -68,6 +85,12 @@ function validateField(name: FieldName, values: FormValues): string | undefined 
       return validatePasswordConfirmation(values.password, values.password_confirmation)
     case 'data_privacy_consent':
       return values.data_privacy_consent ? undefined : 'You need to agree to the Data Privacy Notice to register.'
+    case 'home_street':
+    case 'home_barangay':
+    case 'home_city':
+    case 'home_province':
+    case 'home_postal_code':
+      return validateHomeAddressField(name, values)
     default:
       return undefined
   }
@@ -110,6 +133,66 @@ function Field({
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * One part of the home address. The street line takes the full width because
+ * it is the long answer; the other four pair up from `sm` and stack on a phone.
+ */
+function HomeAddressInput({
+  field,
+  value,
+  error,
+  onChange,
+  onBlur,
+}: {
+  field: HomeAddressField
+  value: string
+  error?: string
+  onChange: (value: string) => void
+  onBlur: () => void
+}) {
+  const id = `reg-${field.replace(/_/g, '-')}`
+  const hint = HOME_ADDRESS_HINTS[field]
+  const hintId = `${id}-hint`
+  const errorId = `${id}-error`
+  const isZip = field === 'home_postal_code'
+  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined
+
+  return (
+    <Field
+      label={HOME_ADDRESS_LABELS[field]}
+      required={HOME_ADDRESS_REQUIRED.includes(field)}
+      error={error}
+      errorId={errorId}
+      controlId={id}
+      className={field === 'home_street' ? 'sm:col-span-2' : ''}
+    >
+      <input
+        id={id}
+        autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
+        value={value}
+        /*
+         * ZIP takes digits only, as the character is typed: a letter here is
+         * never part of an answer. The cap is the slice, not `maxLength` —
+         * the browser applies maxLength to a paste BEFORE this handler sees
+         * it, so "1485 " copied with a space, or "ZIP 1485", lost its last
+         * digits and came out short (the e2e spec caught "14a85" becoming 148).
+         */
+        onChange={(e) => onChange(isZip ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS) : e.target.value)}
+        onBlur={onBlur}
+        inputMode={isZip ? 'numeric' : undefined}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className={inputCls}
+      />
+      {hint && (
+        <p id={hintId} className="mt-1.5 text-xs text-ink-secondary">
+          {hint}
+        </p>
+      )}
+    </Field>
   )
 }
 
@@ -175,6 +258,8 @@ export function RegisterPage() {
         password: values.password,
         password_confirmation: values.password_confirmation,
         data_privacy_consent: values.data_privacy_consent,
+        claim_number: values.claim_number.trim() || undefined,
+        ...homeAddressPayload(values),
       })
       // Self-registration is always a business owner, so always the public portal.
       setSession(data.data.token, data.data.user, 'public')
@@ -242,8 +327,18 @@ export function RegisterPage() {
             />
           </Field>
 
-          {/* The prototype's "Home Address" band — our account record keys on
-              middle name / suffix / gender instead, laid out in the same slot. */}
+          {/*
+            Middle name, suffix and gender open the slot where the prototype
+            drew its "Home Address" band, and the band itself follows them.
+
+            It was left out once, on the reasoning that the account record
+            needed the name parts and gender more than an address. The client
+            reversed that [checklist 2026-09-28, Register 2 — "make sure that
+            profile details are complete (like home details)"], so the owner's
+            home address is asked here, required, in the prototype's place for
+            it. Staff accounts are made by the super admin and never see this
+            form, so they are never asked.
+          */}
           <Field label="Middle Name" error={errors.middle_name} errorId="reg-middle-error" controlId="reg-middle">
             <input
               id="reg-middle"
@@ -287,6 +382,22 @@ export function RegisterPage() {
               </select>
             </Field>
           </div>
+
+          <fieldset className="sm:col-span-2">
+            <legend className="mb-3 text-sm font-bold text-ink">Home Address</legend>
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+              {HOME_ADDRESS_FIELDS.map((field) => (
+                <HomeAddressInput
+                  key={field}
+                  field={field}
+                  value={values[field]}
+                  error={errors[field]}
+                  onChange={(value) => setValue(field, value)}
+                  onBlur={() => blurValidate(field)}
+                />
+              ))}
+            </div>
+          </fieldset>
 
           <Field label="Email Address" required error={errors.email} errorId="reg-email-error" controlId="reg-email">
             <input
@@ -339,6 +450,34 @@ export function RegisterPage() {
               invalid={!!errors.password_confirmation}
               describedBy={errors.password_confirmation ? 'reg-confirm-error' : undefined}
             />
+          </Field>
+          {/*
+            Claiming a business the city licensed before BizTrack (Ken's
+            checklist, "Migration 1"). Optional and last, because most people
+            registering have nothing to claim. The server checks the number
+            against the surname above (LegacyClaim), so the hint names both.
+          */}
+          <Field
+            label="Business account or permit number from before BizTrack"
+            error={errors.claim_number}
+            errorId="reg-claim-error"
+            controlId="reg-claim"
+            className="sm:col-span-2"
+          >
+            <input
+              id="reg-claim"
+              autoComplete="off"
+              value={values.claim_number}
+              onChange={(e) => setValue('claim_number', e.target.value)}
+              aria-invalid={errors.claim_number ? true : undefined}
+              aria-describedby={errors.claim_number ? 'reg-claim-error reg-claim-hint' : 'reg-claim-hint'}
+              className={inputCls}
+            />
+            <p id="reg-claim-hint" className="mt-1.5 text-xs text-ink-secondary">
+              Optional. If the city already licensed your business, enter the number on your paper
+              permit and we will link the business to this account — your last name must match the
+              one on the city’s record.
+            </p>
           </Field>
         </div>
 

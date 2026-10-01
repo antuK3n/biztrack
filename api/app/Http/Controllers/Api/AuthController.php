@@ -7,8 +7,11 @@ use App\Http\Resources\UserResource;
 use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
-use App\Notifications\PasswordChangeCode;
 use App\Support\Audit;
+use App\Support\EmailCodes;
+use App\Support\EmailSwitch;
+use App\Support\LegacyImport\LegacyClaim;
+use App\Support\OfficeHours;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -99,14 +102,123 @@ class AuthController extends Controller
     /**
      * The signed-in user as the web app's `User` type, plus the join date the
      * Profile screen shows as "member since". UserResource is shared with the
-     * admin user listings, so the extra field is added on this side.
+     * admin user listings, so what only the signed-in user should see — the
+     * join date and the home address — is added on this side.
      *
      * @return array<string, mixed>
      */
     private function userPayload(User $user): array
     {
-        return (new UserResource($this->withRelations($user)))->resolve()
-            + ['created_at' => optional($user->created_at)->toISOString()];
+        $user = $this->withRelations($user);
+
+        return (new UserResource($user))->resolve()
+            + [
+                'created_at' => optional($user->created_at)->toISOString(),
+                /*
+                 * The owner's home address [checklist 2026-09-28, Register 2],
+                 * on the signed-in user's own payload only — see the note in
+                 * UserResource for why the admin listings do not carry it. Null
+                 * for staff, who are never asked, and for owners who registered
+                 * before it was; `home_address_missing` below says which.
+                 */
+                'home_street' => $user->home_street,
+                'home_barangay' => $user->home_barangay,
+                'home_city' => $user->home_city,
+                'home_province' => $user->home_province,
+                'home_postal_code' => $user->home_postal_code,
+                /*
+                 * Whether this account has to confirm its address before it can
+                 * file [checklist 2026-09-27, Register 1]. Worked out here so the
+                 * web app never has to know how mail is configured: false for
+                 * every account while mail is off, false for staff, and false
+                 * once the address is confirmed.
+                 */
+                'email_verification_required' => EmailSwitch::on()
+                    && $user->roles->contains('name', 'business_owner')
+                    && ! $user->hasVerifiedEmail(),
+                /*
+                 * Whether Settings must e-mail a code before a password change
+                 * [checklist 2026-09-27, Edit Settings]. The same for every
+                 * account — it is the mail switch — but sent here for the same
+                 * reason as the line above: the web app never learns how mail
+                 * is configured, only what it has to ask the reader for.
+                 */
+                'password_change_code_required' => EmailSwitch::on(),
+                /*
+                 * An owner with no home address on file [checklist 2026-09-28,
+                 * Register 2] — anyone who registered before it was asked. The
+                 * Profile and home pages prompt on this; nothing is refused
+                 * over it (docs/questions-for-malabon.md, A27). Staff are never
+                 * asked, so never owe one.
+                 */
+                'home_address_missing' => $user->roles->contains('name', 'business_owner')
+                    && ! $user->hasHomeAddress(),
+            ];
+    }
+
+    /**
+     * Validation for the home address, shared by registration and the profile
+     * form so a value one accepts the other cannot refuse.
+     *
+     * Free text throughout, barangay included: an owner may live outside
+     * Malabon, so the city's barangay list (the one a business address is
+     * picked from) cannot be the list of answers. ZIP is optional and, when
+     * given, is the four digits every Philippine ZIP code is.
+     *
+     * @param  bool  $onUpdate  false at registration, where all four parts are
+     *                          simply required. True on the profile form,
+     *                          where three rules share the work:
+     *                          - an ABSENT key keeps what is stored, so a
+     *                          caller that predates the address (or a staff
+     *                          account, whose form never shows it) can still
+     *                          save a name edit;
+     *                          - `filled`: a key that IS sent may not be empty,
+     *                          so an address once given is corrected, never
+     *                          blanked;
+     *                          - `required_with`: sending any one part makes
+     *                          the other three required, so an owner cannot
+     *                          end up holding a street with no city.
+     * @return array<string, array<int, string>>
+     */
+    private function homeAddressRules(bool $onUpdate): array
+    {
+        $parts = User::HOME_ADDRESS_REQUIRED;
+        $presence = fn (string $field) => $onUpdate
+            ? ['required_with:'.implode(',', array_diff($parts, [$field])), 'filled']
+            : ['required'];
+
+        return [
+            'home_street' => [...$presence('home_street'), 'string', 'max:255'],
+            'home_barangay' => [...$presence('home_barangay'), 'string', 'max:100'],
+            'home_city' => [...$presence('home_city'), 'string', 'max:100'],
+            'home_province' => [...$presence('home_province'), 'string', 'max:100'],
+            'home_postal_code' => ['nullable', 'string', 'regex:/^\d{4}$/'],
+        ];
+    }
+
+    /**
+     * One sentence per part, whichever rule caught it — "required",
+     * "required_with" and "filled" are the same fact to the person typing.
+     *
+     * @return array<string, string>
+     */
+    private function homeAddressMessages(): array
+    {
+        $said = [
+            'home_street' => 'Enter your house number, building and street.',
+            'home_barangay' => 'Enter your barangay.',
+            'home_city' => 'Enter your city or municipality.',
+            'home_province' => 'Enter your province.',
+        ];
+
+        $messages = ['home_postal_code.regex' => 'A ZIP code is 4 digits.'];
+        foreach ($said as $field => $sentence) {
+            foreach (['required', 'required_with', 'filled'] as $rule) {
+                $messages["{$field}.{$rule}"] = $sentence;
+            }
+        }
+
+        return $messages;
     }
 
     private function authPayload(User $user, string $portal = 'public'): JsonResponse
@@ -135,10 +247,32 @@ class AuthController extends Controller
             'mobile_number' => ['required', 'string', 'max:20'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
             'data_privacy_consent' => ['accepted'],
+            /*
+             * A business account or permit number from before BizTrack, to
+             * claim the businesses the old register holds under this person's
+             * name (Ken's checklist, "Migration 1"; see LegacyClaim). Optional:
+             * most people registering have nothing to claim.
+             */
+            'claim_number' => ['nullable', 'string', 'max:60'],
+            /*
+             * Required here and only here. Registration is the public portal,
+             * so everyone reaching this line is a business owner; staff
+             * accounts are made by the super admin (Admin\UserController),
+             * which never asks for a home address.
+             */
+            ...$this->homeAddressRules(onUpdate: false),
         ], [
             'email.unique' => 'This email is already registered. Try signing in instead.',
             'data_privacy_consent.accepted' => 'You must agree to the data privacy notice to continue.',
+            ...$this->homeAddressMessages(),
         ]);
+
+        // Checked BEFORE the account is written, so a mistyped number is
+        // answered on the form rather than with an account that claimed nothing
+        // and an email address that can no longer be used to try again.
+        $claimFrom = filled($data['claim_number'] ?? null)
+            ? LegacyClaim::match($data['claim_number'], $data['last_name'], $request->ip())
+            : null;
 
         $user = User::create([
             'name' => trim("{$data['first_name']} {$data['last_name']}"),
@@ -149,6 +283,11 @@ class AuthController extends Controller
             'gender' => $data['gender'],
             'email' => strtolower(trim($data['email'])),
             'mobile_number' => $data['mobile_number'],
+            'home_street' => $data['home_street'],
+            'home_barangay' => $data['home_barangay'],
+            'home_city' => $data['home_city'],
+            'home_province' => $data['home_province'],
+            'home_postal_code' => $data['home_postal_code'] ?? null,
             'password' => $data['password'],
             'data_privacy_consent_at' => now(),
             'is_active' => true,
@@ -160,6 +299,10 @@ class AuthController extends Controller
         }
 
         Audit::log('user.registered', $user);
+
+        if ($claimFrom !== null) {
+            LegacyClaim::claim($claimFrom, $user, $data['claim_number']);
+        }
 
         /*
          * Send the verification email, and never let it fail the registration
@@ -178,8 +321,19 @@ class AuthController extends Controller
          * verifiable without a single credential. Point MAIL_MAILER at a real
          * transport in the deployed environment and nothing here changes.
          */
+        /*
+         * With a real mailer configured, a six-digit code goes out instead of
+         * the link, and filing waits for it [checklist 2026-09-27, Register 1;
+         * why a code is on EmailCodes]. With mail off (the demo) the link is
+         * written to the log exactly as before, and nothing waits on it.
+         */
         try {
-            $user->sendEmailVerificationNotification();
+            if (EmailSwitch::on()) {
+                [, $code] = EmailCodes::issueVerify($user);
+                EmailCodes::send($user, EmailCode::VERIFY, $code);
+            } else {
+                $user->sendEmailVerificationNotification();
+            }
         } catch (\Throwable $e) {
             Log::error('Verification email failed to send on registration.', [
                 'user_id' => $user->id,
@@ -333,17 +487,27 @@ class AuthController extends Controller
          * the citizen side keeping the staff portal's existence to itself, and
          * it is paid by people who have been given the right address.
          *
-         * The STAFF and ADMIN doors keep the 409. Someone standing at
-         * /staff/login already knows a staff portal exists — the page they are
-         * looking at is one — so there is no secret left for the status to
-         * leak, and an officer who typed the wrong one of the two LGU doors is
-         * owed a refusal they can distinguish from a mistyped password. 409
+         * ── A business owner at an LGU door gets the same [checklist
+         *    2026-09-27, Login 3] ───────────────────────────────────────────
+         *
+         * The LGU doors used to answer 409 to ANY right password from the
+         * wrong door, owners included. That told a stranger at /staff/login
+         * holding a leaked list of owner passwords exactly which ones were
+         * right: a free password-checking service, and the owner's lockout
+         * never moved. So an owner account at /staff/login or /admin/login now
+         * goes through `$refuse` too: 422, the one sentence, a counted attempt.
+         *
+         * Between the two LGU doors the 409 stays. Someone at /staff/login
+         * already knows a staff portal exists — the page they are looking at
+         * is one — so an officer who typed the wrong one of the two LGU doors
+         * is owed a refusal they can tell apart from a mistyped password. 409
          * rather than 422 because the credentials were right and the conflict
          * is with WHERE they were used.
          */
         $user->loadMissing('roles');
-        if ($this->portalFor($user) !== $portal) {
-            if ($portal === 'public') {
+        $belongs = $this->portalFor($user);
+        if ($belongs !== $portal) {
+            if ($portal === 'public' || $belongs === 'public') {
                 return $refuse($user);
             }
 
@@ -381,15 +545,256 @@ class AuthController extends Controller
             ], 403);
         }
 
+        /*
+         * The second step [checklist 2026-09-27, Login 5]: with a real mailer,
+         * a right password earns a code by e-mail, not a session. Everyone —
+         * owners, officers, the super admin. With mail off (the demo) the
+         * password is enough, as it always was.
+         */
+        if (EmailSwitch::on()) {
+            return $this->startSignInCode($user, $portal);
+        }
+
+        return $this->completeSignIn($user, $portal, $key);
+    }
+
+    private function loginKey(string $email, Request $request): string
+    {
+        return 'login:'.Str::lower($email).'|'.$request->ip();
+    }
+
+    /** Everything a finished sign-in does, whichever step finished it. */
+    private function completeSignIn(User $user, string $portal, string $key): JsonResponse
+    {
         RateLimiter::clear($key);
         $user->forceFill([
             'failed_login_attempts' => 0,
             'locked_until' => null,
             'last_login_at' => now(),
         ])->save();
-        Audit::log('user.logged_in', $user);
+        Audit::log('user.logged_in', $user, actorId: $user->id);
+
+        /*
+         * An LGU sign-in outside office hours is written down [checklist
+         * 2026-09-27, Login 6]. The officer is told so on the page; this is the
+         * row the administrator reads. Owners are not recorded: filing at night
+         * is what an online counter is for, and logging it would be noise.
+         */
+        if ($portal !== 'public' && ! OfficeHours::isOpen()) {
+            Audit::log('user.signed_in_outside_hours', $user, [
+                'portal' => $portal,
+                'local_time' => OfficeHours::now()->format('D, j M Y H:i'),
+            ], actorId: $user->id);
+        }
 
         return $this->authPayload($user, $portal);
+    }
+
+    /**
+     * Send the sign-in code and hand the page the handle it needs for step two.
+     *
+     * No token here, and the lockout counters are not reset yet: the password
+     * was right, but the sign-in is not finished until the code is.
+     */
+    private function startSignInCode(User $user, string $portal): JsonResponse
+    {
+        [$row, $code, $challenge] = EmailCodes::issueLogin($user, $portal);
+
+        try {
+            EmailCodes::send($user, EmailCode::LOGIN, $code);
+        } catch (\Throwable $e) {
+            /*
+             * The code did not go, so the sign-in cannot finish, and the page
+             * must say that rather than ask for a code that is not coming. The
+             * row is closed so nothing is left half-open. 503 because this is
+             * the relay's outage, not the reader's mistake. The cost is written
+             * in docs/email-setup.md: while the relay is down, nobody can sign
+             * in.
+             */
+            $row->forceFill(['consumed_at' => now()])->save();
+            Log::error('Sign-in code could not be sent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send your sign-in code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        return response()->json([
+            'data' => [
+                'code_required' => true,
+                'challenge' => $challenge,
+                'email' => EmailCodes::mask($user->email),
+                'expires_in_minutes' => EmailCodes::minutes(EmailCode::LOGIN),
+                'resend_after' => (int) config('auth.email_codes.resend_after', 60),
+            ],
+        ]);
+    }
+
+    /**
+     * Step two of a sign-in: the code from the e-mail [Login 5].
+     *
+     * A wrong code counts against the account exactly as a wrong password
+     * does — same limiter key, same `failed_login_attempts`. Without that,
+     * somebody holding the password could start a fresh challenge every five
+     * guesses and walk the million codes at leisure; with it, five wrong codes
+     * lock the account for fifteen minutes, as five wrong passwords do.
+     */
+    public function verifySignInCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'challenge' => ['required', 'string', 'max:128'],
+            'code' => ['required', 'string', 'max:32'],
+        ]);
+
+        $row = EmailCodes::findChallenge($data['challenge']);
+        $user = $row?->user;
+
+        if (! $row || ! $user || ! $user->is_active) {
+            return $this->deadSignInCode();
+        }
+
+        $key = $this->loginKey($user->email, $request);
+        $lockedFor = $user->locked_until?->isFuture() ? (int) now()->diffInSeconds($user->locked_until) : 0;
+
+        if (RateLimiter::tooManyAttempts($key, 5) || $lockedFor > 0) {
+            $minutes = max(1, (int) ceil(max(RateLimiter::availableIn($key), $lockedFor) / 60));
+
+            return response()->json([
+                'message' => "Account temporarily locked. Try again in {$minutes} minute".($minutes === 1 ? '' : 's').'.',
+            ], 429);
+        }
+
+        $result = $this->tryCode($row, $data['code']);
+
+        if ($result['status'] === 'ok') {
+            /*
+             * Typing the code proves the reader can open this inbox, which is
+             * all confirming an address ever meant. So an account that never
+             * confirmed is confirmed now, rather than being sent a second code
+             * straight after this one.
+             */
+            if (! $user->hasVerifiedEmail()) {
+                $user->markEmailAsVerified();
+                Audit::log('user.email_verified', $user, ['via' => 'sign-in code'], actorId: $user->id);
+            }
+
+            return $this->completeSignIn($user->fresh(), (string) $row->portal, $key);
+        }
+
+        if ($result['status'] === 'malformed') {
+            return $this->codeRefusal('Enter the 6 digits from the e-mail.');
+        }
+
+        RateLimiter::hit($key, 15 * 60);
+        $attempts = $user->failed_login_attempts + 1;
+        $user->forceFill([
+            'failed_login_attempts' => $attempts,
+            'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $user->locked_until,
+        ])->save();
+
+        if ($result['status'] === 'dead') {
+            return $this->deadSignInCode();
+        }
+
+        return $this->codeRefusal($this->triesLeft($result['remaining']));
+    }
+
+    /** A new sign-in code for the same attempt, rationed [Login 5]. */
+    public function resendSignInCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'challenge' => ['required', 'string', 'max:128'],
+        ]);
+
+        $row = EmailCodes::findChallenge($data['challenge']);
+        $user = $row?->user;
+
+        if (! $row || ! $user || ! $user->is_active) {
+            return $this->deadSignInCode();
+        }
+
+        $wait = EmailCodes::resendWait($row);
+
+        if ($wait === null) {
+            return $this->deadSignInCode();
+        }
+
+        if ($wait > 0) {
+            return response()->json([
+                'message' => "You can ask for a new code in {$wait} second".($wait === 1 ? '' : 's').'.',
+                'retry_after' => $wait,
+            ], 429);
+        }
+
+        $code = EmailCodes::refresh($row);
+
+        try {
+            EmailCodes::send($user, EmailCode::LOGIN, $code);
+        } catch (\Throwable $e) {
+            Log::error('Sign-in code could not be resent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send a new code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        return response()->json([
+            'message' => 'We sent a new code. Use the newest one.',
+            'data' => ['resend_after' => (int) config('auth.email_codes.resend_after', 60)],
+        ]);
+    }
+
+    /**
+     * A typed code, tidied and tried. Spaces and dashes are how people copy a
+     * code out of an e-mail, so they are dropped. Anything that is still not
+     * six digits is `malformed` and costs no try: it could not have been right,
+     * and charging a guess for a typo is how a reader gets locked out by a
+     * phone keyboard.
+     *
+     * @return array{status: 'ok'|'wrong'|'dead'|'malformed', remaining: int}
+     */
+    private function tryCode(EmailCode $row, string $typed): array
+    {
+        $code = (string) preg_replace('/[\s-]/', '', $typed);
+
+        if (! $row->isLive()) {
+            return ['status' => 'dead', 'remaining' => 0];
+        }
+
+        if (preg_match('/^\d{6}$/', $code) !== 1) {
+            return ['status' => 'malformed', 'remaining' => 0];
+        }
+
+        return EmailCodes::check($row, $code);
+    }
+
+    private function triesLeft(int $left): string
+    {
+        return "That code is not right. You have {$left} ".($left === 1 ? 'try' : 'tries').' left.';
+    }
+
+    private function codeRefusal(string $message): JsonResponse
+    {
+        return response()->json(['message' => $message, 'errors' => ['code' => [$message]]], 422);
+    }
+
+    /**
+     * One answer for every sign-in code that cannot work any more — used,
+     * expired, guessed out, or never ours. `reason` lets the page take the
+     * reader back to the password step instead of leaving them at a dead box.
+     */
+    private function deadSignInCode(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'This code no longer works. Sign in again to get a new one.',
+            'reason' => 'code_expired',
+        ], 422);
     }
 
     public function logout(Request $request): JsonResponse
@@ -443,8 +848,15 @@ class AuthController extends Controller
              * one number would only make them harder to compare later.
              */
             'mobile_number' => ['required', 'string', 'regex:/^09\d{9}$/'],
+            /*
+             * The home address [checklist 2026-09-28, Register 2]: how an
+             * owner who registered before it was asked completes it. What an
+             * absent, emptied or partial answer does is on homeAddressRules.
+             */
+            ...$this->homeAddressRules(onUpdate: true),
         ], [
             'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
+            ...$this->homeAddressMessages(),
         ]);
 
         $user = $request->user();
@@ -457,6 +869,11 @@ class AuthController extends Controller
          * before it reaches here. `?? $user->middle_name` could not tell that
          * apart from a client that never sent the field, so it read as "keep"
          * either way and a middle name, once saved, could never be removed.
+         *
+         * The home address goes through the same helper for its "absent keeps"
+         * half only: of its parts, ZIP alone may be sent empty, and the
+         * validation above refuses an emptied street, barangay, city or
+         * province before this runs.
          */
         $optional = function (string $key) use ($data, $user) {
             return array_key_exists($key, $data) ? $data[$key] : $user->{$key};
@@ -472,6 +889,11 @@ class AuthController extends Controller
             'suffix' => $optional('suffix'),
             'gender' => $optional('gender'),
             'mobile_number' => $data['mobile_number'],
+            'home_street' => $optional('home_street'),
+            'home_barangay' => $optional('home_barangay'),
+            'home_city' => $optional('home_city'),
+            'home_province' => $optional('home_province'),
+            'home_postal_code' => $optional('home_postal_code'),
         ])->save();
 
         Audit::log('user.profile_updated', $user);
@@ -482,96 +904,31 @@ class AuthController extends Controller
     }
 
     /**
-     * Send a six-digit code to the registered address, to confirm a password
-     * change.
+     * Change the signed-in user's password. Requires the current password and
+     * revokes every other token so a hijacked session dies with the old
+     * credential; the token making this request stays valid.
      *
-     * ── Why the current password is checked HERE too ────────────────────────
-     *
-     * It is checked again when the change lands, so this looks redundant. It
-     * is not: without it, anybody holding a session could make the owner's
-     * inbox ring by posting this endpoint, and the mail would say somebody is
-     * changing their password when nobody had got past the first field. A
-     * warning that fires on nothing teaches its reader to ignore the next one.
-     */
-    public function sendPasswordCode(Request $request): JsonResponse
-    {
-        $data = $request->validate(['current_password' => ['required', 'string']]);
-
-        $user = $request->user();
-
-        if (! Hash::check($data['current_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => ['Your current password is incorrect.'],
-            ]);
-        }
-
-        /*
-         * One code a minute. The button is otherwise an open relay: a held
-         * session can post it in a loop and bury the owner's inbox — including
-         * the warning mails this very feature sends.
-         */
-        $live = EmailCode::liveFor($user, EmailCode::PURPOSE_PASSWORD);
-        if ($live && $live->created_at->diffInSeconds(now()) < EmailCode::RESEND_SECONDS) {
-            $wait = EmailCode::RESEND_SECONDS - (int) $live->created_at->diffInSeconds(now());
-
-            throw ValidationException::withMessages([
-                'code' => ["A code was just sent. Wait {$wait} seconds before asking for another."],
-            ]);
-        }
-
-        $user->notify(new PasswordChangeCode(EmailCode::issue($user, EmailCode::PURPOSE_PASSWORD)));
-
-        Audit::log('user.password_code_sent', $user);
-
-        return response()->json([
-            'message' => 'We sent a six-digit code to your email address.',
-            /*
-             * Masked, never whole. The reader needs to recognise which address
-             * it went to; printing it in full would let anyone who has taken
-             * the session read the address they are about to be stopped by.
-             */
-            'email' => self::maskEmail($user->email),
-            'expires_in_minutes' => EmailCode::TTL_MINUTES,
-        ]);
-    }
-
-    /** `nena@example.com` → `n•••@example.com`. Enough to recognise, not to learn. */
-    private static function maskEmail(string $email): string
-    {
-        [$name, $domain] = array_pad(explode('@', $email, 2), 2, '');
-
-        return mb_substr($name, 0, 1).str_repeat('•', max(mb_strlen($name) - 1, 1)).'@'.$domain;
-    }
-
-    /**
-     * Change the signed-in user's password. Requires the current password AND
-     * a code from the registered address, and revokes every other token so a
-     * hijacked session dies with the old credential; the token making this
-     * request stays valid.
+     * With a real mailer it also requires the code from requestPasswordCode
+     * [checklist 2026-09-27, Edit Settings; closes View Profile 3]. A session
+     * left open on a shared computer, plus a password read over a shoulder,
+     * was enough to take the account over for good — the change signs every
+     * other device out, the real owner included. The code adds the one thing
+     * neither of those gives: the inbox. With mail off (the demo) the current
+     * password is enough, as it was, because a code nobody can receive would
+     * make the password impossible to change.
      */
     public function updatePassword(Request $request): JsonResponse
     {
+        $codeRequired = EmailSwitch::on();
+
         $data = $request->validate([
             'current_password' => ['required', 'string'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
-            /*
-             * ── The second factor ───────────────────────────────────────────
-             *
-             * This endpoint asked for the current password and nothing else,
-             * so a session left open at a shared counter was enough to take
-             * the account: type the password its owner had just typed in front
-             * of you, set a new one, and the change itself signs every other
-             * device out. The owner's way back in is the password they no
-             * longer have. [Client, 28 September 2026.]
-             *
-             * Six digits, `string` not `integer`: a code of `012345` is not
-             * the number 12345, and casting would drop the leading zero for
-             * one reader in ten.
-             */
-            'code' => ['required', 'string', 'size:6'],
+            // Not validated at all with mail off, so a request shaped as it
+            // was before this feature is answered exactly as it was.
+            ...($codeRequired ? ['code' => ['required', 'string', 'max:32']] : []),
         ], [
-            'code.required' => 'Enter the six-digit code we emailed you.',
-            'code.size' => 'The code is six digits.',
+            'code.required' => 'Enter the 6-digit code we e-mailed you. Press Send code if you do not have one.',
         ]);
 
         $user = $request->user();
@@ -582,18 +939,37 @@ class AuthController extends Controller
             ]);
         }
 
-        $code = EmailCode::liveFor($user, EmailCode::PURPOSE_PASSWORD);
+        if ($codeRequired) {
+            if ($locked = $this->lockedResponse($user)) {
+                return $locked;
+            }
 
-        if ($code === null) {
-            throw ValidationException::withMessages([
-                'code' => ['That code has expired. Ask for a new one.'],
-            ]);
-        }
+            $row = EmailCodes::latestPassword($user);
+            $result = $row ? $this->tryCode($row, $data['code']) : ['status' => 'dead', 'remaining' => 0];
 
-        // A REASON, not a boolean: "expired" sends the reader to the Send
-        // button and "wrong" sends them back to the mail. See EmailCode::spend.
-        if ($failure = $code->spend($data['code'])) {
-            throw ValidationException::withMessages(['code' => [$failure]]);
+            if ($result['status'] !== 'ok') {
+                /*
+                 * Wrong and dead codes count against the account as a wrong
+                 * sign-in code does (see verifySignInCode), `malformed` does
+                 * not. Without this, whoever holds the session and the
+                 * password asks for a fresh code every five guesses and walks
+                 * the million; with it, five wrong codes lock the account for
+                 * fifteen minutes. The cost falls on an owner who mistypes the
+                 * code five times: their other devices cannot sign in for
+                 * fifteen minutes, and this session is left alone. A request
+                 * with no code ever sent (`$row` null) cannot have been a
+                 * guess and is not counted.
+                 */
+                if ($row && $result['status'] !== 'malformed') {
+                    $this->countFailedCode($user);
+                }
+
+                return $this->codeRefusal(match ($result['status']) {
+                    'dead' => 'This code no longer works. Send yourself a new one.',
+                    'malformed' => 'Enter the 6 digits from the e-mail.',
+                    default => $this->triesLeft($result['remaining']),
+                });
+            }
         }
 
         $user->forceFill(['password' => $data['password']])->save();
@@ -603,11 +979,132 @@ class AuthController extends Controller
             ->where('id', '!=', $user->currentAccessToken()->id)
             ->delete();
 
-        Audit::log('user.password_changed', $user);
+        Audit::log('user.password_changed', $user, $codeRequired ? ['via' => 'email code'] : []);
 
         return response()->json([
             'message' => 'Password updated. Other signed-in devices have been logged out.',
         ]);
+    }
+
+    /**
+     * E-mail the code a password change needs, and send it again when asked
+     * [checklist 2026-09-27, Edit Settings].
+     *
+     * The current password is checked FIRST, before anything is looked up,
+     * issued or sent. A stolen session on its own therefore cannot fill the
+     * owner's inbox with codes, and cannot learn from this endpoint whether
+     * mail is on or where the address points — it gets the same refusal as a
+     * mistyped password.
+     *
+     * One endpoint for the first code and every resend. While a code is still
+     * good, asking again re-sends a new number on the SAME row, so the wrong
+     * guesses already made stay counted (the rule the sign-in resend follows);
+     * one a minute, five per code (auth.email_codes). Only once it has expired,
+     * been used or been guessed out does a new row start.
+     *
+     * With mail off it sends nothing and says `code_required: false`: the
+     * change goes through on the password alone, as it always has.
+     */
+    public function requestPasswordCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is incorrect.'],
+            ]);
+        }
+
+        if (! EmailSwitch::on()) {
+            return response()->json(['data' => ['code_required' => false]]);
+        }
+
+        if ($locked = $this->lockedResponse($user)) {
+            return $locked;
+        }
+
+        $row = EmailCodes::latestPassword($user);
+        $resend = $row !== null && $row->isLive();
+
+        if ($resend) {
+            $wait = EmailCodes::resendWait($row);
+
+            // Five sends of one code: wait for it to run out rather than
+            // starting a new one, or the ration would reset on demand.
+            $wait ??= max(1, (int) ceil(now()->diffInSeconds($row->expires_at)));
+
+            if ($wait > 0) {
+                return response()->json([
+                    'message' => "You can ask for a new code in {$wait} second".($wait === 1 ? '' : 's').'.',
+                    'retry_after' => $wait,
+                ], 429);
+            }
+
+            $code = EmailCodes::refresh($row);
+        } else {
+            [$row, $code] = EmailCodes::issuePassword($user);
+        }
+
+        try {
+            EmailCodes::send($user, EmailCode::PASSWORD, $code);
+        } catch (\Throwable $e) {
+            // Closed so a code that never arrived cannot be half-used later.
+            // Same 503 and wording as the sign-in code.
+            $row->forceFill(['consumed_at' => now()])->save();
+            Log::error('Password-change code could not be sent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send your code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        // Never the code: the audit trail is read by administrators.
+        Audit::log('user.password_code_sent', $user, ['resend' => $resend]);
+
+        return response()->json([
+            'message' => 'We sent a 6-digit code to '.EmailCodes::mask($user->email).'.',
+            'data' => [
+                'code_required' => true,
+                'email' => EmailCodes::mask($user->email),
+                'expires_in_minutes' => EmailCodes::minutes(EmailCode::PASSWORD),
+                'resend_after' => (int) config('auth.email_codes.resend_after', 60),
+            ],
+        ]);
+    }
+
+    /**
+     * The account lockout, as sign-in applies it: 429 while `locked_until` is
+     * in the future. Used by the password-code steps so five wrong codes stop
+     * the guessing here as well as at the sign-in page.
+     */
+    private function lockedResponse(User $user): ?JsonResponse
+    {
+        if (! $user->locked_until?->isFuture()) {
+            return null;
+        }
+
+        $minutes = max(1, (int) ceil(now()->diffInSeconds($user->locked_until) / 60));
+
+        return response()->json([
+            'message' => "Account temporarily locked. Try again in {$minutes} minute".($minutes === 1 ? '' : 's').'.',
+        ], 429);
+    }
+
+    /** One more failed attempt on the account; the fifth locks it for fifteen minutes. */
+    private function countFailedCode(User $user): void
+    {
+        $attempts = $user->failed_login_attempts + 1;
+        $user->forceFill([
+            'failed_login_attempts' => $attempts,
+            'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $user->locked_until,
+        ])->save();
     }
 
     public function forgotPassword(Request $request): JsonResponse
@@ -755,9 +1252,17 @@ class AuthController extends Controller
          * cannot act on. It must not answer with a cheerful "sent" either —
          * that is the bug this method exists to fix — so the failure gets its
          * own 502 and its own sentence.
+         *
+         * A code with mail on, the link with mail off: the same split as
+         * registration.
          */
         try {
-            $user->sendEmailVerificationNotification();
+            if (EmailSwitch::on()) {
+                [, $code] = EmailCodes::issueVerify($user);
+                EmailCodes::send($user, EmailCode::VERIFY, $code);
+            } else {
+                $user->sendEmailVerificationNotification();
+            }
         } catch (\Throwable $e) {
             Log::error('Verification email failed to resend.', [
                 'user_id' => $user->id,
@@ -772,8 +1277,50 @@ class AuthController extends Controller
         Audit::log('user.verification_resent', $user);
 
         return response()->json([
-            'message' => 'Verification email sent. Check your inbox — it can take a minute.',
+            'message' => EmailSwitch::on()
+                ? 'We sent a new code to '.EmailCodes::mask($user->email).'. It can take a minute.'
+                : 'Verification email sent. Check your inbox — it can take a minute.',
         ]);
+    }
+
+    /**
+     * Confirm the signed-in owner's address with the code from the e-mail
+     * [checklist 2026-09-27, Register 1].
+     *
+     * Behind auth:sanctum, so the code only has to prove the inbox; the session
+     * already proves the account. Five wrong guesses close the code, and the
+     * reader asks for a new one with the button beside the box.
+     */
+    public function verifyEmailCode(Request $request): JsonResponse
+    {
+        $data = $request->validate(['code' => ['required', 'string', 'max:32']]);
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'Your email address is already confirmed.',
+                'data' => $this->userPayload($user),
+            ]);
+        }
+
+        $row = EmailCodes::latestVerify($user);
+        $result = $row ? $this->tryCode($row, $data['code']) : ['status' => 'dead', 'remaining' => 0];
+
+        if ($result['status'] === 'ok') {
+            $user->markEmailAsVerified();
+            Audit::log('user.email_verified', $user, ['via' => 'code']);
+
+            return response()->json([
+                'message' => 'Your email address is confirmed.',
+                'data' => $this->userPayload($user->fresh()),
+            ]);
+        }
+
+        return $this->codeRefusal(match ($result['status']) {
+            'dead' => 'This code no longer works. Send yourself a new one.',
+            'malformed' => 'Enter the 6 digits from the e-mail.',
+            default => $this->triesLeft($result['remaining']),
+        });
     }
 
     /**

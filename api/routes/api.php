@@ -1,6 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\KwikPayCallbackController;
+use App\Http\Controllers\Api\OfficeHoursController;
+use App\Http\Controllers\FakeKwikPayController;
+use App\Services\KwikPay\FakeKwikPay;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -12,6 +16,14 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
     Route::post('login', [AuthController::class, 'login'])->middleware('throttle:login');
+    /*
+     * The sign-in code, step two [checklist 2026-09-27, Login 5]. Only reached
+     * while a real mailer is configured — with mail off, login issues the token
+     * itself. Same IP limiter as the password step; the per-account lockout is
+     * inside the method.
+     */
+    Route::post('login/code', [AuthController::class, 'verifySignInCode'])->middleware('throttle:login');
+    Route::post('login/code/resend', [AuthController::class, 'resendSignInCode'])->middleware('throttle:6,1');
     Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('reset-password', [AuthController::class, 'resetPassword']);
 
@@ -51,23 +63,54 @@ Route::prefix('auth')->group(function () {
         Route::post('profile/photo', [AuthController::class, 'updatePhoto']);
         Route::get('profile/photo', [AuthController::class, 'showPhoto']);
         Route::delete('profile/photo', [AuthController::class, 'destroyPhoto']);
-        /*
-         * A password change is confirmed by email.
-         *
-         * `password/code` mails the six digits; `PUT password` will not act
-         * without them. Throttled at the route as well as per-account inside
-         * the method: the account limiter stops one owner's inbox being
-         * buried, and this one stops a script walking sessions.
-         */
-        Route::post('password/code', [AuthController::class, 'sendPasswordCode'])
-            ->middleware('throttle:10,1');
         Route::put('password', [AuthController::class, 'updatePassword']);
+        /*
+         * The code a password change needs while mail is on [checklist
+         * 2026-09-27, Edit Settings]. The first code and every resend; the
+         * per-account ration (one a minute, five per code) is inside the
+         * method, this limiter caps password guesses against the session.
+         */
+        Route::post('password/code', [AuthController::class, 'requestPasswordCode'])
+            ->middleware('throttle:6,1');
         // Laravel's own convention for this endpoint. The per-account limiter
         // inside the method is the tighter of the two — see the note there.
         Route::post('email/resend', [AuthController::class, 'resendVerification'])
             ->middleware('throttle:6,1');
+        // The code from the confirmation e-mail, when mail is on [Register 1].
+        Route::post('email/verify-code', [AuthController::class, 'verifyEmailCode'])
+            ->middleware('throttle:10,1');
     });
 });
+
+// Is City Hall open now? Public: the sign-in pages show it [Login 6].
+Route::get('office-hours', OfficeHoursController::class);
+
+/*
+ * KwikPay's deposit callback (docs/payment-gateway.md). Public — KwikPay holds
+ * no token of ours; the MD5 signature over the fields is the authentication,
+ * checked in KwikPayCallback. No CSRF: API routes carry none. Registered
+ * whatever the payment mode is, so a payment opened before the switch was
+ * turned off can still be confirmed after. Its raw fields are protected from
+ * TrimStrings / ConvertEmptyStringsToNull in bootstrap/app.php.
+ */
+Route::post('payments/kwikpay/callback', KwikPayCallbackController::class)
+    ->name('payments.kwikpay.callback');
+
+/*
+ * The stand-in KwikPay for demos and e2e — never on a real server. Both the
+ * registration and every action check FakeKwikPay::available() (local/testing
+ * AND KWIKPAY_FAKE=true). See FakeKwikPayController.
+ */
+if (FakeKwikPay::available()) {
+    Route::prefix('fake-kwikpay')->group(function () {
+        Route::post('api/transfer', [FakeKwikPayController::class, 'transfer']);
+        Route::post('api/query', [FakeKwikPayController::class, 'query']);
+        Route::post('api/me', [FakeKwikPayController::class, 'me']);
+        Route::get('pay/{orderId}', [FakeKwikPayController::class, 'page']);
+        Route::post('pay/{orderId}/{outcome}', [FakeKwikPayController::class, 'settle']);
+        Route::get('qr/{orderId}', [FakeKwikPayController::class, 'qr']);
+    });
+}
 
 // Workflow routes are registered in routes/workflow.php (loaded below) once
 // their controllers exist.

@@ -40,9 +40,9 @@ class PermitController extends Controller
      * filing detail screen — is reading one permit or a handful. Loading the
      * office sheet for those would be work nobody asked for.
      *
-     * `business` is re-listed WITHOUT the column restriction that `$eager`
-     * puts on it: that one selects id and name only, and the table leads with
-     * the BAN.
+     * `business` is re-listed (in registerEager(), as a closure) WITHOUT the
+     * column restriction that `$eager` puts on it and WITH retired businesses:
+     * `$eager` selects id and name only, and loads null for a soft-deleted one.
      *
      * Two entries for one relation do NOT merge, and the FIRST wins — proved
      * by a test that read `ban: null` off a row whose business has one. So
@@ -50,7 +50,8 @@ class PermitController extends Controller
      * rather than relying on order.
      */
     private array $registerEager = [
-        'business:id,name,ban',
+        // `business` itself is added by registerEager(), as a closure — it has
+        // to reach retired (soft-deleted) businesses, which a string cannot say.
         'issuedBy:id,first_name,middle_name,last_name,suffix',
         'priorPermit:id,permit_number',
         'application.officeForms',
@@ -152,6 +153,22 @@ class PermitController extends Controller
              * would still accept it.
              */
             'permit_type' => ['sometimes', 'nullable', 'string', 'exists:permit_types,code'],
+            /*
+             * Every office BUT this one — "other permits in a separate view"
+             * (checklist item 18). BPLO's own table is the Mayor's Permit; the
+             * five clearances other offices issue are a second view, and
+             * asking for them as one set needs a negative filter, not five
+             * requests.
+             */
+            'exclude_permit_type' => ['sometimes', 'nullable', 'string', 'exists:permit_types,code'],
+            /*
+             * Retired businesses (checklist item 21) — ones removed from the
+             * register, whose certificates stay on it. `hide` drops them,
+             * `only` lists nothing else, `include` both. Absent means no
+             * filtering, which is what this endpoint always answered; the
+             * register page sends `hide` by default.
+             */
+            'retired' => ['sometimes', 'nullable', Rule::in(['hide', 'include', 'only'])],
             'sort' => ['sometimes', 'nullable', Rule::in(array_keys(self::SORTS))],
             'dir' => ['sometimes', 'nullable', Rule::in(['asc', 'desc'])],
             /*
@@ -194,6 +211,22 @@ class PermitController extends Controller
         if ($code = $request->query('permit_type')) {
             $query->whereHas('permitType', fn ($t) => $t->where('code', $code));
         }
+
+        if ($except = $request->query('exclude_permit_type')) {
+            $query->whereHas('permitType', fn ($t) => $t->where('code', '!=', $except));
+        }
+
+        /*
+         * `whereHas('business')` honours the soft-delete scope, so it is
+         * exactly "the business is still on the register"; `onlyTrashed` is
+         * exactly the retired ones. Applied after scopeToReader like every
+         * other filter here, so it can only ever narrow what a reader sees.
+         */
+        match ($request->query('retired')) {
+            'hide' => $query->whereHas('business'),
+            'only' => $query->whereHas('business', fn ($b) => $b->onlyTrashed()),
+            default => null,
+        };
 
         /*
          * Lapsing inside the window. Two conditions, and the second is the one
@@ -250,17 +283,17 @@ class PermitController extends Controller
          */
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
-                $sub->where('permit_number', 'like', "%{$q}%")
+                $sub->whereLike('permit_number', "%{$q}%")
                     ->orWhereHas('business', fn ($b) => $b
-                        ->where('name', 'like', "%{$q}%")
-                        ->orWhere('ban', 'like', "%{$q}%")
+                        ->whereLike('name', "%{$q}%")
+                        ->orWhereLike('ban', "%{$q}%")
                         ->orWhereHas('owner', fn ($o) => $o
-                            ->where('first_name', 'like', "%{$q}%")
-                            ->orWhere('last_name', 'like', "%{$q}%")))
-                    ->orWhereHas('application', fn ($a) => $a->where('tracking_id', 'like', "%{$q}%"))
+                            ->whereLike('first_name', "%{$q}%")
+                            ->orWhereLike('last_name', "%{$q}%")))
+                    ->orWhereHas('application', fn ($a) => $a->whereLike('tracking_id', "%{$q}%"))
                     ->orWhereHas('permitType', fn ($t) => $t
-                        ->where('name', 'like', "%{$q}%")
-                        ->orWhere('code', 'like', "%{$q}%"));
+                        ->whereLike('name', "%{$q}%")
+                        ->orWhereLike('code', "%{$q}%"));
             });
         }
 
@@ -278,14 +311,21 @@ class PermitController extends Controller
          * rows, and equal keys without a tiebreak shuffle between pages - a
          * reader paging the register then sees one row twice and another not
          * at all.
+         *
+         * A blank sorts as the lowest value: first ascending, last descending.
+         * That is what SQLite always did with NULL, and it is stated here
+         * because PostgreSQL does the reverse by default — a permit from the
+         * old register has no tracking ID, and after an import there are
+         * thousands of them to land at the wrong end of the table.
          */
         $sort = $request->query('sort');
         $dir = $request->query('dir') === 'asc' ? 'asc' : 'desc';
+        $nulls = $dir === 'asc' ? 'nulls first' : 'nulls last';
 
         if ($sort !== null && isset(self::SORTS[$sort])) {
-            $query->orderByRaw(self::SORTS[$sort].' '.$dir);
+            $query->orderByRaw(self::SORTS[$sort].' '.$dir.' '.$nulls);
         } else {
-            $query->orderByDesc('issued_at');
+            $query->orderByRaw('issued_at desc nulls last');
         }
 
         $permits = $query->orderByDesc('id')->paginate($this->perPage($request));
@@ -503,6 +543,30 @@ class PermitController extends Controller
         ]);
     }
 
+    /**
+     * Revoke a permit (checklist item 23). Behind `permit.revoke` on the
+     * route — BPLO and the super admin. See `WorkflowService::revokePermit`
+     * for what may be revoked and what the act writes.
+     *
+     * Answers with the register row rather than the contracted payload, so the
+     * table that sent the request can redraw the row with its revocation
+     * columns filled without a second round trip.
+     */
+    public function revoke(Request $request, Permit $permit): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
+        ]);
+
+        $this->workflow->revokePermit($permit, $data['reason']);
+
+        return response()->json([
+            'data' => new PermitRegisterResource($permit->fresh()->load($this->registerEager())),
+        ]);
+    }
+
     public function pdf(Request $request, Permit $permit): Response
     {
         $this->authorizeView($request, $permit);
@@ -702,6 +766,17 @@ class PermitController extends Controller
             fn (string $relation) => ! in_array(explode(':', $relation)[0], $replaced, true),
         ));
 
-        return array_merge($base, $this->registerEager);
+        return array_merge($base, $this->registerEager, [
+            /*
+             * Retired businesses included. A retired business is one removed
+             * from the register (soft-deleted); its certificates stay, and the
+             * default scope loaded `null` in its place, so the table printed
+             * "Business removed from register" and nothing else. The Retired
+             * filter (checklist item 21) now decides whether those rows are
+             * listed at all — and when they are, they name the business and
+             * say it is retired, which is what a reader asking for them wants.
+             */
+            'business' => fn ($b) => $b->withTrashed()->select('id', 'name', 'ban', 'deleted_at'),
+        ]);
     }
 }

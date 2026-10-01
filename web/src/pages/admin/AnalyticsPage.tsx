@@ -1,23 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
-import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
+import { Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { HorizontalBars, VerticalBars } from '../../components/charts/Bars'
 import type { BarDatum } from '../../components/charts/Bars'
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   CHART_AMBER,
+  CHART_AXIS_TICK,
+  CHART_GRID,
   CHART_MUTED,
   CHART_PURPLE,
   CHART_ROYAL,
   CHART_SLATE,
   CHART_TEAL,
+  CHART_TOOLTIP,
+  ChartFrame,
 } from '../../components/charts/ChartFrame'
 import { ShareChart } from '../../components/charts/ShareChart'
 import type { ShareSlice } from '../../components/charts/ShareChart'
 import { StackedBars } from '../../components/charts/StackedBars'
+import { activePortal, portalPath } from '../../lib/api'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type {
@@ -29,9 +36,12 @@ import type {
   RankedShareRow,
   StageRow,
 } from '../../lib/types'
+import { AnalyticsError } from './AnalyticsError'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
-import { GenerateReportButton } from './GenerateReportButton'
+import { OfficeScope } from './OfficeScope'
+import { officePermit } from './officePermit'
+import type { OfficePermit } from './officePermit'
 
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
@@ -168,6 +178,31 @@ const PERIOD_OPTIONS = [
   { value: '36', label: 'Last 36 months' },
 ]
 
+/** The window the URL asks for, when it is one the menu offers; 12 otherwise. */
+function windowFrom(value: string | null): string {
+  return PERIOD_OPTIONS.some((option) => option.value === value) ? (value as string) : '12'
+}
+
+/**
+ * A wait in office hours, as a reader would say it.
+ *
+ * Under an hour it is minutes. "0.0h" was what a 20-minute reply printed: a
+ * figure that reads as instant, or as broken, and is neither. The API measures
+ * office time only (OfficeHours::hoursBetween), so this is office minutes too.
+ */
+function officeWait(hours: number): { value: string; unit: string } {
+  if (hours < 1) {
+    const minutes = Math.round(hours * 60)
+    return minutes < 1 ? { value: 'Under 1', unit: ' min' } : { value: String(minutes), unit: ' min' }
+  }
+  return { value: hours.toFixed(1), unit: ' office hours' }
+}
+
+function waitText(hours: number): string {
+  const { value, unit } = officeWait(hours)
+  return `${value.toLowerCase()}${unit}`
+}
+
 function pct(value: number | null): string {
   return value === null ? '—' : `${value.toFixed(1)}%`
 }
@@ -264,6 +299,7 @@ function StatCard({
   detail,
   unavailable,
   metric,
+  window,
 }: {
   value: string
   unit?: string
@@ -271,6 +307,8 @@ function StatCard({
   detail: string
   unavailable?: boolean
   metric?: string
+  /** The card's own window, when the cards in a row do not share one. */
+  window?: string
 }) {
   return (
     <ProtoCard className="px-4 py-3.5">
@@ -287,6 +325,7 @@ function StatCard({
         </p>
       )}
       <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">{detail}</p>
+      {window && <p className="mt-1 text-[11px] font-semibold text-ink-secondary">{window}</p>}
     </ProtoCard>
   )
 }
@@ -304,6 +343,19 @@ function VolumePanel({ report }: { report: DashboardReport }) {
    * the leader-highlight ramp the ranked panels use would be pointing at
    * whichever type happened to come first in the payload.
    */
+  /*
+   * Nothing filed yet: a sentence, not three bars of height zero. On the first
+   * of the month that is every office's dashboard, and three empty bars over
+   * "0 total submitted" read as a chart that failed to load.
+   */
+  if (report.volume.total === 0) {
+    return (
+      <ProtoCard className="px-5 py-4">
+        <p className="text-[13px] text-ink-secondary">Nothing filed yet this month.</p>
+      </ProtoCard>
+    )
+  }
+
   const data: BarDatum[] = report.volume.rows.map((row) => ({
     key: row.type,
     label: row.label,
@@ -353,6 +405,19 @@ const OUTCOME_COLORS: Record<string, string> = {
 
 function DecisionsPanel({ report }: { report: DashboardReport }) {
   const { rows, approval_rate, approved, decisioned, total } = report.decisions
+
+  /*
+   * With nothing filed this month there is nothing to have decided, and
+   * "Nothing filed this month has been decided yet" implied filings waiting on
+   * a decision that do not exist. Same sentence as the volume panel beside it.
+   */
+  if (total === 0) {
+    return (
+      <ProtoCard className="px-5 py-4">
+        <p className="text-[13px] text-ink-secondary">Nothing filed yet this month.</p>
+      </ProtoCard>
+    )
+  }
   /*
    * Cancelled only earns a slice once it has happened — otherwise it is a
    * permanent zero explaining nothing. Zero-count outcomes are dropped from the
@@ -452,12 +517,18 @@ function TierPanel({ report }: { report: DashboardReport }) {
 
   const data: BarDatum[] = measured.map((row) => {
     const mean = row.mean_working_days as number
+    /*
+     * The unit is written on every figure: WORKING days here, because RA 11032
+     * sets its limits in working days. The department panel beside this one is
+     * in OFFICE days, a different clock, and a bare "8.7d" beside a bare
+     * "2.2d" invited reading the two as the same measure.
+     */
     return {
       key: row.tier,
-      label: `${row.label} · ${row.statutory_working_days}d`,
+      label: `${row.label} · ${row.statutory_working_days}-day limit`,
       value: Number(((mean / row.statutory_working_days) * 100).toFixed(1)),
-      valueText: `${mean.toFixed(1)}d`,
-      note: `${row.statutory_working_days}-day legal limit`,
+      valueText: `${mean.toFixed(1)} working days`,
+      note: `${row.statutory_working_days} working days`,
       color: row.breaching ? BREACH : CHART_ROYAL,
     }
   })
@@ -478,7 +549,7 @@ function TierPanel({ report }: { report: DashboardReport }) {
           categoryHeading="Tier and legal limit"
           valueHeading="Average working days"
           noteHeading="Legal limit"
-          categoryWidth={132}
+          categoryWidth={108}
           rowHeight={34}
           reference={{ value: 100, label: 'Legal limit', color: '#1a1f2b' }}
           /*
@@ -507,16 +578,16 @@ function TierPanel({ report }: { report: DashboardReport }) {
                 style={{ color: BREACH, backgroundColor: BREACH_TINT }}
               >
                 <WarningGlyph />
-                {row.label}: over by {row.overage_days?.toFixed(1)}d
+                {row.label}: {row.overage_days?.toFixed(1)} working days over
               </span>
             ) : (
               <span className="font-semibold text-ink-secondary">
-                {row.label}: inside by {Math.abs(row.overage_days ?? 0).toFixed(1)}d
+                {row.label}: {Math.abs(row.overage_days ?? 0).toFixed(1)} working days inside
               </span>
             )}
             <span className="text-ink-muted">
-              {num(row.within_statutory)}/{num(row.observations)} inside the limit (
-              {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)}d calendar
+              {num(row.within_statutory)} of {num(row.observations)} decided inside the limit (
+              {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)} calendar days
             </span>
           </li>
         ))}
@@ -610,11 +681,17 @@ function StagePanel({ report }: { report: DashboardReport }) {
    * already ranks them, so colour is only pointing at the answer to "who is the
    * bottleneck" — which is the question this panel exists for.
    */
+  /*
+   * OFFICE days, said on every figure. Since bcf16a3 the API counts only the
+   * hours City Hall is open (Monday to Friday, 8:00 to 17:00 Manila) and
+   * reports them in office days of 9 office hours — not the working days of
+   * the RA 11032 panel beside this one, and not calendar days.
+   */
   const data: BarDatum[] = rows.map((row) => ({
     key: row.code,
     label: DEPARTMENT_HEADINGS[row.code] ?? row.code,
     value: row.mean_days,
-    valueText: `${row.mean_days.toFixed(1)}d`,
+    valueText: `${row.mean_days.toFixed(1)} office days`,
     note: `${num(row.reviews)} reviews`,
     color: row.code === bottleneck?.code ? CHART_ROYAL : CHART_MUTED,
   }))
@@ -622,13 +699,13 @@ function StagePanel({ report }: { report: DashboardReport }) {
   return (
     <ProtoCard className="px-4 pb-3 pt-4">
       <HorizontalBars
-        title="Average days a review spends with each department"
+        title="Average office days a review spends with each department"
         data={data}
         categoryHeading="Department"
-        valueHeading="Average days per review"
+        valueHeading="Average office days per review"
         noteHeading="Reviews completed"
         categoryWidth={104}
-        tooltipUnit="days per review"
+        tooltipUnit="office days per review"
         /*
          * Assembled from the computed values, never a fixed sentence: a
          * hardcoded "Fire Protection is the bottleneck" would keep reading as
@@ -638,12 +715,13 @@ function StagePanel({ report }: { report: DashboardReport }) {
           bottleneck && (
             <>
               <strong className="font-semibold text-ink">{bottleneck.name}</strong> is the slowest at{' '}
-              {bottleneck.mean_days.toFixed(1)}d
+              {bottleneck.mean_days.toFixed(1)} office days
               {bottleneck.above_average_days !== null && bottleneck.above_average_days > 0 && (
-                <> ({bottleneck.above_average_days.toFixed(1)}d over the {mean_days?.toFixed(1)}d
+                <> ({bottleneck.above_average_days.toFixed(1)} over the {mean_days?.toFixed(1)}-day
                   average)</>
               )}
-              , handling {bottleneck.share_of_reviews.toFixed(1)}% of reviews.
+              , handling {bottleneck.share_of_reviews.toFixed(1)}% of reviews. An office day is 9 office
+              hours, Monday to Friday.
             </>
           )
         }
@@ -662,56 +740,319 @@ function StagePanel({ report }: { report: DashboardReport }) {
  * invites a reader to average or compare them. Each card states its own
  * denominator underneath for the same reason.
  */
-function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
+/*
+ * The words each card is printed with, for the office on screen.
+ *
+ * The permit-validity card is the one whose meaning moves with the office: for
+ * City Health it tests sanitary permits only, so "Business permit compliance"
+ * and "hold a valid permit for every type they have been issued" were both
+ * wrong there. Scoped to one office the office issues one permit type, so the
+ * sentence names it. Every office together keeps the server's wording.
+ */
+function complianceWords(
+  indicator: ComplianceIndicator,
+  permit: OfficePermit,
+  scoped: boolean,
+): { label: string; numerator: string; denominator: string } {
+  if (indicator.indicator === 'permit_validity' && scoped) {
+    return {
+      label: `${permit.label} compliance`,
+      numerator: `hold a ${permit.noun} that is valid today`,
+      denominator: `businesses ever issued a ${permit.noun}`,
+    }
+  }
+  return {
+    label: indicator.label,
+    numerator: indicator.numerator_label,
+    denominator: indicator.denominator_label,
+  }
+}
+
+/**
+ * Why a rate is missing, when the server did not say.
+ *
+ * A null rate with no `unavailable_reason` means an empty denominator. For the
+ * renewal card that used to print "No permits due for renewal in this window",
+ * which is a claim, and for most offices a false one: City Health's sanitary
+ * permits fall due every month. What is actually empty is the set of due
+ * permits a renewal filing can be credited against — a renewal names the one
+ * permit it replaces (`prior_permit_id`), and an office whose permit is never
+ * the one named has nothing to count. The sentence says that, and claims
+ * nothing about how many permits fell due.
+ */
+function missingRateReason(indicator: ComplianceIndicator, permit: OfficePermit): string {
+  if (indicator.indicator === 'renewal') {
+    return `No ${permit.noun} that fell due in this window is named by a renewal filing, so there is nothing to count on-time renewals against.`
+  }
+  return `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`
+}
+
+function ComplianceCard({
+  indicator,
+  permit,
+  scoped,
+  window,
+}: {
+  indicator: ComplianceIndicator
+  permit: OfficePermit
+  scoped: boolean
+  window: string
+}) {
   const unavailable = indicator.rate === null
+  const words = complianceWords(indicator, permit, scoped)
 
   return (
     <StatCard
       value={unavailable ? 'Cannot be computed' : `${indicator.rate?.toFixed(0)}`}
       unit={unavailable ? undefined : '%'}
       unavailable={unavailable}
-      label={indicator.label}
+      label={words.label}
       // Keyed off the row's own identifier rather than a literal, so the three
       // indicators cannot be wired to each other's definitions.
       metric={`compliance.${indicator.indicator}`}
       detail={
         unavailable
-          ? (indicator.unavailable_reason ??
-            `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`)
-          : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${indicator.denominator_label} ${indicator.numerator_label}.`
+          ? (indicator.unavailable_reason ?? missingRateReason(indicator, permit))
+          : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${words.denominator} ${words.numerator}.`
       }
+      window={window}
     />
   )
 }
 
-function CompliancePanel({ report }: { report: DashboardReport }) {
+/*
+ * Each card states its own window, and the heading states none. The three do
+ * not share one: RA 11032 processing and renewals count the trailing months
+ * the filter sets, while permit validity is a fact about today. A heading
+ * reading "Last 12 months" over all three put a twelve-month label on an
+ * as-of-today figure.
+ */
+function CompliancePanel({
+  report,
+  permit,
+  scoped,
+  trailing,
+  asOf,
+}: {
+  report: DashboardReport
+  permit: OfficePermit
+  scoped: boolean
+  trailing: string
+  asOf: string
+}) {
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       {report.compliance.map((indicator) => (
-        <ComplianceCard key={indicator.indicator} indicator={indicator} />
+        <ComplianceCard
+          key={indicator.indicator}
+          indicator={indicator}
+          permit={permit}
+          scoped={scoped}
+          window={indicator.indicator === 'permit_validity' ? asOf : trailing}
+        />
       ))}
     </div>
   )
 }
 
+/* ── Permits Approaching Expiry ────────────────────────────────────────── */
+
 /*
- * ── "Permits Approaching Expiry" is not on this screen any more ─────────────
+ * Back from Renewal Risk Prediction, which was removed (checklist 2026-09-27,
+ * item 6). It is a table rather than a chart because an office reads it as a
+ * worklist — "how many sanitary permits fall due in the next 30 days" is a
+ * number to copy into a plan, not a shape to compare.
  *
- * It moved to Renewal Risk Prediction (web/src/pages/admin/RenewalRiskPage.tsx,
- * PermitLifecyclePanel), where the client asked for it, and its first column
- * became four named states — Active / Compliant, Near Expiry, Pending Renewal,
- * Overdue / Expired — instead of three overlapping 30/60/90 day windows.
- *
- * The move is the right one and it is worth saying why, because this is the sort
- * of panel that drifts back. This screen is about volumes, processing times and
- * where the city's businesses are; the expiry table is a WORKLIST, read by the
- * officer chasing renewals, and that officer already has a screen which is
- * nothing but permits running out. Two screens were describing one population.
- *
- * The dashboard payload still carries an `expiry` key. It is not read here and
- * it is not on the DashboardReport type — see the note there for why the type,
- * not the payload, is where this is enforced.
+ * The windows nest (30 ⊂ 60 ⊂ 90), exactly as the payload computes them, and the
+ * footnote says so, because a reader adding the three rows gets a figure that
+ * counts the nearest permits three times.
  */
+const PERMIT_TYPE_HEADINGS: Record<string, string> = {
+  BUSINESS: "Mayor's",
+  SANITARY: 'Sanitary',
+  FSIC: 'Fire',
+  ZONING: 'Zoning',
+  OCCUPANCY: 'Occupancy',
+  CEC: 'Environmental',
+}
+
+function ExpiryPanel({ report }: { report: DashboardReport }) {
+  const { columns, rows } = report.expiry
+
+  if (columns.length === 0) {
+    return (
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
+        No permit has been issued in this scope yet, so nothing can fall due.
+      </ProtoCard>
+    )
+  }
+
+  /*
+   * The first and last columns stay put while the permit types scroll between
+   * them. At 390px the six permit-type columns pushed Total off the right edge,
+   * with nothing to say it was there — and Total is the column an office plans
+   * from. White backgrounds so the scrolling cells pass under, not through.
+   */
+  return (
+    <ProtoCard className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <caption className="sr-only">
+            Permits approaching expiry by window and permit type. The windows nest, so the 90-day
+            row includes the 30- and 60-day ones.
+          </caption>
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="sticky left-0 bg-white px-3 py-2.5 font-semibold sm:px-4">
+                Window
+              </th>
+              {columns.map((column) => (
+                <th
+                  key={column.code}
+                  scope="col"
+                  className="px-3 py-2.5 text-right font-semibold"
+                  title={column.label}
+                >
+                  {PERMIT_TYPE_HEADINGS[column.code] ?? column.code}
+                </th>
+              ))}
+              <th
+                scope="col"
+                className="sticky right-0 border-l border-line bg-white px-3 py-2.5 text-right font-semibold sm:px-4"
+              >
+                Total
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.window} className="border-b border-line/60 last:border-0">
+                <th
+                  scope="row"
+                  className="sticky left-0 whitespace-nowrap bg-white px-3 py-2 text-[14px] font-normal text-ink sm:px-4"
+                >
+                  {row.expired ? 'Already expired' : `Within ${row.days} days`}
+                </th>
+                {columns.map((column) => (
+                  <td key={column.code} className="tnum px-3 py-2 text-right text-[14px] text-ink">
+                    {num(row.counts[column.code] ?? 0)}
+                  </td>
+                ))}
+                <td className="tnum sticky right-0 border-l border-line bg-white px-3 py-2 text-right text-[14px] font-bold text-ink sm:px-4">
+                  {num(row.total)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-line px-4 py-2 text-[11px] leading-snug text-ink-muted">
+        The windows nest: a permit 20 days out is in all three. Expired permits are counted once,
+        in their own row.
+        {columns.length > 2 && (
+          <span className="sm:hidden"> Slide the table sideways to see every permit type.</span>
+        )}
+      </p>
+    </ProtoCard>
+  )
+}
+
+/* ── New and Closed Businesses ─────────────────────────────────────────── */
+
+/*
+ * From Business Growth Analysis's Closure Trend, with registrations drawn
+ * beside the closures so the line has something to be read against.
+ *
+ * Two series, told apart by more than colour: registrations are a solid royal
+ * line, closures a dashed purple one, and the legend under the chart names both
+ * with their window totals. Purple, not red — a closure is not an error
+ * (DESIGN.md, Red Means Stop).
+ */
+function monthTick(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' })
+}
+
+function MovementPanel({ report }: { report: DashboardReport }) {
+  const movement = report.business_movement
+
+  if (!movement || movement.rows.length === 0) {
+    return (
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
+        Nothing to draw yet. These figures arrive with the next refresh.
+      </ProtoCard>
+    )
+  }
+
+  const data = movement.rows.map((row) => ({ ...row, label: monthTick(row.month) }))
+
+  return (
+    <ProtoCard className="px-4 pb-3 pt-4">
+      <ChartFrame
+        title="Businesses registered and businesses closed, month by month"
+        height={190}
+        columns={['Month', 'Registered', 'Closed', 'Net']}
+        rows={data.map((row) => ({
+          header: row.label,
+          cells: [num(row.registered), num(row.closed), num(row.net)],
+        }))}
+        legend={[
+          {
+            key: 'registered',
+            label: 'Registered (solid line)',
+            value: num(movement.registered),
+            color: CHART_ROYAL,
+          },
+          {
+            key: 'closed',
+            label: 'Closed (dashed line)',
+            value: num(movement.closed),
+            color: CHART_PURPLE,
+          },
+        ]}
+        footer="A closure is a removal from the register or a blacklisting, dated when it was recorded."
+      >
+        <LineChart data={data} margin={{ top: 8, right: 14, bottom: 4, left: 0 }}>
+          <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={CHART_AXIS_TICK}
+            tickLine={false}
+            axisLine={{ stroke: CHART_GRID }}
+            minTickGap={14}
+          />
+          <YAxis
+            tick={CHART_AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            width={34}
+          />
+          <Tooltip {...CHART_TOOLTIP} />
+          <Line
+            type="monotone"
+            dataKey="registered"
+            name="Registered"
+            stroke={CHART_ROYAL}
+            strokeWidth={2.5}
+            dot={{ r: 3, fill: CHART_ROYAL }}
+            isAnimationActive={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="closed"
+            name="Closed"
+            stroke={CHART_PURPLE}
+            strokeWidth={2.5}
+            strokeDasharray="6 4"
+            dot={{ r: 3, fill: CHART_PURPLE, strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ChartFrame>
+    </ProtoCard>
+  )
+}
 
 /* ── Ranked panels ─────────────────────────────────────────────────────── */
 
@@ -979,12 +1320,14 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         label="Response time"
         metric="officer_activity.mean_response_hours"
         unavailable={a.mean_response_hours === null}
-        value={a.mean_response_hours === null ? 'No replies yet' : a.mean_response_hours.toFixed(1)}
-        unit="h"
+        value={a.mean_response_hours === null ? 'No replies yet' : officeWait(a.mean_response_hours).value}
+        unit={a.mean_response_hours === null ? undefined : officeWait(a.mean_response_hours).unit}
         detail={
           (a.mean_response_hours === null
             ? 'No applicant message has been answered in this window.'
-            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; middle wait ${a.median_response_hours?.toFixed(1)}h.`) +
+            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}${
+                a.median_response_hours === null ? '' : `; middle wait ${waitText(a.median_response_hours)}`
+              }. Office hours only.`) +
           (a.threads_awaiting_reply > 0
             ? ` ${num(a.threads_awaiting_reply)} still waiting.`
             : '')
@@ -1074,9 +1417,22 @@ function pointBounds(points: MapPoint[]): [[number, number], [number, number]] |
   ]
 }
 
-function BusinessMap({ report }: { report: DashboardReport }) {
+function BusinessMap({ report, permit }: { report: DashboardReport; permit: OfficePermit }) {
   const { points, plotted, mapped, total_businesses } = report.map
   const bounds = pointBounds(points)
+
+  /*
+   * What a red pin can and cannot claim. The payload's `lapsed` means only "no
+   * valid permit today": a business whose permit expired and one whose first
+   * filing is still being processed both arrive as `lapsed`, and nothing in the
+   * payload tells them apart. A legend reading "lapsed", or one that implies
+   * every red pin let a permit run out, would accuse the second kind of
+   * something they have not done. So the legend says what is known and names
+   * both possibilities. Scoped to one office it names that office's permit,
+   * because a red pin on City Health's map is about the sanitary permit.
+   */
+  const validLabel = `${permit.label} valid today`
+  const missingLabel = `No valid ${permit.noun} today`
 
   /*
    * Lapsed permits render last, which in Leaflet means on top.
@@ -1112,7 +1468,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
             style={{ borderColor: MAP_VALID }}
             aria-hidden="true"
           />
-          Permit valid today
+          {validLabel}
         </span>
         <span className="flex items-center gap-1.5">
           <span
@@ -1120,7 +1476,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
             style={{ backgroundColor: MAP_LAPSED }}
             aria-hidden="true"
           />
-          No valid permit
+          {missingLabel} (lapsed, or not issued yet)
         </span>
       </p>
       <div className="overflow-hidden rounded-lg">
@@ -1189,7 +1545,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
                 <span className="font-semibold">{point.business}</span>
                 {point.barangay && <> · {point.barangay}</>}
                 <br />
-                {point.permit_state === 'active' ? 'Permit valid today' : 'No valid permit'}
+                {point.permit_state === 'active' ? validLabel : missingLabel}
               </Popup>
             </CircleMarker>
           ))}
@@ -1228,17 +1584,44 @@ function LoadingState() {
 }
 
 export function AnalyticsPage() {
-  const [months, setMonths] = useState('12')
+  /*
+   * Undefined until the reader picks one: the first request asks for "my
+   * default" and the server answers with the reader's own office (or every
+   * office for the super admin). See OfficeScope for why the label is read off
+   * the response and not off this state.
+   */
+  /*
+   * In the URL, so a reload, a bookmark or the Generate Report link keeps the
+   * office. Still only a request: the server decides (AnalyticsOffice).
+   *
+   * The trailing window is in the URL too, beside the office. It was component
+   * state, so a reload or a shared link quietly went back to twelve months
+   * while the office it was opened for stayed put — two halves of one view
+   * kept two different ways. `months` is left out of the URL at its default,
+   * so the plain address stays the plain address.
+   */
+  const [params, setParams] = useSearchParams()
+  const office = params.get('office') ?? undefined
+  const months = windowFrom(params.get('months'))
+  const setParam = (name: string, value: string | undefined) => {
+    const next = new URLSearchParams(params)
+    if (value === undefined) next.delete(name)
+    else next.set(name, value)
+    setParams(next, { replace: true })
+  }
+  const setOffice = (value: string) => setParam('office', value)
+  const setMonths = (value: string) => setParam('months', value === '12' ? undefined : value)
 
   const {
     data: result,
     loading,
     error,
     reload,
-  } = useAsync(() => analytics.dashboard(Number(months)), [months])
+  } = useAsync(() => analytics.dashboard(Number(months), office), [months, office])
 
   const data = result?.data
   const meta = result?.meta
+  const scope = result?.scope
 
   const monthWindow = data
     ? new Date(`${data.month_start}T00:00:00`).toLocaleDateString('en-PH', {
@@ -1248,12 +1631,17 @@ export function AnalyticsPage() {
     : ''
   const trailing = data ? `Last ${data.window_months} months to ${dateLabel(data.today)}` : ''
   const asOf = data ? `As of ${dateLabel(data.today)}` : ''
+  // Whose permit the figures count: the office on screen, as the SERVER scoped
+  // it (see officePermit).
+  const scoped = Boolean(scope?.office)
+  const permit = officePermit(scope?.office)
 
   return (
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-3 pb-1">
+          <span className="flex flex-wrap items-center gap-3 pb-1">
+            {scope && <OfficeScope scope={scope} onChange={setOffice} />}
             <FilterMenu
               label="Filter the dashboard"
               fields={[
@@ -1265,7 +1653,20 @@ export function AnalyticsPage() {
                 },
               ]}
             />
-            <GenerateReportButton onGenerate={() => analytics.dashboardReport(Number(months))} />
+            {/*
+              "Generate Report" opens Report Generation (checklist 2026-09-27,
+              item 7) for the office on screen, rather than downloading this
+              dashboard as a PDF. The five LGU reports are what an office files;
+              the dashboard PDF is still there, as one option on that screen.
+            */}
+            <Link
+              to={`${portalPath(activePortal(), '/analytics/reports')}${
+                scope?.can_switch ? `?office=${scope.office ?? 'all'}` : ''
+              }`}
+              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+            >
+              Generate Report
+            </Link>
           </span>
         }
       >
@@ -1274,12 +1675,21 @@ export function AnalyticsPage() {
 
       <AnalyticsTabs />
 
-      {meta && <ComputedAt meta={meta} onRefreshed={reload} />}
+      {/*
+        Refresh only for the two readers who see every office: one press
+        recomputes every office's figures, and the API refuses anyone else
+        (403). An office's own figures are recomputed every night.
+      */}
+      {meta && <ComputedAt meta={meta} onRefreshed={scope?.can_switch ? reload : undefined} />}
 
       {loading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState error={error} onRetry={reload} />
+        <AnalyticsError
+          error={error}
+          onRetry={reload}
+          onOwnOffice={office ? () => setParam('office', undefined) : undefined}
+        />
       ) : data ? (
         <MetricDefinitions value={meta?.definitions}>
           {/*
@@ -1293,7 +1703,7 @@ export function AnalyticsPage() {
             <Kpi
               value={num(data.kpis.active_businesses)}
               label="Active Businesses"
-              hint="holding a permit valid today"
+              hint={`holding a ${permit.noun} valid today`}
               metric="kpis.active_businesses"
             />
             {/*
@@ -1329,7 +1739,7 @@ export function AnalyticsPage() {
                   : `${data.kpis.compliance_rate.toFixed(0)}%`
               }
               label="Compliance Rate"
-              hint="permit validity"
+              hint={scoped ? `${permit.noun} validity, today` : 'permit validity, today'}
               metric="kpis.compliance_rate"
             />
           </div>
@@ -1377,27 +1787,54 @@ export function AnalyticsPage() {
               indicators be split apart with their own denominators, and that is
               what CompliancePanel does.
             */}
-            <SectionHeading note={trailing}>Compliance Rate</SectionHeading>
-            <CompliancePanel report={data} />
+            <SectionHeading>Compliance Rate</SectionHeading>
+            <CompliancePanel report={data} permit={permit} scoped={scoped} trailing={trailing} asOf={asOf} />
           </section>
 
           {/*
-            Five sections in a two-column grid, not six.
+            Full width, both: the expiry table carries a column per permit type
+            (six on this register) and was unreadable squeezed into half a row.
+          */}
+          <div className="mt-5 grid gap-y-5 *:min-w-0">
+            <section>
+              <SectionHeading note={asOf} metric="expiry">
+                Permits Approaching Expiry
+              </SectionHeading>
+              <ExpiryPanel report={data} />
+            </section>
 
-            "Permits Approaching Expiry" used to lead this block and moved to
-            Renewal Risk Prediction. Nothing was left in its place and nothing
-            needs to be: this is a plain two-column grid, so the five remaining
-            sections reflow and the last one runs to the full width. The
-            alternative — a spacer, or a panel promoted out of order to keep the
-            count even — is how a layout ends up with a hole in it.
+            <section>
+              <SectionHeading note={trailing} metric="business_movement">
+                New and Closed Businesses
+              </SectionHeading>
+              <MovementPanel report={data} />
+            </section>
+          </div>
+
+          {/*
+            Five sections in a two-column grid: a plain grid, so the last one
+            runs to the full width rather than leaving a hole. "Permits
+            Approaching Expiry" used to lead this block; it came back from
+            Renewal Risk Prediction (checklist 2026-09-27, item 6) and sits in its
+            own row above, beside New and Closed Businesses.
           */}
           <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
-            <section>
-              {/* Same as Decision Outcomes above: the pass-rate info button
-                  already sits beside the pass rate inside the panel. */}
-              <SectionHeading note={trailing}>Inspections</SectionHeading>
-              <InspectionsPanel report={data} />
-            </section>
+            {/*
+              Only for an office that inspects. The payload has a row for every
+              inspecting office in scope, even at zero visits, so no rows means
+              the office on screen books no visits at all — BPLO, which issues
+              the Mayor's Permit on the strength of the clearances. It used to
+              get an empty chart over "No pass rate overall — 0 passed of 0".
+              Without it the block is four sections, two rows of two.
+            */}
+            {data.inspections.rows.length > 0 && (
+              <section>
+                {/* Same as Decision Outcomes above: the pass-rate info button
+                    already sits beside the pass rate inside the panel. */}
+                <SectionHeading note={trailing}>Inspections</SectionHeading>
+                <InspectionsPanel report={data} />
+              </section>
+            )}
 
             {/*
               The count stays in the title. The shares under these two charts do
@@ -1469,7 +1906,7 @@ export function AnalyticsPage() {
 
           <section className="mt-5">
             <SectionHeading note={asOf} metric="map">GIS Mapping</SectionHeading>
-            <BusinessMap report={data} />
+            <BusinessMap report={data} permit={permit} />
           </section>
         </MetricDefinitions>
       ) : null}

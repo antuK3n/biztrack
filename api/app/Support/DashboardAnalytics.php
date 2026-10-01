@@ -8,7 +8,9 @@ use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
+use App\Models\Business;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -54,9 +56,7 @@ use Illuminate\Support\Facades\DB;
  *    returned + rejected, never by the grand total. Cancelled filings are neither
  *    a decision nor pending and are counted in their own bucket, surfaced only
  *    when non-zero.
- *  - **Active business** holds a permit valid today — the same definition
- *    BusinessGrowthAnalytics uses for its Active row, so the two screens cannot
- *    disagree about how many businesses are active.
+ *  - **Active business** holds a permit valid today.
  *  - **Inspection type comes from the inspecting department**, because
  *    `inspections.inspection_type` is null on every seeded row. City Health reads
  *    as Sanitary, Fire Protection as Fire Safety, and so on. The department is
@@ -108,6 +108,20 @@ final class DashboardAnalytics
 
     /** Cumulative expiry horizons, in days. */
     private const EXPIRY_WINDOWS = [30, 60, 90];
+
+    /**
+     * Reviews an office must have finished in the window before its average
+     * is drawn, or it can be named the slowest department.
+     *
+     * A mean over one or two reviews is an anecdote, not a department's
+     * processing time. The screen already hid offices under this line
+     * (AnalyticsPage MIN_REVIEWS_FOR_STAGE), but the bottleneck was chosen
+     * here from every office — so the sentence under the chart could name an
+     * office the chart did not draw. The threshold is decided here now and
+     * travels as `stages.min_reviews`. Same number, and the same reason, as
+     * the control chart's (Spc::MIN_COMPLETIONS_PER_WEEK).
+     */
+    public const MIN_REVIEWS_FOR_STAGE = Spc::MIN_COMPLETIONS_PER_WEEK;
 
     /**
      * The short name each inspecting office's visit goes by on the panel.
@@ -163,11 +177,32 @@ final class DashboardAnalytics
      *
      * @return array<string, mixed>
      */
-    public static function dataset(int $windowMonths = self::DEFAULT_WINDOW_MONTHS): array
+    public static function dataset(int $windowMonths = self::DEFAULT_WINDOW_MONTHS, ?string $office = null): array
     {
+        /*
+         * $office is a department code, or null for every office. It has already
+         * been decided by AnalyticsOffice::forRequest() by the time it arrives
+         * here; this class does not know who is asking and must not be the place
+         * that decides what they may see. It only narrows every fact query to
+         * that office's filings, permits, visits and threads — see
+         * AnalyticsOffice for what each of those means.
+         */
+        $scope = AnalyticsOffice::scope($office);
         $now = CarbonImmutable::now();
-        $today = $now->startOfDay();
-        $windowStart = $today->subMonths($windowMonths);
+        /*
+         * MANILA DAYS, NOT UTC ONES (ManilaCalendar). `$today` is the Manila
+         * date, carried as a Manila-zoned Carbon for date comparisons and
+         * printed as the date the City is living in. The `*Start` instants
+         * below are where those Manila days and months begin, converted back to
+         * UTC so they compare with the stored timestamps.
+         *
+         * This was `$now->startOfDay()` on the UTC clock. The nightly refresh
+         * runs at 03:00 Manila, which is 19:00 UTC the day before, so every
+         * stored dashboard was computed for yesterday: on the 1st of the month
+         * "This Month" was last month.
+         */
+        $today = ManilaCalendar::today($now);
+        $windowStart = ManilaCalendar::startOfDay($today->subMonths($windowMonths));
         /*
          * Still shipped, no longer used by a figure. `ytd_start` is a date label
          * that stayed behind when the yearly KPI became a full-term one; nothing
@@ -177,45 +212,115 @@ final class DashboardAnalytics
          * kpiFacts() — and that is now a call this codebase can make on its own.
          */
         $ytdStart = $today->startOfYear();
-        $monthStart = $today->startOfMonth();
+        $monthStart = ManilaCalendar::startOfDay($today->startOfMonth());
 
         // Gathered once: the RA 11032 compliance indicator is derived from these
         // same rows so the indicator and the tier panel cannot disagree.
-        $tierObservations = self::tierObservations($windowStart, $now);
+        $tierObservations = self::tierObservations($windowStart, $now, $scope);
 
         return [
-            'params' => ['months' => $windowMonths],
+            'params' => $office === null ? ['months' => $windowMonths] : ['months' => $windowMonths, 'office' => $office],
             'now' => $now->toISOString(),
+            // Manila dates, all four: the dates the screen prints.
             'today' => $today->toDateString(),
-            'window_start' => $windowStart->toDateString(),
+            'window_start' => ManilaCalendar::dateOf($windowStart),
             'ytd_start' => $ytdStart->toDateString(),
-            'month_start' => $monthStart->toDateString(),
+            'month_start' => ManilaCalendar::dateOf($monthStart),
             'top_n' => self::TOP_N,
             'expiry_windows' => self::EXPIRY_WINDOWS,
             'tiers' => self::tierRules(),
             'map_point_limit' => self::MAP_POINT_LIMIT,
 
-            'kpis' => self::kpiFacts($today, $monthStart, $now),
-            'volume' => self::volumeFacts($monthStart, $now),
-            'decisions' => self::decisionFacts($monthStart, $now),
+            'kpis' => self::kpiFacts($today, $monthStart, $now, $scope),
+            'volume' => self::volumeFacts($monthStart, $now, $scope),
+            'decisions' => self::decisionFacts($monthStart, $now, $scope),
             'tier_observations' => $tierObservations,
-            'stage_observations' => self::stageObservations($windowStart, $now),
-            'compliance' => self::complianceFacts($today, $windowStart, $now, $tierObservations),
-            'permit_type_columns' => self::permitTypeColumns(),
-            'expiring_permits' => self::expiringPermits($today),
-            'barangays' => self::barangayFacts($today),
-            'lines_of_business' => self::lineOfBusinessFacts($today),
-            'organization_forms' => self::organizationFormFacts(),
-            'inspections' => self::inspectionFacts($windowStart, $now),
-            'officer_activity' => self::officerActivityFacts($windowStart, $now),
-            'map' => self::mapFacts($today),
+            'stage_observations' => self::stageObservations($windowStart, $now, $scope),
+            'stage_rules' => self::stageRules($scope),
+            'compliance' => self::complianceFacts($today, $windowStart, $now, $tierObservations, $scope),
+            'permit_type_columns' => self::permitTypeColumns($scope),
+            'expiring_permits' => self::expiringPermits($today, $scope),
+            'barangays' => self::barangayFacts($today, $scope),
+            'lines_of_business' => self::lineOfBusinessFacts($today, $scope),
+            'organization_forms' => self::organizationFormFacts($scope),
+            'inspections' => self::inspectionFacts($windowStart, $now, $scope),
+            'officer_activity' => self::officerActivityFacts($windowStart, $now, $scope),
+            'map' => self::mapFacts($today, $scope),
+            'business_movement' => self::movementFacts($windowStart, $now, $scope),
         ];
     }
 
     /** @return array<string, mixed> */
-    public static function build(int $windowMonths = self::DEFAULT_WINDOW_MONTHS): array
+    public static function build(int $windowMonths = self::DEFAULT_WINDOW_MONTHS, ?string $office = null): array
     {
-        return self::compute(self::dataset($windowMonths));
+        return self::compute(self::dataset($windowMonths, $office));
+    }
+
+    /* ── office scope ──────────────────────────────────────────────────── */
+
+    /**
+     * Narrow a query to filings routed to the office. A no-op for every office.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     */
+    private static function routedTo(QueryBuilder $query, ?array $scope, string $idColumn = 'applications.id'): QueryBuilder
+    {
+        if ($scope === null) {
+            return $query;
+        }
+
+        /*
+         * An uncorrelated IN rather than a correlated EXISTS: assignments are
+         * indexed by department and not by application, so EXISTS rescanned
+         * them per filing and a scoped dashboard took about two seconds. The IN
+         * is evaluated once, off the department index.
+         */
+        return $query->whereIn($idColumn, DB::table('application_assignments')
+            ->select('application_id')
+            ->where('department_id', $scope['department_id']));
+    }
+
+    /**
+     * Narrow a query on a business id column to the office's businesses: those
+     * with a filing routed to it, OR holding (or having held) a permit it
+     * issues. A no-op for every office.
+     *
+     * One base for every panel. Active Businesses counted permit holders while
+     * the map, the organisation and the new-and-closed panels counted only
+     * businesses with a filing routed here, so a permit from the old register
+     * (no filing behind it) was active yet off the map. Either link makes a
+     * business this office's.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     */
+    private static function officeBusinesses(QueryBuilder $query, ?array $scope, string $businessIdColumn): QueryBuilder
+    {
+        if ($scope === null) {
+            return $query;
+        }
+
+        return $query->where(static fn (QueryBuilder $q) => $q
+            ->whereIn($businessIdColumn, self::routedTo(
+                DB::table('applications')->select('applications.business_id'),
+                $scope,
+            ))
+            ->orWhereIn($businessIdColumn, DB::table('permits')
+                ->select('permits.business_id')
+                ->whereIn('permits.permit_type_id', $scope['permit_type_ids'] === [] ? [0] : $scope['permit_type_ids'])));
+    }
+
+    /**
+     * Narrow a query on a permit type id column to the types the office issues.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     */
+    private static function issuedBy(QueryBuilder $query, ?array $scope, string $permitTypeColumn): QueryBuilder
+    {
+        if ($scope === null) {
+            return $query;
+        }
+
+        return $query->whereIn($permitTypeColumn, $scope['permit_type_ids']);
     }
 
     /**
@@ -246,7 +351,13 @@ final class DashboardAnalytics
             'volume' => self::computeVolume($dataset['volume']),
             'decisions' => $decisions,
             'processing_tiers' => self::computeTiers($dataset['tiers'], $dataset['tier_observations']),
-            'stages' => self::computeStages($dataset['stage_observations']),
+            // Rules absent from a snapshot or fixture written before they
+            // travelled: the threshold the screen has always applied, and no
+            // office set aside.
+            'stages' => self::computeStages(
+                $dataset['stage_observations'],
+                $dataset['stage_rules'] ?? ['min_reviews' => self::MIN_REVIEWS_FOR_STAGE, 'excluded' => []],
+            ),
             'compliance' => $compliance,
             'expiry' => self::computeExpiry(
                 $dataset['permit_type_columns'],
@@ -259,6 +370,9 @@ final class DashboardAnalytics
             'inspections' => self::computeInspections($dataset['inspections']),
             'officer_activity' => self::computeOfficerActivity($dataset['officer_activity']),
             'map' => self::computeMap($dataset['map']),
+            // Absent from snapshots stored before the panel moved here; an empty
+            // series renders as "nothing on record" until the next refresh.
+            'business_movement' => self::computeMovement($dataset['business_movement'] ?? []),
         ];
     }
 
@@ -302,25 +416,46 @@ final class DashboardAnalytics
      * The upper bound stays. `now` is Laravel's clock for this build, and a
      * filing dated ahead of it is not yet part of the term being reported.
      *
+     * ── FILINGS, NOT DRAFTS, AND DATED BY SUBMISSION ─────────────────────────
+     *
+     * Both counts, like the volume and outcome panels below, are of SUBMITTED
+     * filings, dated by `submitted_at`. They counted every row from creation,
+     * drafts included — for every office at once only: an office's view never
+     * held drafts, because a draft is routed to nobody, so the city total and
+     * the sum of its offices disagreed by however many drafts were sitting
+     * unsent. A draft is not a filing until it is submitted, and a draft
+     * started in September and submitted in October was filed in October.
+     *
      * @return array<string, int>
      */
     private static function kpiFacts(
         CarbonImmutable $today,
         CarbonImmutable $monthStart,
         CarbonImmutable $now,
+        ?array $scope = null,
     ): array {
         return [
-            'active_businesses' => count(self::activeBusinessIds($today)),
-            'applications_ytd' => DB::table('applications')
-                ->whereNull('deleted_at')
-                ->where('created_at', '<=', $now)
+            'active_businesses' => count(self::activeBusinessIds($today, $scope)),
+            'applications_ytd' => self::submitted($scope)
+                ->where('submitted_at', '<=', $now)
                 ->count(),
-            'applications_this_month' => DB::table('applications')
-                ->whereNull('deleted_at')
-                ->where('created_at', '>=', $monthStart)
-                ->where('created_at', '<=', $now)
+            'applications_this_month' => self::submitted($scope)
+                ->where('submitted_at', '>=', $monthStart)
+                ->where('submitted_at', '<=', $now)
                 ->count(),
         ];
+    }
+
+    /**
+     * Submitted filings, routed to the office when there is one. Never a draft.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     */
+    private static function submitted(?array $scope): QueryBuilder
+    {
+        return self::routedTo(DB::table('applications'), $scope)
+            ->whereNull('deleted_at')
+            ->whereNotNull('submitted_at');
     }
 
     /**
@@ -330,24 +465,36 @@ final class DashboardAnalytics
      *
      * @return list<int>
      */
-    private static function activeBusinessIds(CarbonImmutable $today): array
+    private static function activeBusinessIds(CarbonImmutable $today, ?array $scope = null): array
     {
-        static $cache = [];
-        $key = $today->toDateString();
+        return self::activeBusinesses($today, $scope)
+            ->pluck('permits.business_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+    }
 
-        if (! isset($cache[$key])) {
-            $cache[$key] = DB::table('permits')
-                ->join('businesses', 'businesses.id', '=', 'permits.business_id')
-                ->whereNull('businesses.deleted_at')
-                ->where('permits.status', PermitStatus::Active->value)
-                ->whereDate('permits.valid_until', '>=', $key)
-                ->distinct()
-                ->pluck('permits.business_id')
-                ->map(static fn ($id): int => (int) $id)
-                ->all();
-        }
-
-        return $cache[$key];
+    /**
+     * The same set as a subquery, for `whereIn(column, …)`.
+     *
+     * Scoped, "active" means holding a valid permit THIS office issued: a
+     * business with a current fire clearance is active to BFP whatever its
+     * sanitary permit says.
+     *
+     * No cache. It used to keep the id list in a function-level static keyed by
+     * day, which a long-running process (the queue worker) would have carried
+     * past the permits issued later that day; and passing that list inline put
+     * one bound parameter per business into every query that used it. A
+     * subquery lets the database do both jobs.
+     */
+    private static function activeBusinesses(CarbonImmutable $today, ?array $scope = null): QueryBuilder
+    {
+        return self::issuedBy(DB::table('permits'), $scope, 'permits.permit_type_id')
+            ->join('businesses', 'businesses.id', '=', 'permits.business_id')
+            ->whereNull('businesses.deleted_at')
+            ->where('permits.status', PermitStatus::Active->value)
+            ->whereDate('permits.valid_until', '>=', $today->toDateString())
+            ->distinct()
+            ->select('permits.business_id');
     }
 
     /* ── facts: Application Volume ─────────────────────────────────────── */
@@ -361,12 +508,12 @@ final class DashboardAnalytics
      *
      * @return list<array{type: string, label: string, count: int}>
      */
-    private static function volumeFacts(CarbonImmutable $monthStart, CarbonImmutable $now): array
+    private static function volumeFacts(CarbonImmutable $monthStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        $counts = DB::table('applications')
-            ->whereNull('deleted_at')
-            ->where('created_at', '>=', $monthStart)
-            ->where('created_at', '<=', $now)
+        // Submitted this month, never a draft — see kpiFacts().
+        $counts = self::submitted($scope)
+            ->where('submitted_at', '>=', $monthStart)
+            ->where('submitted_at', '<=', $now)
             ->groupBy('application_type')
             ->selectRaw('application_type, count(*) as c')
             ->pluck('c', 'application_type');
@@ -390,19 +537,27 @@ final class DashboardAnalytics
     /**
      * This month's filings bucketed by outcome.
      *
-     * `decisioned` marks the three buckets that belong in the Approval Rate
-     * denominator. Carrying the flag with the fact states the formula's one
+     * `decisioned` marks the two buckets that belong in the Approval Rate
+     * denominator: approved and rejected. Carrying the flag with the fact states the formula's one
      * subtlety — that Pending is excluded — next to the rows it applies to,
      * rather than leaving it as a list of outcome names buried in the arithmetic.
      *
      * @return list<array{outcome: string, label: string, count: int, decisioned: bool}>
      */
-    private static function decisionFacts(CarbonImmutable $monthStart, CarbonImmutable $now): array
+    private static function decisionFacts(CarbonImmutable $monthStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        $counts = DB::table('applications')
-            ->whereNull('deleted_at')
-            ->where('created_at', '>=', $monthStart)
-            ->where('created_at', '<=', $now)
+        /*
+         * Scoped, this is still the FILING's outcome, not the office's own
+         * clearance decision on it: "of the filings routed to CHO this month,
+         * how many were approved". The per-clearance decision lives on
+         * application_permit_types and is the Office Performance screen's
+         * subject, not this panel's.
+         */
+        // Submitted this month, never a draft — see kpiFacts(). A draft was in
+        // the "pending" bucket below, as a decision nobody had been asked for.
+        $counts = self::submitted($scope)
+            ->where('submitted_at', '>=', $monthStart)
+            ->where('submitted_at', '<=', $now)
             ->groupBy('status')
             ->selectRaw('status, count(*) as c')
             ->pluck('c', 'status');
@@ -427,9 +582,17 @@ final class DashboardAnalytics
             }
         }
 
+        /*
+         * RETURNED IS NOT A DECISION. A returned filing is back with the
+         * applicant to fix and resubmit; nobody has decided it, and it comes
+         * back for the decision it is still owed. Counting it beside approved
+         * and rejected in the approval rate's denominator read every return as
+         * a refusal. It keeps its own row, so the reader can see how many are
+         * out with applicants, and is left out of the rate like Pending.
+         */
         return [
             ['outcome' => 'approved', 'label' => 'Approved', 'count' => $approved, 'decisioned' => true],
-            ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => $returned, 'decisioned' => true],
+            ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => $returned, 'decisioned' => false],
             ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => $rejected, 'decisioned' => true],
             ['outcome' => 'pending', 'label' => 'Pending', 'count' => $pending, 'decisioned' => false],
             ['outcome' => 'cancelled', 'label' => 'Cancelled', 'count' => $cancelled, 'decisioned' => false],
@@ -440,6 +603,16 @@ final class DashboardAnalytics
 
     /**
      * One row per decided filing in the window: its tier and how long it took.
+     *
+     * WHOSE TIME (FilingClock, which the Reports tab's processing-time report
+     * reads too, so the two cannot disagree). For every office at once, a
+     * filing is timed from submission to decision, less the stretches it sat
+     * with the applicant — Pending Payment and Returned, read from status
+     * history. For one office, it is that office's own review: its
+     * assignment's span for the five clearance offices, the time at BPLO's
+     * desk for BPLO. Scoped, this used to be every routed filing's whole
+     * lifetime, so CHO was judged on BFP's inspection and the applicant's
+     * payment.
      *
      * Working days are counted here, in dataset(), because the count depends on
      * the calendar and compute() must stay a pure function of its input. Both
@@ -460,71 +633,35 @@ final class DashboardAnalytics
      *
      * @return list<array{tier: string, working_days: int, calendar_days: float, within_statutory: bool, within_recorded_deadline: bool, recorded_deadline_working_days: int|null}>
      */
-    private static function tierObservations(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    private static function tierObservations(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        $rows = DB::table('applications')
-            ->whereNull('deleted_at')
-            ->whereNotNull('complexity')
-            ->whereNotNull('submitted_at')
-            ->whereNotNull('decided_at')
-            ->where('decided_at', '>=', $windowStart)
-            ->where('decided_at', '<=', $now)
-            ->orderBy('id')
-            ->get(['complexity', 'submitted_at', 'decided_at', 'deadline_at']);
-
         $observations = [];
-        foreach ($rows as $row) {
-            $tier = (string) $row->complexity;
+        // Up to and including `now`: the half-open bound is the next second.
+        foreach (FilingClock::decided($windowStart, $now->addSecond(), $scope) as $row) {
+            $tier = (string) $row['tier'];
             if (! isset(self::TIERS[$tier])) {
-                // An unrecognised tier is not silently folded into a real one:
-                // it would move a statutory mean it does not belong to.
+                // No tier, or an unrecognised one: not silently folded into a
+                // real tier, where it would move a statutory mean it does not
+                // belong to.
                 continue;
             }
 
-            $submitted = CarbonImmutable::parse($row->submitted_at);
-            $decided = CarbonImmutable::parse($row->decided_at);
-            $workingDays = self::workingDaysBetween($submitted, $decided);
-
             $observations[] = [
                 'tier' => $tier,
-                'working_days' => $workingDays,
-                'calendar_days' => Rounding::statistic($submitted->diffInHours($decided) / 24),
-                // The statutory test: this filing's own turnaround against the
-                // legal limit for its tier.
-                'within_statutory' => $workingDays <= self::TIERS[$tier]['statutory_working_days'],
-                'within_recorded_deadline' => $row->deadline_at !== null
-                    && $decided->lessThanOrEqualTo(CarbonImmutable::parse($row->deadline_at)),
-                'recorded_deadline_working_days' => $row->deadline_at === null
+                'working_days' => $row['working_days'],
+                'calendar_days' => $row['calendar_days'],
+                // The statutory test: this turnaround against the legal limit
+                // for the filing's tier.
+                'within_statutory' => $row['working_days'] <= self::TIERS[$tier]['statutory_working_days'],
+                'within_recorded_deadline' => $row['deadline_at'] !== null
+                    && $row['end']->lessThanOrEqualTo($row['deadline_at']),
+                'recorded_deadline_working_days' => $row['deadline_at'] === null
                     ? null
-                    : self::workingDaysBetween($submitted, CarbonImmutable::parse($row->deadline_at)),
+                    : ManilaCalendar::workingDaysBetween($row['submitted_at'], $row['deadline_at']),
             ];
         }
 
         return $observations;
-    }
-
-    /**
-     * Whole working days from one instant to another, weekends excluded.
-     *
-     * Matches how `deadline_at` is set (`addWeekdays`), so a filing's measured
-     * duration and its statutory deadline are counted on the same calendar.
-     * Philippine holidays are not modelled — the register does not carry a
-     * holiday table, so this slightly overstates working days around them.
-     */
-    private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
-    {
-        $cursor = $from->startOfDay();
-        $end = $to->startOfDay();
-        $days = 0;
-
-        while ($cursor->lessThan($end)) {
-            $cursor = $cursor->addDay();
-            if (! $cursor->isWeekend()) {
-                $days++;
-            }
-        }
-
-        return $days;
     }
 
     /* ── facts: time-in-stage per department ───────────────────────────── */
@@ -532,12 +669,22 @@ final class DashboardAnalytics
     /**
      * One row per completed review assignment in the window.
      *
+     * BPLO's reviews are left out, the way Office Performance leaves them out
+     * (OfficePerformanceAnalytics::NOT_COMPARABLE): BPLO's assignment is
+     * stamped a second time at the final approval, so its recorded span is
+     * the whole filing — every other office's review inside it — and averaging
+     * it beside the five offices' own spans made BPLO look like a department
+     * with a queue of its own the length of the whole process. stageRules()
+     * names it, with the reason, so the panel can say why it is not drawn.
+     *
      * @return list<array{code: string, name: string, days: float}>
      */
-    private static function stageObservations(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    private static function stageObservations(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
         $rows = DB::table('application_assignments')
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
+            ->when($scope !== null, static fn ($q) => $q->where('application_assignments.department_id', $scope['department_id']))
+            ->whereNotIn('departments.code', array_keys(OfficePerformanceAnalytics::NOT_COMPARABLE))
             ->whereNotNull('application_assignments.completed_at')
             ->where('application_assignments.completed_at', '>=', $windowStart)
             ->where('application_assignments.completed_at', '<=', $now)
@@ -557,11 +704,41 @@ final class DashboardAnalytics
             $observations[] = [
                 'code' => (string) $row->code,
                 'name' => (string) $row->name,
-                'days' => Rounding::statistic($assigned->diffInHours($completed) / 24),
+                // Office days, not wall-clock days: a review that reaches an
+                // office at 7 pm has its clock start at 8 the next morning,
+                // and the weekend is not the office's (OfficeHours::hoursBetween).
+                'days' => Rounding::statistic(OfficeHours::hoursBetween($assigned, $completed) / OfficeHours::hoursPerDay()),
             ];
         }
 
         return $observations;
+    }
+
+    /**
+     * The department panel's rules: the review threshold, and the offices
+     * whose time is set aside, with the sentence that says why.
+     *
+     * @return array{min_reviews: int, excluded: list<array{code: string, name: string, reason: string}>}
+     */
+    private static function stageRules(?array $scope = null): array
+    {
+        $excluded = [];
+        // The office list is Office Performance's; the sentence is this
+        // panel's, because Office Performance's also speaks to its own
+        // columns (volume, open caseload) that this panel does not have.
+        $reason = 'The time recorded against this office is the whole filing, every other office’s review included, '
+            .'because its review is stamped again at the final approval. It is not averaged beside the others.';
+        foreach (array_keys(OfficePerformanceAnalytics::NOT_COMPARABLE) as $code) {
+            if ($scope !== null && $scope['code'] !== $code) {
+                continue;
+            }
+            $name = DB::table('departments')->where('code', $code)->value('name');
+            if ($name !== null) {
+                $excluded[] = ['code' => $code, 'name' => (string) $name, 'reason' => $reason];
+            }
+        }
+
+        return ['min_reviews' => self::MIN_REVIEWS_FOR_STAGE, 'excluded' => $excluded];
     }
 
     /* ── facts: the three compliance indicators ────────────────────────── */
@@ -582,11 +759,12 @@ final class DashboardAnalytics
         CarbonImmutable $windowStart,
         CarbonImmutable $now,
         array $tierObservations,
+        ?array $scope = null,
     ): array {
         return [
             self::ra11032Compliance($tierObservations),
-            self::permitValidityCompliance($today),
-            self::renewalCompliance($windowStart, $now),
+            self::permitValidityCompliance($today, $scope),
+            self::renewalCompliance($windowStart, $now, $scope),
         ];
     }
 
@@ -639,9 +817,11 @@ final class DashboardAnalytics
      *
      * @return array{indicator: string, label: string, numerator: int, denominator: int, numerator_label: string, denominator_label: string}
      */
-    private static function permitValidityCompliance(CarbonImmutable $today): array
+    private static function permitValidityCompliance(CarbonImmutable $today, ?array $scope = null): array
     {
-        $rows = DB::table('permits')
+        // Scoped, only the types this office issues are tested: CHO's compliance
+        // is whether its sanitary permits are current, not whether BFP's are.
+        $rows = self::issuedBy(DB::table('permits'), $scope, 'permits.permit_type_id')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
             ->get(['permits.business_id', 'permits.permit_type_id', 'permits.status', 'permits.valid_until']);
@@ -680,106 +860,152 @@ final class DashboardAnalytics
      * Share of permits that fell due in the window whose renewal was filed
      * before they expired.
      *
-     * A renewal is linked to the permit it replaces by `applications.prior_permit_id`,
-     * the only such link in the schema. Never-submitted drafts are not on-time.
+     * ── WHICH RENEWAL RENEWS WHICH PERMIT ───────────────────────────────────
      *
-     * THE FAILURE MODE THIS GUARDS. That link is set on almost none of the
-     * register's renewal filings — 2 of 746 at the time of writing. Divide anyway
-     * and the indicator reports 0%, which does not read as "we cannot tell": it
-     * reads as "not one business in Malabon renewed on time", which is a much
-     * stronger and entirely false claim. So when the window has permits that fell
-     * due but not one of them has a renewal filing linked to it, the indicator
-     * declines to compute and says why.
+     * This matched a renewal to a permit by `applications.prior_permit_id`
+     * alone. A renewal filing carries one prior permit — in practice the
+     * business permit — and the clearances riding on the same filing have no
+     * link of their own, so the five clearance offices could never be credited
+     * with a renewal. Their dashboards read "Renewal compliance" blank whatever
+     * their businesses did.
      *
-     * The test is on the data, not a flag: link the filings and the indicator
-     * starts working with no change here.
+     * A permit is now renewed by a submitted renewal filing of the SAME
+     * BUSINESS that carries the SAME PERMIT TYPE (`application_permit_types`),
+     * filed during the permit's term — on or after its first valid day, and
+     * not the filing that produced it. On time is filed on or before its
+     * expiry date, both read in Manila. `prior_permit_id`, where it is set,
+     * still links its permit directly. Never-submitted drafts are not renewals.
+     *
+     * ── THE DENOMINATOR STAYS COMMENSURABLE WITH THE NUMERATOR ───────────────
+     *
+     * Only the permit types renewals are actually filed for are due: the types
+     * any submitted renewal filing carries, derived from the register. The old
+     * reason for narrowing it — a prior-permit link could only ever credit one
+     * permit per filing, so counting every type due built a denominator the
+     * numerator could not reach (21.2% that was an arithmetic artefact) — is
+     * answered by matching on the type instead, so every type a renewal
+     * carries can now be credited.
+     *
+     * THE FAILURE MODE THIS STILL GUARDS. When permits fell due but not one of
+     * them has a renewal matched to it, the indicator declines to compute and
+     * says why, rather than reading 0% — which would claim that not one
+     * business renewed on time, when it may be the register that cannot see
+     * them.
      *
      * @return array{indicator: string, label: string, numerator: int, denominator: int, numerator_label: string, denominator_label: string, unavailable_reason?: string}
      */
-    private static function renewalCompliance(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    private static function renewalCompliance(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        /*
-         * THE DENOMINATOR HAS TO BE COMMENSURABLE WITH THE NUMERATOR.
-         *
-         * A renewal application carries exactly one `prior_permit_id`, so it can
-         * only ever be credited against one permit — in practice the business
-         * permit, with the sanitary, fire and zoning clearances riding along on
-         * the same filing. Counting every permit type that fell due therefore
-         * built a denominator the numerator could not reach by construction:
-         * 1,257 permits due (444 business, 321 sanitary, 321 fire, 71 zoning)
-         * against a numerator capped at the number of filings. The indicator read
-         * 21.2% and looked like a compliance catastrophe when it was an
-         * arithmetic artefact.
-         *
-         * So restrict the denominator to the permit types renewals actually
-         * re-validate, derived from the register rather than hardcoded, which
-         * keeps this correct if this LGU ever starts filing standalone renewals
-         * for a clearance. Same rows, scoped: 266 of 444 = 59.9%.
-         *
-         * The remaining shortfall is a real finding, not an artefact — 169
-         * business permits fell due with no renewal filed at all, while 91% of
-         * the renewals that were filed arrived on time.
-         */
-        $renewablePermitTypes = DB::table('applications')
-            ->join('permits', 'permits.id', '=', 'applications.prior_permit_id')
+        $renewalFilings = static fn () => DB::table('applications')
             ->whereNull('applications.deleted_at')
             ->where('applications.application_type', ApplicationType::Renewal->value)
-            ->whereNotNull('applications.submitted_at')
+            ->whereNotNull('applications.submitted_at');
+
+        $renewablePermitTypes = DB::table('application_permit_types')
+            ->whereIn('application_id', $renewalFilings()->select('applications.id'))
             ->distinct()
-            ->pluck('permits.permit_type_id')
+            ->pluck('permit_type_id')
+            ->merge($renewalFilings()
+                ->join('permits', 'permits.id', '=', 'applications.prior_permit_id')
+                ->distinct()
+                ->pluck('permits.permit_type_id'))
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
             ->all();
+
+        /*
+         * Scoped, the office's own types among those. An office none of whose
+         * types is ever renewed has nothing due here, and the indicator says
+         * "nothing in the denominator" rather than borrowing the city's figure.
+         */
+        if ($scope !== null) {
+            $renewablePermitTypes = array_values(array_intersect($renewablePermitTypes, $scope['permit_type_ids']));
+        }
 
         $due = DB::table('permits')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
-            ->when(
-                $renewablePermitTypes !== [],
-                static fn ($q) => $q->whereIn('permits.permit_type_id', $renewablePermitTypes),
-            )
-            ->whereDate('permits.valid_until', '>=', $windowStart->toDateString())
-            ->whereDate('permits.valid_until', '<=', $now->toDateString())
-            ->pluck('permits.valid_until', 'permits.id');
+            ->whereIn('permits.permit_type_id', $renewablePermitTypes === [] ? [0] : $renewablePermitTypes)
+            // Manila dates: valid_until is a date the permit printed, and the
+            // window runs from the Manila date it opened to today in Manila.
+            ->whereDate('permits.valid_until', '>=', ManilaCalendar::dateOf($windowStart))
+            ->whereDate('permits.valid_until', '<=', ManilaCalendar::dateOf($now));
 
-        if ($due->isEmpty()) {
-            return [
-                'indicator' => 'renewal',
-                'label' => 'Renewal compliance',
-                'numerator' => 0,
-                'denominator' => 0,
-                'numerator_label' => 'renewed before expiry',
-                'denominator_label' => 'permits due for renewal',
-            ];
-        }
-
-        $renewals = DB::table('applications')
-            ->whereNull('deleted_at')
-            ->where('application_type', ApplicationType::Renewal->value)
-            ->whereNotNull('submitted_at')
-            ->whereIn('prior_permit_id', $due->keys()->all())
-            ->get(['prior_permit_id', 'submitted_at']);
-
-        $onTime = [];
-        $linked = [];
-        foreach ($renewals as $renewal) {
-            $permitId = (int) $renewal->prior_permit_id;
-            $linked[$permitId] = true;
-            $expiry = CarbonImmutable::parse($due[$permitId])->startOfDay();
-            if (CarbonImmutable::parse($renewal->submitted_at)->startOfDay()->lessThanOrEqualTo($expiry)) {
-                $onTime[$permitId] = true;
-            }
-        }
+        $permits = (clone $due)->get([
+            'permits.id', 'permits.business_id', 'permits.permit_type_id',
+            'permits.application_id', 'permits.valid_from', 'permits.valid_until',
+        ]);
 
         $fact = [
             'indicator' => 'renewal',
             'label' => 'Renewal compliance',
-            'numerator' => count($onTime),
-            'denominator' => $due->count(),
+            'numerator' => 0,
+            'denominator' => $permits->count(),
             'numerator_label' => 'renewed before expiry',
             'denominator_label' => 'permits due for renewal',
         ];
 
-        if ($linked === []) {
-            $fact['unavailable_reason'] = 'No renewal filing in this window records which permit it replaces, '
+        if ($permits->isEmpty()) {
+            return $fact;
+        }
+
+        /*
+         * Every submitted renewal of these businesses, once per permit type it
+         * carries, plus the permit it names as prior, if any. Subqueries, not
+         * id lists: a three-year window on a full register is thousands of
+         * permits, and an inline IN list of that size is a statement some
+         * drivers refuse.
+         */
+        $renewals = $renewalFilings()
+            ->whereIn('applications.business_id', (clone $due)->select('permits.business_id'))
+            ->leftJoin('application_permit_types', 'application_permit_types.application_id', '=', 'applications.id')
+            ->get([
+                'applications.id', 'applications.business_id', 'applications.prior_permit_id',
+                'applications.submitted_at', 'application_permit_types.permit_type_id',
+            ]);
+
+        $byType = [];
+        $byPrior = [];
+        foreach ($renewals as $renewal) {
+            $filed = ['id' => (int) $renewal->id, 'date' => ManilaCalendar::dateOf($renewal->submitted_at)];
+            if ($renewal->permit_type_id !== null) {
+                $byType[$renewal->business_id.'|'.$renewal->permit_type_id][] = $filed;
+            }
+            if ($renewal->prior_permit_id !== null) {
+                $byPrior[(int) $renewal->prior_permit_id][] = $filed;
+            }
+        }
+
+        $onTime = 0;
+        $linked = 0;
+        foreach ($permits as $permit) {
+            $from = CarbonImmutable::parse($permit->valid_from)->toDateString();
+            $until = CarbonImmutable::parse($permit->valid_until)->toDateString();
+
+            $earliest = null;
+            foreach ($byType[$permit->business_id.'|'.$permit->permit_type_id] ?? [] as $filed) {
+                // Filed during this permit's term, and not the filing that produced it.
+                if ($filed['date'] >= $from && $filed['id'] !== (int) $permit->application_id) {
+                    $earliest = $earliest === null ? $filed['date'] : min($earliest, $filed['date']);
+                }
+            }
+            foreach ($byPrior[(int) $permit->id] ?? [] as $filed) {
+                $earliest = $earliest === null ? $filed['date'] : min($earliest, $filed['date']);
+            }
+
+            if ($earliest !== null) {
+                $linked++;
+                if ($earliest <= $until) {
+                    $onTime++;
+                }
+            }
+        }
+
+        $fact['numerator'] = $onTime;
+
+        if ($linked === 0) {
+            $fact['unavailable_reason'] = 'No renewal filing in this window can be matched to a permit that fell due, '
                 .'so on-time renewals cannot be counted. This is a gap in the register, not a compliance finding.';
         }
 
@@ -797,9 +1023,9 @@ final class DashboardAnalytics
      *
      * @return list<array{code: string, label: string}>
      */
-    private static function permitTypeColumns(): array
+    private static function permitTypeColumns(?array $scope = null): array
     {
-        return DB::table('permit_types')
+        return self::issuedBy(DB::table('permit_types'), $scope, 'permit_types.id')
             ->join('permits', 'permits.permit_type_id', '=', 'permit_types.id')
             ->groupBy('permit_types.id', 'permit_types.code', 'permit_types.name')
             ->orderBy('permit_types.id')
@@ -812,33 +1038,77 @@ final class DashboardAnalytics
     }
 
     /**
-     * One row per permit in the widest window, with its signed days to expiry.
+     * The expiry table's rows: one per permit still in force (with its signed
+     * days to expiry), and one per business that has let a permit type lapse.
      *
      * The buckets are cumulative. Emitting per-permit rows rather than
      * pre-bucketed counts is what lets the cumulative nesting (30 ⊂ 60 ⊂ 90) be
      * a computation compute() performs, visibly and testably, instead of an
      * assumption baked into a SQL `case` nobody re-reads.
      *
-     * @return list<array{code: string, days_to_expiry: int}>
+     * ── "Already expired" is businesses, not permit rows ────────────────────
+     *
+     * The Expired row counted every permit on the register whose date had
+     * passed. A business that has renewed every year for five years holds four
+     * expired permits and one valid one, and was counted four times as
+     * "expired" while trading lawfully. BPLO's row read 767 on the copy of the
+     * register this was measured on, against 147 businesses actually lapsed.
+     *
+     * So the expired rows are now one per (business, permit type) whose LATEST
+     * permit of that type has run out and which holds no permit of that type
+     * in force today. A latest permit that was revoked or suspended is left
+     * out: that business did not lapse, it was stopped, and the definition has
+     * always excluded revoked permits. `business_id` travels so compute() can
+     * also say how many distinct businesses that is (`businesses`).
+     *
+     * @return list<array{code: string, days_to_expiry: int, business_id: int}>
      */
-    private static function expiringPermits(CarbonImmutable $today): array
+    private static function expiringPermits(CarbonImmutable $today, ?array $scope = null): array
     {
-        $rows = DB::table('permits')
+        $rows = self::issuedBy(DB::table('permits'), $scope, 'permits.permit_type_id')
             ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
-            ->whereIn('permits.status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+            // Each business's permits of one type together, oldest to latest.
+            ->orderBy('permits.business_id')
+            ->orderBy('permits.permit_type_id')
+            ->orderBy('permits.valid_until')
             ->orderBy('permits.id')
-            ->get(['permit_types.code', 'permits.valid_until']);
+            ->get(['permits.business_id', 'permits.permit_type_id', 'permit_types.code', 'permits.status', 'permits.valid_until']);
+
+        $todayDate = $today->toDateString();
+        $live = [PermitStatus::Active->value, PermitStatus::Expired->value];
 
         $out = [];
+        $groups = [];
         foreach ($rows as $row) {
-            $validUntil = CarbonImmutable::parse($row->valid_until)->startOfDay();
+            $days = ManilaCalendar::daysBetweenDates(
+                $todayDate,
+                // Date to date: today is a Manila date and valid_until is the
+                // date printed on the permit.
+                CarbonImmutable::parse($row->valid_until)->toDateString(),
+            );
 
-            $out[] = [
-                'code' => (string) $row->code,
-                'days_to_expiry' => (int) $today->diffInDays($validUntil, false),
-            ];
+            // Still in force, or due: one row per permit, as before.
+            if (in_array((string) $row->status, $live, true) && $days >= 0) {
+                $out[] = ['code' => (string) $row->code, 'days_to_expiry' => $days, 'business_id' => (int) $row->business_id];
+            }
+
+            $key = $row->business_id.'|'.$row->permit_type_id;
+            $groups[$key]['code'] = (string) $row->code;
+            $groups[$key]['business_id'] = (int) $row->business_id;
+            // Ordered by valid_until, so the last one written is the latest.
+            $groups[$key]['latest'] = ['status' => (string) $row->status, 'days' => $days];
+            if ($row->status === PermitStatus::Active->value && $days >= 0) {
+                $groups[$key]['in_force'] = true;
+            }
+        }
+
+        foreach ($groups as $group) {
+            $latest = $group['latest'];
+            if (! isset($group['in_force']) && $latest['days'] < 0 && in_array($latest['status'], $live, true)) {
+                $out[] = ['code' => $group['code'], 'days_to_expiry' => $latest['days'], 'business_id' => $group['business_id']];
+            }
         }
 
         return $out;
@@ -851,17 +1121,11 @@ final class DashboardAnalytics
      *
      * @return list<array{barangay: string, count: int}>
      */
-    private static function barangayFacts(CarbonImmutable $today): array
+    private static function barangayFacts(CarbonImmutable $today, ?array $scope = null): array
     {
-        $activeIds = self::activeBusinessIds($today);
-
-        if ($activeIds === []) {
-            return [];
-        }
-
         return DB::table('business_addresses')
             ->join('barangays', 'barangays.id', '=', 'business_addresses.barangay_id')
-            ->whereIn('business_addresses.business_id', $activeIds)
+            ->whereIn('business_addresses.business_id', self::activeBusinesses($today, $scope))
             ->where('business_addresses.address_type', 'business_location')
             ->groupBy('barangays.id', 'barangays.name')
             ->orderBy('barangays.name')
@@ -884,17 +1148,11 @@ final class DashboardAnalytics
      *
      * @return list<array{industry: string, psic_code: string, count: int}>
      */
-    private static function lineOfBusinessFacts(CarbonImmutable $today): array
+    private static function lineOfBusinessFacts(CarbonImmutable $today, ?array $scope = null): array
     {
-        $activeIds = self::activeBusinessIds($today);
-
-        if ($activeIds === []) {
-            return [];
-        }
-
         return DB::table('business_lines')
             ->join('psic_codes', 'psic_codes.id', '=', 'business_lines.psic_code_id')
-            ->whereIn('business_lines.business_id', $activeIds)
+            ->whereIn('business_lines.business_id', self::activeBusinesses($today, $scope))
             ->groupBy('psic_codes.id', 'psic_codes.code', 'psic_codes.title')
             ->orderBy('psic_codes.code')
             ->get([
@@ -923,16 +1181,18 @@ final class DashboardAnalytics
      *
      * @return array{forms: list<array{form: string, label: string, count: int}>, unrecorded: int, total: int}
      */
-    private static function organizationFormFacts(): array
+    private static function organizationFormFacts(?array $scope = null): array
     {
-        $counts = DB::table('businesses')
+        $counts = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
             ->whereNull('deleted_at')
             ->whereNotNull('form_of_organization')
             ->groupBy('form_of_organization')
             ->selectRaw('form_of_organization, count(*) as c')
             ->pluck('c', 'form_of_organization');
 
-        $total = DB::table('businesses')->whereNull('deleted_at')->count();
+        $total = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+            ->whereNull('deleted_at')
+            ->count();
 
         $forms = [];
         $recorded = 0;
@@ -978,7 +1238,7 @@ final class DashboardAnalytics
      *
      * @return list<array{type: string, label: string, scheduled: int, completed: int, passed: int, failed: int, conditional: int}>
      */
-    private static function inspectionFacts(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    private static function inspectionFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
         $buckets = [];
 
@@ -1006,6 +1266,7 @@ final class DashboardAnalytics
         $inspectingOffices = DB::table('permit_types')
             ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
             ->where('permit_types.requires_inspection', true)
+            ->when($scope !== null, static fn ($q) => $q->where('departments.id', $scope['department_id']))
             ->orderBy('permit_types.id')
             ->pluck('departments.code');
 
@@ -1019,6 +1280,7 @@ final class DashboardAnalytics
             ->whereNull('applications.deleted_at')
             ->where('inspections.created_at', '>=', $windowStart)
             ->where('inspections.created_at', '<=', $now)
+            ->when($scope !== null, static fn ($q) => $q->where('inspections.department_id', $scope['department_id']))
             ->orderBy('departments.code')
             ->get(['departments.code', 'inspections.status', 'inspections.result']);
 
@@ -1026,7 +1288,17 @@ final class DashboardAnalytics
             $code = (string) $row->code;
             $open($code);
 
-            // Every inspection on record was scheduled at some point, so
+            // A cancelled visit was never going to happen, so it is not part of
+            // the work: counted as scheduled, it read as backlog forever (the
+            // gap between scheduled and completed is what this panel calls the
+            // backlog). A rescheduled one stays: rescheduling moves the same
+            // visit to a new date (InspectionController::reschedule), and it is
+            // still owed.
+            if ((string) $row->status === InspectionStatus::Cancelled->value) {
+                continue;
+            }
+
+            // Every other inspection on record counts as scheduled, so
             // "scheduled" is the total rather than the count still awaiting a
             // visit — otherwise a fully worked-through queue would report zero
             // scheduled and a pass rate with no context.
@@ -1109,10 +1381,13 @@ final class DashboardAnalytics
      *
      * @return array<string, mixed>
      */
-    private static function officerActivityFacts(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    private static function officerActivityFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
+        // Scoped, the office's own threads and its own requests: a thread with
+        // BFP is BFP's reply time, not CHO's.
         $messages = DB::table('messages')
             ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+            ->when($scope !== null, static fn ($q) => $q->where('message_threads.department_id', $scope['department_id']))
             ->where('messages.created_at', '>=', $windowStart)
             ->where('messages.created_at', '<=', $now)
             ->orderBy('messages.thread_id')
@@ -1142,16 +1417,20 @@ final class DashboardAnalytics
             }
 
             if (isset($awaiting[$threadId])) {
-                $latencies[] = Rounding::statistic($awaiting[$threadId]->diffInMinutes($sentAt) / 60);
+                // Office hours only: a message sent at 9 pm and answered at
+                // 8:30 the next morning waited half an hour of office time.
+                $latencies[] = Rounding::statistic(OfficeHours::hoursBetween($awaiting[$threadId], $sentAt));
                 unset($awaiting[$threadId]);
             }
         }
 
         $requests = DB::table('officer_requests')
+            ->when($scope !== null, static fn ($q) => $q->where('department_id', $scope['department_id']))
             ->where('created_at', '>=', $windowStart)
             ->where('created_at', '<=', $now);
 
         $meetings = DB::table('officer_requests')
+            ->when($scope !== null, static fn ($q) => $q->where('department_id', $scope['department_id']))
             ->whereNotNull('meeting_scheduled_at')
             ->where('meeting_scheduled_at', '>=', $windowStart)
             ->where('meeting_scheduled_at', '<=', $now);
@@ -1179,6 +1458,83 @@ final class DashboardAnalytics
         ];
     }
 
+    /* ── facts: new and closed businesses ──────────────────────────────── */
+
+    /**
+     * Registrations and closures per month across the trailing window.
+     *
+     * Moved here from Business Growth Analysis when that screen was removed
+     * (checklist 2026-09-27, item 6). It drew closures alone; registrations now
+     * sit beside them because a closure count means little without what came in.
+     *
+     * Two things close a business and they are dated by different columns: a
+     * soft delete by `deleted_at`, a blacklisting by `status_changed_at`. The two
+     * sets cannot overlap — trashed rows are matched with onlyTrashed, the
+     * blacklisted with the default scope — so a business struck off and later
+     * removed closed once. A blacklisting with no recorded date cannot be put in
+     * a month and is left out. Suspension is temporary and is not a closure.
+     *
+     * Registrations count every business created in the window, including ones
+     * since removed: it registered in that month whatever happened after.
+     *
+     * @return list<array{month: string, registered: int, closed: int, partial: bool}>
+     */
+    private static function movementFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
+    {
+        // Manila months: a business registered at 7 am Manila on the 1st is
+        // that month's, not the previous month's as the UTC clock had it.
+        $buckets = [];
+        $cursor = ManilaCalendar::local($windowStart)->startOfMonth();
+        $lastMonth = ManilaCalendar::monthOf($now);
+        while ($cursor->format('Y-m') <= $lastMonth) {
+            // The current month is still running: its count is not a drop, it
+            // is a month not over yet. Flagged so the chart can say so instead
+            // of ending every line in a cliff to zero.
+            $buckets[$cursor->format('Y-m')] = [
+                'month' => $cursor->format('Y-m'),
+                'registered' => 0,
+                'closed' => 0,
+                'partial' => $cursor->format('Y-m') === $lastMonth,
+            ];
+            $cursor = $cursor->addMonth();
+        }
+
+        // Scoped, the office's businesses: those with a filing routed to it.
+        $registered = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+            ->where('created_at', '>=', $windowStart)
+            ->where('created_at', '<=', $now)
+            ->pluck('created_at');
+
+        $removed = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+            ->whereNotNull('deleted_at')
+            ->where('deleted_at', '>=', $windowStart)
+            ->where('deleted_at', '<=', $now)
+            ->pluck('deleted_at');
+
+        $blacklisted = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+            ->whereNull('deleted_at')
+            ->where('status', Business::STATUS_BLACKLISTED)
+            ->whereNotNull('status_changed_at')
+            ->where('status_changed_at', '>=', $windowStart)
+            ->where('status_changed_at', '<=', $now)
+            ->pluck('status_changed_at');
+
+        foreach ($registered as $at) {
+            $month = ManilaCalendar::monthOf($at);
+            if (isset($buckets[$month])) {
+                $buckets[$month]['registered']++;
+            }
+        }
+        foreach ($removed->concat($blacklisted) as $at) {
+            $month = ManilaCalendar::monthOf($at);
+            if (isset($buckets[$month])) {
+                $buckets[$month]['closed']++;
+            }
+        }
+
+        return array_values($buckets);
+    }
+
     /* ── facts: GIS ────────────────────────────────────────────────────── */
 
     /**
@@ -1193,12 +1549,12 @@ final class DashboardAnalytics
      *
      * @return array<string, mixed>
      */
-    private static function mapFacts(CarbonImmutable $today): array
+    private static function mapFacts(CarbonImmutable $today, ?array $scope = null): array
     {
-        $activeIds = self::activeBusinessIds($today);
+        $activeIds = self::activeBusinessIds($today, $scope);
         $active = array_fill_keys($activeIds, true);
 
-        $rows = DB::table('business_addresses')
+        $rows = self::officeBusinesses(DB::table('business_addresses'), $scope, 'businesses.id')
             ->join('businesses', 'businesses.id', '=', 'business_addresses.business_id')
             ->leftJoin('barangays', 'barangays.id', '=', 'business_addresses.barangay_id')
             ->whereNull('businesses.deleted_at')
@@ -1235,7 +1591,9 @@ final class DashboardAnalytics
 
         return [
             'mapped' => count($points),
-            'total_businesses' => DB::table('businesses')->whereNull('deleted_at')->count(),
+            'total_businesses' => self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+                ->whereNull('deleted_at')
+                ->count(),
             'points' => array_slice($points, 0, self::MAP_POINT_LIMIT),
         ];
     }
@@ -1431,16 +1789,26 @@ final class DashboardAnalytics
     /**
      * Mean time-in-stage per department, and which one is the bottleneck.
      *
-     * The bottleneck is the slowest department by mean, and the summary sentence
-     * is assembled from the computed values — never a fixed string. A hardcoded
-     * "Fire Protection is the bottleneck" would keep reading as true after Fire
-     * Protection got faster.
+     * The bottleneck is the slowest department by mean AMONG THOSE WITH
+     * ENOUGH REVIEWS TO BE DRAWN (`min_reviews`), and the summary sentence
+     * is assembled from the computed values — never a fixed string. A
+     * hardcoded "Fire Protection is the bottleneck" would keep reading as true
+     * after Fire Protection got faster. Every office is still listed in
+     * `rows`, each saying whether it is `drawn`.
      *
      * @param  list<array{code: string, name: string, days: float}>  $observations
+     * @param  array{min_reviews: int, excluded: list<array{code: string, name: string, reason: string}>}  $rules
      * @return array<string, mixed>
      */
-    private static function computeStages(array $observations): array
+    private static function computeStages(array $observations, array $rules): array
     {
+        $minReviews = (int) $rules['min_reviews'];
+        $excludedCodes = array_column($rules['excluded'], 'code');
+        $observations = array_values(array_filter(
+            $observations,
+            static fn (array $o): bool => ! in_array((string) $o['code'], $excludedCodes, true),
+        ));
+
         $grouped = [];
         foreach ($observations as $observation) {
             $code = (string) $observation['code'];
@@ -1456,6 +1824,7 @@ final class DashboardAnalytics
                 'name' => $group['name'],
                 'reviews' => $n,
                 'mean_days' => Rounding::statistic(array_sum($group['days']) / $n, 1),
+                'drawn' => $n >= $minReviews,
             ];
         }
 
@@ -1481,8 +1850,9 @@ final class DashboardAnalytics
             );
 
         $bottleneck = null;
-        if ($rows !== []) {
-            $slowest = $rows[0];
+        $drawn = array_values(array_filter($rows, static fn (array $row): bool => $row['drawn']));
+        if ($drawn !== []) {
+            $slowest = $drawn[0];
             $bottleneck = [
                 'code' => $slowest['code'],
                 'name' => $slowest['name'],
@@ -1505,6 +1875,8 @@ final class DashboardAnalytics
             'reviews' => count($observations),
             'mean_days' => $overall,
             'bottleneck' => $bottleneck,
+            'min_reviews' => $minReviews,
+            'excluded' => array_values($rules['excluded']),
         ];
     }
 
@@ -1548,10 +1920,11 @@ final class DashboardAnalytics
      *
      * 30d ⊂ 60d ⊂ 90d: a permit expiring in 20 days is counted in all three,
      * which is what the mockup's own figures do. Expired is disjoint from the
-     * three forward windows.
+     * three forward windows, and counts lapsed businesses per permit type —
+     * see expiringPermits().
      *
      * @param  list<array{code: string, label: string}>  $columns
-     * @param  list<array{code: string, days_to_expiry: int}>  $permits
+     * @param  list<array{code: string, days_to_expiry: int, business_id?: int}>  $permits
      * @param  list<int>  $windows
      * @return array<string, mixed>
      */
@@ -1580,13 +1953,17 @@ final class DashboardAnalytics
             'total' => 0,
         ];
 
-        foreach ($permits as $permit) {
+        $businesses = array_fill(0, count($rows), []);
+        foreach ($permits as $n => $permit) {
             $code = (string) $permit['code'];
             if (! array_key_exists($code, $blank)) {
                 continue;
             }
 
             $days = (int) $permit['days_to_expiry'];
+            // A fact without a business id (a snapshot or fixture written
+            // before the id travelled) stands for a business of its own.
+            $business = isset($permit['business_id']) ? 'b'.$permit['business_id'] : 'row'.$n;
 
             foreach ($rows as $index => $row) {
                 $hit = $row['expired']
@@ -1596,11 +1973,46 @@ final class DashboardAnalytics
                 if ($hit) {
                     $rows[$index]['counts'][$code]++;
                     $rows[$index]['total']++;
+                    $businesses[$index][$business] = true;
                 }
             }
         }
 
+        /*
+         * `businesses`, beside `total`: how many distinct businesses the row
+         * is about. `total` stays the sum of the cells so the table adds up
+         * across; a business lapsed on its sanitary permit and its fire
+         * clearance is two cells and one business.
+         */
+        foreach ($rows as $index => $row) {
+            $rows[$index]['businesses'] = count($businesses[$index]);
+        }
+
         return ['columns' => $columns, 'rows' => $rows];
+    }
+
+    /**
+     * @param  list<array{month: string, registered: int, closed: int, partial?: bool}>  $facts
+     * @return array{rows: list<array{month: string, registered: int, closed: int, net: int, partial: bool}>, registered: int, closed: int}
+     */
+    private static function computeMovement(array $facts): array
+    {
+        $rows = [];
+        $registered = 0;
+        $closed = 0;
+        foreach ($facts as $fact) {
+            $registered += (int) $fact['registered'];
+            $closed += (int) $fact['closed'];
+            $rows[] = [
+                'month' => (string) $fact['month'],
+                'registered' => (int) $fact['registered'],
+                'closed' => (int) $fact['closed'],
+                'net' => (int) $fact['registered'] - (int) $fact['closed'],
+                'partial' => (bool) ($fact['partial'] ?? false),
+            ];
+        }
+
+        return ['rows' => $rows, 'registered' => $registered, 'closed' => $closed];
     }
 
     /**

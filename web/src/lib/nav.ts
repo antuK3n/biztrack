@@ -5,13 +5,13 @@ import {
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
-  HistoryIcon,
   HomeIcon,
   InboxIcon,
   MailIcon,
   MapPinIcon,
   ShieldCheckIcon,
   TrackIcon,
+  UploadIcon,
   UsersIcon,
 } from '../components/icons'
 import { portalPath } from './api'
@@ -65,7 +65,8 @@ export interface NavItem {
 
 /*
  * Prototype rail registry (docs/rehaul-spec.md §2).
- * Owner rail (PDF p5): Home · Track · Drafts · Payment History.
+ * Owner rail (PDF p5): Home · Track · Drafts. The PDF's Payment History is a
+ * tab on Profile since 2026-09-27.
  * Staff rail (p61): Home · Track (verification) · Other Requirements. The PDF
  * draws an Inspections entry beside Track; it is gone on purpose — the client
  * had the two screens merged into Track's For Inspection tab. See below.
@@ -94,7 +95,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'My Permits', icon: ShieldCheckIcon, to: '/permits', permission: 'permit.view_own', mobile: true },
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
-  { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
+  /*
+   * No Payment History entry [checklist 2026-09-27]. It is the second tab on
+   * Profile now, behind the avatar menu, and /payments redirects there.
+   */
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
   /*
@@ -153,11 +157,12 @@ const NAV_ITEMS: NavItem[] = [
   /*
    * One rail entry, two different audiences behind it.
    *
-   * BPLO holds `analytics.view` and gets the three dashboards (Analytics
-   * Dashboard, Renewal Risk, Business Growth Analysis). The super admin holds
-   * `analytics.processing_time` and gets exactly one screen. The permissions are
-   * disjoint by design, so this entry needs `anyPermission` to appear for both
-   * and `toByPermission` to send each of them somewhere they are allowed to be.
+   * Every office admin, BPLO and the super admin hold `analytics.view` and land
+   * on the one dashboard, scoped to their office (checklist 2026-09-27, item 1).
+   * The super admin also holds `analytics.processing_time` (Office Performance,
+   * Processing Time), reached from the tab strip. `toByPermission` is kept so a
+   * holder of only the second permission would still land somewhere they may
+   * be; `analytics.view` is listed first, so it wins for the super admin.
    *
    * `to` was '/analytics' — a pre-portal-split path that only resolved because
    * the legacy shim in App.tsx redirects it. The rail is inside the staff site
@@ -170,20 +175,13 @@ const NAV_ITEMS: NavItem[] = [
     to: '/analytics',
     anyPermission: ['analytics.view', 'analytics.processing_time'],
     /*
-     * The super admin now lands on Office Performance rather than Processing
-     * Time (issue #102), and the destination moved rather than a seventh rail
-     * row being added.
-     *
-     * Two reasons. A rail entry per analytics screen would give BPLO one row
-     * and the super admin two for a feature the client asks for as "Analytics";
-     * and of the super admin's two screens, this is the one that answers the
-     * question a reader arrives with. Office Performance says which office is
-     * slow; Processing Time says what that office has been doing week by week,
-     * which is the second question and is one tab away.
-     *
-     * The permission is unchanged and must stay `analytics.processing_time` —
-     * the same claim the route in App.tsx makes. If these two ever disagree the
-     * rail draws a link that RequirePermission bounces, which fails nothing.
+     * Issue #102 sent the super admin to Office Performance here, because
+     * Office Performance and Processing Time were the only analytics screens
+     * that account could open. It holds the dashboard too now, so the first
+     * key wins and it lands on the dashboard like everyone else. The second key
+     * is what a holder of `analytics.processing_time` alone would get; it must
+     * stay the same claim the route in App.tsx makes, or the rail draws a link
+     * RequirePermission bounces.
      */
     toByPermission: {
       'analytics.view': '/analytics',
@@ -299,6 +297,13 @@ const NAV_ITEMS: NavItem[] = [
    * product claims over eBOSS (PRODUCT.md §4), so the trail belongs in the rail.
    */
   { label: 'Audit Logs', icon: AuditIcon, to: '/admin/audit-logs', permission: 'audit.view' },
+  /*
+   * Importing the old register (Ken's checklist, 27 September 2026). Its own
+   * permission, `data.import`, held by the super admin alone — an import writes
+   * owners' personal data into the register in bulk, which no office does. The
+   * route in App.tsx carries the same claim.
+   */
+  { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
 ]
 
 /**

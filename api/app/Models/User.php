@@ -34,12 +34,22 @@ class User extends Authenticatable implements MustVerifyEmail
     protected $fillable = [
         'name', 'first_name', 'middle_name', 'last_name', 'suffix', 'gender',
         'email', 'mobile_number', 'password', 'department_id', 'is_active',
+        'home_street', 'home_barangay', 'home_city', 'home_province', 'home_postal_code',
         'data_privacy_consent_at', 'email_verified_at',
         'last_login_at', 'failed_login_attempts', 'locked_until',
         'blacklisted_at', 'blacklist_reason', 'blacklisted_by',
     ];
 
     protected $hidden = ['password', 'remember_token'];
+
+    /**
+     * The parts of a home address an owner has to give for it to count as
+     * given [checklist 2026-09-28, Register 2]. ZIP is left out on purpose —
+     * many people do not know theirs, and nothing downstream reads it. One list,
+     * so registration, the profile form and the "complete your profile" prompt
+     * cannot disagree about what complete means.
+     */
+    public const HOME_ADDRESS_REQUIRED = ['home_street', 'home_barangay', 'home_city', 'home_province'];
 
     protected function casts(): array
     {
@@ -159,6 +169,24 @@ class User extends Authenticatable implements MustVerifyEmail
     public function sendEmailVerificationNotification(): void
     {
         $this->notify(new VerifyEmailAddress);
+    }
+
+    /**
+     * Whether every required part of the home address is on file.
+     *
+     * All four or nothing counts: a street with no city is not an address
+     * anyone can use, and treating it as one would switch the prompt off for
+     * an owner whose record is still unusable.
+     */
+    public function hasHomeAddress(): bool
+    {
+        foreach (self::HOME_ADDRESS_REQUIRED as $column) {
+            if (blank($this->{$column})) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function fullName(): string

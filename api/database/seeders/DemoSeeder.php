@@ -196,14 +196,36 @@ class DemoSeeder extends Seeder
         ]);
     }
 
+    /*
+     * Owners get a home address, because registration now requires one
+     * [checklist 2026-09-28, Register 2] and a demo owner without one would
+     * greet every tester with the "complete your profile" prompt. Staff get
+     * none: nothing asks them for it.
+     *
+     * Juan lives in Navotas on purpose. A business in Malabon does not mean an
+     * owner who lives there, and the demo should carry one case of that so the
+     * free-text barangay is exercised.
+     */
+    private const HOME_ADDRESSES = [
+        'owner@biztrack.local' => ['12 Gen. Luna St.', 'Longos', 'Malabon', 'Metro Manila', '1472'],
+        'juan@biztrack.local' => ['7 M. Naval St.', 'San Roque', 'Navotas', 'Metro Manila', '1485'],
+        'inactive@biztrack.local' => ['30 Rizal Ave.', 'Tinajeros', 'Malabon', 'Metro Manila', '1470'],
+    ];
+
     private function user(string $email, string $first, string $last, string $gender, string $password, array $roles, ?Department $dept = null, bool $active = true): User
     {
+        $home = in_array('business_owner', $roles, true) ? (self::HOME_ADDRESSES[$email] ?? null) : null;
+
         $user = User::updateOrCreate(['email' => $email], [
             'name' => "$first $last", 'first_name' => $first, 'last_name' => $last,
             'gender' => $gender, 'mobile_number' => '09171234567',
             'password' => Hash::make($password), 'department_id' => $dept?->id,
             'is_active' => $active, 'data_privacy_consent_at' => now(),
             'email_verified_at' => now(),
+            ...($home === null ? [] : [
+                'home_street' => $home[0], 'home_barangay' => $home[1], 'home_city' => $home[2],
+                'home_province' => $home[3], 'home_postal_code' => $home[4],
+            ]),
         ]);
         $roleIds = Role::whereIn('name', $roles)->pluck('id');
         $user->roles()->sync($roleIds);

@@ -7,10 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
 use App\Http\Resources\PermitResource;
 use App\Models\Application;
+use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessOwner;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\MalabonGeo;
 use App\Support\Numbering;
 use App\Support\Tin;
 use Closure;
@@ -18,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Business registry. Owners manage their own; an officer may read the record
@@ -91,15 +94,20 @@ class BusinessController extends Controller
              * would move that dead end earlier and make it silent.
              *
              * So the answer remains ordering: the businesses that can be renewed
-             * surface first, the rest stay reachable behind them. `withCount`
+             * surface first, the rest stay reachable behind them. An EXISTS
              * rather than a join because `permits` is many-per-business and a
              * join would multiply the page.
+             *
+             * It was `withCount('permits')` and ORDER BY CASE WHEN
+             * permits_count > 0. SQLite lets ORDER BY reach a select alias
+             * inside an expression; PostgreSQL does not, so the owner's
+             * business list answered 500 on the production database. The count
+             * was read by nothing but this sort.
              */
             // Named in the amendment chooser, so it must arrive with the
             // list rather than a request per row. One constant query.
             ->with('currentBusinessPermit')
-            ->withCount('permits')
-            ->orderByRaw('CASE WHEN permits_count > 0 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN EXISTS (SELECT 1 FROM permits WHERE permits.business_id = businesses.id) THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
@@ -591,7 +599,7 @@ class BusinessController extends Controller
             $request->merge(['tin' => Tin::normalize((string) $request->input('tin'))]);
         }
 
-        return $request->validate([
+        $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             // Trade name stays optional: most sole proprietors have none.
             'trade_name' => ['nullable', 'string', 'max:255'],
@@ -866,6 +874,56 @@ class BusinessController extends Controller
             'tin.required' => 'Enter your Tax Identification Number.',
             'tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.',
         ]);
+
+        self::assertPinInBarangay($data, $business);
+
+        return $data;
+    }
+
+    /**
+     * Checklist Zoning 3 — a pin outside its own barangay is refused here, not
+     * only in the browser. See MalabonGeo for the geometry and the tolerance.
+     *
+     * Checked when the location is NEW: every create, and an update that moves
+     * the pin or changes the barangay. An update that sends back the location
+     * already on file is let through untouched, because most of the register
+     * predates this check — only 61 of 788 stored addresses sat inside their
+     * own barangay when it was measured — and a renewal re-saves that address
+     * as it found it. Refusing it would charge our history to an applicant who
+     * never placed the pin; the wizard says it out loud instead ("Check this
+     * location"), and CPDO sees it. The moment the applicant touches either the
+     * pin or the barangay, the new answer has to agree with itself.
+     *
+     * The error sits on both coordinates, because either the pin or the
+     * barangay can be the wrong half, and the pin is what the message asks to
+     * move first.
+     */
+    private static function assertPinInBarangay(array $data, ?Business $business): void
+    {
+        $lat = $data['address']['latitude'] ?? null;
+        $lng = $data['address']['longitude'] ?? null;
+        $barangayId = $data['address']['barangay_id'] ?? null;
+        if ($lat === null || $lng === null || $barangayId === null) {
+            return;
+        }
+
+        $stored = $business?->address;
+        if ($stored !== null
+            && (int) $stored->barangay_id === (int) $barangayId
+            && $stored->latitude !== null && $stored->longitude !== null
+            && abs((float) $stored->latitude - (float) $lat) < 1e-6
+            && abs((float) $stored->longitude - (float) $lng) < 1e-6) {
+            return;
+        }
+
+        $name = Barangay::whereKey($barangayId)->value('name');
+        $problem = $name === null ? null : MalabonGeo::pinProblem((float) $lat, (float) $lng, (string) $name);
+        if ($problem !== null) {
+            throw ValidationException::withMessages([
+                'address.latitude' => $problem,
+                'address.longitude' => $problem,
+            ]);
+        }
     }
 
     /**

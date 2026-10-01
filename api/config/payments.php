@@ -1,0 +1,85 @@
+<?php
+
+/*
+ * How owners pay (docs/payment-gateway.md).
+ *
+ * Two modes:
+ *
+ *   simulated  The payment completes the instant the owner presses Pay. No money
+ *              moves. This is what the prototype has always done and what runs
+ *              during a presentation.
+ *   kwikpay    The owner is sent to KwikPay (GCash, Maya, QR Ph, GoTyme) and the
+ *              payment completes only when KwikPay confirms it — by a signed
+ *              callback or when we ask.
+ *
+ * PAYMENT_GATEWAY is only the DEFAULT. The live value is the `payment_gateway`
+ * row in `settings`, set by the super admin's API or by
+ * `php artisan biztrack:payment-gateway on|off`, so it can change on a running
+ * server. See App\Support\PaymentMode.
+ */
+
+/*
+ * `?:` rather than env()'s default argument where a blank would hurt:
+ * .env.example lists these keys with empty values, and env() returns "" for
+ * `KEY=`, not the default — a copied example file would otherwise leave the
+ * base URL blank and the timeout at zero.
+ */
+return [
+
+    'default' => env('PAYMENT_GATEWAY') ?: 'simulated',
+
+    'kwikpay' => [
+        // The provider's Back Office domain. Point it at the fake (below) for a
+        // demo without credentials.
+        'base_url' => env('KWIKPAY_BASE_URL') ?: 'https://pay4-kwikpay.jd.management',
+
+        // Issued by KwikPay at contract time. The key signs every request and
+        // verifies every callback; it must never reach the browser or a log.
+        'merchant' => env('KWIKPAY_MERCHANT'),
+        'key' => env('KWIKPAY_KEY'),
+
+        // "1"–"12". Which one is enabled for us is KwikPay's to say — the docs
+        // say to ask the account manager. Empty until they do.
+        'payment_type' => env('KWIKPAY_PAYMENT_TYPE'),
+
+        /*
+         * Testing only: when set (e.g. "1.00"), KwikPay is asked to collect this
+         * amount instead of the bill. The bill, the payment record and the
+         * receipt keep the real assessed amount. Leave empty for real use; the
+         * full amount is then charged. See docs/payment-gateway.md.
+         */
+        'charge_override' => env('KWIKPAY_CHARGE_OVERRIDE') ?: null,
+
+        /*
+         * Where KwikPay reaches us. The callback has to be a PUBLIC address, so
+         * APP_URL (usually localhost) is only the fallback; set this to the
+         * tunnel or the server's real address, without the /api/v1 part.
+         */
+        'callback_base_url' => env('KWIKPAY_CALLBACK_BASE_URL'),
+
+        /*
+         * Optional allowlist for callbacks, comma-separated. KwikPay's docs name
+         * 34.21.238.122 as the platform's outbound address. Empty = not enforced
+         * (the default): the signature is ALWAYS checked, and that is what
+         * actually proves a callback came from someone holding our key. Behind a
+         * tunnel or proxy the caller's address is the proxy's, so enforcing this
+         * without trusted proxies configured would refuse every real callback.
+         */
+        'callback_ips' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('KWIKPAY_CALLBACK_IPS', ''))
+        ))),
+
+        // Seconds to wait on KwikPay before treating a request as timed out.
+        'timeout' => (int) (env('KWIKPAY_TIMEOUT') ?: 15),
+
+        /*
+         * A stand-in KwikPay served by this app, for demos and the e2e suite
+         * (App\Http\Controllers\FakeKwikPayController). Only ever mounted when
+         * APP_ENV is local or testing AND this is true — see
+         * App\Services\KwikPay\FakeKwikPay::available().
+         */
+        'fake' => (bool) env('KWIKPAY_FAKE', false),
+    ],
+
+];

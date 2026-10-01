@@ -2,9 +2,11 @@
 
 use App\Enums\PermitStatus;
 use App\Models\Application;
+use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 
 /*
  * GET /admin/business-map — every business at its pin, with the state of its
@@ -42,21 +44,33 @@ function mapPermit(Business $business, PermitStatus $status, string $from, strin
     ]);
 }
 
-it('is refused to an office that may read permits but not manage users', function () {
+it('is BPLO’s and the super admin’s, and refused to every other office', function () {
     /*
-     * The gate, stated as a test because the permission is a stand-in and reads
-     * like the wrong one.
+     * The gate, stated as a test because the permission is a stand-in.
      *
-     * BPLO holds `permit.view_all`, which is the permission whose NAME fits
-     * this screen, and must still be refused: the map plots every business in
-     * the city at once, and a city-wide read is the cross-office view
-     * ApplicationVisibility exists to refuse everyone but the super admin
-     * (AGENTS.md §10). If someone ever "corrects" the middleware to the
-     * better-reading permission, this is what says no.
+     * Checklist item 16 put the map on BPLO's Permits page, so BPLO is let in
+     * now — it was refused while the gate was `user.manage`. The gate is
+     * `application.view_any_office`, the permission that lifts the office
+     * boundary, and the five clearance offices do not hold it. They DO hold
+     * `permit.view_all`, the permission whose name fits this screen; if
+     * someone ever "corrects" the middleware to it, the refusals below are
+     * what say no — a city-wide plot is the cross-office read
+     * ApplicationVisibility exists to refuse them (AGENTS.md §10).
      */
-    $bplo = authAs('bplo@biztrack.local');
+    foreach (['bplo@biztrack.local', 'admin@biztrack.local'] as $email) {
+        test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')->assertOk();
+    }
 
-    test()->withHeaders($bplo)->getJson('/api/v1/admin/business-map')->assertForbidden();
+    foreach ([
+        'sanitary@biztrack.local',
+        'fire@biztrack.local',
+        'zoning@biztrack.local',
+        'obo@biztrack.local',
+        'cenro@biztrack.local',
+        'owner@biztrack.local',
+    ] as $email) {
+        test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')->assertForbidden();
+    }
 });
 
 it('gives the super admin every business that carries a pin', function () {
@@ -92,7 +106,7 @@ it('counts the businesses it could not plot instead of dropping them quietly', f
     expect($meta['plotted'] + $meta['unmapped'])->toBe($meta['businesses_total']);
 });
 
-it('calls a permit lapsed when its term has run out, whatever the status column says', function () {
+it('calls a permit expired when its term has run out, whatever the status column says', function () {
     /*
      * The bug this screen exists not to have.
      *
@@ -104,6 +118,7 @@ it('calls a permit lapsed when its term has run out, whatever the status column 
      *
      * Written as a regression: the permit below is exactly that row, and the
      * cheap implementation (`where status = active`) answers 'active' for it.
+     * It was called 'lapsed' until the map grew to five states.
      */
     $business = Business::query()
         ->whereHas('address', fn ($a) => $a->whereNotNull('latitude')->whereNotNull('longitude'))
@@ -123,12 +138,12 @@ it('calls a permit lapsed when its term has run out, whatever the status column 
         test()->withHeaders($admin)->getJson('/api/v1/admin/business-map')->assertOk()->json('data')
     )->firstWhere('id', $business->id);
 
-    expect($row['state'])->toBe('lapsed');
+    expect($row['state'])->toBe('expired');
 });
 
-it('separates a business that never held a permit from one whose permit lapsed', function () {
+it('separates a business that never held a permit from one whose permit expired', function () {
     /*
-     * Three states, not two. Folding "never held one" into "lapsed" would tell
+     * Its own state. Folding "never held one" into "expired" would tell
      * a BPLO clerk a certificate ran out when none was ever issued, and those
      * are different jobs — a renewal to chase versus a first filing that never
      * finished.
@@ -186,4 +201,63 @@ it('reports the live permit when a business holds both a superseded one and its 
 
     expect($row['state'])->toBe('active')
         ->and($row['permit_number'])->toBe($replacement->permit_number);
+});
+
+it('says revoked and suspended rather than folding them into expired', function () {
+    /*
+     * Checklist item 16 asks for five states, because each is a different job:
+     * a revoked permit is enforcement, a suspended one is a clearance to settle
+     * or a suspension to lift, an expired one is a renewal to chase. A map that
+     * said "lapsed" for all three sent all three to the same desk.
+     *
+     * A suspension counts only inside its term — past it the permit is simply
+     * expired — and a revocation counts whatever the dates say.
+     */
+    // The seeded register holds only a couple of businesses, so three are
+    // registered here and pinned — anywhere in Malabon will do; the state is
+    // what is tested.
+    $owner = authAs('owner@biztrack.local');
+    $pinned = collect(range(1, 3))->map(function (int $i) use ($owner) {
+        $id = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+            'name' => "Map State Store {$i}",
+            'registration_type' => 'DTI',
+            'registration_number' => 'DTI-'.random_int(100000, 999999),
+            'tin' => '123-456-789-000',
+            'address' => ['line1' => "{$i} Map Street", 'barangay_id' => Barangay::first()->id],
+            'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
+        ])->assertCreated()->json('data.id');
+
+        $business = Business::with('address')->findOrFail($id);
+        $business->address->update(['latitude' => 14.66, 'longitude' => 120.95]);
+
+        return $business;
+    });
+
+    [$revoked, $suspended, $oldSuspension] = $pinned->all();
+
+    foreach ($pinned as $b) {
+        Permit::where('business_id', $b->id)->delete();
+    }
+
+    mapPermit($revoked, PermitStatus::Revoked, now()->subMonth()->toDateString(), now()->addYear()->toDateString());
+    mapPermit($suspended, PermitStatus::Suspended, now()->subMonth()->toDateString(), now()->addYear()->toDateString());
+    mapPermit($oldSuspension, PermitStatus::Suspended, now()->subYears(2)->toDateString(), now()->subYear()->toDateString());
+
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/admin/business-map')
+        ->assertOk()
+        ->json();
+
+    $rows = collect($body['data'])->keyBy('id');
+
+    expect($rows[$revoked->id]['state'])->toBe('revoked')
+        ->and($rows[$suspended->id]['state'])->toBe('suspended')
+        ->and($rows[$oldSuspension->id]['state'])->toBe('expired')
+        // The popup opens the certificate, so the id travels with the number.
+        ->and($rows[$revoked->id]['permit_id'])->not->toBeNull();
+
+    // The legend's counts are the five states and nothing else, and they add up.
+    expect(array_keys($body['meta']['counts']))->toEqualCanonicalizing(['active', 'expired', 'suspended', 'revoked', 'none'])
+        ->and(array_sum($body['meta']['counts']))->toBe($body['meta']['plotted'])
+        ->and($body['meta']['truncated'])->toBeFalse();
 });

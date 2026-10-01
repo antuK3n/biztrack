@@ -4,6 +4,11 @@ import { formatBytes } from './format'
 import type {
   StaffMessageRow,
   BlacklistedOwner,
+  LguReport,
+  ReportKey,
+  ReportListItem,
+  AnalyticsScope,
+  ScopedComputed,
   AdminBusiness,
   AdminCaseload,
   AdminRole,
@@ -24,7 +29,6 @@ import type {
   Business,
   AnalyticsProvenance,
   AnalyticsRefreshResult,
-  BusinessGrowthReport,
   Computed,
   BusinessStatus,
   BusinessPayload,
@@ -39,6 +43,8 @@ import type {
   HeldClearance,
   Inspection,
   InspectionResult,
+  LegacyImport,
+  LegacyImportGuide,
   Message,
   MessageThreadSummary,
   MessageTranscriptMeta,
@@ -51,20 +57,16 @@ import type {
   PageParams,
   Payment,
   PaymentMethod,
+  PaymentOptions,
   Permit,
   PermitRegisterRow,
   PermitType,
   PrefillResult,
   ProcessingTimeReport,
   PsicCode,
-  RenewalReminderResult,
-  RenewalModelReport,
-  RenewalRiskReport,
   CreateRequirementPayload,
   OfficeStatusOption,
   RequestStatus,
-  RiskAction,
-  RiskBand,
   TimelineEntry,
   User,
   ReleasedCaseload,
@@ -985,8 +987,30 @@ export const payments = {
         fee_profile: feeProfile,
       }),
     ),
+  /**
+   * Pay. In simulated mode the payment comes back `completed`; with online
+   * payment on it comes back `pending` with a `pay_url` to send the owner to or
+   * show as a QR code, and completes later (see `get` / `check`).
+   */
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
+  /**
+   * The mode, the methods it offers and any online payment already in flight.
+   * The pay screen lists what this returns rather than its own list, because
+   * the methods depend on a switch the super admin can flip at any time.
+   */
+  options: (applicationId: number) =>
+    unwrap<PaymentOptions>(api.get(`/applications/${applicationId}/payment-options`)),
+  /** One payment as the server holds it now. What the waiting screen polls. */
+  get: (id: number) => unwrap<Payment>(api.get(`/payments/${id}`)),
+  /** Ask the payment service once, now, whether this payment has gone through. */
+  check: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/check`)),
+  /**
+   * "Pay a different way". The server asks the payment service once first, so
+   * the answer can be `completed` (it was paid after all), `failed`, or
+   * `pending` with `set_aside` — in the last two a new payment can be started.
+   */
+  abandon: (id: number) => unwrap<Payment>(api.post(`/payments/${id}/abandon`)),
   history: (params: PageParams = {}) => unwrap<Payment[]>(api.get('/payments', { params })),
   /** Same history, keeping the page meta. */
   historyPage: (params: PageParams = {}) => unwrapPaged<Payment>(api.get('/payments', { params })),
@@ -1306,6 +1330,17 @@ export interface PermitFilters extends PageParams {
    */
   permit_type?: string
   /**
+   * Every office BUT this one — "other permits in a separate view" (checklist
+   * item 18). The Permits page sends BUSINESS here for its Other offices view.
+   */
+  exclude_permit_type?: string
+  /**
+   * Businesses removed from the register (checklist item 21). `hide` drops
+   * their certificates, `only` lists nothing else, `include` both. Absent
+   * means no filtering; the register page sends `hide` by default.
+   */
+  retired?: 'hide' | 'include' | 'only'
+  /**
    * The column to order by, from the server's own whitelist.
    *
    * Sorting used to run in the browser over the 25 rows in hand, because
@@ -1438,6 +1473,14 @@ export const permits = {
    */
   liftSuspension: (id: number, reason: string) =>
     unwrap<Permit>(api.post(`/permits/${id}/lift-suspension`, { reason })),
+  /**
+   * Revoke a permit. BPLO and the super admin only (`permit.revoke`), reason
+   * required. The server sets the status, the revocation date and reason,
+   * writes the audit entry and tells the owner; it refuses a certificate that
+   * is already expired, superseded or revoked. Answers with the register row.
+   */
+  revoke: (id: number, reason: string) =>
+    unwrap<PermitRegisterRow>(api.post(`/permits/${id}/revoke`, { reason })),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */
@@ -1471,44 +1514,13 @@ export const notifications = {
 
 /* ── Analytics ────────────────────────────────────────────────────────── */
 
-/**
- * The Renewal Risk table's server-side filter and page.
- *
- * Every field is optional and omitted when unset, which is load-bearing rather
- * than tidy: the analytics snapshots are keyed on the parameters, so an
- * unfiltered request has to send exactly `days` and `limit` or it stops matching
- * the precomputed snapshot and the default screen pays to recompute on every
- * load. axios omits `undefined` params, so leaving a field out is how that is
- * expressed.
- */
-export interface RenewalRiskQuery {
-  /** Barangay name, exactly as the payload's `barangays` list spells it. */
-  barangay?: string
-  band?: RiskBand
-  action?: RiskAction
-  /**
-   * Free text over business name and permit number, matched server-side.
-   *
-   * Sent rather than applied here for the same reason as the filters below,
-   * only more sharply: the browser holds one page of a set that runs to
-   * thousands, so a term filtered in the browser would search 25 rows and
-   * answer "no such business" about a register that has it on page ninety.
-   *
-   * Unlike the selects, "all" is a real term here — a text box says "no filter"
-   * by being empty, so send `undefined` rather than a sentinel.
-   */
-  search?: string
-  /** First row of the page, counted over the filtered set. */
-  offset?: number
-}
-
 export const analytics = {
   summary: () => unwrap<AnalyticsSummary>(api.get('/analytics/summary')),
   /** Download the summary as a CSV report (Bearer blob; v2). */
   export: (filename = 'biztrack-analytics.csv') => downloadBlob('/analytics/export', filename),
 
   /*
-   * The three precomputed screens. Each resolves to { data, meta }: the
+   * The precomputed screens. Each resolves to { data, meta }: the
    * statistics plus when they were computed, and whether that was a stored
    * refresh or this very request. Read the meta onto the screen — these are
    * batch figures, as fresh as the last `analytics:refresh` and no fresher,
@@ -1522,10 +1534,44 @@ export const analytics = {
    * decision outcomes all describe the same month and have to reconcile, which
    * they cannot be relied on to do if each arrives from a different refresh.
    */
-  dashboard: (months: number) =>
-    unwrapComputed<DashboardReport>(api.get('/analytics/dashboard', { params: { months } })),
-  dashboardReport: (months: number) =>
-    downloadBlob(`/analytics/dashboard/report?months=${months}`, 'analytics-dashboard.pdf'),
+  /*
+   * `office` is a department code, 'all', or undefined for "the server's
+   * default for me" — the reader's own office, or every office for the super
+   * admin. It is a request, not a filter: an office account asking for another
+   * office gets a 403, and the answer's `scope` says whose figures came back.
+   */
+  dashboard: async (months: number, office?: string): Promise<ScopedComputed<DashboardReport>> => {
+    const res = await api.get<{ data: DashboardReport; meta: AnalyticsProvenance; scope: AnalyticsScope }>(
+      '/analytics/dashboard',
+      { params: { months, office } },
+    )
+    return { data: res.data.data, meta: res.data.meta, scope: res.data.scope }
+  },
+  dashboardReport: (months: number, office?: string) =>
+    downloadBlob(
+      `/analytics/dashboard/report?months=${months}${office ? `&office=${encodeURIComponent(office)}` : ''}`,
+      `analytics-dashboard${office && office !== 'all' ? `-${office.toLowerCase()}` : ''}.pdf`,
+    ),
+
+  /*
+   * Report Generation. `office` follows the dashboard's rule: a request, not a
+   * filter — the server answers an office account with its own office and
+   * refuses any other.
+   */
+  reports: async (office?: string): Promise<{ data: ReportListItem[]; scope: AnalyticsScope }> => {
+    const res = await api.get<{ data: ReportListItem[]; scope: AnalyticsScope }>('/analytics/reports', {
+      params: { office },
+    })
+    return res.data
+  },
+  report: (key: ReportKey, from: string, to: string, office?: string) =>
+    unwrap<LguReport>(api.get(`/analytics/reports/${key}`, { params: { from, to, office } })),
+  reportCsv: (key: ReportKey, from: string, to: string, office?: string) => {
+    const query = new URLSearchParams({ from, to })
+    if (office) query.set('office', office)
+    const suffix = office && office !== 'all' ? `-${office.toLowerCase()}` : ''
+    return downloadBlob(`/analytics/reports/${key}/csv?${query.toString()}`, `${key}${suffix}-${from}-to-${to}.csv`)
+  },
 
   /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>
@@ -1554,68 +1600,6 @@ export const analytics = {
       'processing-time-monitoring.pdf',
     ),
 
-  businessGrowth: (months: number) =>
-    unwrapComputed<BusinessGrowthReport>(
-      api.get('/analytics/business-growth', { params: { months } }),
-    ),
-  businessGrowthReport: (months: number) =>
-    downloadBlob(
-      `/analytics/business-growth/report?months=${months}`,
-      'business-growth-analysis.pdf',
-    ),
-
-  /**
-   * Renewal Risk: permits near expiry ranked by a weighted rule score.
-   * `score` is out of 100 and is not a probability — see RenewalRiskReport.
-   *
-   * The filters go to the server rather than being applied to the rows that
-   * come back, and here that is not a preference. The payload is the leading
-   * `limit` rows BY SCORE; on this register the leading twenty-five are all
-   * High, so filtering them in the browser for "Low risk" would return nothing
-   * and report that the city has no low-risk businesses. It has thousands. The
-   * same reasoning as the officer queue — see the note in QueuePage.
-   */
-  renewalRisk: (days: number, limit?: number, view?: RenewalRiskQuery) =>
-    unwrapComputed<RenewalRiskReport>(
-      api.get('/analytics/renewal-risk', { params: { days, limit, ...view } }),
-    ),
-  renewalRiskReport: (days: number) =>
-    downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
-
-  /**
-   * The fitted model shown beside that watchlist.
-   *
-   * Takes no arguments, and that is deliberate rather than an omission. The
-   * horizon and the filters narrow which permits a reader is looking at; they do
-   * not refit a regression, and the training set is the whole of permit history
-   * either way. Passing them through would key to snapshots that can never exist
-   * and serve the "no model" fallback for every filtered view, which a reader
-   * would correctly read as an outage. See AnalyticsController::renewalModel().
-   *
-   * Resolves to `available: false` with a reason when the register holds too
-   * little settled history to fit on, or when the fit itself found nothing. The
-   * screen renders that state rather than a number, because there is no honest
-   * number to render.
-   */
-  renewalModel: () => unwrapComputed<RenewalModelReport>(api.get('/analytics/renewal-model')),
-
-  /**
-   * Send one renewal follow-up to a business owner, now.
-   *
-   * Keyed on the permit and not the business: a business commonly holds three
-   * permits expiring on three dates and the watchlist has a row per permit, so
-   * the row the officer pressed is the fact that has to travel.
-   *
-   * The server refuses a second send on the same permit the same day and says
-   * so through `already_sent` — the guard is a unique index rather than a flag
-   * in this tab, so it survives a reload, a second officer, and a replayed
-   * request. Callers must still keep the button from firing twice while one is
-   * in flight; that is about not making two requests, not about not sending two
-   * messages.
-   */
-  sendRenewalReminder: (permitId: number) =>
-    unwrap<RenewalReminderResult>(api.post(`/analytics/renewal-risk/${permitId}/remind`)),
-
   /**
    * Recompute and re-store every figure set now, rather than waiting for 03:00.
    *
@@ -1643,7 +1627,12 @@ export interface AdminUserFilters extends PageParams {
 
 export interface AdminBusinessFilters extends PageParams {
   q?: string
-  status?: BusinessStatus
+  /**
+   * One status, or `retired` — the businesses removed from the register,
+   * which the roster otherwise leaves out (checklist item 21). Retired is not
+   * a status a business can be set to; it is a filter only.
+   */
+  status?: BusinessStatus | 'retired'
   /**
    * The order, from the endpoint's own whitelist — never a raw column.
    *
@@ -1684,6 +1673,12 @@ export interface AuditLogFilters extends PageParams {
   auditable_id?: number
   /** The actor, by user id. */
   user_id?: number
+  /**
+   * Removals only — deletes and retires, which carry a copy of the record.
+   * Sent as 1, not `true`: Axios writes a boolean as the string "true", which
+   * Laravel's `boolean` rule refuses.
+   */
+  removed?: 1
 }
 
 /**
@@ -1839,6 +1834,39 @@ export const admin = {
       total: res.data.meta?.total ?? res.data.data.length,
     }
   },
+}
+
+/* ── Importing the old register ───────────────────────────────────────── */
+
+/*
+ * The super admin's import (permission `data.import`). Upload or name an ODBC
+ * source → dry run → confirm → import. Nothing reaches the register before
+ * `run`.
+ */
+export const legacyImports = {
+  guide: () => unwrap<LegacyImportGuide>(api.get('/admin/legacy-imports/guide')),
+  history: () => unwrap<LegacyImport[]>(api.get('/admin/legacy-imports')),
+  show: (id: number) => unwrap<LegacyImport>(api.get(`/admin/legacy-imports/${id}`)),
+  template: () => downloadBlob('/admin/legacy-imports/template', 'biztrack-legacy-import-template.csv'),
+  /** Upload a CSV and dry-run it. */
+  previewCsv: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return unwrap<LegacyImport>(
+      api.post('/admin/legacy-imports/csv', form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    )
+  },
+  /** Name an ODBC source and dry-run it. The credentials live on the server. */
+  previewOdbc: (body: { dsn: string; table?: string; query?: string }) =>
+    unwrap<LegacyImport>(api.post('/admin/legacy-imports/odbc', body)),
+  /** Confirm a dry run. Small imports finish in the call; large ones come back queued. */
+  run: (id: number) => unwrap<LegacyImport>(api.post(`/admin/legacy-imports/${id}/run`)),
+}
+
+/** Claim businesses from the old register, against the signed-in owner's surname. */
+export const legacyClaim = {
+  claim: (claimNumber: string) =>
+    unwrap<{ claimed: number }>(api.post('/businesses/claim', { claim_number: claimNumber })),
 }
 
 /* ── Unread badges ────────────────────────────────────────────────────── */
@@ -1999,4 +2027,81 @@ export interface OicPageMeta extends PageMeta {
    */
   open: number
   open_assigned: number
+}
+
+/* ── Six-digit e-mail codes [checklist 2026-09-27, Register 1 and Login 5] ── */
+
+/**
+ * What the password step answers when a code is needed. Only returned while
+ * the API has a real mailer; with mail off, /auth/login answers with the token
+ * as it always has, so the sign-in page checks for `code_required` rather than
+ * assuming either shape.
+ */
+export interface SignInCodeChallenge {
+  code_required: true
+  challenge: string
+  /** Masked, e.g. `o••••@biztrack.local`: which inbox to open. */
+  email: string
+  expires_in_minutes: number
+  /** Seconds before the resend button works. */
+  resend_after: number
+}
+
+export const emailCodes = {
+  verifySignIn: (challenge: string, code: string) =>
+    unwrap<{ token: string; user: User }>(api.post('/auth/login/code', { challenge, code })),
+  resendSignIn: async (challenge: string): Promise<{ message: string; resend_after: number }> => {
+    const res = await api.post<{ message: string; data: { resend_after: number } }>('/auth/login/code/resend', {
+      challenge,
+    })
+    return { message: res.data.message, resend_after: res.data.data.resend_after }
+  },
+  /** Confirm the signed-in owner's address; answers with the refreshed account. */
+  confirmEmail: async (code: string): Promise<{ message: string; user: User }> => {
+    const res = await api.post<{ message: string; data: User }>('/auth/email/verify-code', { code })
+    return { message: res.data.message, user: res.data.data }
+  },
+  resendConfirm: async (): Promise<string> => {
+    const res = await api.post<{ message: string }>('/auth/email/resend')
+    return res.data.message
+  },
+  /**
+   * E-mail the code a password change needs, or a new one [Edit Settings].
+   * Carries the current password because the API checks it before sending
+   * anything. `code_required: false` means mail is off and the change goes
+   * through on the password alone.
+   */
+  requestPasswordCode: async (currentPassword: string): Promise<PasswordCodeSent> => {
+    const res = await api.post<{ message?: string; data: PasswordCodeSent }>('/auth/password/code', {
+      current_password: currentPassword,
+    })
+    return { ...res.data.data, message: res.data.message }
+  },
+}
+
+export type PasswordCodeSent =
+  | { code_required: false; message?: string }
+  | {
+      code_required: true
+      message?: string
+      /** Masked, e.g. `o••••@biztrack.local`. */
+      email: string
+      expires_in_minutes: number
+      resend_after: number
+    }
+
+/* ── Office hours [checklist 2026-09-27, Login 6] ─────────────────────────── */
+
+export interface OfficeHoursStatus {
+  open: boolean
+  /** The server's clock, in Manila time. Never the browser's. */
+  now: string
+  timezone: string
+  opens: string
+  closes: string
+  days: number[]
+}
+
+export const officeHours = {
+  get: () => unwrap<OfficeHoursStatus>(api.get('/office-hours')),
 }

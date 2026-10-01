@@ -10,18 +10,14 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
-use App\Models\PermitExpiryNotice;
-use App\Services\NotificationService;
 use App\Support\AnalyticsDatasets;
+use App\Support\AnalyticsDefinitions;
+use App\Support\AnalyticsOffice;
 use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
-use App\Support\Audit;
-use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
-use App\Support\RenewalModelAnalytics;
-use App\Support\RenewalRiskAnalytics;
 use App\Support\Spc;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -33,27 +29,102 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AnalyticsController extends Controller
 {
-    public function summary(): JsonResponse
+    /*
+     * summary() and export() are register-wide counts with no office in them.
+     * They sat on `analytics.view` when only BPLO held it; now that every office
+     * admin holds it (checklist 2026-09-27, item 1) they are closed to anyone
+     * who cannot read every office, rather than taught a second scoping rule.
+     * No screen calls either today — the office-scoped CSVs are on the Reports
+     * screen.
+     */
+    public function summary(Request $request): JsonResponse
     {
+        $this->requireEveryOffice($request);
+
         return response()->json(['data' => $this->buildSummary()]);
     }
 
+    /**
+     * The Analytics Dashboard, for one office or for all of them.
+     *
+     * The office is decided by AnalyticsOffice::forRequest() and nowhere else:
+     * an office account gets its own office whatever it sends, and asking for
+     * another is a 403. `scope` travels beside `data` and `meta` so the screen
+     * can say whose figures these are and draw the office menu for the two
+     * readers who have one.
+     */
     public function dashboard(Request $request): JsonResponse
     {
-        return $this->serve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+        $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
+        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, $this->dashboardParams($request, $office));
+        $resolved['meta']['definitions'] = AnalyticsDefinitions::forOffice($resolved['meta']['definitions'] ?? [], $office);
+
+        return response()->json([
+            'data' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'scope' => AnalyticsOffice::describe($request->user(), $office),
+        ]);
     }
 
     public function dashboardReport(Request $request): Response
     {
-        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+        $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
+        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, $this->dashboardParams($request, $office));
 
         $pdf = Pdf::loadView('pdf.analytics-dashboard-report', [
             'report' => $resolved['data'],
             'meta' => $resolved['meta'],
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
+            'scope' => AnalyticsOffice::describe($request->user(), $office),
+            'generated_at' => $this->printedTime($resolved['data']['generated_at']),
         ])->setPaper('a4');
 
-        return PdfFile::render($pdf)->download('analytics-dashboard.pdf');
+        $suffix = $office === null ? '' : '-'.strtolower($office);
+
+        return PdfFile::render($pdf)->download("analytics-dashboard{$suffix}.pdf");
+    }
+
+    /**
+     * When the figures were computed, as a printed report states it: Manila
+     * clock time, with the zone said in words.
+     *
+     * The app runs in UTC, and this used to format the UTC instant as it
+     * stood, so a report computed at 9:16 in the evening in Malabon said
+     * "1:16 PM" with nothing to tell the reader it was eight hours behind.
+     * The zone is City Hall's (config/office_hours.php), the one every other
+     * time on the office screens is read in.
+     */
+    private function printedTime(string $iso): string
+    {
+        $zone = (string) config('office_hours.timezone', 'Asia/Manila');
+
+        return Carbon::parse($iso)->setTimezone($zone)->format('F j, Y g:i A')
+            .($zone === 'Asia/Manila' ? ' Manila time' : ' ('.$zone.')');
+    }
+
+    /**
+     * The snapshot key's parameters. The office is left OUT when it is every
+     * office, so the whole-city key stays `dashboard:months=12` — the string the
+     * snapshots stored before offices existed already carry.
+     *
+     * @return array<string, int|string>
+     */
+    private function dashboardParams(Request $request, ?string $office): array
+    {
+        $params = ['months' => $this->windowMonths($request)];
+        if ($office !== null) {
+            $params['office'] = $office;
+        }
+
+        return $params;
+    }
+
+    private function requireEveryOffice(Request $request): void
+    {
+        abort_unless(
+            AnalyticsOffice::canSwitch($request->user()),
+            403,
+            'These figures cover every office, so only BPLO and the administrator can read them.',
+        );
     }
 
     public function processingTime(Request $request): JsonResponse
@@ -78,8 +149,7 @@ class AnalyticsController extends Controller
      * over snapshot averages would tell the reader how much test data is in the
      * register NOW while the averages beside it carry however much was in it at
      * three in the morning, and nothing on the page would distinguish the two
-     * vintages. See the opposite call on businessGrowth(), where the caption can
-     * only come from the live fact table and the inconsistency is the lesser one.
+     * vintages.
      */
     public function officePerformance(Request $request): JsonResponse
     {
@@ -93,398 +163,11 @@ class AnalyticsController extends Controller
         $pdf = Pdf::loadView('pdf.processing-time-report', [
             'report' => $resolved['data'],
             'meta' => $resolved['meta'],
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
+            'generated_at' => $this->printedTime($resolved['data']['generated_at']),
         ])->setPaper('a4');
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
         return PdfFile::render($pdf)->download('processing-time-monitoring.pdf');
-    }
-
-    /**
-     * Business Growth Analysis, plus the one thing the snapshot cannot carry.
-     *
-     * ── Why `industry_lenses` is spliced on here ────────────────────────────
-     *
-     * The Business Industry Growth Trend panel now offers the reader three
-     * questions over the same six slots — Largest, Fastest growing, Fastest
-     * declining — because a panel titled "Growth Trend" that ranks by size
-     * cannot show a small trade that doubled and will happily show a large one
-     * that shrank. The argument for the three lenses, the minimum business
-     * count they impose and why Largest stays the default all live on
-     * BusinessGrowthAnalytics::industryLenses(); this note is only about where
-     * the computation is allowed to happen.
-     *
-     * It cannot be part of the dataset. AnalyticsResolver serves the stored
-     * snapshot verbatim whenever one exists, so a re-ranking or a new key added
-     * to the builder would not reach the browser until the next refresh — the
-     * screen would keep drawing last night's six-by-count rows. Snapshots are
-     * what they were when they were computed; that is the point of them.
-     *
-     * That leaves serve time, which is the same door the renewal-risk barangay
-     * menu and permit-lifecycle split come through, for the same reason. The
-     * splice is purely additive: `industry_growth` is left exactly as the engine
-     * produced it, so the PDF report, the parity fixture and any older client
-     * keep reading the payload they already read.
-     *
-     * The register is read live here, which is a real (small) inconsistency with
-     * the `computed_at` the screen prints — and it is the lesser of the two
-     * available ones. The floor's caption ("7 of 30 lines carry fewer than 10
-     * businesses") can only come from the whole fact table, and a live caption
-     * printed over snapshot rows would put two vintages in one panel where the
-     * reader would have no way to tell them apart.
-     */
-    public function businessGrowth(Request $request): JsonResponse
-    {
-        $months = $this->months($request);
-        $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $months]);
-        $resolved['data']['industry_lenses'] = BusinessGrowthAnalytics::industryLenses($months);
-
-        return response()->json([
-            'data' => $resolved['data'],
-            'meta' => $resolved['meta'],
-        ]);
-    }
-
-    public function businessGrowthReport(Request $request): Response
-    {
-        $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
-
-        $pdf = Pdf::loadView('pdf.business-growth-report', [
-            'report' => $resolved['data'],
-            'meta' => $resolved['meta'],
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
-        ])->setPaper('a4');
-
-        return PdfFile::render($pdf)->download('business-growth-analysis.pdf');
-    }
-
-    /**
-     * Renewal Risk: permits near expiry, ranked by a weighted rule score.
-     *
-     * Not a prediction endpoint. See RenewalRiskScoring for what the number is
-     * and, more importantly, what it is not.
-     *
-     * ── Why the filters are query parameters and not browser work ────────────
-     *
-     * Same reasoning as the officer queue (see the long note in
-     * web/src/pages/officer/QueuePage.tsx): a filter applied in the browser can
-     * only narrow the rows that were already sent, so its totals describe the
-     * page rather than the register. Here that failure has teeth — the payload
-     * is the top `limit` rows BY SCORE, and on this register the leading 25 are
-     * all High, so a browser-side "show me Low risk" would filter 25 High rows
-     * down to nothing and report that the city has no low-risk businesses. It
-     * has 2,060.
-     *
-     * ── Why a filtered request is computed on the spot ───────────────────────
-     *
-     * The filters ride in the snapshot key, and `analytics:refresh` only
-     * precomputes the unfiltered variants in config/analytics.php. So the
-     * default screen keys to exactly the snapshot it always did and is served
-     * from store, while any filtered or paged request misses and is computed for
-     * that request, saying so through `meta.source` and `meta.fallback_reason`.
-     *
-     * That reason is `window_not_precomputed`, NOT `not_yet_refreshed`, and the
-     * difference is the whole reason both still exist: a band filter is a
-     * supported option working as designed, and reporting it as staleness put a
-     * warning panel and a Refresh button — which could not have helped — over a
-     * correct table. Filtering also has to happen before the ranking is cut, so
-     * a filtered view is a different computation rather than a slice of the
-     * stored one, which is why it cannot be served from the snapshot at all.
-     *
-     * The filters are deliberately absent from the key when they are unset,
-     * rather than present as nulls — `renewal_risk:days=365,limit=25` has to
-     * stay the string it is or the existing snapshots stop matching.
-     */
-    public function renewalRisk(Request $request): JsonResponse
-    {
-        $days = $this->horizonDays($request);
-        $limit = $this->limit($request);
-        $view = $this->renewalRiskView($request);
-
-        $params = ['days' => $days, 'limit' => $limit];
-        foreach (['barangay', 'band', 'action', 'search'] as $filter) {
-            if ($view[$filter] !== null) {
-                $params[$filter] = $view[$filter];
-            }
-        }
-        if ($view['offset'] > 0) {
-            $params['offset'] = $view['offset'];
-        }
-
-        $resolved = AnalyticsResolver::resolve(
-            AnalyticsDatasets::RENEWAL_RISK,
-            $params,
-            static fn (): array => RenewalRiskAnalytics::build($days, $limit, $view),
-        );
-
-        return response()->json([
-            'data' => $this->decorateRenewalRisk($resolved['data'], $days, $view['barangay']),
-            'meta' => $resolved['meta'],
-        ]);
-    }
-
-    /**
-     * The fitted model that sits beside the rule score.
-     *
-     * Its own endpoint rather than more keys on renewalRisk(), for the reasons
-     * in RenewalModelAnalytics' docblock. Two consequences show up right here
-     * and both are deliberate:
-     *
-     *  - **It takes no filters.** The barangay, level and action controls narrow
-     *    a watchlist; they do not refit a regression. Accepting them would key
-     *    to snapshots that can never exist and serve the "no model" fallback for
-     *    every filtered view, which a reader would correctly read as an outage.
-     *  - **The horizon is pinned to the precomputed one.** The screen's horizon
-     *    selector changes which permits are estimated, not which cycles the fit
-     *    was trained on, and the single precomputed variant already carries the
-     *    full year — a superset of every shorter horizon. Passing the caller's
-     *    horizon through would miss the snapshot on four choices in five and
-     *    fall back to "model unavailable" for no reason anyone could act on.
-     *
-     * The fallback here is not a second implementation of the statistics. It is
-     * their honest absence: `available => false` with a reason, same keys.
-     */
-    public function renewalModel(): JsonResponse
-    {
-        $days = RenewalModelAnalytics::DEFAULT_HORIZON_DAYS;
-        $limit = RenewalModelAnalytics::DEFAULT_LIMIT;
-
-        return response()->json(AnalyticsResolver::resolve(
-            AnalyticsDatasets::RENEWAL_MODEL,
-            ['days' => $days, 'limit' => $limit],
-            static fn (): array => RenewalModelAnalytics::build($days, $limit),
-        ));
-    }
-
-    /**
-     * The filters and page offset a caller asked for, unvalidated at this layer.
-     *
-     * Clamped rather than rejected, in the same spirit as horizonDays(): a
-     * stray query string should narrow nothing, not 422 a dashboard. What
-     * stops that being a silent lie is that RenewalRiskAnalytics echoes back
-     * the filters it actually applied, and the screen renders the echo.
-     *
-     * @return array{barangay: string|null, band: string|null, action: string|null, search: string|null, offset: int}
-     */
-    private function renewalRiskView(Request $request): array
-    {
-        $text = static function (?string $value): ?string {
-            $value = trim((string) $value);
-
-            return ($value === '' || $value === 'all') ? null : mb_substr($value, 0, 120);
-        };
-
-        $band = $text($request->query('band'));
-        $action = $text($request->query('action'));
-
-        /*
-         * The search term skips the "all" sentinel, unlike every filter above
-         * it. Those are `<select>` values where "all" is how the control says
-         * "unset"; a text box says that by being empty, and a business whose
-         * name an officer typed as "all" would otherwise come back as the
-         * unfiltered city with nothing to say the term was discarded. Still
-         * capped at 120 — it travels into a snapshot key.
-         */
-        $search = trim((string) $request->query('search', ''));
-
-        return [
-            'barangay' => $text($request->query('barangay')),
-            'band' => in_array($band, RenewalRiskAnalytics::BANDS, true) ? $band : null,
-            'action' => in_array($action, RenewalRiskAnalytics::ACTIONS, true) ? $action : null,
-            'search' => $search === '' ? null : mb_substr($search, 0, 120),
-            // Bounded so a hand-typed offset cannot walk a scored register row
-            // by row; the screen never sends one past `matching`.
-            'offset' => max(0, min(100_000, (int) $request->query('offset', '0'))),
-        ];
-    }
-
-    /**
-     * Three things the statistics payload cannot carry, added at serve time.
-     *
-     *  - **The barangay menu.** A control's options are a register question,
-     *    not a statistic, and they have to be there whether the payload came
-     *    from store or was computed for this request. A stored snapshot has no
-     *    idea what a filter is.
-     *  - **Officer follow-ups per row.** These are live state — the whole point
-     *    is that an officer sees a send they made a minute ago — and the
-     *    snapshot is a nightly figure. Reading them off the payload would tell
-     *    an officer they had not rung a business they rang this morning.
-     *  - **The permit lifecycle split.** It runs its own register query and so
-     *    cannot come out of `compute()`, which touches no database — see the
-     *    long note on RenewalRiskAnalytics::lifecycle().
-     *
-     * The barangay is passed down rather than read back off `$data['filters']`,
-     * because a stored snapshot carries no filters at all and would silently
-     * give the whole city's lifecycle counts under a screen filtered to one
-     * barangay — where they would read as that barangay's, and would not sum to
-     * the `scored_permits` printed beside them.
-     *
-     * The paging fields are defaulted rather than computed here: a payload with
-     * no `filters` is by definition an unfiltered one, so `matching` is
-     * `scored_permits` and the offset is zero. That is exactly the snapshot-served
-     * default screen, and it means the client has one shape to render instead
-     * of two.
-     *
-     * @param  array<string, mixed>  $data
-     * @return array<string, mixed>
-     */
-    private function decorateRenewalRisk(array $data, int $days, ?string $barangay = null): array
-    {
-        $data['filters'] ??= ['barangay' => null, 'band' => null, 'action' => null, 'search' => null];
-        $data['matching'] ??= (int) ($data['scored_permits'] ?? 0);
-        $data['offset'] ??= 0;
-        $data['barangays'] = RenewalRiskAnalytics::barangaysInScope($days);
-        $data['lifecycle'] = RenewalRiskAnalytics::lifecycle($days, $barangay);
-
-        $rows = $data['at_risk'] ?? [];
-        $manual = RenewalRiskAnalytics::manualRemindersByPermit(
-            array_values(array_map(static fn (array $row): int => (int) $row['permit_id'], $rows)),
-        );
-
-        $data['at_risk'] = array_map(static function (array $row) use ($manual): array {
-            $sent = $manual[(int) $row['permit_id']] ?? null;
-            $row['manual_reminders'] = $sent['count'] ?? 0;
-            $row['manual_reminder_at'] = $sent['last_at'] ?? null;
-
-            return $row;
-        }, $rows);
-
-        return $data;
-    }
-
-    /**
-     * Send one renewal follow-up to a business owner, now, from the watchlist.
-     *
-     * Keyed on the PERMIT rather than the business, which is not the obvious
-     * choice and is the right one: a business commonly holds its business,
-     * sanitary and fire permits at once, they expire on different dates, and
-     * the watchlist has a row per permit. A business-keyed endpoint would have
-     * to guess which permit the officer was looking at, and the message quotes
-     * a permit number and an expiry date.
-     *
-     * ── The double-send guard ────────────────────────────────────────────────
-     *
-     * This puts a real message in a real business owner's notifications, so
-     * "probably only once" is not good enough. The guard is the same one
-     * `biztrack:scan-permits` runs on: an insert into `permit_expiry_notices`,
-     * whose unique index on (permit_id, notice_kind) makes the row the
-     * permission to send. Claim it and you send; fail to claim it and somebody
-     * already did. The kind carries today's date
-     * (RenewalRiskAnalytics::manualNoticeKind), so the grain is one follow-up
-     * per permit per day — a double-click, a replayed request or a second
-     * officer on the same row all resolve to one message, while next month's
-     * chase is still possible.
-     *
-     * A repeat is a 200 rather than a 409. Nothing went wrong: the officer's
-     * intent (this owner should have been told) is satisfied, and the answer
-     * they need is "yes, and here is when" — which is what `already_sent` and
-     * `sent_at` say.
-     */
-    public function remindRenewal(Permit $permit, NotificationService $notify): JsonResponse
-    {
-        $permit->loadMissing('business.owner');
-
-        /*
-         * Both models soft-delete, and neither absence is an error worth a 500.
-         * A closed business has nobody to chase and an unclaimed one has no
-         * inbox — the same two exclusions ScanPermits filters on, for the same
-         * reason. Refused before the ledger is touched, because a ledger row is
-         * a claim that a message went out.
-         */
-        $owner = $permit->business?->owner;
-        if (! $owner) {
-            return response()->json([
-                'message' => $permit->business === null
-                    ? 'That business has been removed from the register, so there is nobody to remind.'
-                    : 'That business has no owner account yet, so there is no inbox to send a reminder to.',
-                'errors' => [],
-            ], 422);
-        }
-
-        /*
-         * Only permits the watchlist would actually show, and the band is the
-         * same answer — one pass, so the endpoint cannot refuse a permit the
-         * screen lists or send the urgent wording to a row badged Moderate.
-         * Without this the endpoint is a way to message any owner about any
-         * permit they have ever held, including one that lapsed in 2024, which
-         * is neither what the button on screen does nor something the officer
-         * pressing it has been shown the facts for.
-         *
-         * Computed BEFORE the ledger row is claimed: a claimed row is a promise
-         * that a message went out, so nothing may fail after it.
-         */
-        $band = RenewalRiskAnalytics::bandForPermit($permit->id);
-
-        if ($band === null) {
-            return response()->json([
-                'message' => 'That permit is not on the renewal watchlist, so there is no renewal to follow up.',
-                'errors' => [],
-            ], 422);
-        }
-
-        /*
-         * "Monitor" is not a message, so a Low-risk permit has no button and
-         * this endpoint will not send one either.
-         *
-         * The spec lists three recommended actions and only two of them are
-         * addressed to the applicant. "Send Reminder" and "Immediate
-         * follow-up" both mean "tell this business something"; Monitor means
-         * "an officer should keep an eye on this", which is advice to the
-         * reader of the screen about their own attention. Manufacturing a
-         * notification for it would put "we are monitoring you" into a
-         * business owner's list on the strength of a permit that is 200 days
-         * off with nothing at all against it — a message with no request in it,
-         * sent to 2,060 people. The guard is here and not only in the UI
-         * because a control that is absent from the screen must also be absent
-         * from the API, or it is merely hidden.
-         */
-        if ($band === 'low') {
-            return response()->json([
-                'message' => 'This permit is low risk, and the recommended action is to monitor it rather than '
-                    .'to contact the business. Nothing was sent.',
-                'errors' => [],
-            ], 422);
-        }
-
-        $kind = RenewalRiskAnalytics::manualNoticeKind();
-        $notice = PermitExpiryNotice::firstOrCreate([
-            'permit_id' => $permit->id,
-            'notice_kind' => $kind,
-        ]);
-
-        if (! $notice->wasRecentlyCreated) {
-            return response()->json(['data' => [
-                'permit_id' => $permit->id,
-                'already_sent' => true,
-                'sent_at' => $notice->created_at?->toISOString(),
-                'message' => 'A follow-up already went to this business today, so nothing was sent again.',
-            ]]);
-        }
-
-        // The band decides the tone, and it came from the register above rather
-        // than from the request: a caller can claim any urgency it likes.
-        $urgent = $band === 'high';
-
-        $notify->renewalFollowUp($permit, $urgent);
-
-        /*
-         * Recorded against the permit, with who and when coming from the audit
-         * row itself. A message sent to a citizen on an officer's authority is
-         * exactly the kind of act §5.2 exists for, and "the system sent it"
-         * must not be an available answer to "who contacted this business".
-         */
-        Audit::log('permit.renewal_followup_sent', $permit, [
-            'notice_kind' => $kind,
-            'action' => $urgent ? 'immediate_follow_up' : 'send_reminder',
-            'notified_user_id' => $owner->id,
-        ]);
-
-        return response()->json(['data' => [
-            'permit_id' => $permit->id,
-            'already_sent' => false,
-            'sent_at' => $notice->created_at?->toISOString(),
-            'message' => 'Reminder sent. It is in the business owner’s notifications now.',
-        ]]);
     }
 
     /**
@@ -509,8 +192,20 @@ class AnalyticsController extends Controller
      * nothing — so a refresh can still partly succeed, and the response still
      * reports per dataset rather than returning a bare 204.
      */
-    public function refresh(): JsonResponse
+    public function refresh(Request $request): JsonResponse
     {
+        /*
+         * BPLO and the super admin only: the two readers who see every office.
+         * One press recomputes every office's figures, and its response names
+         * every snapshot it rebuilt; an office that reads only its own figures
+         * has no business doing either. Its screen shows no button.
+         */
+        abort_unless(
+            AnalyticsOffice::canSwitch($request->user()),
+            403,
+            'Only BPLO and the super admin can recompute the figures. They are recomputed every night.',
+        );
+
         $outcome = AnalyticsRefresher::run();
 
         /*
@@ -566,33 +261,10 @@ class AnalyticsController extends Controller
         );
     }
 
-    /** Printable Renewal Risk report. */
-    public function renewalRiskReport(Request $request): Response
-    {
-        $days = $this->horizonDays($request);
-
-        $resolved = $this->resolve(AnalyticsDatasets::RENEWAL_RISK, [
-            'days' => $days,
-            'limit' => $this->limit($request),
-        ]);
-
-        // Unfiltered on purpose, matching the rest of this PDF: the report
-        // covers the whole watchlist and the screen says so beside the filter.
-        $resolved['data']['lifecycle'] = RenewalRiskAnalytics::lifecycle($days);
-
-        $pdf = Pdf::loadView('pdf.renewal-risk-report', [
-            'report' => $resolved['data'],
-            'meta' => $resolved['meta'],
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
-        ])->setPaper('a4');
-
-        return PdfFile::render($pdf)->download('renewal-risk.pdf');
-    }
-
     /**
      * Read a dataset's precomputed statistics, or compute them now.
      *
-     * @param  array<string, int>  $params
+     * @param  array<string, int|string>  $params
      * @return array{data: array<string, mixed>, meta: array<string, mixed>}
      */
     private function resolve(string $dataset, array $params): array
@@ -630,22 +302,6 @@ class AnalyticsController extends Controller
      * scope for the delivered flow — see the note in routes/workflow.php.
      */
 
-    /** How far ahead the renewal watchlist looks, in days. */
-    private function horizonDays(Request $request): int
-    {
-        $days = (int) $request->query('days', (string) RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS);
-
-        return max(7, min(365, $days));
-    }
-
-    /** Rows in the watchlist table. */
-    private function limit(Request $request): int
-    {
-        $limit = (int) $request->query('limit', (string) RenewalRiskAnalytics::DEFAULT_LIMIT);
-
-        return max(1, min(200, $limit));
-    }
-
     /** Chart window in weeks, clamped so a stray query string cannot scan the table. */
     private function weeks(Request $request): int
     {
@@ -654,25 +310,34 @@ class AnalyticsController extends Controller
         return max(Spc::MIN_COMPLETIONS_PER_WEEK, min(104, $weeks));
     }
 
-    /** Dashboard trailing window in months, clamped so a stray query cannot scan. */
+    /**
+     * Dashboard trailing window in months: one of the windows the screen offers
+     * and the nightly refresh precomputes (config analytics.variants.dashboard).
+     * Any other number used to be clamped and computed on the spot, uncached,
+     * on every request; now it is refused.
+     */
     private function windowMonths(Request $request): int
     {
-        $months = (int) $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $raw = $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $offered = array_map(
+            static fn (array $v): int => (int) $v['months'],
+            AnalyticsDatasets::variants(AnalyticsDatasets::DASHBOARD),
+        );
 
-        return max(1, min(36, $months));
-    }
+        abort_unless(
+            is_string($raw) && ctype_digit($raw) && in_array((int) $raw, $offered, true),
+            422,
+            'Choose one of the windows the dashboard offers: '.implode(', ', $offered).' months.',
+        );
 
-    /** Growth period in months, clamped to a sane range. */
-    private function months(Request $request): int
-    {
-        $months = (int) $request->query('months', (string) BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS);
-
-        return max(1, min(36, $months));
+        return (int) $raw;
     }
 
     /** CSV download of the summary (status counts, monthly, KPIs). */
-    public function export(): StreamedResponse
+    public function export(Request $request): StreamedResponse
     {
+        $this->requireEveryOffice($request);
+
         $s = $this->buildSummary();
 
         return response()->streamDownload(function () use ($s) {
@@ -715,9 +380,9 @@ class AnalyticsController extends Controller
         $byType = Application::select('application_type', DB::raw('count(*) as c'))
             ->groupBy('application_type')->pluck('c', 'application_type');
 
-        // Applications per month (last 12 months) — SQLite strftime.
+        // Applications per month (last 12 months).
         $byMonth = Application::select(
-            DB::raw("strftime('%Y-%m', created_at) as month"),
+            DB::raw($this->yearMonth('created_at').' as month'),
             DB::raw('count(*) as count')
         )
             ->where('created_at', '>=', now()->subMonths(11)->startOfMonth())
@@ -752,6 +417,26 @@ class AnalyticsController extends Controller
             'expiring_permits' => $expiringPermits,
             'simulated_revenue' => round($simulatedRevenue, 2),
         ];
+    }
+
+    /**
+     * `YYYY-MM` of a timestamp column, in the SQL of whichever engine is
+     * connected.
+     *
+     * This was `strftime('%Y-%m', …)` alone, which is SQLite's and nothing
+     * else's: on PostgreSQL, the production database, the summary and its CSV
+     * export answered 500 ("function strftime does not exist"). There is no
+     * date-formatting function the two engines share, so the one line that
+     * differs is chosen here. The column is a constant from this file, never
+     * input.
+     */
+    private function yearMonth(string $column): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'pgsql' => "to_char({$column}, 'YYYY-MM')",
+            'mysql', 'mariadb' => "date_format({$column}, '%Y-%m')",
+            default => "strftime('%Y-%m', {$column})",
+        };
     }
 
     /** Mean days from `submitted` to `approved` per application, from status history. */

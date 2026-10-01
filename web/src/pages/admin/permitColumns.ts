@@ -220,7 +220,13 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      * answers null on an orphaned row and the helper prints "Business removed
      * from register" where a dereference would throw.
      */
-    value: (r) => businessName(r.business),
+    /*
+     * A retired business — one removed from the register (checklist item 21)
+     * — says so in words beside its name. The register lists those rows only
+     * when the Retired filter asks for them, and a reader who asked for "all"
+     * must still be able to tell which ones they are without a colour.
+     */
+    value: (r) => (r.business_retired ? `${businessName(r.business)} (retired)` : businessName(r.business)),
   },
   { key: 'trade_name', label: 'Trade Name', value: (r) => r.face?.trade_name ?? null },
   { key: 'owner_name', label: 'Owner', value: (r) => r.face?.owner_name ?? null },
@@ -447,7 +453,28 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
  * matches but the table cannot show is the right way round; the reverse — a
  * column nobody looks up — is what this removes.
  */
+/*
+ * ── BPLO's own table carries only what BPLO reads ─────────────────────────
+ *
+ * Checklist item 17: "only necessary columns, no expiry for BPLO since
+ * business permits all expire in January". Every Mayor's Permit runs to the
+ * end of the calendar year — the renewal season is January — so a Valid until
+ * column on BPLO's table is one date repeated down the page, and Days to
+ * expiry is the same number on every row. They go, and so do the two columns
+ * that name the certificate and its office: with the Mayor's Permit chosen,
+ * both are constant, and the table already says whose certificates these are.
+ *
+ * Only for BUSINESS. A clearance's term is its own — a sanitary permit or an
+ * FSIC can lapse any month — so the other offices keep their expiry columns,
+ * and the register-wide views keep everything.
+ */
+const NOT_ON_BPLO_TABLE = new Set(['permit_type', 'office', 'valid_until', 'days'])
+
 export function columnsFor(office: OfficeCode | ''): PermitColumn[] {
+  if (office === 'BUSINESS') {
+    return SHARED_COLUMNS.filter((c) => !NOT_ON_BPLO_TABLE.has(c.key))
+  }
+
   if (office !== '') {
     return [...SHARED_COLUMNS, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
   }
