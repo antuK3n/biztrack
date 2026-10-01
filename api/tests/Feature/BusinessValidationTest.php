@@ -8,6 +8,7 @@ use App\Models\FeeAssessment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\PermitFace;
 use Database\Seeders\ReferenceSeeder;
 
 /*
@@ -113,6 +114,97 @@ it('persists a free-text line of business for the "Other (not listed)" code', fu
     $line = Business::find($businessId)->lines()->first();
     expect($line->psic_code_id)->toBe($otherId)
         ->and($line->line_of_business)->toBe('Bamboo furniture weaving');
+});
+
+/*
+ * ── A catch-all line has to say what it is ───────────────────────────────────
+ *
+ * The rule existed in one screen. ApplyWizard's `needsText` refuses to continue
+ * past a 00000 line with no description, and ReferenceSeeder says the same
+ * thing in a comment — but `line_of_business` was `nullable` at the door, so
+ * anything that was not the wizard filed a business whose only description was
+ * "Other (not listed)". That is then what the Mayor's Permit printed, which is
+ * where the client found it: *"pwede ba yon? make sure na meron kung ano
+ * nilagay nya o ininput"* [1 October 2026].
+ */
+it('refuses an unclassified line with no description of its own', function () {
+    $otherId = PsicCode::where('code', PsicCode::UNCLASSIFIED)->value('id');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload([
+            'lines' => [['psic_code_id' => $otherId, 'capitalization' => 25000]],
+        ]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['lines.0.line_of_business']);
+});
+
+it('asks for the description only on the line that needs one', function () {
+    /*
+     * Per line, which is the reason the rule is a closure rather than a
+     * `required_if` on the request. A business may declare a classified trade
+     * and a catch-all trade together; demanding a description of the coded line
+     * would be asking the applicant to re-type the PSIC title.
+     */
+    $otherId = PsicCode::where('code', PsicCode::UNCLASSIFIED)->value('id');
+    $sariSari = PsicCode::where('code', '47111')->value('id');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload([
+            'lines' => [
+                ['psic_code_id' => $sariSari],
+                ['psic_code_id' => $otherId],
+            ],
+        ]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['lines.1.line_of_business'])
+        ->assertJsonMissingValidationErrors(['lines.0.line_of_business']);
+});
+
+it('prints what the applicant typed on the certificate face, not "Other (not listed)"', function () {
+    /*
+     * The defect itself, at the one door that matters. `PermitFace::capture`
+     * read `psicCode->title` alone, so a hardware store filed under the
+     * catch-all got a permit whose Line of Business box said the thing that
+     * carries no information.
+     */
+    $otherId = PsicCode::where('code', PsicCode::UNCLASSIFIED)->value('id');
+
+    $businessId = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload([
+            'lines' => [['psic_code_id' => $otherId, 'line_of_business' => 'Hardware and construction supply']],
+        ]))
+        ->assertCreated()
+        ->json('data.id');
+
+    $face = PermitFace::capture(
+        Business::with(['address.barangay', 'owner', 'lines.psicCode'])->findOrFail($businessId)
+    );
+
+    expect($face['line_of_business'])->toBe('Hardware and construction supply')
+        ->and($face['line_of_business'])->not->toBe('Other (not listed)');
+});
+
+it('falls back to the PSIC title for a classified line nobody described', function () {
+    /*
+     * The free text is optional detail on a coded line, so its absence is
+     * normal and the title is the answer. Asserted because the fix could
+     * easily have been "always print the free text", which would have blanked
+     * the box on every line in the register that has none.
+     */
+    $sariSari = PsicCode::where('code', '47111')->value('id');
+
+    $businessId = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload([
+            'lines' => [['psic_code_id' => $sariSari]],
+        ]))
+        ->assertCreated()
+        ->json('data.id');
+
+    $face = PermitFace::capture(
+        Business::with(['address.barangay', 'owner', 'lines.psicCode'])->findOrFail($businessId)
+    );
+
+    expect($face['line_of_business'])->toBe('Retail sale in non-specialized stores (sari-sari store)');
 });
 
 it('keeps the free-text line when the business is updated', function () {

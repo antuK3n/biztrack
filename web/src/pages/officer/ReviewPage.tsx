@@ -18,7 +18,13 @@ import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  lineOfBusinessText,
+} from '../../lib/format'
 import { MAIN_FORM_RETURN_TARGETS } from '../../lib/returnTargets'
 import { otherPermitProgress } from '../../lib/status'
 import {
@@ -4026,11 +4032,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       API from that single figure, so this column was the same
                       number twice on a good filing and a dash on this one.
                     */}
+                      {/*
+                       * The applicant's own words FIRST, then the class they
+                       * were sorted into.
+                       *
+                       * This printed the PSIC title alone, so every line filed
+                       * under the catch-all 00000 reached the reviewer as
+                       * "Other (not listed) (00000)" — the one description that
+                       * says nothing — while what the applicant actually typed
+                       * sat unread in `line_of_business`. The classification
+                       * stays because a reviewer checks it; it just no longer
+                       * stands in for the trade.
+                       */}
                       <Field
                         label={`Line of Business ${business.lines!.length > 1 ? i + 1 : ''}`.trim()}
-                        value={
-                          line.psic_code ? `${line.psic_code.title} (${line.psic_code.code})` : ''
-                        }
+                        value={lineOfBusinessText(line)}
                       />
                       {/*
                        * Products / Services — the paper's own second column of
