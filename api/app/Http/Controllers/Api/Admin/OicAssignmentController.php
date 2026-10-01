@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\User;
+use App\Support\Caseload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,6 +46,27 @@ class OicAssignmentController extends Controller
              * looking for, and it is invisible in a list ordered by officer.
              */
             'holder' => ['sometimes', 'in:assigned,unassigned'],
+            /*
+             * Still open, or finished?
+             *
+             * The register counts every assignment a name is on, finished ones
+             * included, because it is the record of who did what. The officer
+             * directory's Holding column counts only work that can still be
+             * moved. Both are right and they answer differently — 34 against 2
+             * on the same register — and a reader had no way to get from one
+             * number to the other.
+             *
+             * This is that way. `open` uses `Caseload::scopeOpen`, the same
+             * rule the Holding column counts by, so the filtered register is
+             * exactly the set that column is talking about.
+             *
+             * Note it is the FILING's state, not the assignment's
+             * `completed_at`: an office that has finished its own review is
+             * still the officer in charge while the filing is live. Filtering
+             * on `completed_at` would answer a different question and disagree
+             * with Holding again, one step further along.
+             */
+            'state' => ['sometimes', 'in:open,finished'],
             'q' => ['sometimes', 'string', 'max:100'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:200'],
             'page' => ['sometimes', 'integer', 'min:1'],
@@ -62,6 +84,13 @@ class OicAssignmentController extends Controller
             // and whose Reassign button acts on nothing.
             ->whereHas('application');
 
+        /*
+         * The register before any narrowing, kept for the two reconciling
+         * figures in `meta`. They must not move when a filter does: a
+         * reconciliation that changed with the view would reconcile nothing.
+         */
+        $unfiltered = clone $query;
+
         if (isset($data['department_id'])) {
             $query->where('department_id', $data['department_id']);
         }
@@ -70,6 +99,12 @@ class OicAssignmentController extends Controller
             $query->whereNotNull('officer_user_id');
         } elseif (($data['holder'] ?? null) === 'unassigned') {
             $query->whereNull('officer_user_id');
+        }
+
+        if (($data['state'] ?? null) === 'open') {
+            Caseload::scopeOpen($query);
+        } elseif (($data['state'] ?? null) === 'finished') {
+            $query->whereHas('application', fn ($a) => $a->whereIn('status', Caseload::decidedStatuses()));
         }
 
         if ($needle = trim($data['q'] ?? '')) {
@@ -107,6 +142,32 @@ class OicAssignmentController extends Controller
                     ->get(['id', 'code', 'name'])
                     ->map(fn ($d) => ['id' => $d->id, 'code' => $d->code, 'name' => $d->name])
                     ->all(),
+                /*
+                 * ── The two figures that reconcile this screen with the
+                 *    officer directory ──────────────────────────────────────
+                 *
+                 * `total` counts every assignment a name is on, finished ones
+                 * included, because this is the record of who did what. The
+                 * directory's Holding column counts only work that can still
+                 * be moved. On the live register that reads 34 against 2, and
+                 * nothing on either screen explained the gap — which is the
+                 * kind of disagreement that makes a reader distrust both
+                 * numbers rather than report one.
+                 *
+                 * So the register states the chain itself: of N assignments,
+                 * `open` are on filings still live, and `open_assigned` of
+                 * those have an officer — and that last figure is exactly what
+                 * the Holding column adds up to.
+                 *
+                 * Counted over the WHOLE register, ignoring the page and every
+                 * filter above: a reconciliation that moved when a filter did
+                 * would reconcile nothing.
+                 */
+                'open' => (clone $unfiltered)->tap(fn ($q) => Caseload::scopeOpen($q))->count(),
+                'open_assigned' => (clone $unfiltered)
+                    ->tap(fn ($q) => Caseload::scopeOpen($q))
+                    ->whereNotNull('officer_user_id')
+                    ->count(),
             ],
         ]);
     }

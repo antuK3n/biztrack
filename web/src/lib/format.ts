@@ -195,6 +195,41 @@ export function formatRelative(iso: string | null | undefined): string {
   return rtf.format(Math.round(diffMs / day), 'day')
 }
 
+/**
+ * The stamp beside a name in a conversation list: "4:33 AM", "24 Sep",
+ * "1 Sep 2025".
+ *
+ * A message list is scanned down a narrow column, and "September 24, 2026"
+ * is eighteen characters of a fact the reader mostly needs to the nearest
+ * day. It was taking a third of the row and truncating the business name
+ * beside it - "SAMPLE Bagon...", "SAMPLE Riversi..." - which is the part an
+ * officer is actually looking for.
+ *
+ * So it says only what distinguishes this row from the others near it: the
+ * time when it is today, the day and month within the year, the year as well
+ * once it is old enough that a bare "1 Sep" would be ambiguous. The full
+ * stamp is still in the `title`, and still on every message in the transcript.
+ */
+export function formatListStamp(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+
+  const now = new Date()
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear()
+
+  if (sameDay) {
+    return d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
+  }
+
+  return d.getFullYear() === now.getFullYear()
+    ? d.toLocaleDateString('en-PH', { day: 'numeric', month: 'short' })
+    : d.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -236,4 +271,24 @@ export function paymentMethodLabel(method: string): string {
  */
 export function businessName(business: { name: string } | null): string {
   return business?.name ?? 'Business removed from register'
+}
+
+/**
+ * `Liza Reyes` -> `LR`, for an avatar where the register holds no photograph.
+ *
+ * Two letters at most, and one is better than a squeeze: a third initial in a
+ * 40px circle is unreadable at the size it would have to be set.
+ *
+ * Why initials rather than the generic silhouette that was here: an inbox is
+ * scanned, not read. A reader looking for "who was I talking to" recognises a
+ * SHAPE before they recognise a word, which is why every messaging app leads a
+ * row with one - and an identical grey person on every row gives them nothing
+ * to recognise, spending 44px a row to say "this is a person" about a list
+ * that is entirely people.
+ */
+export function initialsOf(name: string | null | undefined): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }

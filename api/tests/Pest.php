@@ -5,6 +5,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
 use App\Models\DocumentType;
 use App\Models\Barangay;
+use App\Models\Department;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -50,6 +51,31 @@ function loginToken(string $email, string $password = 'biztrack1', ?string $port
  * every admin-driven test on the wrong-door 409 — a failure that reads as a
  * permission problem and is nothing of the kind.
  */
+/**
+ * Route a filing to an office, and answer with that office's id.
+ *
+ * This lived in ConversationSeparationTest until MessageThreadsTest needed the
+ * same thing. A Pest run filtered to one file loads only that file, so a
+ * fixture two suites share has to be in the shared home rather than in
+ * whichever suite happened to write it first - and two copies would redeclare
+ * the function on a full run.
+ *
+ * It matters more than it used to. An office's Messages page is its caseload
+ * now [client, 28 September 2026], so a fixture that wants an office to SEE a
+ * filing has to hand it to them; before this, writing to them was enough.
+ */
+function assignOffice(int $applicationId, string $departmentCode): int
+{
+    $department = Department::where('code', $departmentCode)->firstOrFail();
+
+    ApplicationAssignment::firstOrCreate([
+        'application_id' => $applicationId,
+        'department_id' => $department->id,
+    ]);
+
+    return $department->id;
+}
+
 function portalFor(string $email): string
 {
     $user = User::where('email', $email)->first();

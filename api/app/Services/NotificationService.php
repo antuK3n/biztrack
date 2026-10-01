@@ -698,15 +698,49 @@ class NotificationService
          * must act on look like the one they can ignore.
          */
         $restored = $to === 'active';
-        $title = $restored ? 'Business account restored' : "Business account {$label}";
+        $title = $restored
+            ? 'Business account restored'
+            : ($to === Business::STATUS_BLACKLISTED
+                // Named for what it is. "Business account Blacklisted" reads
+                // as one account among several; this one is about the reader.
+                ? 'Your account has been blacklisted'
+                : "Business account {$label}");
+
+        /*
+         * -- A blacklisting is about the reader, not about one shopfront -----
+         *
+         * It said "{business} is now Blacklisted. New applications cannot be
+         * filed for it" - true of the business named, and badly misleading
+         * about everything else the reader owns, all of which was barred in
+         * the same act. Somebody with three shops would have read this as one
+         * shop's problem and found out the rest by being refused
+         * [client, 27 September 2026: *"bale lahat lahat ng business nya ay
+         * blacklisted na ... need ng notif sa business owner"*].
+         *
+         * The count comes from the owner's own businesses rather than from
+         * the caller, so the sentence cannot drift from what was actually
+         * written.
+         */
+        $blacklisted = $to === Business::STATUS_BLACKLISTED;
+        $held = $blacklisted || $restored
+            ? $business->owner->businesses()->count()
+            : 1;
 
         $body = $restored
             ? "{$business->name} is active again and can file applications. Reason: {$reason}"
-            : "{$business->name} is now {$label}. "
-                .($to === Business::STATUS_BLACKLISTED || $to === 'suspended'
-                    ? 'New applications cannot be filed for it while this stands. '
-                    : '')
-                ."Reason: {$reason} If you believe this is a mistake, message the City BPLO.";
+            : ($blacklisted
+                ? 'This account has been blacklisted'
+                    .($held > 1
+                        ? ", so all {$held} of its businesses — including {$business->name} — are "
+                            .'blacklisted and none of them can file or renew.'
+                        : ", so {$business->name} cannot file or renew.")
+                    ." Reason: {$reason} To ask what is needed to have this lifted, message the "
+                    .'City BPLO through BizTrack.'
+                : "{$business->name} is now {$label}. "
+                    .($to === 'suspended'
+                        ? 'New applications cannot be filed for it while this stands. '
+                        : '')
+                    ."Reason: {$reason} If you believe this is a mistake, message the City BPLO.");
 
         /*
          * `/dashboard`, not `/businesses` — there is no such route, and this

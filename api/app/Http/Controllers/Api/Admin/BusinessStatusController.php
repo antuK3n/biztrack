@@ -10,6 +10,7 @@ use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -31,6 +32,29 @@ class BusinessStatusController extends Controller
     ];
 
     /**
+     * What the roster may be ordered by, and the expression for each.
+     *
+     * Correlated subqueries rather than joins for the two cross-table sorts:
+     * this query already eager-loads four relations, and a join onto
+     * `permit_fees` would multiply the rows before the paginator counted them —
+     * a business with three unpaid fees would be three rows of a twenty-row
+     * page. The subquery returns one value per business and leaves the count
+     * alone.
+     *
+     * `registered` is last-registered-first when `dir` is the default `desc`,
+     * which is the order this list has always come in.
+     */
+    private const SORTS = [
+        'registered' => 'businesses.created_at',
+        'name' => 'businesses.name',
+        'status_changed' => 'businesses.status_changed_at',
+        'owner' => '(select name from users where users.id = businesses.owner_user_id)',
+        'fees' => '(select coalesce(sum(amount), 0) from unbilled_permit_fees
+                    where unbilled_permit_fees.business_id = businesses.id
+                      and unbilled_permit_fees.billed_at is null)',
+    ];
+
+    /**
      * The business roster. Paginated, newest registration first.
      *
      * 705 rows and 122 KB unpaged. `q` and `status` are here so the admin can
@@ -42,6 +66,37 @@ class BusinessStatusController extends Controller
         $request->validate([
             'q' => ['sometimes', 'nullable', 'string', 'max:120'],
             'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted'],
+            /*
+             * ── Ordering, from a whitelist ──────────────────────────────────
+             *
+             * The roster came back newest-registration-first and only that. An
+             * admin owed money by somebody had no way to ask which businesses
+             * owe the most, and one holding a name had to page 705 rows to find
+             * it [client, 27 September 2026: *"pakilagyan ng mga pwede pang
+             * ifilter at isort"*].
+             *
+             * A whitelist, never the raw parameter: `orderBy($request->input())`
+             * is a column name from the internet reaching the query planner.
+             */
+            'sort' => ['sometimes', 'nullable', 'in:'.implode(',', array_keys(self::SORTS))],
+            'dir' => ['sometimes', 'nullable', 'in:asc,desc'],
+            /*
+             * The two facts an admin narrows by that are not a status: whether
+             * the owner is barred (one sanction, several shopfronts) and
+             * whether money is outstanding.
+             */
+            'owner_blacklisted' => ['sometimes', 'nullable', 'boolean'],
+            'fees' => ['sometimes', 'nullable', 'in:owing,clear'],
+            'filed' => ['sometimes', 'nullable', 'in:yes,never'],
+            /*
+             * When the business was registered. "Everything registered this
+             * quarter" is the shape of half the questions an admin is asked to
+             * answer about this register, and sorting by date does not answer
+             * it — it puts the quarter at the top of seven hundred rows and
+             * leaves the reader to decide where it ends.
+             */
+            'registered_from' => ['sometimes', 'nullable', 'date'],
+            'registered_to' => ['sometimes', 'nullable', 'date', 'after_or_equal:registered_from'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -54,7 +109,7 @@ class BusinessStatusController extends Controller
          * per row and this list is paged at twenty.
          */
         $query = Business::with([
-            'owner:id,name',
+            'owner:id,name,blacklisted_at',
             /*
              * Latest by the CALENDAR, not by insertion order.
              *
@@ -105,7 +160,65 @@ class BusinessStatusController extends Controller
             $query->where('status', $status);
         }
 
-        $page = $query->orderByDesc('created_at')
+        /*
+         * Whose sanction it is. After a blacklisting cascades, three rows of one
+         * owner read identically; this is how an admin asks for the businesses
+         * caught by somebody else's finding rather than by their own conduct.
+         */
+        if ($request->has('owner_blacklisted') && $request->query('owner_blacklisted') !== null) {
+            $barred = $request->boolean('owner_blacklisted');
+            $query->whereHas('owner', fn ($o) => $barred
+                ? $o->whereNotNull('blacklisted_at')
+                : $o->whereNull('blacklisted_at'));
+        }
+
+        // Money outstanding, which is the reason an officer opens this screen
+        // when they are not here to sanction anybody.
+        if ($fees = $request->query('fees')) {
+            $query->when(
+                $fees === 'owing',
+                fn ($b) => $b->whereHas('unbilledPermitFees', fn ($f) => $f->outstanding()),
+                fn ($b) => $b->whereDoesntHave('unbilledPermitFees', fn ($f) => $f->outstanding()),
+            );
+        }
+
+        /*
+         * Registered between two dates. `whereDate`, not a raw comparison
+         * against a timestamp: `created_at <= '2026-09-27'` excludes
+         * everything registered ON the 27th, because midnight is the earliest
+         * moment of the day and every row that day is later than it. An
+         * inclusive "to" is what a reader means by a date range.
+         */
+        if ($from = $request->query('registered_from')) {
+            $query->whereDate('created_at', '>=', $from);
+        }
+        if ($to = $request->query('registered_to')) {
+            $query->whereDate('created_at', '<=', $to);
+        }
+
+        // A business that has never filed is a registration with no paperwork
+        // behind it — worth being able to list on its own.
+        if ($filed = $request->query('filed')) {
+            $query->when(
+                $filed === 'yes',
+                fn ($b) => $b->has('applications'),
+                fn ($b) => $b->doesntHave('applications'),
+            );
+        }
+
+        /*
+         * `orderByRaw` with an expression from the whitelist above, never from
+         * the request. `dir` is validated to two words, so it is safe to
+         * interpolate; the column never is.
+         *
+         * `id` last, always: two businesses registered in the same second, or
+         * two owing nothing, would otherwise come back in whatever order SQLite
+         * felt like — which makes page two repeat rows from page one.
+         */
+        $sort = $request->query('sort') ?: 'registered';
+        $dir = $request->query('dir') ?: ($sort === 'registered' || $sort === 'status_changed' || $sort === 'fees' ? 'desc' : 'asc');
+
+        $page = $query->orderByRaw(self::SORTS[$sort].' '.$dir)
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
 
@@ -133,7 +246,21 @@ class BusinessStatusController extends Controller
                  */
                 'tracking_id' => $b->applications->first()?->tracking_id,
                 'applications_count' => (int) $b->applications_count,
-                'owner' => $b->owner ? ['id' => $b->owner->id, 'name' => $b->owner->name] : null,
+                /*
+                 * The owner, and whether the bar is theirs.
+                 *
+                 * A row reading "Blacklisted" says nothing about WHY, and
+                 * after the cascade most blacklisted rows are blacklisted
+                 * because of a finding against the person rather than anything
+                 * about that shopfront. The roster marks which, so an admin
+                 * looking at three rows of one owner can see it is one
+                 * sanction and not three.
+                 */
+                'owner' => $b->owner ? [
+                    'id' => $b->owner->id,
+                    'name' => $b->owner->name,
+                    'blacklisted' => $b->owner->isBlacklisted(),
+                ] : null,
                 'status' => $b->status,
                 'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
                 'created_at' => optional($b->created_at)->toISOString(),
@@ -192,6 +319,78 @@ class BusinessStatusController extends Controller
         ]);
     }
 
+    /**
+     * Who is blacklisted, and everything they own.
+     *
+     * ── Why this is a register of PEOPLE ──────────────────────────────────
+     *
+     * The business roster answers "which shopfronts are barred", and after
+     * the cascade that is three rows saying the same thing about one person,
+     * with nothing on screen to say they are the same thing. The question an
+     * admin actually has - who is barred from the register, and what does the
+     * bar cover - has no answer on a list of businesses
+     * [client, 27 September 2026: *"sa blacklisted ay mismong owner ang naka
+     * record don at mga listahan na rin ng mga business nya ay kasama"*].
+     *
+     * So: one row per person, their reason, the date, who decided, and every
+     * business registered to them - including any registered SINCE, which the
+     * cascade never touched and which they still cannot file for.
+     */
+    public function blacklistedOwners(Request $request): JsonResponse
+    {
+        $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $query = User::whereNotNull('blacklisted_at')
+            ->with([
+                'businesses:id,owner_user_id,name,status,created_at',
+                'blacklistedBy:id,name',
+            ]);
+
+        if ($q = $request->query('q')) {
+            $query->where(fn ($sub) => $sub
+                ->where('name', 'like', "%{$q}%")
+                ->orWhere('email', 'like', "%{$q}%")
+                ->orWhereHas('businesses', fn ($b) => $b->where('name', 'like', "%{$q}%")));
+        }
+
+        $page = $query->orderByDesc('blacklisted_at')->paginate($this->perPage($request));
+
+        return response()->json([
+            'data' => collect($page->items())->map(fn (User $owner) => [
+                'id' => $owner->id,
+                'name' => $owner->name,
+                'email' => $owner->email,
+                'mobile_number' => $owner->mobile_number,
+                'blacklisted_at' => optional($owner->blacklisted_at)->toISOString(),
+                'reason' => $owner->blacklist_reason,
+                // Named, because a sanction nobody signed is one nobody can
+                // follow up. Null where the record predates this column.
+                'blacklisted_by' => $owner->blacklistedBy?->name,
+                'businesses' => $owner->businesses->map(fn (Business $b) => [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'status' => $b->status,
+                    'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
+                    /*
+                     * Registered after the bar was imposed, which the cascade
+                     * could not have caught. It is still barred - the owner's
+                     * blacklisting is read on every filing attempt - but its
+                     * own column says Active, and an admin comparing the two
+                     * should be told why rather than left to wonder.
+                     */
+                    'registered_after' => $b->created_at !== null
+                        && $owner->blacklisted_at !== null
+                        && $b->created_at->greaterThan($owner->blacklisted_at),
+                ])->values(),
+            ])->values(),
+            'meta' => $this->pageMeta($page),
+        ]);
+    }
+
     public function updateStatus(Request $request, Business $business): JsonResponse
     {
         $data = $request->validate([
@@ -218,6 +417,26 @@ class BusinessStatusController extends Controller
             $changes['status_changed_at'] = now();
         }
         $business->update($changes);
+
+        /*
+         * -- Blacklisting is of the OWNER ------------------------------------
+         *
+         * It used to write one business's column, so an owner barred for
+         * falsified documents filed for their other two the same afternoon.
+         * A suspension is about a premises that failed an inspection; a
+         * blacklisting is a finding against whoever is filing, and it only
+         * means anything if it follows the person [client, 27 September 2026:
+         * *"once na naka blacklist, mismong owner na tlga yan, bale lahat
+         * lahat ng business nya ay blacklisted na"*].
+         *
+         * Only on a real move, like everything else in this method: re-saving
+         * a blacklisting already in force must not re-date the sanction or
+         * re-bar businesses an earlier reinstatement had since released.
+         */
+        $sweep = ['blacklisted' => 0, 'restored' => 0];
+        if ($data['status'] !== $from) {
+            $sweep = $this->carryToTheOwner($business, $data['status'], $data['reason'], $request);
+        }
 
         Audit::log('business.status_changed', $business, [
             'from' => $from,
@@ -278,8 +497,240 @@ class BusinessStatusController extends Controller
                 'id' => $business->id,
                 'status' => $business->status,
                 'status_label' => self::LABELS[$business->status] ?? ucfirst($business->status),
+                /*
+                 * What ELSE moved, so the screen can say it rather than making
+                 * the admin reload and count. Blacklisting one business of
+                 * three changes three rows, and a reply describing only the
+                 * one that was clicked is a reply that hides two thirds of
+                 * what just happened.
+                 */
+                'owner_blacklisted' => $business->owner?->isBlacklisted() ?? false,
+                'others_blacklisted' => $sweep['blacklisted'],
+                'others_restored' => $sweep['restored'],
             ],
         ]);
+    }
+
+    /**
+     * Lift a blacklisting from the owner, and set every business they hold to
+     * one status.
+     *
+     * ── Why this is one act and not several ────────────────────────────────
+     *
+     * The sanctions card used to offer Change Status per business, and that
+     * was incoherent: a blacklisting falls on the PERSON and reaches
+     * everything they own, so releasing one shopfront while the other three
+     * stayed barred left a register that contradicted itself — the owner is
+     * blacklisted, and one of their businesses says Active
+     * [client, 28 September 2026: *"hindi pwedeng isahang business lang ang
+     * mamomodify mo tas yung iba naka tag pa rin sa blacklisted"*].
+     *
+     * The bar went on as one act. It comes off as one act.
+     *
+     * ── Why Blacklisted is not among the choices ───────────────────────────
+     *
+     * They already are. Offering it would be a control whose only effect is to
+     * re-date a sanction that is already in force — which is exactly what the
+     * "already blacklisted" guard on the business dialog refuses. To bar
+     * somebody who is not yet barred, use the business roster; this endpoint
+     * is the way back.
+     */
+    public function liftOwnerBlacklist(Request $request, User $owner): JsonResponse
+    {
+        $data = $request->validate([
+            /*
+             * The three a released business can land on, and no more.
+             * `blacklisted` is absent by design — see the note above.
+             */
+            'status' => ['required', 'in:active,flagged,suspended'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'status.in' => 'Choose Active, Flagged, or Suspended. They are already blacklisted.',
+        ]);
+
+        abort_unless($owner->isBlacklisted(), 422, 'This owner is not blacklisted.');
+
+        $to = $data['status'];
+        $reason = $data['reason'];
+
+        $moved = DB::transaction(function () use ($owner, $to, $reason, $request) {
+            $owner->forceFill([
+                'blacklisted_at' => null,
+                'blacklist_reason' => null,
+                'blacklisted_by' => null,
+            ])->save();
+
+            Audit::log('owner.blacklist_lifted', $owner, [
+                'reason' => $reason,
+                'to' => $to,
+                'by' => $request->user()?->id,
+            ]);
+
+            /*
+             * EVERY business they hold, not only the ones the cascade barred.
+             * One registered after the blacklisting still reads Active while
+             * being refused every filing, and leaving it behind would keep the
+             * exact contradiction this endpoint exists to end.
+             */
+            $businesses = $owner->businesses()->get();
+
+            foreach ($businesses as $business) {
+                $from = $business->status;
+                if ($from === $to) {
+                    continue;
+                }
+
+                $business->update(['status' => $to, 'status_changed_at' => now()]);
+
+                Audit::log('business.status_changed', $business, [
+                    'from' => $from,
+                    'to' => $to,
+                    'reason' => "Owner released from blacklist: {$reason}",
+                    'released_with_owner' => $owner->id,
+                ]);
+
+                /*
+                 * Suspended keeps the certificates suspended; the other two
+                 * bring them back. Flagged is a watch marker and never a
+                 * sanction — `isBlockedFromApplying` ignores it — so a flagged
+                 * business trades on valid permits like an active one.
+                 */
+                if ($to === 'suspended') {
+                    $this->workflow->suspendPermitsForBusiness($business, $reason);
+                } else {
+                    $this->workflow->restorePermitsForBusiness($business);
+                }
+            }
+
+            return $businesses;
+        });
+
+        /*
+         * One notice for the person, not one per shopfront. The bar was on
+         * them, so its lifting is one piece of news — and four notifications
+         * saying the same thing about four businesses is how somebody learns
+         * to swipe this app's messages away.
+         */
+        $this->notifications->push(
+            $owner,
+            'account_status',
+            $to === 'active' ? 'Your account has been restored' : 'Your account is no longer blacklisted',
+            $moved->count() === 1
+                ? "{$moved->first()->name} is now ".self::LABELS[$to].". Reason: {$reason}"
+                : "All {$moved->count()} of your businesses are now ".self::LABELS[$to].". Reason: {$reason}",
+            '/dashboard',
+        );
+
+        return response()->json([
+            'data' => [
+                'owner_blacklisted' => false,
+                'status' => $to,
+                'status_label' => self::LABELS[$to],
+                'businesses_moved' => $moved->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Carry a blacklisting - or its lifting - to the owner and their other
+     * businesses.
+     *
+     * Returns how many OTHER businesses moved, so the reply can say so.
+     *
+     * ── Why reinstating is the mirror and not a separate decision ──────────
+     *
+     * Setting a blacklisted business back to Active is an admin saying the
+     * finding no longer stands. Leaving the owner barred while one of their
+     * businesses reads Active would be the worst of both: a roster that says
+     * they may trade and an endpoint that refuses every filing, with nothing
+     * on either screen explaining the disagreement. So the lifting is
+     * owner-wide too, and the businesses that were blacklisted BY the cascade
+     * come back with it.
+     *
+     * Suspended and Flagged are untouched here on purpose. They are facts
+     * about a premises, they are set one business at a time, and a business
+     * suspended for its own reasons must not be quietly reactivated because a
+     * different shopfront was reinstated.
+     */
+    private function carryToTheOwner(Business $business, string $to, string $reason, Request $request): array
+    {
+        $owner = $business->owner;
+        if ($owner === null) {
+            return ['blacklisted' => 0, 'restored' => 0];
+        }
+
+        if ($to === Business::STATUS_BLACKLISTED) {
+            $owner->forceFill([
+                'blacklisted_at' => now(),
+                'blacklist_reason' => $reason,
+                'blacklisted_by' => $request->user()?->id,
+            ])->save();
+
+            Audit::log('owner.blacklisted', $owner, [
+                'reason' => $reason,
+                'because_of_business_id' => $business->id,
+            ]);
+
+            $others = $owner->businesses()
+                ->whereKeyNot($business->id)
+                ->where('status', '!=', Business::STATUS_BLACKLISTED)
+                ->get();
+
+            foreach ($others as $other) {
+                $other->update([
+                    'status' => Business::STATUS_BLACKLISTED,
+                    'status_changed_at' => now(),
+                ]);
+                Audit::log('business.status_changed', $other, [
+                    'from' => $other->getOriginal('status'),
+                    'to' => Business::STATUS_BLACKLISTED,
+                    // Named as a consequence, because it is: nobody clicked
+                    // this row, and an audit trail that cannot tell a decision
+                    // from its fallout is one nobody can reconstruct.
+                    'reason' => "Owner blacklisted: {$reason}",
+                    'cascaded_from_business_id' => $business->id,
+                ]);
+                $this->workflow->suspendPermitsForBusiness($other, "Owner blacklisted: {$reason}");
+            }
+
+            return ['blacklisted' => $others->count(), 'restored' => 0];
+        }
+
+        // Lifting it. Only from a blacklisted owner, and only to Active -
+        // moving a blacklisted business to Flagged or Suspended is a
+        // half-measure nobody asked for and would leave the owner barred.
+        if ($to === 'active' && $owner->isBlacklisted()) {
+            $owner->forceFill([
+                'blacklisted_at' => null,
+                'blacklist_reason' => null,
+                'blacklisted_by' => null,
+            ])->save();
+
+            Audit::log('owner.blacklist_lifted', $owner, [
+                'reason' => $reason,
+                'because_of_business_id' => $business->id,
+            ]);
+
+            $others = $owner->businesses()
+                ->whereKeyNot($business->id)
+                ->where('status', Business::STATUS_BLACKLISTED)
+                ->get();
+
+            foreach ($others as $other) {
+                $other->update(['status' => 'active', 'status_changed_at' => now()]);
+                Audit::log('business.status_changed', $other, [
+                    'from' => Business::STATUS_BLACKLISTED,
+                    'to' => 'active',
+                    'reason' => "Owner reinstated: {$reason}",
+                    'cascaded_from_business_id' => $business->id,
+                ]);
+                $this->workflow->restorePermitsForBusiness($other);
+            }
+
+            return ['blacklisted' => 0, 'restored' => $others->count()];
+        }
+
+        return ['blacklisted' => 0, 'restored' => 0];
     }
 
     /**

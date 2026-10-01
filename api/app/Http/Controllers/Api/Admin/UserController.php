@@ -10,11 +10,12 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Support\Audit;
 use App\Support\Caseload;
+use App\Support\StaffCredentials;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -75,12 +76,65 @@ class UserController extends Controller
     private const OFFICELESS_ROLES = ['admin', 'business_owner'];
 
     /**
+     * The office role a typed one copies its permissions from.
+     *
+     * `sanitary_officer` rather than a list written out here: the five office
+     * roles carry the same seven permissions (zoning adds `zoning.evaluate`),
+     * so any of them is the standard set — and taking it from a role means a
+     * change to what an officer may do reaches roles created this way without
+     * anybody remembering a second place to edit.
+     */
+    private const OFFICE_ROLE_TEMPLATE = 'sanitary_officer';
+
+    /**
      * The staff directory. Paginated, alphabetical.
      *
      * Alphabetical rather than newest-first on purpose: this is a directory you
      * look somebody up in, not a feed. The payload carries every role and every
      * permission per user, so it grows faster than the row count suggests.
      */
+    /**
+     * What "holding" counts, for `withCount` and `loadCount` alike.
+     *
+     * Written once because the directory's figure and the caseload screen's
+     * figure describe one fact, and because the three endpoints that answer
+     * with a single user have to agree with the one that answers with a list.
+     * The conditions themselves come from `Caseload`, which is where the rule
+     * lives.
+     */
+    private static function caseloadCounts(): array
+    {
+        return [
+            'assignments as open_reviews_count' => fn ($a) => Caseload::scopeOpen($a),
+            'inspections as open_inspections_count' => fn ($i) => $i->whereNotIn('status', Caseload::CLOSED_INSPECTIONS),
+        ];
+    }
+
+    /**
+     * One user, loaded the way the directory loads every row.
+     *
+     * -- Why this exists -------------------------------------------------
+     *
+     * Creating, editing and activating all answer with the changed user, and
+     * the page puts that answer straight back into the row it came from. None
+     * of them counted the caseload, so `open_reviews` was absent from the
+     * payload, `whenCounted` dropped the key, and the Holding cell fell back
+     * to a dash - a row that read "2 filings" a second ago read "-" for no
+     * reason the administrator could see, and stayed that way until the page
+     * was reloaded [client, 27 September 2026: *"bat may ganyan pa sa holding,
+     * kung wala, it should be automatic na Nothing"*].
+     *
+     * The fix belongs here rather than in the cell. A dash meant "the server
+     * did not say", which was true and useless; printing "Nothing" instead
+     * would have invented a zero. Sending the figure makes both readings
+     * unnecessary.
+     */
+    private function withCaseload(User $user): User
+    {
+        return $user->loadCount(self::caseloadCounts())
+            ->load('department', 'roles.permissions');
+    }
+
     public function index(Request $request): JsonResponse
     {
         /*
@@ -131,7 +185,24 @@ class UserController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
+        /*
+         * ── The workload column ──────────────────────────────────────────
+         *
+         * Two counts per officer, so the directory can say who is carrying
+         * what without the reader opening every row in turn [client, 27
+         * September 2026: "need mo pa pindutin isa isa kung ano laman na
+         * permit na hawak nila"].
+         *
+         * `withCount`, not a per-row query: this list is paginated and a
+         * `Caseload::summary()` per officer would be two queries a row.
+         *
+         * The conditions come from `Caseload` rather than being written again
+         * here. The directory's number and the caseload screen's number
+         * describe one fact, and a "holding 3" beside a page listing 2 is the
+         * kind of disagreement nobody reports — they just stop trusting both.
+         */
         $query = User::with('department', 'roles.permissions')
+            ->withCount(self::caseloadCounts())
             ->orderBy('name')
             ->orderBy('id');
 
@@ -178,9 +249,37 @@ class UserController extends Controller
     {
         $roles = Role::whereNotIn('name', self::EXCLUDED_ROLES)
             ->orderBy('display_name')
-            ->get(['name', 'display_name', 'description']);
+            ->get(['id', 'name', 'display_name', 'description']);
 
         $superAdminTaken = $this->superAdminExists();
+
+        /*
+         * ── Which offices each role is actually used in ─────────────────────
+         *
+         * There is no role→office column, and there should not be: nothing in
+         * the register forbids a BPLO account holding the Fire Inspector role,
+         * and the office is what does the scoping anyway. But an admin who has
+         * just picked CHO does not want to read six roles, five of which
+         * belong to other offices [client, 27 September 2026: *"may dropdown
+         * na ng kung ano ano ang role sa office na pinili na yon"*].
+         *
+         * So the form is told where each role is IN USE, derived from the
+         * accounts that hold it, and puts those first. Derived rather than
+         * declared, because it stays true without anybody maintaining it — and
+         * it is why a role typed for CHO today is a CHO role tomorrow, as soon
+         * as the account holding it exists.
+         *
+         * One query for the whole table, not one per role.
+         */
+        $usedIn = DB::table('user_roles')
+            ->join('users', 'users.id', '=', 'user_roles.user_id')
+            ->whereNotNull('users.department_id')
+            ->whereNull('users.deleted_at')
+            ->select('user_roles.role_id', 'users.department_id')
+            ->distinct()
+            ->get()
+            ->groupBy('role_id')
+            ->map(fn ($rows) => $rows->pluck('department_id')->map(fn ($id) => (int) $id)->values()->all());
 
         return response()->json([
             'data' => $roles->map(fn (Role $role) => [
@@ -200,6 +299,13 @@ class UserController extends Controller
                  * offices are explicitly allowed more than one account each.
                  */
                 'available' => $role->name !== self::DEPARTMENTLESS_ROLE || ! $superAdminTaken,
+                /*
+                 * The offices where somebody currently holds this role. Empty
+                 * for a role nobody has yet — including one typed a moment ago
+                 * whose account is still being filled in, which is why the
+                 * form must show unused roles too rather than hiding them.
+                 */
+                'used_in_departments' => $usedIn->get($role->id, []),
             ])->all(),
         ]);
     }
@@ -213,6 +319,25 @@ class UserController extends Controller
     }
 
     public function store(Request $request): JsonResponse
+    {
+        /*
+         * ── Validation inside the transaction, on purpose ───────────────────
+         *
+         * A typed role is created by `validateUser` before the rest of the
+         * request is judged (it has to be, so that `roles.*`'s `exists` rule
+         * and the office and super-admin guards all apply to it unchanged).
+         * Left outside a transaction, an admin who typed "Records Clerk III"
+         * and then failed on a weak password would leave that role in the
+         * register for ever, held by nobody and offered to everybody.
+         *
+         * A ValidationException thrown in here rolls the role back with
+         * everything else, so a refused request leaves no trace — which is
+         * what a refused request should do.
+         */
+        return DB::transaction(fn () => $this->createUser($request));
+    }
+
+    private function createUser(Request $request): JsonResponse
     {
         $data = $this->validateUser($request, creating: true);
 
@@ -236,11 +361,18 @@ class UserController extends Controller
         Audit::log('user.created', $user, ['roles' => $data['roles']]);
 
         return response()->json([
-            'data' => new UserResource($user->load('department', 'roles.permissions')),
+            'data' => new UserResource($this->withCaseload($user)),
         ], 201);
     }
 
     public function update(Request $request, User $user): JsonResponse
+    {
+        // In a transaction for the same reason as store(): a typed role must
+        // not survive a request the rest of which was refused.
+        return DB::transaction(fn () => $this->applyUserEdit($request, $user));
+    }
+
+    private function applyUserEdit(Request $request, User $user): JsonResponse
     {
         $data = $this->validateUser($request, creating: false, user: $user);
 
@@ -290,10 +422,31 @@ class UserController extends Controller
             $user->roles()->sync(Role::whereIn('name', $data['roles'])->pluck('id'));
         }
 
+        /*
+         * -- A new password ends the old sessions ---------------------------
+         *
+         * An admin setting somebody else's password is doing one of two
+         * things: handing back an account whose owner is locked out, or taking
+         * one away from whoever has it. The second case is the one that
+         * matters, and it does not work unless the tokens go: Sanctum tokens
+         * are independent of the password, so without this the person who
+         * prompted the reset keeps the session they already had and the reset
+         * accomplishes nothing at all.
+         *
+         * Not logged with the password, obviously, and not logged with a hash
+         * of it either - the audit trail records THAT it happened, which is
+         * what an auditor needs, and nothing a reader of the trail could take
+         * an account with.
+         */
+        if (filled($data['password'] ?? null)) {
+            $user->tokens()->delete();
+            Audit::log('user.password_reset', $user, ['by' => $request->user()?->id]);
+        }
+
         Audit::log('user.updated', $user);
 
         return response()->json([
-            'data' => new UserResource($user->fresh()->load('department', 'roles.permissions')),
+            'data' => new UserResource($this->withCaseload($user->fresh())),
             'meta' => $released ? ['released' => $released] : [],
         ]);
     }
@@ -702,7 +855,7 @@ class UserController extends Controller
         Audit::log('user.toggle_active', $user, ['is_active' => $user->is_active] + ($released ?? []));
 
         return response()->json([
-            'data' => new UserResource($user->fresh()->load('department', 'roles.permissions')),
+            'data' => new UserResource($this->withCaseload($user->fresh())),
             'meta' => $released ? ['released' => $released] : [],
         ]);
     }
@@ -757,6 +910,35 @@ class UserController extends Controller
 
         $required = $creating ? 'required' : 'sometimes';
 
+        /*
+         * Tidied before it is judged, so `+63 917 123 4567` and `0917-123-4567`
+         * are accepted as the numbers they plainly are. A number of the wrong
+         * LENGTH is not a formatting preference and still fails below.
+         */
+        if ($request->has('mobile_number')) {
+            $request->merge([
+                'mobile_number' => StaffCredentials::normaliseMobile($request->input('mobile_number')),
+            ]);
+        }
+
+        /*
+         * ── A role that is not on the list yet ──────────────────────────────
+         *
+         * `new_role` is a job title typed into the Role box because the office
+         * does not have one by that name [client, 27 September 2026: *"pede
+         * rin nila i type yung role kung wala sa choices"*]. It is turned into
+         * a real role here and then handled exactly like a chosen one, so
+         * everything below — the office check, the super-admin seat, the
+         * `exists` rule on `roles.*` — applies to it unchanged.
+         *
+         * Resolved BEFORE validation rather than after it, for that reason:
+         * a second code path that creates accounts, skipping those three
+         * guards, is how the singleton super-admin seat stops being singleton.
+         */
+        if (filled($request->input('new_role')) && ! filled($request->input('roles'))) {
+            $request->merge(['roles' => [$this->roleFromTypedTitle($request)]]);
+        }
+
         $data = $request->validate([
             'first_name' => [$required, 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
@@ -764,10 +946,14 @@ class UserController extends Controller
             'suffix' => ['nullable', 'string', 'max:20'],
             'gender' => [$required, 'in:M,F'],
             'email' => [$required, 'email', 'max:255', Rule::unique('users', 'email')->ignore($user?->id)],
-            'mobile_number' => [$required, 'string', 'max:20'],
-            'password' => $creating
-                ? ['required', PasswordRule::min(8)]
-                : ['nullable', PasswordRule::min(8)],
+            'mobile_number' => StaffCredentials::mobileRules(required: $creating),
+            /*
+             * Optional on an edit and required on a create, both from the one
+             * policy. `nullable` is what lets the edit form post an untouched,
+             * empty password field without that being read as "clear it" - see
+             * the note in update().
+             */
+            'password' => StaffCredentials::passwordRules(required: $creating),
             'department_id' => ['nullable', 'exists:departments,id'],
             'roles' => [$required, 'array', 'min:1'],
             'roles.*' => [Rule::exists('roles', 'name')->whereNotIn('name', self::EXCLUDED_ROLES)],
@@ -775,12 +961,114 @@ class UserController extends Controller
             'email.unique' => 'This email is already registered.',
             'roles.required' => 'Choose the role this account signs in with.',
             'roles.*.exists' => 'Choose one of the LGU staff roles. Business owners register their own accounts.',
-        ]);
+        ] + StaffCredentials::messages());
 
         $this->assertOfficeMatchesRole($data, $user);
         $this->assertSuperAdminSeat($data, $user);
 
         return $data;
+    }
+
+    /**
+     * Turn a typed job title into a real role, and answer with its name.
+     *
+     * ── Why typing one is safe here, and what makes it safe ────────────────
+     *
+     * A role in this register is a permission bundle, so the obvious
+     * implementation — create the row, attach nothing — mints an account that
+     * signs in to a blank app and can do nothing, with no error anywhere to
+     * say why. That is the trap this method exists to avoid.
+     *
+     * What makes it avoidable is that an office role is almost entirely a job
+     * TITLE. Measured on the register: `sanitary_officer`, `fire_inspector`,
+     * `obo_staff` and `cenro_officer` carry byte-for-byte the same seven
+     * permissions, and `zoning_officer` those seven plus `zoning.evaluate`.
+     * What actually decides which filings an officer sees is their
+     * `department_id`, not their role. So "Sanitary Inspector II" is a real
+     * thing an office needs to be able to write down, and it needs exactly the
+     * powers every other office role has.
+     *
+     * The new role therefore COPIES an existing office role's permissions
+     * rather than starting empty, and the office still does the scoping.
+     *
+     * ── The one door this does not open ────────────────────────────────────
+     *
+     * A departmentless role. `admin` holds fourteen permissions including
+     * `user.manage`, which is the power to mint accounts — and a typed name
+     * that reached it would be privilege escalation by spelling. A typed role
+     * always belongs to an office, and the request is refused when no office
+     * is named.
+     */
+    private function roleFromTypedTitle(Request $request): string
+    {
+        $label = trim((string) $request->input('new_role'));
+
+        if (mb_strlen($label) < 3) {
+            throw ValidationException::withMessages([
+                'new_role' => ['A role name needs at least three characters.'],
+            ]);
+        }
+
+        /*
+         * An office is required, and it is required HERE rather than being
+         * left to `assertOfficeMatchesRole` below: by the time that runs the
+         * role exists, so a refused request would have left a role row behind
+         * that nobody holds.
+         */
+        if (! filled($request->input('department_id'))) {
+            throw ValidationException::withMessages([
+                'new_role' => [
+                    'Choose the office first. A typed role belongs to an office — only the '
+                    .'super admin works across every one, and that seat cannot be created by '
+                    .'naming it.',
+                ],
+            ]);
+        }
+
+        $name = Str::slug($label, '_');
+
+        /*
+         * An existing role wins, matched on the slug and on the display name.
+         *
+         * Two admins typing "Sanitary Inspector II" a week apart must land on
+         * one role, not two that differ by a space — and somebody typing the
+         * exact label of a role already on the list gets that role rather than
+         * a near-duplicate beside it.
+         */
+        $existing = Role::where('name', $name)
+            ->orWhereRaw('lower(display_name) = ?', [mb_strtolower($label)])
+            ->first();
+
+        if ($existing !== null) {
+            if (in_array($existing->name, self::EXCLUDED_ROLES, true)) {
+                throw ValidationException::withMessages([
+                    'new_role' => ['That is not an LGU staff role. Business owners register their own accounts.'],
+                ]);
+            }
+
+            return $existing->name;
+        }
+
+        // The permissions every office role has. Taken from a role rather than
+        // listed here, so a change to what an officer may do reaches roles
+        // made this way without anybody remembering to update a second list.
+        $template = Role::where('name', self::OFFICE_ROLE_TEMPLATE)->firstOrFail();
+
+        $role = Role::create([
+            'name' => $name,
+            'display_name' => $label,
+            'description' => 'Office role added from the officer directory. Works like '
+                ."{$template->display_name}.",
+        ]);
+        $role->permissions()->sync($template->permissions()->pluck('permissions.id'));
+
+        Audit::log('role.created', $role, [
+            'display_name' => $label,
+            'copied_from' => $template->name,
+            'by' => $request->user()?->id,
+        ]);
+
+        return $role->name;
     }
 
     /**

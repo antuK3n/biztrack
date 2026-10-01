@@ -35,6 +35,22 @@ class UserResource extends JsonResource
             'email_verified_at' => optional($this->email_verified_at)->toISOString(),
             'roles' => $this->roleNames(),
             'permissions' => $this->permissionNames(),
+            /*
+             * What this officer is carrying, when the caller asked for it.
+             *
+             * `whenCounted`, so every other consumer of this resource — the
+             * profile, the assignment payloads, the message participants — is
+             * unchanged and pays nothing. Only the officer directory adds the
+             * counts, and only that screen sees these keys.
+             *
+             * OPEN work only, by the same rule the caseload screen uses
+             * (`Caseload::scopeOpen`). A finished review keeps the officer's
+             * name on it and is not something they are still carrying; the
+             * caseload page states that separately, and the two numbers have
+             * to be able to differ without either being wrong.
+             */
+            'open_reviews' => $this->whenCounted('open_reviews_count'),
+            'open_inspections' => $this->whenCounted('open_inspections_count'),
         ];
     }
 }

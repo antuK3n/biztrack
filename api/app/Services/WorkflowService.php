@@ -4817,4 +4817,38 @@ class WorkflowService
             'reason' => $reason,
         ]);
     }
+
+    /**
+     * Put a filing back in its office's pool, with nobody holding it.
+     *
+     * The other end of `assignOfficer`, and the act the Officer in Charge
+     * screen could not perform: its dialog had to name a successor, so an
+     * office losing its only officer had no way to release the work from
+     * there. The caseload screen could do it through `reassign-caseload`,
+     * which takes `to_user_id: null` — this is the same meaning on the
+     * per-assignment endpoint.
+     *
+     * `assigned_at` goes with the holder. It records when THIS officer took
+     * it, so leaving it behind would date a claim nobody has made, and the
+     * office queue orders by longest-waiting.
+     *
+     * Its own audit action rather than a `reassigned` with a null officer: an
+     * auditor reading the trail should not have to inspect the payload to tell
+     * a handover from a release.
+     */
+    public function releaseOfficer(ApplicationAssignment $assignment, ?string $reason = null): void
+    {
+        if ($assignment->officer_user_id === null) {
+            // Already in the pool. Not an error — the reader asked for a state
+            // the filing is already in, and saying so would be pedantry.
+            return;
+        }
+
+        $assignment->forceFill(['officer_user_id' => null, 'assigned_at' => null])->save();
+
+        Audit::log('assignment.released', $assignment, [
+            'released_by_user_id' => Auth::id(),
+            'reason' => $reason,
+        ]);
+    }
 }

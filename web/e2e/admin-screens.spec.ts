@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
@@ -56,6 +56,8 @@ function officer(over: {
   dept: (typeof DEPARTMENTS)[number]
   role: string
   active?: boolean
+  reviews?: number
+  inspections?: number
 }) {
   return {
     id: over.id,
@@ -73,15 +75,24 @@ function officer(over: {
     roles: [over.role],
     permissions: [],
     last_active_at: null,
+    /*
+     * The workload counts, which the server sends only on this screen
+     * (`whenCounted`). Defaulted to zero so a fixture row that does not care
+     * still renders the column, and overridden per officer below for the
+     * three cases the cell has to tell apart: carrying work, carrying none,
+     * and a payload that carried no counts at all.
+     */
+    open_reviews: over.reviews ?? 0,
+    open_inspections: over.inspections ?? 0,
   }
 }
 
 const OFFICERS = [
-  officer({ id: 11, first: 'Liza', last: 'Reyes', email: 'bplo@biztrack.local', dept: DEPARTMENTS[0], role: 'bplo_staff' }),
+  officer({ id: 11, first: 'Liza', last: 'Reyes', email: 'bplo@biztrack.local', dept: DEPARTMENTS[0], role: 'bplo_staff', reviews: 3 }),
   // The client's rule: an office may hold MORE THAN ONE account.
   officer({ id: 12, first: 'Marites', last: 'Santos', email: 'bplo.two@biztrack.local', dept: DEPARTMENTS[0], role: 'bplo_staff' }),
   officer({ id: 13, first: 'Carlos', last: 'Dizon', email: 'sanitary@biztrack.local', dept: DEPARTMENTS[1], role: 'sanitary_officer' }),
-  officer({ id: 14, first: 'Rosa', last: 'Lim', email: 'retired@biztrack.local', dept: DEPARTMENTS[1], role: 'sanitary_officer', active: false }),
+  officer({ id: 14, first: 'Rosa', last: 'Lim', email: 'retired@biztrack.local', dept: DEPARTMENTS[1], role: 'sanitary_officer', active: false, reviews: 1, inspections: 2 }),
 ]
 
 /*
@@ -92,6 +103,13 @@ const OFFICERS = [
 const SUPER_ADMIN = {
   ...officer({ id: 15, first: 'Ramon', last: 'Santos', email: 'admin@biztrack.local', dept: DEPARTMENTS[0], role: 'admin' }),
   department: null,
+  /*
+   * No counts at all — the `undefined` case, which is a payload from before
+   * they existed rather than an officer holding nothing. The cell prints a
+   * dash for it and "Nothing" for a real zero, and those are different facts.
+   */
+  open_reviews: undefined,
+  open_inspections: undefined,
 }
 
 /*
@@ -226,26 +244,41 @@ test.describe('Officer Assignment', () => {
      * for an option that is simply absent, with nothing to explain why.
      */
     await page.getByRole('button', { name: 'Add officer' }).click()
-    await expect(page.getByRole('heading', { name: /Add|Create/ })).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: /Add|Create/ })).toBeVisible()
 
-    // The select inside the dialog that offers roles — named by what it holds
-    // rather than by a caption three other controls also carry.
-    const admin = page
-      .locator('div.fixed.inset-0 select')
-      .locator('option', { hasText: 'Administrator' })
-    await expect(admin).toHaveCount(1)
     /*
-     * Read off the element, not through toBeDisabled(): Playwright's
-     * enabled/disabled actionability covers form CONTROLS, and an <option> is
-     * not one — it reported "enabled" for `<option disabled value="admin">`.
-     *
-     * This is also the one place `disabled` is the right tool. An option is not
-     * separately focusable, so disabling it takes nothing out of the tab order;
-     * the select itself stays reachable and the text says why the seat is gone.
+     * Through the office first, because the office is what decides which roles
+     * are offered at all: the super admin is the one account belonging to no
+     * office, so it lives behind that choice and nowhere else.
      */
-    expect(await admin.evaluate((el) => (el as HTMLOptionElement).disabled)).toBe(true)
-    // And it says WHY it cannot be chosen, rather than being quietly inert.
-    await expect(admin).toHaveText(/already assigned/)
+    await dialog.getByLabel(/^Office/).selectOption('none')
+
+    const role = dialog.getByRole('combobox', { name: /^Role/ })
+    await expect(role).toBeEnabled()
+    await role.click()
+
+    const admin = dialog.getByRole('option', { name: /Administrator/ })
+    await expect(admin).toHaveCount(1)
+
+    // Marked as taken, and it SAYS so rather than being quietly inert. A role
+    // that cannot be granted has to explain itself; dropping it from the list
+    // would leave an admin hunting for an option that is simply absent.
+    await expect(admin).toHaveAttribute('aria-disabled', 'true')
+    await expect(admin).toContainText(/already assigned/)
+
+    /*
+     * And pressing it changes nothing, which is the part the attribute alone
+     * does not prove.
+     *
+     * Dispatched rather than clicked: Playwright reads `aria-disabled` as
+     * not-enabled and refuses the click, so a plain `.click()` here would
+     * only re-assert the attribute that was just checked. The event goes
+     * straight at the handler, which is where the actual guard lives - an
+     * option that merely LOOKS unavailable is the bug this is about.
+     */
+    await admin.dispatchEvent('mousedown')
+    await expect(role).toHaveValue('')
   })
 
   test('offers Reassign only to an account that belongs to an office', async ({ page }) => {
@@ -256,138 +289,128 @@ test.describe('Officer Assignment', () => {
      * move, no queue to move it from — and the take endpoint answers 422 on
      * exactly that ground. A button that can only fail is worse than no button.
      */
+    /*
+     * A LINK now, not a button: Reassign opens a page rather than a dialog
+     * [27 September 2026]. The claim is unchanged — the control is offered
+     * only where it can work — and it is the reason this test survived the
+     * move while the three that drove the dialog did not.
+     */
     const officer = page.locator('tbody tr', { hasText: 'bplo@biztrack.local' })
-    await expect(officer.getByRole('button', { name: 'Reassign' })).toBeVisible()
+    await expect(officer.getByRole('link', { name: /^Reassign .*caseload$/ })).toBeVisible()
 
     const superAdmin = page.locator('tbody tr', { hasText: 'admin@biztrack.local' })
     await expect(superAdmin).toHaveCount(1)
-    await expect(superAdmin.getByRole('button', { name: 'Reassign' })).toHaveCount(0)
+    await expect(superAdmin.getByRole('link', { name: /^Reassign/ })).toHaveCount(0)
     // The rest of the row is untouched: the account is still editable.
     await expect(superAdmin.getByRole('button', { name: 'Edit' })).toBeVisible()
   })
 
   /*
-   * ── The Reassign dialog ──────────────────────────────────────────────────
+   * ── Three dialog tests retired ──────────────────────────────────────────
    *
-   * `caseload` is stubbed per test rather than in the beforeEach: the three
-   * cases below are three different SERVER answers — a held caseload, an empty
-   * list, and an office queue — and the screen is supposed to read differently
-   * for each. A shared stub would test one of them three times.
+   * They drove the Reassign MODAL: that an officer holding nothing was told
+   * so with no scope to choose from, that Scope listed the permits one by one,
+   * and that the same dialog could hand over the office's unheld work.
+   *
+   * The dialog is a page now, and every one of those claims is made against
+   * it in `officer-caseload.spec.ts` — "an officer holding nothing is told so,
+   * in words", "the tables are the Officer in Charge columns, per list" with
+   * "every row checkbox names the filing it selects", and "the office's unheld
+   * work can be handed to this officer".
+   *
+   * Deleted rather than pointed at the new screen: a test in this file would
+   * have to navigate away from the screen this file is about, and two specs
+   * asserting one page is how they drift.
    */
-  const caseloadRoute = (page: Page, body: Record<string, unknown>) =>
-    page.route('**/api/v1/admin/users/11/caseload*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: {
-            user: { id: 11, name: 'Liza Reyes' },
-            department: { id: 1, code: 'BPLO', name: 'Business Permits and Licensing Office' },
-            open_reviews: 0,
-            open_inspections: 0,
-            total: 0,
-            candidates: [],
-            ...body,
-          },
-        }),
-      }),
-    )
 
-  const aCase = (over: Partial<Record<string, unknown>> = {}) => ({
-    kind: 'review',
-    id: 501,
-    application_id: 301,
-    tracking_id: 'BIZ-2026-00007',
-    business: 'Aling Nena Sari-Sari Store',
-    office: { code: 'BPLO', name: 'Business Permits and Licensing Office' },
-    permit: 'Mayor’s Permit',
-    status_label: 'For approval',
-    at: '2026-09-01T02:00:00.000000Z',
-    ...over,
-  })
-
-  const openReassign = async (page: Page) => {
-    await page
-      .locator('tbody tr', { hasText: 'bplo@biztrack.local' })
-      .getByRole('button', { name: 'Reassign' })
-      .click()
-    await expect(page.getByRole('heading', { name: 'Reassign' })).toBeVisible()
-  }
-
-  test('an officer holding nothing is told so, with no scope to choose from', async ({ page }) => {
+  test('the directory says what each officer is carrying', async ({ page }) => {
     /*
-     * The client asked for exactly this: drop "Everything they are holding (0)"
-     * and leave the sentence. An empty `cases` array is the server SAYING the
-     * desk is clear, so offering a chooser over it invites a reader to pick a
-     * category, type a reason and be refused.
+     * Client, 27 September 2026: "need mo pa pindutin isa isa kung ano laman
+     * na permit na hawak nila." The directory listed name, office and status
+     * and said nothing about load, so finding who was carrying work meant
+     * opening every row in turn.
      */
-    await caseloadRoute(page, { cases: [], unassigned: [] })
-    await openReassign(page)
-
-    await expect(page.getByText('Liza Reyes is not holding any open work, so there is nothing to move.')).toBeVisible()
-    await expect(page.getByText(/Everything they are holding/)).toHaveCount(0)
-    await expect(page.getByText(/Scope — the permits/)).toHaveCount(0)
-    // And the act it would perform cannot be started.
-    await expect(page.getByRole('button', { name: /Release to office|Move caseload/ })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
-  })
-
-  test('the scope is the permits the officer actually holds, named one by one', async ({ page }) => {
-    await caseloadRoute(page, {
-      open_reviews: 1,
-      total: 1,
-      cases: [aCase()],
-      unassigned: [],
-    })
-    await openReassign(page)
-
-    const scope = page.getByRole('checkbox', { name: /Aling Nena Sari-Sari Store/ })
-    await expect(scope).toBeVisible()
-    // Ticked to begin with: "this officer has gone, move their work" is the
-    // common act and should not cost a click per case.
-    await expect(scope).toBeChecked()
-    await expect(page.getByText('BIZ-2026-00007').first()).toBeVisible()
-  })
-
-  test('the same dialog hands the office’s unheld work to the officer', async ({ page }) => {
     /*
-     * The other direction. The client: "ang mga unassign applications pede
-     * maiassign kung kanino mang officer ako magclick." Asserted through the
-     * REQUEST, not the dialog closing — a screen that ticks without sending
-     * the case is the defect this covers.
+     * Not `exact`. The heading carries a link to the register's matching view
+     * beside the word, so its accessible name is "Holding open work" — and
+     * that link is part of what this column is for: the number here and the
+     * rows there are the same set.
      */
-    let sent: unknown = null
-    await page.route('**/api/v1/admin/users/11/take-cases', async (route) => {
-      sent = route.request().postDataJSON()
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ data: { total: 1, to: { id: 11, name: 'Liza Reyes' } } }),
-      })
-    })
-    await caseloadRoute(page, {
-      cases: [],
-      unassigned: [aCase({ id: 777, tracking_id: 'BIZ-2026-00009', business: 'RxCare Pharmacy' })],
-    })
-    await openReassign(page)
+    await expect(page.getByRole('columnheader', { name: 'Holding', exact: true })).toBeVisible()
 
-    await expect(page.getByText('Unassigned in BPLO')).toBeVisible()
-    const free = page.getByRole('checkbox', { name: /RxCare Pharmacy/ })
-    // Nothing ticked to begin with — taking work on is a decision about a
-    // particular case, never a sweep.
-    await expect(free).not.toBeChecked()
+    /*
+     * And nothing else in it.
+     *
+     * A link to the register's matching view lived in this heading — first
+     * beside the word, where "Holding open work" read as one four-word column
+     * name, then under it, where the two-line cell left every other heading in
+     * the row sitting unevenly against it. Navigation belongs in the page
+     * header, which is where it went.
+     */
+    const headers = page.locator('thead th')
+    await expect(headers.locator('a')).toHaveCount(0)
 
-    const hand = page.getByRole('button', { name: /^Assign .*to Liza Reyes$/ })
-    await expect(hand).toHaveAttribute('aria-disabled', 'true')
+    // Every heading the same height, which is what the link was breaking.
+    const heights = await headers.evaluateAll((cells) =>
+      cells.map((c) => Math.round(c.getBoundingClientRect().height)),
+    )
+    expect(new Set(heights).size).toBe(1)
 
-    await free.check()
-    await expect(hand).not.toHaveAttribute('aria-disabled', 'true')
-    await hand.click()
+    const busy = page.locator('tbody tr', { hasText: 'bplo@biztrack.local' }).first()
+    await expect(busy).toContainText('3 filings')
 
-    await expect.poll(() => sent).not.toBeNull()
-    expect(sent).toMatchObject({ cases: [{ kind: 'review', id: 777 }] })
+    /*
+     * "Nothing", not a dash. A dash means "no value"; this has a value and it
+     * is zero — and a clear desk is the fact an administrator is looking FOR,
+     * because it is who the next case goes to.
+     */
+    const free = page.locator('tbody tr', { hasText: 'sanitary@biztrack.local' })
+    await expect(free).toContainText('Nothing')
+  })
+
+  test('site visits are named apart from paperwork', async ({ page }) => {
+    // They move by a different act on the caseload screen, so an administrator
+    // planning a reassignment needs to know the load is not all paperwork.
+    const mixed = page.locator('tbody tr', { hasText: 'retired@biztrack.local' })
+    await expect(mixed).toContainText('site visit')
+  })
+
+  test('no row prints a dash, because every payload carries the figure', async ({ page }) => {
+    /*
+     * This asserted the opposite: a dash for the one payload that carried no
+     * counts. The dash was honest - `undefined` is not zero, and printing
+     * "Nothing" would have invented a figure - but it was the wrong thing to
+     * be honest about, because the reason the counts were missing was fixable
+     * [client, 27 September 2026: *"bat may ganyan pa sa holding, kung wala,
+     * it should be automatic na Nothing"*].
+     *
+     * All four endpoints that answer with a user count the caseload now
+     * (`UserController::withCaseload`), so there is no payload left for the
+     * cell to apologise for, and a dash reappearing here means one of them
+     * stopped counting.
+     */
+    const holding = page.locator('tbody tr').locator('td:nth-child(4)')
+    await expect(holding.first()).toBeVisible()
+
+    const cells = await holding.allInnerTexts()
+    expect(cells.length).toBeGreaterThan(0)
+    for (const text of cells) {
+      expect(text.trim(), 'a Holding cell still says it does not know').not.toBe('—')
+      expect(text.trim()).toMatch(/Nothing|filing/)
+    }
+  })
+
+  test('offers a way to the whole register, not just row by row', async ({ page }) => {
+    /*
+     * This directory lists OFFICERS; the Officer in Charge register lists
+     * ASSIGNMENTS, every office at once, with the holder on each row. They
+     * answer two halves of one question, and the door only existed in one
+     * direction — that register's holder names already link into an officer's
+     * caseload.
+     */
+    const door = page.getByRole('link', { name: 'View all assignments' })
+    await expect(door).toBeVisible()
+    await expect(door).toHaveAttribute('href', '/staff/admin/oic')
   })
 
   test('the pager stays reachable at the ends of the list', async ({ page }) => {
@@ -486,10 +509,23 @@ test.describe('Owner Status', () => {
      * history keeps. Confirm therefore waits for it — and stays reachable while
      * it waits, so the reader can find out why it will not go (§6.2).
      */
-    await page.locator('tbody tr', { hasText: 'RxCare Pharmacy' }).getByRole('button', { name: 'Change Status' }).click()
+    /*
+     * By the ACCESSIBLE name, which now carries the business: twenty rows of
+     * identical "Change Status" is twenty identical stops for a screen-reader
+     * reader, so each button names what it acts on.
+     */
+    await page
+      .locator('tbody tr', { hasText: 'RxCare Pharmacy' })
+      .getByRole('button', { name: /^Change the status of/ })
+      .click()
     await expect(page.getByRole('heading', { name: 'Changing Status' })).toBeVisible()
 
-    const confirm = page.getByRole('button', { name: 'Confirm' })
+    /*
+     * "Review this change", not "Confirm". The dialog gained a review step —
+     * suspending a business stops it trading and blacklisting bars its owner
+     * everywhere, so neither happens on one press any more.
+     */
+    const confirm = page.getByRole('button', { name: 'Review this change' })
     await expect(confirm).toHaveAttribute('aria-disabled', 'true')
     expect(await confirm.evaluate((el) => el.hasAttribute('disabled'))).toBe(false)
 
@@ -501,6 +537,14 @@ test.describe('Owner Status', () => {
       'Blacklisted',
     ])
 
+    /*
+     * A different status AND a reason. RxCare is already suspended in the stub,
+     * so the change has to be to something else: the dialog refuses a change that
+     * is not one — the status select opens on what the business already is, so
+     * Review used to be pressable the moment it appeared and pressing it wrote
+     * an audit row recording a change to the same value.
+     */
+    await modal.locator('select').first().selectOption('flagged')
     await modal.locator('select').nth(1).selectOption({ index: 1 })
     await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
   })
@@ -539,7 +583,7 @@ test.describe('Owner Status', () => {
     )
 
     await page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
-      .getByRole('button', { name: 'View Status History' })
+      .getByRole('button', { name: /^Status history for/ })
       .click()
 
     const history = page.getByRole('dialog').filter({ hasText: 'Status History' })

@@ -271,7 +271,14 @@ test.describe('the Other Requirements tile carries a count', () => {
      * `awaits_applicant` this reads 1 and the owner is told they owe nothing
      * for a document that was handed back to them.
      */
-    await expect(page.getByText('2 documents are waiting on you.')).toBeVisible()
+    /*
+     * The tile's own note, in the words it actually uses. This asserted
+     * "2 documents are waiting on you." - a sentence with an "are" and a full
+     * stop that DashboardPage has not printed for some time, so the test had
+     * been red on copy rather than on behaviour. The claim it was making is
+     * the one that matters and is kept: the number counts the resubmission.
+     */
+    await expect(page.getByText('2 documents waiting on you').first()).toBeVisible()
 
     /*
      * One fetch for two readers. The tile and the panel below it show the same
@@ -321,5 +328,81 @@ test.describe('the Other Requirements tile carries a count', () => {
     const tile = page.getByRole('link', { name: 'Other Requirements', exact: true })
     await expect(tile).toBeVisible({ timeout: 15_000 })
     await expect(tile).not.toContainText(/\d/)
+  })
+})
+
+/*
+ * ── Every verdict asks first ──────────────────────────────────────────────
+ *
+ * "Add mo modal for confirmation sa major decisions" [client, 28 September
+ * 2026]. Approving a requirement was the one decision on this screen that
+ * asked nothing: it closed the matter on a single press, while the two
+ * verdicts that LEAVE it open both put up a dialog. Backwards, and the wrong
+ * way round for the one that cannot be walked back from here.
+ */
+test.describe('an office deciding a requirement', () => {
+  test.use({ storageState: sessionFor('bplo') })
+
+  /** Open the first requirement the office can act on, or skip. */
+  async function openOne(page: Page): Promise<boolean> {
+    await page.goto('/staff/requests')
+
+    const rows = page.getByRole('button', { name: /^(View|Review) / })
+    await expect(rows.first()).toBeVisible({ timeout: 20000 })
+    await rows.first().click()
+
+    return (await page.getByRole('button', { name: /^Mark / }).count()) > 0
+  }
+
+  test('asks before approving, and can be backed out of', async ({ page }) => {
+    test.skip(!(await openOne(page)), 'no requirement this office may decide')
+
+    const approve = page.getByRole('button', { name: 'Mark Approved' })
+    test.skip((await approve.count()) === 0, 'this one is already approved')
+
+    await approve.click()
+
+    /*
+     * The dialog names WHAT is being decided. A reader arrives here from a
+     * table of eleven of these, and a confirmation that says only "are you
+     * sure?" is asking them to remember which row they pressed.
+     */
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(/are you sure/i)
+    // `.first()`: getByText matches the label AND the block wrapping it, and
+    // the body copy says "requirement" again a line below.
+    await expect(dialog.getByText('Requirement', { exact: true }).first()).toBeVisible()
+    await expect(dialog.getByText('Business', { exact: true }).first()).toBeVisible()
+
+    // Backing out changes nothing.
+    await dialog.getByRole('button', { name: 'Go back' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Mark Approved' })).toBeVisible()
+  })
+
+  test('will not send a refusal back with no reason on it', async ({ page }) => {
+    test.skip(!(await openOne(page)), 'no requirement this office may decide')
+
+    const sendBack = page.getByRole('button', { name: /^Mark (Rejected|Pending|Needs)/ }).first()
+    test.skip((await sendBack.count()) === 0, 'nothing to send back to')
+
+    await sendBack.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+
+    /*
+     * Confirm stays PRESSABLE with the box empty, and says what is missing
+     * when pressed. A disabled button leaves the tab order and takes its
+     * explanation with it, so the one control that would account for the
+     * hold-up is the one a screen-reader user never reaches (WCAG 3.3.1 and
+     * 3.3.3, AGENTS.md 6.2).
+     */
+    const confirm = dialog.getByRole('button', { name: /^Yes, mark/ })
+    await expect(confirm).toBeEnabled()
+    await confirm.click()
+
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText(/Say why first/i)).toBeVisible()
   })
 })

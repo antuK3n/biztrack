@@ -237,7 +237,31 @@ class Business extends Model
     public function isBlockedFromApplying(): bool
     {
         return in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true)
+            || $this->ownerIsBlacklisted()
             || $this->hasSuspendedPermit();
+    }
+
+    /**
+     * Is the PERSON behind this business barred?
+     *
+     * ── Why this is asked separately from the business's own status ────────
+     *
+     * The cascade sets every one of a blacklisted owner's businesses to
+     * `blacklisted` too, so in the ordinary case the first clause above has
+     * already answered. This covers the gap the cascade cannot: a business
+     * REGISTERED AFTER the blacklisting. It starts life `active`, like every
+     * new business, and without this it would be the one shopfront a barred
+     * owner could still file from — which is precisely the hole that moving
+     * the sanction onto the person was meant to close.
+     *
+     * `loadMissing` rather than a query: this is asked once per filing
+     * attempt, and the owner is usually already on the row.
+     */
+    public function ownerIsBlacklisted(): bool
+    {
+        $this->loadMissing('owner');
+
+        return $this->owner?->isBlacklisted() === true;
     }
 
     /**
@@ -277,6 +301,20 @@ class Business extends Model
      */
     public function filingBlockReason(): string
     {
+        /*
+         * The owner's own bar is named FIRST and named as itself.
+         *
+         * "This business can't file applications" is misleading advice to
+         * somebody whose every business is barred: it sends them to enquire
+         * about one shopfront when the finding is against them. The message
+         * says which it is, and where to take it.
+         */
+        if ($this->ownerIsBlacklisted()) {
+            return 'This account is blacklisted, so no application or renewal can be filed for '
+                .'any of its businesses. Message the City BPLO through BizTrack to ask what is '
+                .'needed to have it lifted.';
+        }
+
         if (in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true)) {
             return 'This business currently can’t file applications. Please contact the '
                 .'LGU to resolve its account status.';

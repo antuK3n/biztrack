@@ -42,7 +42,7 @@ function officerIn(string $code, string $role, string $email): User
         'gender' => 'M',
         'email' => $email,
         'mobile_number' => '09170000000',
-        'password' => 'biztrack1',
+        'password' => 'Biztrack-Test1!',
         'department_id' => Department::where('code', $code)->value('id'),
         'is_active' => true,
         'email_verified_at' => now(),
@@ -106,7 +106,7 @@ it('creates an officer from the payload the form actually sends', function () {
             'gender' => 'F',
             'email' => 'new.zoning@biztrack.local',
             'mobile_number' => '09171234567',
-            'password' => 'biztrack1',
+            'password' => 'Biztrack-Test1!',
             'role' => 'zoning_officer',
             'department_id' => Department::where('code', 'CPDO')->value('id'),
         ])->assertCreated()->json('data');
@@ -118,7 +118,7 @@ it('creates an officer from the payload the form actually sends', function () {
     // And the account can actually sign in to the staff portal it was made for.
     test()->postJson('/api/v1/auth/login', [
         'email' => 'new.zoning@biztrack.local',
-        'password' => 'biztrack1',
+        'password' => 'Biztrack-Test1!',
         'portal' => 'staff',
     ])->assertOk();
 });
@@ -131,7 +131,7 @@ it('still accepts the plural roles array', function () {
             'gender' => 'M',
             'email' => 'new.obo@biztrack.local',
             'mobile_number' => '09171234567',
-            'password' => 'biztrack1',
+            'password' => 'Biztrack-Test1!',
             'roles' => ['obo_staff'],
             'department_id' => Department::where('code', 'OBO')->value('id'),
         ])->assertCreated()
@@ -173,7 +173,7 @@ it('refuses an officer with no office, and a super admin with one', function () 
     test()->withHeaders($admin)->postJson('/api/v1/admin/users', [
         'first_name' => 'No', 'last_name' => 'Office', 'gender' => 'M',
         'email' => 'no.office@biztrack.local', 'mobile_number' => '09171234567',
-        'password' => 'biztrack1', 'role' => 'sanitary_officer',
+        'password' => 'Biztrack-Test1!', 'role' => 'sanitary_officer',
     ])->assertStatus(422)->assertJsonValidationErrors('department_id');
 
     // The mirror image, and the more dangerous one: OIC reassignment is granted
@@ -182,7 +182,7 @@ it('refuses an officer with no office, and a super admin with one', function () 
     test()->withHeaders($admin)->postJson('/api/v1/admin/users', [
         'first_name' => 'Super', 'last_name' => 'Admin', 'gender' => 'F',
         'email' => 'second.admin@biztrack.local', 'mobile_number' => '09171234567',
-        'password' => 'biztrack1', 'role' => 'admin',
+        'password' => 'Biztrack-Test1!', 'role' => 'admin',
         'department_id' => Department::where('code', 'BPLO')->value('id'),
     ])->assertStatus(422)->assertJsonValidationErrors('department_id');
 });
@@ -192,7 +192,7 @@ it('will not mint a business owner from the staff screen', function () {
         ->postJson('/api/v1/admin/users', [
             'first_name' => 'Back', 'last_name' => 'Door', 'gender' => 'M',
             'email' => 'back.door@biztrack.local', 'mobile_number' => '09171234567',
-            'password' => 'biztrack1', 'role' => 'business_owner',
+            'password' => 'Biztrack-Test1!', 'role' => 'business_owner',
         ])->assertStatus(422)->assertJsonValidationErrors('roles.0');
 });
 
@@ -324,7 +324,7 @@ it('lets one office hold as many accounts as it needs', function () {
             ->postJson('/api/v1/admin/users', [
                 'first_name' => $first, 'last_name' => $last, 'gender' => 'M',
                 'email' => $email, 'mobile_number' => '09171234567',
-                'password' => 'biztrack1', 'role' => 'sanitary_officer', 'department_id' => $cho,
+                'password' => 'Biztrack-Test1!', 'role' => 'sanitary_officer', 'department_id' => $cho,
             ])->assertCreated();
     }
 
@@ -337,7 +337,7 @@ it('lets one office hold as many accounts as it needs', function () {
     // And each of them can actually sign in to the staff portal.
     foreach (['cho.two@biztrack.local', 'cho.three@biztrack.local'] as $email) {
         test()->postJson('/api/v1/auth/login', [
-            'email' => $email, 'password' => 'biztrack1', 'portal' => 'staff',
+            'email' => $email, 'password' => 'Biztrack-Test1!', 'portal' => 'staff',
         ])->assertOk();
     }
 });
@@ -354,7 +354,7 @@ it('keeps the super admin a single seat', function () {
     test()->withHeaders($admin)->postJson('/api/v1/admin/users', [
         'first_name' => 'Second', 'last_name' => 'Admin', 'gender' => 'F',
         'email' => 'second.admin@biztrack.local', 'mobile_number' => '09171234567',
-        'password' => 'biztrack1', 'role' => 'admin',
+        'password' => 'Biztrack-Test1!', 'role' => 'admin',
     ])->assertStatus(422)->assertJsonValidationErrors('roles');
 
     // Promotion is the same act by another route, and was equally open.
@@ -421,7 +421,7 @@ it('lets nobody but the super admin create an office account', function () {
     $payload = [
         'first_name' => 'Sneaky', 'last_name' => 'Officer', 'gender' => 'M',
         'email' => 'sneaky@biztrack.local', 'mobile_number' => '09171234567',
-        'password' => 'biztrack1', 'role' => 'bplo_staff',
+        'password' => 'Biztrack-Test1!', 'role' => 'bplo_staff',
         'department_id' => Department::where('code', 'BPLO')->value('id'),
     ];
 
@@ -1152,4 +1152,262 @@ it('serves the named owner to the reviewing officer', function () {
     expect($owner)->toBeArray()
         ->and($owner['surname'] ?? null)->not->toBeEmpty()
         ->and($owner)->toHaveKeys(['surname', 'given_name', 'middle_name', 'suffix', 'gender']);
+});
+
+/*
+ * ── The workload column on the officer directory ──────────────────────────
+ *
+ * Client, 27 September 2026: *"need mo pa pindutin isa isa kung ano laman na
+ * permit na hawak nila."* The directory listed name, office and status and
+ * said nothing about load, so finding who was carrying work meant opening
+ * every row in turn.
+ *
+ * The risk these tests exist for is not the count being absent — it is the
+ * count DISAGREEING with the caseload screen. A directory saying "holding 3"
+ * beside a page listing 2 is the kind of contradiction nobody reports as a
+ * bug; they stop trusting both numbers.
+ */
+
+it('tells the directory what each officer is carrying', function () {
+    $rows = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/users?per_page=50&staff=1')
+        ->assertOk()
+        ->json('data');
+
+    expect($rows)->not->toBeEmpty();
+    foreach ($rows as $row) {
+        expect($row)->toHaveKey('open_reviews');
+        expect($row)->toHaveKey('open_inspections');
+    }
+});
+
+it('counts exactly what the caseload screen lists', function () {
+    /*
+     * One fact, two screens. Asked of every officer in the register rather
+     * than one, because the rule is shared through `Caseload::scopeOpen` and a
+     * single officer holding nothing would prove nothing.
+     */
+    $headers = authAs('admin@biztrack.local');
+
+    $rows = test()->withHeaders($headers)
+        ->getJson('/api/v1/admin/users?per_page=50&staff=1')
+        ->assertOk()
+        ->json('data');
+
+    $checked = 0;
+
+    foreach ($rows as $row) {
+        if ($row['department'] === null) {
+            continue;
+        }
+
+        $caseload = test()->withHeaders($headers)
+            ->getJson("/api/v1/admin/users/{$row['id']}/caseload")
+            ->assertOk()
+            ->json('data');
+
+        expect($row['open_reviews'])->toBe($caseload['open_reviews'], "reviews disagree for {$row['email']}");
+        expect($row['open_inspections'])->toBe($caseload['open_inspections'], "inspections disagree for {$row['email']}");
+        $checked++;
+    }
+
+    expect($checked)->toBeGreaterThan(0);
+});
+
+it('counts held work only, never a finished review', function () {
+    /*
+     * A finished review keeps the officer's NAME — that is why the Officer in
+     * Charge register can show more than this number — but it is not something
+     * they are still carrying, and a directory that counted it would send an
+     * administrator to an empty caseload page.
+     */
+    $officer = User::whereNotNull('department_id')->firstOrFail();
+
+    $assignment = ApplicationAssignment::where('department_id', $officer->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+
+    // Decide the filing: the assignment keeps the name, the work is over.
+    $application = $assignment->application;
+    $application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+
+    $row = collect(
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson('/api/v1/admin/users?per_page=50&staff=1')
+            ->json('data')
+    )->firstWhere('id', $officer->id);
+
+    $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$officer->id}/caseload")
+        ->json('data');
+
+    expect($row['open_reviews'])->toBe($caseload['open_reviews']);
+    // And the finished one is reported, separately, where it belongs.
+    expect($caseload['finished_reviews'])->toBeGreaterThan(0);
+});
+
+/*
+ * ── The row keeps its figure after it is written to ───────────────────
+ *
+ * Three endpoints answer with a single changed user, and the directory puts
+ * that answer straight back into the row it came from. None of them counted
+ * the caseload, so `open_reviews` was missing, `whenCounted` dropped the key,
+ * and a row reading "2 filings" turned into a dash the instant it was edited
+ * — no error, nothing in the log, and it stayed wrong until a reload
+ * [client, 27 September 2026: *"bat may ganyan pa sa holding, kung wala, it
+ * should be automatic na Nothing"*].
+ *
+ * These assert the FIGURE and not merely the key's presence: a payload that
+ * carried `open_reviews: 0` for an officer holding two would be the same bug
+ * wearing a different face, and the cell would print "Nothing" about somebody
+ * with a full desk.
+ */
+it('keeps the caseload figure on the user each write answers with', function () {
+    $officer = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+
+    $assignment = ApplicationAssignment::where('department_id', $officer->department_id)
+        ->whereNull('officer_user_id')
+        ->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+
+    // What the directory says, which is the figure the row must not lose.
+    $listed = collect(
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson('/api/v1/admin/users?per_page=50&staff=1')
+            ->json('data')
+    )->firstWhere('id', $officer->id);
+
+    expect($listed['open_reviews'])->toBeGreaterThan(0);
+
+    // Editing answers with the same figure.
+    $updated = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$officer->id}", [
+            'first_name' => $officer->first_name,
+            'last_name' => $officer->last_name,
+            'email' => $officer->email,
+            'mobile_number' => $officer->mobile_number ?? '09171234567',
+            'department_id' => $officer->department_id,
+        ])
+        ->assertOk()
+        ->json('data');
+
+    expect($updated)->toHaveKey('open_reviews');
+    expect($updated['open_reviews'])->toBe($listed['open_reviews']);
+    expect($updated)->toHaveKey('open_inspections');
+
+    // So does deactivating — and it reports the caseload AFTER the release
+    // that deactivation performs, which is the number the row should show.
+    $toggled = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$officer->id}/toggle-active", ['is_active' => false])
+        ->assertOk()
+        ->json('data');
+
+    expect($toggled)->toHaveKey('open_reviews');
+    expect($toggled['open_reviews'])->toBe(0);
+});
+
+it('gives a newly created officer a caseload figure of nothing, not a missing key', function () {
+    /*
+     * A brand-new account holds nothing, and the cell has to be able to say so.
+     * Without the count the key is absent, which the page could only render as
+     * "the server did not say" — about an account it had just watched being
+     * created.
+     */
+    $created = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson('/api/v1/admin/users', [
+            'first_name' => 'Brand',
+            'last_name' => 'New',
+            'gender' => 'F',
+            'email' => 'brand.new@biztrack.local',
+            'mobile_number' => '09170000000',
+            'password' => 'Sample-Pass-2026',
+            'roles' => ['bplo_staff'],
+            'department_id' => User::where('email', 'bplo@biztrack.local')->value('department_id'),
+        ])
+        ->assertCreated()
+        ->json('data');
+
+    expect($created)->toHaveKey('open_reviews');
+    expect($created['open_reviews'])->toBe(0);
+    expect($created['open_inspections'])->toBe(0);
+});
+
+it('leaves every other payload that uses UserResource alone', function () {
+    /*
+     * `whenCounted` is the point: the profile, the assignment payloads and the
+     * message participants all render this resource, and none of them should
+     * start carrying a count — or paying for one.
+     */
+    $me = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/auth/me')
+        ->assertOk()
+        ->json('data');
+
+    expect($me)->not->toHaveKey('open_reviews');
+    expect($me)->not->toHaveKey('open_inspections');
+});
+
+/*
+ * ── Two statuses, and the row has to carry both ───────────────────────────
+ *
+ * Client, 27 September 2026: *"bat yung dalawa need pa ireassign kahit
+ * completed na? ang confusing samantalang ang ibang completed ay ok na."*
+ *
+ * Both readings were right and only one was on screen. `status_label` is the
+ * OFFICE's own review step; the reason the row is on somebody's desk is the
+ * FILING, which was in the payload of the register and missing from the
+ * caseload entirely. "Completed" therefore appeared on rows an administrator
+ * was being asked to move, with nothing to say why.
+ */
+
+it('says where the filing has got to, not only where the review step has', function () {
+    $officer = User::whereNotNull('department_id')->firstOrFail();
+
+    $assignment = ApplicationAssignment::where('department_id', $officer->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+    // The office is done; the filing is not.
+    $assignment->forceFill(['status' => AssignmentStatus::Completed->value])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::PendingPayment->value])->save();
+
+    $case = collect(
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson("/api/v1/admin/users/{$officer->id}/caseload")
+            ->assertOk()
+            ->json('data.cases')
+    )->firstWhere('id', $assignment->id);
+
+    expect($case)->not->toBeNull();
+    // The step, and the filing, as two separate facts.
+    expect($case['status_label'])->toBe('Completed');
+    expect($case['application_status_label'])->toBe('Pending Payment');
+
+    /*
+     * And the row is still HELD, which is the whole point: a finished step on
+     * a live filing keeps its officer in charge.
+     */
+    expect(collect(
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson("/api/v1/admin/users/{$officer->id}/caseload")
+            ->json('data.cases')
+    )->pluck('id'))->toContain($assignment->id);
+});
+
+it('drops the row from the caseload once the filing itself is decided', function () {
+    /*
+     * The other half. The confusion was that a Completed step stayed; the
+     * answer has to be that a Completed FILING goes — or the rule is just
+     * "nothing ever leaves".
+     */
+    $officer = User::whereNotNull('department_id')->firstOrFail();
+
+    $assignment = ApplicationAssignment::where('department_id', $officer->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+
+    $data = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$officer->id}/caseload")
+        ->json('data');
+
+    expect(collect($data['cases'])->pluck('id'))->not->toContain($assignment->id);
+    // It is reported where it belongs instead: named, finished, unmovable.
+    expect($data['finished_reviews'])->toBeGreaterThan(0);
 });

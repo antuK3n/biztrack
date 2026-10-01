@@ -723,13 +723,30 @@ it('lets an applicant write to any office, and only that office reads it', funct
 });
 
 /*
- * Also reversed. This asserted ['BPLO', 'CHO'] — the routed offices only — on
- * the reasoning that "a dropdown of every department in the city would be the
- * wrong shape". That is now exactly the shape asked for: the owner picks the
- * office they judge correct, which is not the same question as which offices
- * are reviewing the permit.
+ * ---- Reversed twice, and this is where it landed -----------------------
+ *
+ * First it asserted ['BPLO', 'CHO'] — the routed offices only — on the
+ * reasoning that "a dropdown of every department in the city would be the
+ * wrong shape". Then it asserted every configured office, because the client
+ * asked for the owner to pick the office they judge correct.
+ *
+ * Two instructions on 28 September 2026 settle it, and only together:
+ *
+ *   "sa admin offices ang maaccess lang nila once na naka assign na sa kanila
+ *    yung application"
+ *   "sa business owner side lahat na ng offices may general inquiry"
+ *
+ * An office that is not on this filing will never be SHOWN a message about it
+ * — not in its inbox, and not by notification, since counterparty() has no
+ * officer to name and falls back to the applicant. Offering that office here
+ * would be offering a message that is accepted, stored, and read by nobody.
+ *
+ * The owner has not lost the office. Every one of them has a general enquiry
+ * now, which is where a question that is not about a particular permit
+ * belongs. What they cannot do is raise it against a permit the office was
+ * never handed.
  */
-it('offers an applicant every configured office on their filing', function () {
+it('offers an applicant the offices that are on their filing', function () {
     $app = fileRoutedApplication('Scoping Offer Cafe', ['BUSINESS', 'SANITARY']);
 
     $offices = collect(
@@ -737,9 +754,21 @@ it('offers an applicant every configured office on their filing', function () {
             ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('meta.offices')
     );
 
-    expect($offices)->toHaveCount(Department::count())
-        ->and($offices->pluck('code'))->toContain('BPLO')->toContain('CHO')->toContain('BFP')
+    expect($offices->pluck('code'))->toContain('BPLO')->toContain('CHO')
+        ->and($offices->pluck('code'))->not->toContain('BFP')
+        ->and($offices->count())->toBeLessThan(Department::count())
         ->and($offices->pluck('can_message')->all())->each->toBeTrue();
+
+    // Route the fire office and it joins the list, because now somebody there
+    // would actually be shown what is written.
+    assignOffice($app['id'], 'BFP');
+
+    $offices = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('meta.offices')
+    );
+
+    expect($offices->pluck('code'))->toContain('BFP');
 });
 
 it('will not let one office post into another office’s conversation', function () {
@@ -944,12 +973,12 @@ it('leaves BPLO the shared filing’s office forms, but neither its mail nor its
         ->pluck('permit_type_code'))->toContain('SANITARY')->toContain('FSIC');
 });
 
-it('does not list an inbox row whose only turns belong to another office', function () {
+it('leaves no trace of another office’s turn on a shared filing’s inbox row', function () {
     $app = sharedFiling('Item111 Silhouette Cafe');
 
-    // Only the fire office has spoken. Sanitary can read the filing, so an
-    // unscoped inbox would hand it a row with no messages in it — the leak
-    // reduced to a silhouette: who spoke, and when, without the words.
+    // Only the fire office has spoken. Sanitary is routed the same filing, so
+    // an unscoped inbox would hand it the leak reduced to a silhouette: who
+    // spoke, and when, without the words.
     test()->withHeaders(authAs('fire@biztrack.local'))
         ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
         ->assertCreated();
@@ -959,10 +988,37 @@ it('does not list an inbox row whose only turns belong to another office', funct
             ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data')
     )->firstWhere('application_id', $app['id']);
 
-    expect($rowFor('sanitary@biztrack.local'))->toBeNull()
-        ->and($rowFor('fire@biztrack.local'))->not->toBeNull()
-        // BPLO used to get a row here on the strength of coordinating the
-        // filing. Nobody wrote to BPLO, so there is nothing for it to read and
-        // the row would be the same silhouette this test exists to prevent.
-        ->and($rowFor('bplo@biztrack.local'))->toBeNull();
+    /*
+     * ── What this test claims, and what it stopped claiming ───────────────
+     *
+     * It used to assert the ROW WAS ABSENT for the sanitary office, because a
+     * thread with messages was the only thing that put a filing on an office's
+     * inbox, and a row could therefore only ever be a silhouette.
+     *
+     * An office's inbox is its CASELOAD now [client, 28 September 2026]: a
+     * permit routed to the sanitary office appears whether or not anybody has
+     * written, because an officer handed a file has to be able to write the
+     * first word about it. So the row is expected.
+     *
+     * The leak the test exists to catch is not the row. It is the row SAYING
+     * SOMETHING — a preview, a count, a timestamp that moves when another
+     * office speaks. That is what is asserted below, and it is the stronger
+     * claim of the two: absence proved only that this particular screen did
+     * not leak, where this proves the payload does not carry it at all.
+     */
+    $sanitary = $rowFor('sanitary@biztrack.local');
+
+    expect($sanitary)->not->toBeNull()
+        ->and($sanitary['messages_count'])->toBe(0)
+        ->and($sanitary['unread_count'])->toBe(0)
+        ->and($sanitary['last_message'])->toBeNull();
+
+    // Not even by way of the office list: the fire office's conversation is
+    // not something the sanitary office's row is allowed to count.
+    expect(collect($sanitary['offices'])->pluck('code')->all())->not->toContain('FSIC');
+    expect(collect($sanitary['offices'])->sum('messages_count'))->toBe(0);
+
+    // The office that did speak reads its own turn, as it always did.
+    expect($rowFor('fire@biztrack.local'))->not->toBeNull()
+        ->and($rowFor('fire@biztrack.local')['messages_count'])->toBe(1);
 });

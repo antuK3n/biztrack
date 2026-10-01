@@ -42,7 +42,7 @@ function extraOfficer(string $code, string $role, string $email, string $first =
             'gender' => 'F',
             'email' => $email,
             'mobile_number' => '09171234567',
-            'password' => 'biztrack1',
+            'password' => 'Biztrack-Test1!',
             'role' => $role,
             'department_id' => Department::where('code', $code)->value('id'),
         ])->assertCreated();

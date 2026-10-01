@@ -328,7 +328,7 @@ it('leaves a renewal and an amendment to BPLO, releasing nothing at payment', fu
      * assert a branch and is the honest one here: the alternative is a fixture
      * that costs more to maintain than the rule it guards.
      */
-    expect($source)->toContain("[ApplicationType::Renewal, ApplicationType::Amendment],");
+    expect($source)->toContain('[ApplicationType::Renewal, ApplicationType::Amendment],');
 });
 it('suspends the business permit when an office refuses one of the others', function () {
     $app = paidNewFiling();

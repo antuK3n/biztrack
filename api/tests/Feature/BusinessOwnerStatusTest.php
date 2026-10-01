@@ -240,12 +240,35 @@ it('answers the whole history of one business, not the newest page of everything
         ->getJson("/api/v1/admin/audit-logs?auditable_type=Business&auditable_id={$businessId}&action=status")
         ->assertOk()->json('data'));
 
-    expect($history)->toHaveCount(3)
+    /*
+     * FOUR, not three — and the fourth is the point.
+     *
+     * Both businesses belong to `owner@biztrack.local`, and blacklisting is a
+     * finding against the PERSON: it bars every business they hold. So the
+     * blacklisting of the other one reached this one too, and the trail says
+     * so against this business rather than only against the row that was
+     * clicked. An audit trail that recorded the decision and not its fallout
+     * is one nobody could reconstruct the register from.
+     */
+    expect($history)->toHaveCount(4)
         ->and($history->pluck('changes.to')->sort()->values()->all())
-        ->toBe(['active', 'flagged', 'suspended'])
-        // Strictly this business. The other one's blacklisting is newer and
-        // would have been the first thing an unfiltered scan returned.
+        ->toBe(['active', 'blacklisted', 'flagged', 'suspended'])
+        // Strictly this business. The other one's own blacklisting row is
+        // newer and would have been the first thing an unfiltered scan
+        // returned.
         ->and($history->pluck('auditable_id')->unique()->all())->toBe([$businessId]);
+
+    /*
+     * And the cascaded row is marked as a consequence, not as a decision
+     * somebody made about this business. Nobody clicked it: the reason names
+     * the finding it followed from, and the entry carries the business that
+     * caused it.
+     */
+    $cascaded = $history->firstWhere('changes.to', 'blacklisted');
+
+    expect($cascaded['changes']['reason'])->toStartWith('Owner blacklisted:')
+        ->and($cascaded['changes']['reason'])->toContain('A different business entirely.')
+        ->and($cascaded['changes']['cascaded_from_business_id'])->toBe($otherId);
 });
 
 it('does not let the type filter reach outside the model namespace', function () {
@@ -290,8 +313,8 @@ function numberedBusiness(string $name, string $registrationNumber): int
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',
-        'address' => ['line1' => '5 Number Street', 'barangay_id' => \App\Models\Barangay::first()->id],
-        'lines' => [['psic_code_id' => \App\Models\PsicCode::first()->id, 'capitalization' => 100000]],
+        'address' => ['line1' => '5 Number Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 100000]],
     ])->assertCreated()->json('data.id');
 }
 
@@ -302,7 +325,7 @@ function filedOn(int $businessId, string $type): array
         'business_id' => $businessId,
         'data_privacy_consent' => true,
         'application_type' => $type,
-        'permit_type_ids' => \App\Models\PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     return test()->withHeaders(authAs('owner@biztrack.local'))
@@ -364,8 +387,8 @@ it('reads "latest" from the calendar, not from the insertion order', function ()
 
     // The one inserted FIRST is the one submitted LAST — the shape the seeded
     // register happens to have, and the shape that broke the column.
-    \App\Models\Application::whereKey($older['id'])->update(['submitted_at' => now()]);
-    \App\Models\Application::whereKey($newer['id'])->update(['submitted_at' => now()->subYear()]);
+    Application::whereKey($older['id'])->update(['submitted_at' => now()]);
+    Application::whereKey($newer['id'])->update(['submitted_at' => now()->subYear()]);
 
     expect(ownerStatusRow($businessId)['tracking_id'])->toBe($older['tracking_id']);
 });
