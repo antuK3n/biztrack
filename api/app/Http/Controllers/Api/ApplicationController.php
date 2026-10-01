@@ -12,6 +12,7 @@ use App\Models\Application;
 use App\Models\ApplicationCorrection;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
+use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
@@ -209,7 +210,23 @@ class ApplicationController extends Controller
              * restate what two existing ones say.
              */
             'data_privacy_consent' => ['sometimes', 'boolean'],
-            'permit_type_ids' => ['required', 'array', 'min:1'],
+            /*
+             * `required_without` rather than `required`.
+             *
+             * A renewal that names the permits it carries forward has
+             * already said which types it is for — a permit HAS a type —
+             * and demanding both made a caller restate a fact the first
+             * answer contains. Found on 1 October 2026 filing a renewal
+             * through the API: `prior_permit_ids: [19]` was refused with
+             * "The permit type ids field is required", about permit 19,
+             * whose type the server can read.
+             *
+             * Still accepted when sent, and still what wins: the wizard
+             * sends both, and a NEW filing has no prior permit to derive
+             * anything from, so it remains required there. Only the
+             * redundancy goes.
+             */
+            'permit_type_ids' => ['required_without_all:prior_permit_id,prior_permit_ids', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
             /*
@@ -284,7 +301,22 @@ class ApplicationController extends Controller
             'fee_profile' => $this->classifyFeeProfile($data['fee_profile'] ?? null),
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
-        $app->permitTypes()->sync($data['permit_type_ids']);
+        /*
+         * The types the caller gave, or the ones its prior permits carry.
+         *
+         * Derived only when the key is absent — a caller that sends the
+         * array means it, including a renewal adding a permit the business
+         * does not hold yet, and second-guessing that would quietly drop a
+         * permit somebody asked for.
+         *
+         * `unique`, because two prior permits of the same type is an
+         * ordinary case — last year's and the year before's — and syncing
+         * a duplicated id would not fail, it would just be untidy.
+         */
+        $typeIds = $data['permit_type_ids']
+            ?? Permit::whereIn('id', $priorIds)->pluck('permit_type_id')->unique()->values()->all();
+
+        $app->permitTypes()->sync($typeIds);
         $app->priorPermits()->sync($priorIds);
         $this->syncLineCapitalization($app);
 
