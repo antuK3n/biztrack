@@ -161,14 +161,14 @@ it('refuses to revive a rejected filing when another office approves its permit'
     $app = legalityFiling(['SANITARY', 'FSIC'], 'Legality Rejected Cafe');
     $choAssignment = legalityAssignmentId($app, 'CHO');
 
-    // BPLO rejects. This is terminal, and it deliberately leaves CHO's and BFP's
-    // reviews `pending` — a record of what was outstanding when the decision
-    // came, not a task list.
+    // BPLO rejects. This is terminal, and it closes CHO's and BFP's reviews:
+    // left `pending`, they sat in each office's backlog forever and read as
+    // RA 11032 breaches on a filing nobody can act on any more.
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Wrong zone.'])
         ->assertOk();
 
-    expect(ApplicationAssignment::find($choAssignment)->status->value)->toBe('pending');
+    expect(ApplicationAssignment::find($choAssignment)->status->value)->toBe('closed');
 
     /*
      * The exact call that used to answer 200 and resurrect the filing. 422 here
@@ -184,9 +184,10 @@ it('refuses to revive a rejected filing when another office approves its permit'
     expect($app->fresh()->status)->toBe(ApplicationStatus::Rejected);
 
     // Nothing was written on the way to the refusal. The assignment must still
-    // be pending — marking it completed and only THEN failing the status change
-    // would leave a rejected filing carrying an approval nobody made.
-    expect(ApplicationAssignment::find($choAssignment)->status->value)->toBe('pending')
+    // be closed, never completed — marking it completed and only THEN failing
+    // the status change would leave a rejected filing carrying an approval
+    // nobody made.
+    expect(ApplicationAssignment::find($choAssignment)->status->value)->toBe('closed')
         ->and(ApplicationAssignment::find($choAssignment)->completed_at)->toBeNull();
 
     /*
