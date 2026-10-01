@@ -368,17 +368,6 @@ export function BuildingIcon(props: IconProps) {
   )
 }
 
-/** A pen over the line it signs on — Office Signatories. */
-export function SignatureIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M15.5 4.5 19.5 8.5 10 18H6v-4l9.5-9.5Z" />
-      <path d="M13 7l4 4" />
-      <path d="M3.5 20.5h17" />
-    </Icon>
-  )
-}
-
 /** A filed document: the "application received" glyph in the notification list. */
 export function FileTextIcon(props: IconProps) {
   return (
