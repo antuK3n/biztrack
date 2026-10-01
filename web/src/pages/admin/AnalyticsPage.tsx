@@ -1675,7 +1675,12 @@ export function AnalyticsPage() {
 
       <AnalyticsTabs />
 
-      {meta && <ComputedAt meta={meta} onRefreshed={reload} />}
+      {/*
+        Refresh only for the two readers who see every office: one press
+        recomputes every office's figures, and the API refuses anyone else
+        (403). An office's own figures are recomputed every night.
+      */}
+      {meta && <ComputedAt meta={meta} onRefreshed={scope?.can_switch ? reload : undefined} />}
 
       {loading ? (
         <LoadingState />
