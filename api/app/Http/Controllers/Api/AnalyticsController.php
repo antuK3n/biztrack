@@ -290,12 +290,27 @@ class AnalyticsController extends Controller
         return max(Spc::MIN_COMPLETIONS_PER_WEEK, min(104, $weeks));
     }
 
-    /** Dashboard trailing window in months, clamped so a stray query cannot scan. */
+    /**
+     * Dashboard trailing window in months: one of the windows the screen offers
+     * and the nightly refresh precomputes (config analytics.variants.dashboard).
+     * Any other number used to be clamped and computed on the spot, uncached,
+     * on every request; now it is refused.
+     */
     private function windowMonths(Request $request): int
     {
-        $months = (int) $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $raw = $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $offered = array_map(
+            static fn (array $v): int => (int) $v['months'],
+            AnalyticsDatasets::variants(AnalyticsDatasets::DASHBOARD),
+        );
 
-        return max(1, min(36, $months));
+        abort_unless(
+            is_string($raw) && ctype_digit($raw) && in_array((int) $raw, $offered, true),
+            422,
+            'Choose one of the windows the dashboard offers: '.implode(', ', $offered).' months.',
+        );
+
+        return (int) $raw;
     }
 
     /** CSV download of the summary (status counts, monthly, KPIs). */

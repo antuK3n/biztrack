@@ -67,3 +67,9 @@ it('writes money in the CSV with two decimals and the time in Manila', function 
     expect($csv)->toContain('503000.00')
         ->and($csv)->toMatch('/Generated,\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00/');
 });
+
+it('accepts only the dashboard windows the screen offers', function () {
+    $this->withHeaders(authAs('bplo@biztrack.local'))->getJson('/api/v1/analytics/dashboard?months=6')->assertOk();
+    $this->withHeaders(authAs('bplo@biztrack.local'))->getJson('/api/v1/analytics/dashboard?months=5')->assertStatus(422);
+    $this->withHeaders(authAs('bplo@biztrack.local'))->getJson('/api/v1/analytics/dashboard?months[]=6')->assertStatus(422);
+});
