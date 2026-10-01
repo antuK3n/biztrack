@@ -3,7 +3,6 @@
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
 use App\Http\Controllers\Api\Admin\LegacyImportController;
-use App\Http\Controllers\Api\Admin\OfficeSignatoryController;
 use App\Http\Controllers\Api\Admin\OicAssignmentController;
 use App\Http\Controllers\Api\Admin\PaymentGatewayController;
 use App\Http\Controllers\Api\Admin\UserController;
@@ -550,25 +549,6 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);
-        /*
-         * Office Signatories — the names printed in each office's signature
-         * blocks, the last of which is the "Noted by" on its reports.
-         *
-         * `reference.manage`, the permission #51 gave these rows when the
-         * controller was written ("signatories are reference data"), and one the
-         * super admin alone holds (RbacSeeder). Nothing new has to be seeded
-         * into the live register for it. The controller had no routes until
-         * now: #51 added only an unused import here, which f85d818 tidied away.
-         *
-         * No DELETE, on purpose. Retiring keeps the row, because it is the only
-         * record of whose name an issued document carries.
-         */
-        Route::middleware('permission:reference.manage')->group(function () {
-            Route::get('office-signatories', [OfficeSignatoryController::class, 'index']);
-            Route::post('office-signatories', [OfficeSignatoryController::class, 'store']);
-            Route::put('office-signatories/{officeSignatory}', [OfficeSignatoryController::class, 'update']);
-            Route::post('office-signatories/{officeSignatory}/retire', [OfficeSignatoryController::class, 'retire']);
-        });
         /*
          * Importing the old register (Ken's checklist, 27 September 2026).
          * `data.import` is the super admin's alone — see RbacSeeder.

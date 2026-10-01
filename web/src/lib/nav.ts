@@ -11,7 +11,6 @@ import {
   MailIcon,
   MapPinIcon,
   ShieldCheckIcon,
-  SignatureIcon,
   TrackIcon,
   UploadIcon,
   UsersIcon,
@@ -218,18 +217,6 @@ const NAV_ITEMS: NavItem[] = [
    * route in App.tsx carries the same claim.
    */
   { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
-  /*
-   * Office Signatories — the names each office signs its forms with, the last
-   * of which is the "Noted by" on its reports. `reference.manage`, the
-   * permission the API puts on the routes behind it, and held by the super
-   * admin alone. The routes in App.tsx carry the same claim.
-   */
-  {
-    label: 'Office Signatories',
-    icon: SignatureIcon,
-    to: '/admin/office-signatories',
-    permission: 'reference.manage',
-  },
 ]
 
 /**

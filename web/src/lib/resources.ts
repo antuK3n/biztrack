@@ -49,9 +49,6 @@ import type {
   Notification,
   OfficeForm,
   OfficeFormRequirement,
-  OfficeSignatory,
-  OfficeSignatoryPayload,
-  SignatoryOffice,
   OfficePerformanceReport,
   OfficerRequest,
   PageMeta,
@@ -1553,20 +1550,6 @@ export const admin = {
   /** The officers this one row may be moved to — its own office's, and active. */
   oicCandidates: (assignmentId: number) =>
     unwrap<OicCandidate[]>(api.get(`/admin/oic-assignments/${assignmentId}/candidates`)),
-  /*
-   * Office Signatories (permission `reference.manage`, the super admin's).
-   * There is no delete: retiring keeps the row, because it is the record of
-   * whose name an issued document carries.
-   */
-  signatories: () => unwrap<SignatoryOffice[]>(api.get('/admin/office-signatories')),
-  addSignatory: (departmentId: number, body: OfficeSignatoryPayload) =>
-    unwrap<OfficeSignatory>(
-      api.post('/admin/office-signatories', { department_id: departmentId, ...body }),
-    ),
-  updateSignatory: (id: number, body: OfficeSignatoryPayload) =>
-    unwrap<OfficeSignatory>(api.put(`/admin/office-signatories/${id}`, body)),
-  retireSignatory: (id: number) =>
-    unwrap<OfficeSignatory>(api.post(`/admin/office-signatories/${id}/retire`)),
   auditLogs: async (
     pageOrFilters: number | AuditLogFilters = 1,
   ): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
