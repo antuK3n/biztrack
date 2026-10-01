@@ -695,9 +695,18 @@ officeholder has moved on.**
 
 Current fallback: `City Mayor` and `Officer-in-Charge`, both with blank name lines.
 
-⚠ **`OfficeSignatoryController` exists but is wired to no route.** `office_signatories`
-has 2 rows, both CENRO. So there is no way for an admin to edit signatories today. This
-is open work (§15).
+**The super admin edits them on the Office Signatories screen** (`/admin/office-signatories`,
+permission `reference.manage`, which no other role holds). `OfficeSignatoryController`
+had no routes from #51 until 2026-10-02; it now lists, adds, edits and retires.
+
+- Retiring keeps the row and copies it to the audit log. There is no delete.
+- One *current* holder per post per office. The unique index covers active rows only
+  (migration `2026_10_02_000100`), so a retired holder's successor can take the same post.
+- Order is the signature-block order. The office's highest-order current signatory
+  prints as "Noted by" on its reports, so no two current signatories may share an order.
+
+Only CENRO's two names are seeded. Every other office prints a blank line until the
+super admin enters its names, which are City Hall's to give (B6).
 
 ### 9.3 The owner name comes off the permit, not the session
 
@@ -1098,7 +1107,7 @@ Trivial, but it cost a debugging round. Name script variables `BASE`, not `URL`.
 | ~~Six identical "Apply" buttons~~ | **FIXED.** Every control on the clearance grid now carries an `aria-label` naming its clearance (`Apply for the Sanitary Permit / Health Certificate`, `Submit a copy of the …`, `Remove the … copy`) while the visible label stays one word. Asserted in `clearances.spec.ts` — *"applying is reported on the button…"*. |
 | **No way to withdraw a clearance** | The "Don't apply for the …" control was removed from the card when the client rejected the cluttered design (§20). Applying still commits money, so an undo has to exist — the API endpoint `clearances.unapply` is intact and working, it simply has no UI. **Do not solve this by making Apply a toggle again**; that was the original bug. |
 | **`auth.spec.ts` flake** | *"signing out of one portal leaves the other signed in"* fails in a full run, passes in isolation. Order-dependent pollution; `f0b0084` fixed one cause but not all. |
-| **`OfficeSignatoryController` is unrouted** | Controller exists, no route points at it. `office_signatories` has 2 rows, both CENRO. So signatories cannot be edited by an admin today — and §9.2 says they must never be hard-coded. This is a real gap. |
+| ~~`OfficeSignatoryController` is unrouted~~ | **FIXED 2026-10-02.** Routed under `/admin/office-signatories` on `reference.manage`, with an Office Signatories screen for the super admin (§9.2). Proved in `OfficeSignatoriesTest` and `office-signatories.spec.ts`. The names for offices other than CENRO still have to be entered. |
 | **`stall_count` never populated** | The Market sheet collects a stall count that never reaches the fee engine. Tied to open question A9b. |
 
 ### 15.3 Not yet deployed
@@ -1144,7 +1153,7 @@ user asked explicitly for *"EVERY SINGLE UNSURE QUESTION, put in a single md"*.
 | A13 | Does "Others" really exist on the line-of-business list? | `76aa6bb` dropped it |
 | A22 | Is there a Semi-Annual mode of payment? | |
 | B3 | Should an office see applications that are not its own? | We assumed **no** and built it that way (§4.3) |
-| B6 | Who is the current signatory for each office, and who may change them? | Blocks §15.2's signatory gap |
+| B6 | Who is the current signatory for each office, and who may change them? | The super admin can enter them now (§9.2); the names themselves have to come from City Hall |
 | B14 | Payments are simulated — what is the real path? | |
 | C1 | Should the system give a zoning verdict at all, or only record the location? | We currently show insights and defer the verdict to CPDO |
 | C9 | **ANSWERED** — the zoning clearance card, name, and form | |
@@ -1274,8 +1283,8 @@ it was always better than letting it stand.
 Answer from §15 and §16:
 
 - **Blocked on the user:** `FRONTEND_URL` in `api/.env`.
-- **Real defects:** six nameless "Apply" buttons; the `auth.spec.ts` order flake; the
-  unrouted `OfficeSignatoryController`; `stall_count` never populated.
+- **Real defects:** six nameless "Apply" buttons; the `auth.spec.ts` order flake;
+  `stall_count` never populated.
 - **Undeployed:** two commits (`9f3b489`, `3502a2b`) — ask before redeploying.
 - **Blocked on City Hall:** the A3/A4 fee-gating question is the one most likely to make
   the fee engine wrong; A9b is the one most likely to make Market Clearance wrong.

@@ -43,6 +43,7 @@ import { RecordsPage } from './pages/admin/RecordsPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
 import { BusinessMapPage } from './pages/admin/BusinessMapPage'
 import { ImportPage } from './pages/admin/ImportPage'
+import { SignatoriesPage } from './pages/admin/SignatoriesPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -606,6 +607,14 @@ export default function App() {
               </RequirePermission>
             }
           />
+          <Route
+            path="/staff/admin/office-signatories"
+            element={
+              <RequirePermission permission="reference.manage">
+                <SignatoriesPage />
+              </RequirePermission>
+            }
+          />
         </Route>
 
         {/*
@@ -764,6 +773,15 @@ export default function App() {
             element={
               <RequirePermission permission="data.import">
                 <ImportPage />
+              </RequirePermission>
+            }
+          />
+          {/* Office Signatories — `reference.manage`, the super admin's alone. */}
+          <Route
+            path="/admin/office-signatories"
+            element={
+              <RequirePermission permission="reference.manage">
+                <SignatoriesPage />
               </RequirePermission>
             }
           />
