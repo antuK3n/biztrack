@@ -8,6 +8,7 @@ use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
 use App\Notifications\PasswordChangeCode;
+use App\Support\AccountRestriction;
 use App\Support\Audit;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
@@ -106,7 +107,26 @@ class AuthController extends Controller
     private function userPayload(User $user): array
     {
         return (new UserResource($this->withRelations($user)))->resolve()
-            + ['created_at' => optional($user->created_at)->toISOString()];
+            + [
+                'created_at' => optional($user->created_at)->toISOString(),
+                /*
+                 * Whether this account is barred, and where its owner takes it.
+                 *
+                 * On the session payload rather than in a screen's own call,
+                 * because the answer governs the whole session: the shell
+                 * raises the warning from it, the navigation hides what it
+                 * bars, and the router refuses the rest. A page that fetched
+                 * this for itself would leave every other page deciding
+                 * separately - which is how the dashboard came to show a
+                 * suspension notice over a system that still let the same
+                 * owner file [client, 30 September 2026].
+                 *
+                 * Null for everybody else, and cheap for them: see
+                 * AccountRestriction::for(), which answers without a query for
+                 * any account that is not a business owner's.
+                 */
+                'restriction' => AccountRestriction::for($user),
+            ];
     }
 
     private function authPayload(User $user, string $portal = 'public'): JsonResponse

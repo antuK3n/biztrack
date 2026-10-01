@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 /*
  * `api` and `toApiError` used to be imported here too. Their only consumer was
  * the email-verification banner (checklist item 99), which resent the
  * verification mail; the banner is gone, so the client goes with it.
  */
 import { loginPathFor, portalPath } from '../lib/api'
-import { navItemsFor } from '../lib/nav'
+import { navItemsFor, restrictionDestination } from '../lib/nav'
 import { unread as unreadApi } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
+import { AccountRestrictedModal } from './ui/Proto'
 import { BellIcon } from './icons'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -74,6 +75,27 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
             <NavLink
               key={item.label}
               to={item.to}
+              /*
+                ── The count, said out loud ──────────────────────────────────
+
+                The badge is `aria-hidden`, and the link carried no name of its
+                own, so a screen reader heard "Messages" and nothing else: the
+                one reader who cannot see the red disc was the one reader not
+                told about it. UnreadBadge's own note claimed this was already
+                handled — "it is also spelled out for a screen reader on the
+                link itself" — which was true of the intention and not of the
+                code.
+
+                Only when there IS something unread, so the name stays exactly
+                "Messages" the rest of the time. That keeps the rail's quiet
+                state matching its visible label, and it is what the e2e suite
+                asserts when it checks which doors a restricted account keeps.
+              */
+              aria-label={
+                item.to?.endsWith('/messages') && unreadMessages > 0
+                  ? `${item.label}, ${unreadMessages} unread`
+                  : undefined
+              }
               className="group flex w-20 flex-col items-center gap-0.5 py-1.5"
             >
               {({ isActive }) => (
@@ -394,11 +416,52 @@ export function AppShell() {
    * the badge lit on notifications the reader is looking at.
    */
   const unreadNotifications = useNotifications((s) => s.unread)
+  /*
+   * ---- The warning belongs to the SESSION, not to one page ---------------
+   *
+   * "Pag open na pag open pa lang ng account ng business owner na yon, may
+   * bubungad na agad na modal for warning" [client, 30 September 2026].
+   *
+   * It used to be raised by the dashboard, which meant an owner who landed
+   * anywhere else - a notification link, a bookmark, a reload on the page they
+   * were last reading - was never told. The shell wraps every screen a signed
+   * in account can reach, so raising it here is the difference between "when
+   * you open the account" and "if you happen to visit the home page".
+   *
+   * Dismissal lasts the session and is not persisted. Coming back tomorrow to
+   * an account that is still barred is worth being told about again; coming
+   * back to the same tab after reading the notice is not.
+   */
+  const [restrictionSeen, setRestrictionSeen] = useState(false)
+  const { pathname } = useLocation()
   if (!user) return null
   const isOwner = user.permissions.includes('application.view_own')
+  const restriction = user.restriction
+  /*
+   * Messages and notifications, and the paths beneath them. Everything else a
+   * barred account asks for is answered with the conversation instead.
+   *
+   * Matched with a trailing slash as well as exactly, so a future
+   * /messages/:id is inside the gate rather than outside it by accident.
+   */
+  const barred =
+    restriction !== null &&
+    !['/messages', '/notifications'].some(
+      (open) => pathname === open || pathname.startsWith(`${open}/`),
+    )
 
   return (
     <div className="min-h-dvh bg-canvas">
+      {restriction && !restrictionSeen && (
+        <AccountRestrictedModal
+          variant={restriction.kind}
+          referenceId={restriction.reference_id}
+          businessName={restriction.business_name}
+          covers={restriction.covers}
+          to={restrictionDestination(restriction)}
+          onClose={() => setRestrictionSeen(true)}
+        />
+      )}
       <Rail user={user} unreadMessages={counts.messages} />
       <Bell count={unreadNotifications} />
       {/* Everything fixed to the viewport is furniture, and a printed
@@ -419,7 +482,28 @@ export function AppShell() {
           * that needs it — don't put the nag back on top of every page.
           */}
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16 print:!max-w-none print:!p-0">
-          <Outlet />
+          {/*
+            ---- Nowhere else to go ------------------------------------------
+
+            "The rest — ang mga application, renew, amend at marami pang iba —
+            ay di accessible, dapat maayos muna yung pagka suspend o blacklisted
+            nya" [client, 30 September 2026].
+
+            Here rather than on each route, because the shell wraps every screen
+            a signed-in account can reach and a guard per route is a list that
+            drifts: the next screen somebody adds is barred by default this way,
+            and has to be named to be let through.
+
+            It REDIRECTS rather than rendering a refusal, and to the
+            conversation the finding belongs to — which is the same instruction
+            as the modal's button, for the reader who arrives by typing a path
+            or following an old link rather than by pressing it.
+
+            The rail offers none of these paths while a restriction stands, so
+            in ordinary use this never fires. It is for the bookmark, the
+            browser's back button, and the tab that was already open.
+          */}
+          {barred ? <Navigate to={restrictionDestination(restriction)} replace /> : <Outlet />}
         </div>
       </main>
 

@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Middleware\EnforceAccountRestriction;
+use App\Http\Middleware\EnsurePermission;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,9 +18,13 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'permission' => \App\Http\Middleware\EnsurePermission::class,
+            'permission' => EnsurePermission::class,
+            // A suspended or blacklisted owner reaches their messages and
+            // their notices, and nothing else. See the middleware for what it
+            // is attached to and why it is attached per group.
+            'unrestricted' => EnforceAccountRestriction::class,
         ]);
-        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+        $middleware->append(SecurityHeaders::class);
         /*
          * API-only app: there is no named 'login' route to bounce a guest to.
          * Returning null makes Authenticate throw AuthenticationException, which

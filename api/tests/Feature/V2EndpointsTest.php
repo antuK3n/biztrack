@@ -98,13 +98,19 @@ it('blocks a suspended business from filing a new application', function () {
             'status' => 'suspended', 'reason' => 'demo',
         ])->assertOk();
 
+    /*
+     * 403, not the 422 this asserted until 30 September 2026: a suspension
+     * bars the whole account until it is settled, so the refusal comes from
+     * EnforceAccountRestriction in front of the route rather than from the
+     * controller's own check on `business_id`.
+     */
     $typeId = PermitType::where('code', 'BUSINESS')->value('id');
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
             'data_privacy_consent' => true,
         ])
-        ->assertStatus(422);
+        ->assertForbidden();
 });
 
 it('returns renewal prefill for an existing business', function () {

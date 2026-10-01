@@ -30,6 +30,8 @@ function makeUser(partial: Partial<MockUser> & Pick<MockUser, 'email' | 'first_n
     has_photo: false,
     is_active: true,
     email_verified_at: '2026-07-01T08:00:00Z',
+    // The mock register holds no findings, so no mock account is barred.
+    restriction: null,
     roles: ['business_owner'],
     permissions: [
       'business.manage_own',

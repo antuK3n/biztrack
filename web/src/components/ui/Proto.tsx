@@ -239,6 +239,7 @@ export function AccountRestrictedModal({
   referenceId,
   businessName,
   covers,
+  to,
   onClose,
 }: {
   variant: 'blacklisted' | 'suspended'
@@ -247,6 +248,15 @@ export function AccountRestrictedModal({
   businessName?: string | null
   /** How many businesses the reader holds, for a bar that reaches all of them. */
   covers?: number
+  /**
+   * The conversation to open.
+   *
+   * A suspension goes to the suspended business's own filing; a blacklisting
+   * to the general enquiry, because the finding is against the person and not
+   * against any one shopfront [client, 30 September 2026]. Worked out on the
+   * server, which is the only side that knows which filing that is.
+   */
+  to?: string
   onClose: () => void
 }) {
   const title = variant === 'suspended' ? 'Business Suspended' : 'Account Blacklisted'
@@ -273,10 +283,21 @@ export function AccountRestrictedModal({
             screen that all three were barred [client, 27 September 2026].
           */}
           {variant === 'suspended' ? (
+            /*
+              ---- "Your other businesses are not affected" is gone ---------
+
+              It was true when a suspension barred one premises, and the client
+              asked for that wording on 27 September. It stopped being true on
+              30 September, when they asked for a suspension to bar the whole
+              account until it is settled — so the sentence now had to go, or
+              the modal would be telling an owner their other shops were fine
+              while the system refused to let them file for those shops.
+            */
             <p className="text-base leading-relaxed">
               <span className="font-bold">{businessName ?? 'One of your businesses'}</span> has been
-              suspended. It cannot file or renew while this stands, and its permits are not valid at
-              the counter. Your other businesses are not affected.
+              suspended, and this account is restricted while it stands. Nothing can be filed,
+              renewed or amended — for this business or any other — and its permits are not valid
+              at the counter.
             </p>
           ) : (
             <p className="text-base leading-relaxed">
@@ -292,8 +313,10 @@ export function AccountRestrictedModal({
               there is a BPLO thread in this app, and the button below opens
               it. Naming the wrong door is the same as naming none.
             */}
-            If you believe this is a mistake, or you want to know what is needed to have it lifted,
-            message the City BPLO below. Your notifications carry the reason that was recorded.
+            Until this is settled you can use <span className="font-bold">Messages</span> and your{' '}
+            <span className="font-bold">notifications</span>, and nothing else. Message the City
+            BPLO below to ask what is needed to have it lifted — your notifications carry the
+            reason that was recorded.
           </p>
           {referenceId && (
             <p className="text-base">
@@ -316,7 +339,7 @@ export function AccountRestrictedModal({
             uses for one.
           */}
           <Link
-            to={BPLO_ENQUIRY}
+            to={to ?? BPLO_ENQUIRY}
             onClick={onClose}
             className="flex items-center justify-center gap-2 bg-royal py-3.5 text-sm font-semibold text-white underline underline-offset-2 hover:bg-royal-hover"
           >
