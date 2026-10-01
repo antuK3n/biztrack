@@ -133,3 +133,11 @@ it('defaults a report to the Manila month to date', function () {
 
     expect($period)->toBe(['from' => '2026-10-01', 'to' => '2026-10-01']);
 });
+
+it('marks only the running month of new and closed businesses as partial', function () {
+    $rows = \App\Support\DashboardAnalytics::build(12)['business_movement']['rows'];
+
+    expect(collect($rows)->where('partial', true)->count())->toBe(1)
+        ->and(end($rows)['partial'])->toBeTrue()
+        ->and(collect($rows)->slice(0, -1)->every(fn ($r) => $r['partial'] === false))->toBeTrue();
+});

@@ -1471,7 +1471,7 @@ final class DashboardAnalytics
      * Registrations count every business created in the window, including ones
      * since removed: it registered in that month whatever happened after.
      *
-     * @return list<array{month: string, registered: int, closed: int}>
+     * @return list<array{month: string, registered: int, closed: int, partial: bool}>
      */
     private static function movementFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
@@ -1481,7 +1481,15 @@ final class DashboardAnalytics
         $cursor = ManilaCalendar::local($windowStart)->startOfMonth();
         $lastMonth = ManilaCalendar::monthOf($now);
         while ($cursor->format('Y-m') <= $lastMonth) {
-            $buckets[$cursor->format('Y-m')] = ['month' => $cursor->format('Y-m'), 'registered' => 0, 'closed' => 0];
+            // The current month is still running: its count is not a drop, it
+            // is a month not over yet. Flagged so the chart can say so instead
+            // of ending every line in a cliff to zero.
+            $buckets[$cursor->format('Y-m')] = [
+                'month' => $cursor->format('Y-m'),
+                'registered' => 0,
+                'closed' => 0,
+                'partial' => $cursor->format('Y-m') === $lastMonth,
+            ];
             $cursor = $cursor->addMonth();
         }
 
@@ -1978,8 +1986,8 @@ final class DashboardAnalytics
     }
 
     /**
-     * @param  list<array{month: string, registered: int, closed: int}>  $facts
-     * @return array{rows: list<array{month: string, registered: int, closed: int, net: int}>, registered: int, closed: int}
+     * @param  list<array{month: string, registered: int, closed: int, partial?: bool}>  $facts
+     * @return array{rows: list<array{month: string, registered: int, closed: int, net: int, partial: bool}>, registered: int, closed: int}
      */
     private static function computeMovement(array $facts): array
     {
@@ -1994,6 +2002,7 @@ final class DashboardAnalytics
                 'registered' => (int) $fact['registered'],
                 'closed' => (int) $fact['closed'],
                 'net' => (int) $fact['registered'] - (int) $fact['closed'],
+                'partial' => (bool) ($fact['partial'] ?? false),
             ];
         }
 
