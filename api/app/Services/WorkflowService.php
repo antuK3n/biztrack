@@ -108,7 +108,39 @@ class WorkflowService
             'note' => $note,
         ]);
         Audit::log('application.status_changed', $app, ['from' => $from?->value, 'to' => $to->value]);
+
+        if (in_array($to, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
+            $this->closeOpenReviews($app);
+        }
+
         $this->notify->applicationStatus($app, $to, $note);
+    }
+
+    /**
+     * A filing that has ended takes every office's open review with it.
+     *
+     * Here, in the one writer of `applications.status`, rather than in
+     * `rejectApplication` and `cancel` separately, because the gap was exactly
+     * that neither of them did it: BPLO rejecting a filing left CHO, BFP and
+     * the rest holding `pending` reviews of something that no longer existed,
+     * and a cancellation left BPLO's own. Those rows sat in every office's
+     * For Approval tab and in its open backlog for good — 106 of them on the
+     * copy of the register this was measured on. Any route to Rejected or
+     * Cancelled added later is covered without remembering to.
+     *
+     * Closed, not Completed: see AssignmentStatus::Closed for why
+     * `completed_at` stays null.
+     */
+    private function closeOpenReviews(Application $app): void
+    {
+        $open = ApplicationAssignment::where('application_id', $app->id)
+            ->whereIn('status', AssignmentStatus::openValues())
+            ->get();
+
+        foreach ($open as $assignment) {
+            $assignment->update(['status' => AssignmentStatus::Closed]);
+            Audit::log('assignment.closed', $assignment, ['application_status' => $app->status?->value]);
+        }
     }
 
     /**
@@ -812,11 +844,19 @@ class WorkflowService
         });
     }
 
-    /** Terminal rejection of the whole filing. Reachable from any live status. */
+    /**
+     * Terminal rejection of the whole filing. Reachable from any live status.
+     *
+     * The other offices' open reviews are closed by `transition()` on the way
+     * to Rejected (closeOpenReviews), in the same transaction as the decision,
+     * so a filing cannot be rejected and still sit in CHO's queue.
+     */
     public function rejectApplication(Application $app, string $reason): void
     {
-        $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
-        $this->transition($app, ApplicationStatus::Rejected, $reason);
+        DB::transaction(function () use ($app, $reason) {
+            $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
+            $this->transition($app, ApplicationStatus::Rejected, $reason);
+        });
         $this->notify->applicationRejected($app, $reason);
     }
 
@@ -1594,6 +1634,24 @@ class WorkflowService
                 'rejected_at' => now(),
                 'rejection_note' => $reason,
                 'rejection_remedy' => $remedy !== '' ? $remedy : null,
+            ]);
+            /*
+             * And a row of its own. `rejected_at` above is the LATEST refusal
+             * — what the office's "refused before" banner reads — and a
+             * second refusal after the applicant re-applies overwrites it.
+             * The Reports tab counts refusals per period, so each one is kept
+             * here as well (migration of 1 October 2026).
+             */
+            DB::table('clearance_refusals')->insert([
+                'application_permit_type_id' => $row->id,
+                'application_id' => $row->application_id,
+                'permit_type_id' => $row->permit_type_id,
+                'refused_at' => $row->rejected_at,
+                'reason' => $reason,
+                'remedy' => $remedy !== '' ? $remedy : null,
+                'refused_by_user_id' => Auth::id(),
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
             $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
 

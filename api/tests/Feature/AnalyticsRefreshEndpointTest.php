@@ -37,21 +37,19 @@ it('refuses the refresh to anyone without analytics.view', function () {
     refreshAs('owner@biztrack.local')->assertForbidden();
 });
 
-it('lets every dashboard reader press Refresh now', function () {
+it('lets only BPLO and the super admin recompute every office', function () {
     /*
-     * Every office admin and the super admin hold `analytics.view` since the
-     * dashboard became every office's (checklist 2026-09-27, item 1), and the
-     * "Refresh now" button sits on that screen. A button that 403s would be
-     * worse than no button.
-     *
-     * A refresh recomputes every office's snapshot, not only the caller's. That
-     * exposes nothing — the response carries counts of figure sets, never a
-     * figure — and it is throttled on the route. It used to be refused to the
-     * super admin because it rewrote screens that account could not read; there
-     * is no such screen any more.
+     * One press recomputes every office's snapshot and the response names each
+     * one it rebuilt, so it belongs to the two readers who see every office.
+     * An office reads only its own figures, which are recomputed every night;
+     * its screen shows no button.
      */
-    refreshAs('sanitary@biztrack.local')->assertOk()
-        ->assertJsonMissingPath('data.results.0.data');
+    refreshAs('sanitary@biztrack.local')->assertForbidden()
+        ->assertJsonMissingPath('data.results');
+    refreshAs('fire@biztrack.local')->assertForbidden();
+
+    refreshAs('bplo@biztrack.local')->assertOk();
+    refreshAs('admin@biztrack.local')->assertOk();
 });
 
 it('refuses the refresh to a caller with no session', function () {

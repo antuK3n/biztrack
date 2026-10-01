@@ -5,6 +5,7 @@ use App\Models\OfficeSignatory;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
 
 /*
@@ -77,12 +78,14 @@ it('refuses a business owner', function () {
 
 /* ── the period ───────────────────────────────────────────────────────── */
 
-it('defaults to the current month to date', function () {
+it('defaults to the current Manila month to date', function () {
     $report = reportAs('bplo@biztrack.local', 'permits-issued', '');
 
+    // Manila's today, not the UTC one: between midnight and 8 am in Malabon
+    // the UTC date is still yesterday. AnalyticsManilaDayTest pins the edge.
     expect($report['period'])->toBe([
-        'from' => CarbonImmutable::today()->startOfMonth()->toDateString(),
-        'to' => CarbonImmutable::today()->toDateString(),
+        'from' => ManilaCalendar::today()->startOfMonth()->toDateString(),
+        'to' => ManilaCalendar::today()->toDateString(),
     ]);
 });
 
@@ -104,21 +107,34 @@ it('answers an unknown report with a 404', function () {
 
 /* ── the figures reconcile with the register ──────────────────────────── */
 
-it('counts every permit issued in the period, and only the office’s own types when scoped', function () {
-    $from = CarbonImmutable::parse('2024-01-01')->startOfDay();
-    $to = CarbonImmutable::parse('2026-09-30')->endOfDay();
-    $query = '?from=2024-01-01&to=2026-09-30';
+it('counts every permit issued in the period by type, business permits by month, and only the office’s own types when scoped', function () {
+    // Up to today: the demo seed issues its permits relative to the clock, and
+    // a period that stopped at a fixed date compared zero to zero once the
+    // clock passed it.
+    $today = ManilaCalendar::today()->toDateString();
+    $start = ManilaCalendar::today()->subYears(2)->toDateString();
+    [$from, $to] = ManilaCalendar::period($start, $today);
+    $query = "?from={$start}&to={$today}";
+    $inPeriod = fn () => Permit::where('issued_at', '>=', $from)->where('issued_at', '<', $to);
+    $business = PermitType::where('code', PermitType::OUTCOME_CODE)->value('id');
+
+    // The demo seed issues business permits only, so a clearance is added: a
+    // fixture with none in the period would make the month-versus-type
+    // equalities below compare one population to itself.
+    anaPermit(anaBusiness(), 'SANITARY', ['issued_at' => now()->subDay()->toDateTimeString()]);
+    expect($inPeriod()->where('permit_type_id', '!=', $business)->count())->toBeGreaterThan(0)
+        ->and($inPeriod()->where('permit_type_id', $business)->count())->toBeGreaterThan(0);
 
     $all = reportAs('admin@biztrack.local', 'permits-issued', $query);
-    expect($all['sections'][0]['total']['total'])
-        ->toBe(Permit::whereBetween('issued_at', [$from, $to])->count())
-        // The month table and the type table are one population in two cuts.
-        ->and($all['sections'][1]['total']['total'])->toBe($all['sections'][0]['total']['total']);
+    expect($all['sections'][1]['total']['total'])->toBe($inPeriod()->count())
+        // The month table is the business permit alone: the clearances are
+        // not added into its New and Renewal cells (LguPermitsIssuedTest).
+        ->and($all['sections'][0]['total']['total'])->toBe($inPeriod()->where('permit_type_id', $business)->count());
 
     $sanitary = PermitType::where('code', 'SANITARY')->value('id');
     $cho = reportAs('sanitary@biztrack.local', 'permits-issued', $query);
     expect($cho['sections'][0]['total']['total'])
-        ->toBe(Permit::whereBetween('issued_at', [$from, $to])->where('permit_type_id', $sanitary)->count());
+        ->toBe($inPeriod()->where('permit_type_id', $sanitary)->count());
 });
 
 it('accounts for every peso collected in the period across all offices', function () {

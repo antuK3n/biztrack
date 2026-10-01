@@ -172,8 +172,20 @@ class AnalyticsController extends Controller
      * nothing — so a refresh can still partly succeed, and the response still
      * reports per dataset rather than returning a bare 204.
      */
-    public function refresh(): JsonResponse
+    public function refresh(Request $request): JsonResponse
     {
+        /*
+         * BPLO and the super admin only: the two readers who see every office.
+         * One press recomputes every office's figures, and its response names
+         * every snapshot it rebuilt; an office that reads only its own figures
+         * has no business doing either. Its screen shows no button.
+         */
+        abort_unless(
+            AnalyticsOffice::canSwitch($request->user()),
+            403,
+            'Only BPLO and the super admin can recompute the figures. They are recomputed every night.',
+        );
+
         $outcome = AnalyticsRefresher::run();
 
         /*
@@ -278,12 +290,27 @@ class AnalyticsController extends Controller
         return max(Spc::MIN_COMPLETIONS_PER_WEEK, min(104, $weeks));
     }
 
-    /** Dashboard trailing window in months, clamped so a stray query cannot scan. */
+    /**
+     * Dashboard trailing window in months: one of the windows the screen offers
+     * and the nightly refresh precomputes (config analytics.variants.dashboard).
+     * Any other number used to be clamped and computed on the spot, uncached,
+     * on every request; now it is refused.
+     */
     private function windowMonths(Request $request): int
     {
-        $months = (int) $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $raw = $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+        $offered = array_map(
+            static fn (array $v): int => (int) $v['months'],
+            AnalyticsDatasets::variants(AnalyticsDatasets::DASHBOARD),
+        );
 
-        return max(1, min(36, $months));
+        abort_unless(
+            is_string($raw) && ctype_digit($raw) && in_array((int) $raw, $offered, true),
+            422,
+            'Choose one of the windows the dashboard offers: '.implode(', ', $offered).' months.',
+        );
+
+        return (int) $raw;
     }
 
     /** CSV download of the summary (status counts, monthly, KPIs). */
