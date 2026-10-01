@@ -456,27 +456,34 @@ final class DashboardAnalytics
      */
     private static function activeBusinessIds(CarbonImmutable $today, ?array $scope = null): array
     {
-        /*
-         * Scoped, "active" means holding a valid permit THIS office issued: a
-         * business with a current fire clearance is active to BFP whatever its
-         * sanitary permit says.
-         */
-        static $cache = [];
-        $key = $today->toDateString().'|'.($scope['code'] ?? '*');
+        return self::activeBusinesses($today, $scope)
+            ->pluck('permits.business_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+    }
 
-        if (! isset($cache[$key])) {
-            $cache[$key] = self::issuedBy(DB::table('permits'), $scope, 'permits.permit_type_id')
-                ->join('businesses', 'businesses.id', '=', 'permits.business_id')
-                ->whereNull('businesses.deleted_at')
-                ->where('permits.status', PermitStatus::Active->value)
-                ->whereDate('permits.valid_until', '>=', $today->toDateString())
-                ->distinct()
-                ->pluck('permits.business_id')
-                ->map(static fn ($id): int => (int) $id)
-                ->all();
-        }
-
-        return $cache[$key];
+    /**
+     * The same set as a subquery, for `whereIn(column, …)`.
+     *
+     * Scoped, "active" means holding a valid permit THIS office issued: a
+     * business with a current fire clearance is active to BFP whatever its
+     * sanitary permit says.
+     *
+     * No cache. It used to keep the id list in a function-level static keyed by
+     * day, which a long-running process (the queue worker) would have carried
+     * past the permits issued later that day; and passing that list inline put
+     * one bound parameter per business into every query that used it. A
+     * subquery lets the database do both jobs.
+     */
+    private static function activeBusinesses(CarbonImmutable $today, ?array $scope = null): QueryBuilder
+    {
+        return self::issuedBy(DB::table('permits'), $scope, 'permits.permit_type_id')
+            ->join('businesses', 'businesses.id', '=', 'permits.business_id')
+            ->whereNull('businesses.deleted_at')
+            ->where('permits.status', PermitStatus::Active->value)
+            ->whereDate('permits.valid_until', '>=', $today->toDateString())
+            ->distinct()
+            ->select('permits.business_id');
     }
 
     /* ── facts: Application Volume ─────────────────────────────────────── */
@@ -1105,15 +1112,9 @@ final class DashboardAnalytics
      */
     private static function barangayFacts(CarbonImmutable $today, ?array $scope = null): array
     {
-        $activeIds = self::activeBusinessIds($today, $scope);
-
-        if ($activeIds === []) {
-            return [];
-        }
-
         return DB::table('business_addresses')
             ->join('barangays', 'barangays.id', '=', 'business_addresses.barangay_id')
-            ->whereIn('business_addresses.business_id', $activeIds)
+            ->whereIn('business_addresses.business_id', self::activeBusinesses($today, $scope))
             ->where('business_addresses.address_type', 'business_location')
             ->groupBy('barangays.id', 'barangays.name')
             ->orderBy('barangays.name')
@@ -1138,15 +1139,9 @@ final class DashboardAnalytics
      */
     private static function lineOfBusinessFacts(CarbonImmutable $today, ?array $scope = null): array
     {
-        $activeIds = self::activeBusinessIds($today, $scope);
-
-        if ($activeIds === []) {
-            return [];
-        }
-
         return DB::table('business_lines')
             ->join('psic_codes', 'psic_codes.id', '=', 'business_lines.psic_code_id')
-            ->whereIn('business_lines.business_id', $activeIds)
+            ->whereIn('business_lines.business_id', self::activeBusinesses($today, $scope))
             ->groupBy('psic_codes.id', 'psic_codes.code', 'psic_codes.title')
             ->orderBy('psic_codes.code')
             ->get([
