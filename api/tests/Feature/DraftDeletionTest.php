@@ -160,11 +160,22 @@ it('keeps a deleted draft out of the dashboard counts', function () {
 
     $before = $ytd();
     $app = deletableDraft();
-    // Counted while it exists, so the drop below is this draft and not drift.
-    expect($ytd())->toBe($before + 1);
+    // A draft is not a filing until it is submitted, so it never counted.
+    expect($ytd())->toBe($before);
 
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->deleteJson("/api/v1/applications/{$app->id}")->assertOk();
+    expect($ytd())->toBe($before);
 
+    /*
+     * The guard this test exists for: a removed filing is out of the raw
+     * counts even when it had been submitted. Soft-deleted directly, since the
+     * owner's endpoint only deletes drafts.
+     */
+    $filed = deletableDraft();
+    $filed->forceFill(['submitted_at' => now()])->save();
+    expect($ytd())->toBe($before + 1);
+
+    $filed->delete();
     expect($ytd())->toBe($before);
 });
