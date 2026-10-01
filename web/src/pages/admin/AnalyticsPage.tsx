@@ -792,6 +792,12 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
     )
   }
 
+  /*
+   * The first and last columns stay put while the permit types scroll between
+   * them. At 390px the six permit-type columns pushed Total off the right edge,
+   * with nothing to say it was there — and Total is the column an office plans
+   * from. White backgrounds so the scrolling cells pass under, not through.
+   */
   return (
     <ProtoCard className="overflow-hidden">
       <div className="overflow-x-auto">
@@ -802,7 +808,7 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
           </caption>
           <thead>
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
-              <th scope="col" className="px-4 py-2.5 font-semibold">
+              <th scope="col" className="sticky left-0 bg-white px-3 py-2.5 font-semibold sm:px-4">
                 Window
               </th>
               {columns.map((column) => (
@@ -815,7 +821,10 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
                   {PERMIT_TYPE_HEADINGS[column.code] ?? column.code}
                 </th>
               ))}
-              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+              <th
+                scope="col"
+                className="sticky right-0 border-l border-line bg-white px-3 py-2.5 text-right font-semibold sm:px-4"
+              >
                 Total
               </th>
             </tr>
@@ -823,7 +832,10 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.window} className="border-b border-line/60 last:border-0">
-                <th scope="row" className="whitespace-nowrap px-4 py-2 text-[14px] font-normal text-ink">
+                <th
+                  scope="row"
+                  className="sticky left-0 whitespace-nowrap bg-white px-3 py-2 text-[14px] font-normal text-ink sm:px-4"
+                >
                   {row.expired ? 'Already expired' : `Within ${row.days} days`}
                 </th>
                 {columns.map((column) => (
@@ -831,7 +843,7 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
                     {num(row.counts[column.code] ?? 0)}
                   </td>
                 ))}
-                <td className="tnum px-4 py-2 text-right text-[14px] font-bold text-ink">
+                <td className="tnum sticky right-0 border-l border-line bg-white px-3 py-2 text-right text-[14px] font-bold text-ink sm:px-4">
                   {num(row.total)}
                 </td>
               </tr>
@@ -842,6 +854,9 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
       <p className="border-t border-line px-4 py-2 text-[11px] leading-snug text-ink-muted">
         The windows nest: a permit 20 days out is in all three. Expired permits are counted once,
         in their own row.
+        {columns.length > 2 && (
+          <span className="sm:hidden"> Slide the table sideways to see every permit type.</span>
+        )}
       </p>
     </ProtoCard>
   )
