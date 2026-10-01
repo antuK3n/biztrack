@@ -64,6 +64,15 @@ use Illuminate\Support\Facades\DB;
  *
  * Everything is computed on request. The date range is arbitrary, so there is
  * no snapshot to serve.
+ *
+ * ── MANILA DATES ────────────────────────────────────────────────────────────
+ *
+ * The period is two Manila dates, inclusive, and every section counts the UTC
+ * instants between the first moment of the first and the first moment after
+ * the last (ManilaCalendar::period). Months are Manila months, bucketed in PHP
+ * so SQLite and PostgreSQL bucket alike. This was the UTC day, which put
+ * everything filed before 8 am Manila on the 1st into the previous month and
+ * dropped the last eight hours of the period.
  */
 final class LguReports
 {
@@ -122,8 +131,12 @@ final class LguReports
      */
     public static function build(string $key, CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        $from = $from->startOfDay();
-        $to = $to->endOfDay();
+        /*
+         * $from and $to arrive as Manila dates. From here on they are the UTC
+         * instants that bound the period: $from its first moment, $to the
+         * first moment AFTER it — every comparison against $to is `<`.
+         */
+        [$from, $to] = ManilaCalendar::period($from->toDateString(), $to->toDateString());
 
         $sections = match ($key) {
             'permits-issued' => self::permitsIssued($from, $to, $scope),
@@ -149,7 +162,8 @@ final class LguReports
         $rows = self::issuedBy(DB::table('permits'), $scope)
             ->join('applications', 'applications.id', '=', 'permits.application_id')
             ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
+            ->where('permits.issued_at', '>=', $from)
+            ->where('permits.issued_at', '<', $to)
             ->orderBy('permit_types.id')
             ->get(['permits.issued_at', 'applications.application_type', 'permit_types.name as type_name', 'permit_types.id as type_id']);
 
@@ -162,7 +176,7 @@ final class LguReports
 
         foreach ($rows as $row) {
             $type = self::transaction((string) $row->application_type);
-            $month = CarbonImmutable::parse($row->issued_at)->format('Y-m');
+            $month = ManilaCalendar::monthOf($row->issued_at);
             if (isset($byMonth[$month])) {
                 $byMonth[$month][$type]++;
             }
@@ -202,7 +216,8 @@ final class LguReports
         $payments = DB::table('payments')
             ->join('fee_assessments', 'fee_assessments.id', '=', 'payments.fee_assessment_id')
             ->where('payments.status', PaymentStatus::Completed->value)
-            ->whereBetween('payments.paid_at', [$from, $to])
+            ->where('payments.paid_at', '>=', $from)
+            ->where('payments.paid_at', '<', $to)
             ->orderBy('payments.id')
             ->get(['payments.id', 'payments.amount', 'payments.paid_at', 'fee_assessments.line_items', 'fee_assessments.total_amount']);
 
@@ -248,7 +263,7 @@ final class LguReports
                 $byNature[$natureLabel]['amount'] += $amount;
             }
 
-            $month = CarbonImmutable::parse($payment->paid_at)->format('Y-m');
+            $month = ManilaCalendar::monthOf($payment->paid_at);
             if ($touched && isset($byMonth[$month])) {
                 $byMonth[$month]['payments']++;
                 $byMonth[$month]['amount'] += $paidHere;
@@ -308,7 +323,8 @@ final class LguReports
         // Each business once: the kind of its EARLIEST permit in the period.
         $issued = self::issuedBy(DB::table('permits'), $scope)
             ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
+            ->where('permits.issued_at', '>=', $from)
+            ->where('permits.issued_at', '<', $to)
             ->orderBy('permits.issued_at')
             ->orderBy('permits.id')
             ->get(['permits.business_id', 'applications.application_type']);
@@ -407,7 +423,8 @@ final class LguReports
 
         $issued = self::issuedBy(DB::table('permits'), $scope)
             ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
+            ->where('permits.issued_at', '>=', $from)
+            ->where('permits.issued_at', '<', $to)
             ->get(['permits.permit_type_id', 'applications.application_type']);
         foreach ($issued as $row) {
             $id = (int) $row->permit_type_id;
@@ -419,7 +436,8 @@ final class LguReports
 
         $refused = DB::table('application_permit_types')
             ->whereNotNull('rejected_at')
-            ->whereBetween('rejected_at', [$from, $to])
+            ->where('rejected_at', '>=', $from)
+            ->where('rejected_at', '<', $to)
             ->when($scope !== null, static fn ($q) => $q->whereIn('permit_type_id', $scope['permit_type_ids']))
             ->groupBy('permit_type_id')
             ->selectRaw('permit_type_id, count(*) as c')
@@ -461,7 +479,8 @@ final class LguReports
             ->whereNull('deleted_at')
             ->whereNotNull('submitted_at')
             ->whereNotNull('decided_at')
-            ->whereBetween('decided_at', [$from, $to])
+            ->where('decided_at', '>=', $from)
+            ->where('decided_at', '<', $to)
             ->get(['complexity', 'submitted_at', 'decided_at']);
 
         $tiers = [];
@@ -476,7 +495,7 @@ final class LguReports
 
                 continue;
             }
-            $days = self::workingDaysBetween(CarbonImmutable::parse($row->submitted_at), CarbonImmutable::parse($row->decided_at));
+            $days = ManilaCalendar::workingDaysBetween(CarbonImmutable::parse($row->submitted_at), CarbonImmutable::parse($row->decided_at));
             $tiers[$tier]['decided']++;
             $tiers[$tier]['days'] += $days;
             if ($days <= Ra11032::TIERS[$tier]['statutory_working_days']) {
@@ -505,24 +524,27 @@ final class LguReports
                 ->whereNull('applications.deleted_at')
                 ->where('application_assignments.department_id', $scope['department_id'])
                 ->whereNotNull('application_assignments.assigned_at')
-                ->where('application_assignments.assigned_at', '<=', $to)
+                ->where('application_assignments.assigned_at', '<', $to)
                 ->where(static fn ($q) => $q->whereNull('application_assignments.completed_at')
-                    ->orWhere('application_assignments.completed_at', '>', $to))
+                    ->orWhere('application_assignments.completed_at', '>=', $to))
                 ->get(['application_assignments.assigned_at as since', 'applications.application_type']);
         } else {
             // Every office: the filing as a whole, from submission to decision.
             $pending = DB::table('applications')
                 ->whereNull('deleted_at')
                 ->whereNotNull('submitted_at')
-                ->where('submitted_at', '<=', $to)
+                ->where('submitted_at', '<', $to)
                 ->whereNotIn('status', [ApplicationStatus::Cancelled->value, ApplicationStatus::Draft->value])
-                ->where(static fn ($q) => $q->whereNull('decided_at')->orWhere('decided_at', '>', $to))
+                ->where(static fn ($q) => $q->whereNull('decided_at')->orWhere('decided_at', '>=', $to))
                 ->get(['submitted_at as since', 'application_type']);
         }
 
-        $asOf = $to->greaterThan(CarbonImmutable::now()) ? CarbonImmutable::now() : $to;
+        // The last moment of the period, or now if the period has not ended
+        // yet. $to itself is the first moment AFTER the period — on the next
+        // Manila date — and ageing to it would add a working day.
+        $asOf = $to->greaterThan(CarbonImmutable::now()) ? CarbonImmutable::now() : $to->subSecond();
         foreach ($pending as $row) {
-            $age = self::workingDaysBetween(CarbonImmutable::parse($row->since), $asOf);
+            $age = ManilaCalendar::workingDaysBetween(CarbonImmutable::parse($row->since), $asOf);
             $bucket = 'over_20';
             foreach ($buckets as $key => $limit) {
                 if ($age <= $limit) {
@@ -616,11 +638,19 @@ final class LguReports
         return array_key_exists($type, self::TYPES) ? $type : 'amendment';
     }
 
-    /** @return array<string, string> "2026-09" => "September 2026", every month the range touches */
+    /**
+     * "2026-09" => "September 2026", every Manila month the period touches.
+     *
+     * $to is the exclusive end instant, so the last month is the one its
+     * previous second falls in.
+     *
+     * @return array<string, string>
+     */
     private static function months(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $out = [];
-        for ($cursor = $from->startOfMonth(); $cursor->lessThanOrEqualTo($to); $cursor = $cursor->addMonth()) {
+        $last = ManilaCalendar::monthOf($to->subSecond());
+        for ($cursor = ManilaCalendar::local($from)->startOfMonth(); $cursor->format('Y-m') <= $last; $cursor = $cursor->addMonth()) {
             $out[$cursor->format('Y-m')] = $cursor->format('F Y');
         }
 
@@ -654,21 +684,5 @@ final class LguReports
         return $scope === null ? $query : $query->whereIn('applications.id', DB::table('application_assignments')
             ->select('application_id')
             ->where('department_id', $scope['department_id']));
-    }
-
-    /** Whole working days, weekends excluded — the dashboard's count. */
-    private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
-    {
-        $cursor = $from->startOfDay();
-        $end = $to->startOfDay();
-        $days = 0;
-        while ($cursor->lessThan($end)) {
-            $cursor = $cursor->addDay();
-            if (! $cursor->isWeekend()) {
-                $days++;
-            }
-        }
-
-        return $days;
     }
 }

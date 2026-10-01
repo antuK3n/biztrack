@@ -7,6 +7,7 @@ use App\Models\OfficeSignatory;
 use App\Models\User;
 use App\Support\AnalyticsOffice;
 use App\Support\LguReports;
+use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -157,13 +158,17 @@ class ReportController extends Controller
     /**
      * The reporting period. Defaults to the current month to date, which is the
      * report an office is most often asked for. Dates only, inclusive at both
-     * ends.
+     * ends, and MANILA dates: "today" is the City's today, not the UTC one,
+     * which is still yesterday until 8 am in Malabon. LguReports turns the two
+     * dates into the instants that bound them (ManilaCalendar::period).
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
      */
     private function period(Request $request): array
     {
-        $today = CarbonImmutable::today();
+        // Held as a bare date, like the parsed query values below, so the two
+        // compare and subtract as dates whatever zone either came from.
+        $today = CarbonImmutable::parse(ManilaCalendar::today()->toDateString());
 
         $validated = Validator::make($request->query(), [
             'from' => ['nullable', 'date_format:Y-m-d'],

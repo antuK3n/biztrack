@@ -5,6 +5,7 @@ use App\Models\OfficeSignatory;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
 
 /*
@@ -77,12 +78,14 @@ it('refuses a business owner', function () {
 
 /* ── the period ───────────────────────────────────────────────────────── */
 
-it('defaults to the current month to date', function () {
+it('defaults to the current Manila month to date', function () {
     $report = reportAs('bplo@biztrack.local', 'permits-issued', '');
 
+    // Manila's today, not the UTC one: between midnight and 8 am in Malabon
+    // the UTC date is still yesterday. AnalyticsManilaDayTest pins the edge.
     expect($report['period'])->toBe([
-        'from' => CarbonImmutable::today()->startOfMonth()->toDateString(),
-        'to' => CarbonImmutable::today()->toDateString(),
+        'from' => ManilaCalendar::today()->startOfMonth()->toDateString(),
+        'to' => ManilaCalendar::today()->toDateString(),
     ]);
 });
 

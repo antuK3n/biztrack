@@ -528,38 +528,15 @@ final class OfficePerformanceAnalytics
      * there are in the same unit and can be compared without a conversion —
      * which is the whole reason this is not simply a difference in hours.
      *
-     * Counted over the half-open interval (from, to]: a filing received and
-     * decided the same day took zero working days, and one received Friday and
-     * decided Monday took one. Public holidays are not modelled, here or in
-     * Ra11032, which makes every count slightly generous to the office — a hold
-     * this method calls a breach is genuinely a breach.
-     *
-     * Arithmetic rather than a day-by-day loop for the whole span: any seven
-     * consecutive days contain exactly five weekdays, so only the remainder has
-     * to be walked. The register holds thousands of assignments per window and a
-     * naive loop is a year of iterations per row.
+     * The count itself is ManilaCalendar's, shared with the dashboard and the
+     * reports: Manila dates, the half-open interval (from, to], weekends out,
+     * public holidays in (so a hold this calls a breach is genuinely a breach).
+     * This class kept its own arithmetic copy on the UTC date until the three
+     * were found to disagree about a filing received before 8 am Manila.
      */
     private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): float
     {
-        $start = $from->startOfDay();
-        $end = $to->startOfDay();
-
-        if ($end <= $start) {
-            return 0.0;
-        }
-
-        $days = (int) $start->diffInDays($end);
-        $count = intdiv($days, 7) * 5;
-
-        $cursor = $start;
-        for ($i = 0; $i < $days % 7; $i++) {
-            $cursor = $cursor->addDay();
-            if ($cursor->isWeekday()) {
-                $count++;
-            }
-        }
-
-        return (float) $count;
+        return (float) ManilaCalendar::workingDaysBetween($from, $to);
     }
 
     /**
