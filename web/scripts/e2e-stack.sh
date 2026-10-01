@@ -42,7 +42,41 @@ if [ ! -f "$LIVE_DB" ]; then
 fi
 
 echo "Copying the register to a throwaway database…"
+
+# ── Remove the old copy first, and check the new one ─────────────────────
+#
+# `cp` over a file another process still holds open does not always land on
+# Windows. On 1 October 2026 this produced an E2E database the same SIZE as
+# the register and containing ZERO TABLES — twice — because a previous
+# stack's `php artisan serve` was still attached to it. The script said
+# "Copying…", reported success and served an empty database.
+#
+# What that costs is the diagnosis, not the copy. Every spec fails in
+# auth.setup with "could not sign in", which reads as a broken login, a bad
+# password or an API that will not boot. The real fault — the file has no
+# tables in it — is nowhere in the output, and the search starts in the
+# wrong place.
+#
+# So: delete before copying, so a locked file fails loudly here rather than
+# silently leaving yesterday's, and then COUNT THE TABLES. `users` is the
+# one every session needs, which makes it the honest thing to test for.
+rm -f "$E2E_DB"
 cp "$LIVE_DB" "$E2E_DB"
+
+# Through PHP, not `sqlite3`: the CLI is not installed on every machine that
+# runs this (it is absent on the one this was written on), and a check that
+# reports "no tables" because the checker is missing would fail the stack
+# every time -- which is worse than the fault it is looking for. PHP is
+# already a hard dependency two lines below.
+TABLES="$(php -r 'try { $d = new PDO("sqlite:" . $argv[1]); echo (int) $d->query("select count(*) from sqlite_master where type='"'"'table'"'"' and name='"'"'users'"'"'")->fetchColumn(); } catch (Throwable $e) { echo 0; }' "$E2E_DB" 2>/dev/null || echo 0)"
+
+if [ "$TABLES" != "1" ]; then
+  echo >&2
+  echo "The copy at $E2E_DB has no 'users' table — it is empty or unreadable." >&2
+  echo "A stale test stack is usually still holding the file. Stop any" >&2
+  echo "'php artisan serve' on port $API_PORT, then run this again." >&2
+  exit 1
+fi
 
 cleanup() {
   echo
