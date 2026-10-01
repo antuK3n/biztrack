@@ -282,7 +282,14 @@ final class DashboardAnalytics
 
     /**
      * Narrow a query on a business id column to the office's businesses: those
-     * with at least one filing routed to it. A no-op for every office.
+     * with a filing routed to it, OR holding (or having held) a permit it
+     * issues. A no-op for every office.
+     *
+     * One base for every panel. Active Businesses counted permit holders while
+     * the map, the organisation and the new-and-closed panels counted only
+     * businesses with a filing routed here, so a permit from the old register
+     * (no filing behind it) was active yet off the map. Either link makes a
+     * business this office's.
      *
      * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
      */
@@ -292,10 +299,14 @@ final class DashboardAnalytics
             return $query;
         }
 
-        return $query->whereIn($businessIdColumn, self::routedTo(
-            DB::table('applications')->select('applications.business_id'),
-            $scope,
-        ));
+        return $query->where(static fn (QueryBuilder $q) => $q
+            ->whereIn($businessIdColumn, self::routedTo(
+                DB::table('applications')->select('applications.business_id'),
+                $scope,
+            ))
+            ->orWhereIn($businessIdColumn, DB::table('permits')
+                ->select('permits.business_id')
+                ->whereIn('permits.permit_type_id', $scope['permit_type_ids'] === [] ? [0] : $scope['permit_type_ids'])));
     }
 
     /**
