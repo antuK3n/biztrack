@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\OfficeSignatory;
 use App\Models\User;
 use App\Support\AnalyticsOffice;
 use App\Support\LguReports;
@@ -11,7 +10,6 @@ use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -84,7 +82,7 @@ class ReportController extends Controller
             fputcsv($out, [$compiled['title']]);
             fputcsv($out, ['Office', $compiled['scope']['office_name']]);
             fputcsv($out, ['Period', $compiled['period']['from'], $compiled['period']['to']]);
-            fputcsv($out, ['Generated', $compiled['generated_at'], $compiled['prepared_by']['name']]);
+            fputcsv($out, ['Generated', $compiled['generated_at']]);
 
             foreach ($compiled['sections'] as $section) {
                 fputcsv($out, []);
@@ -132,37 +130,7 @@ class ReportController extends Controller
             // file sees when it was made in their own day, not UTC with
             // microseconds.
             'generated_at' => ManilaCalendar::local(CarbonImmutable::now())->format('Y-m-d\\TH:i:sP'),
-            'prepared_by' => [
-                'name' => (string) $user->name,
-                'position' => (string) ($user->roles()->value('display_name') ?? ''),
-            ],
-            'noted_by' => $this->notedBy($office),
         ];
-    }
-
-    /**
-     * The "Noted by" line: the office's most senior current signatory, as the
-     * administrators have entered it in Office Signatories — never a name
-     * written here (names on LGU forms are admin-edited data). Null when the
-     * office has none on record, and for an all-office report, which no single
-     * office head signs; the screen then prints a blank line to sign on.
-     *
-     * @return array{name: string, position: string}|null
-     */
-    private function notedBy(?string $office): ?array
-    {
-        if ($office === null) {
-            return null;
-        }
-
-        $departmentId = DB::table('departments')->where('code', $office)->value('id');
-        $signatory = OfficeSignatory::query()
-            ->where('department_id', $departmentId)
-            ->where('is_active', true)
-            ->orderByDesc('sort_order')
-            ->first();
-
-        return $signatory === null ? null : ['name' => $signatory->name, 'position' => $signatory->role];
     }
 
     /**

@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Department;
-use App\Models\OfficeSignatory;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -177,19 +176,11 @@ it('keeps pending age buckets adding up to the pending total', function () {
 
 /* ── the page it prints on ────────────────────────────────────────────── */
 
-it('names who prepared it, and takes the noted-by line from the office’s own signatories', function () {
-    $cenro = Department::where('code', 'CENRO')->firstOrFail();
-    OfficeSignatory::query()->where('department_id', $cenro->id)->delete();
-    OfficeSignatory::create(['department_id' => $cenro->id, 'role' => 'Evaluator', 'name' => 'A. Evaluator', 'sort_order' => 0]);
-    OfficeSignatory::create(['department_id' => $cenro->id, 'role' => 'Head of Office', 'name' => 'B. Head', 'sort_order' => 1]);
-
+it('prints no signature lines', function () {
     $report = reportAs('cenro@biztrack.local', 'clearances');
 
-    expect($report['prepared_by']['name'])->not->toBe('')
-        ->and($report['noted_by'])->toBe(['name' => 'B. Head', 'position' => 'Head of Office']);
-
-    // Nobody signs an all-office report on one office's behalf.
-    expect(reportAs('admin@biztrack.local', 'clearances')['noted_by'])->toBeNull();
+    expect($report)->not->toHaveKey('prepared_by')
+        ->and($report)->not->toHaveKey('noted_by');
 });
 
 it('exports the same figures as CSV, headed with the office and period', function () {

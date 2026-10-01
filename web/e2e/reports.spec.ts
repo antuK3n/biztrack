@@ -36,8 +36,8 @@ test.describe('Reports, as BPLO', () => {
       await expect(report).toContainText('City of Malabon')
       await expect(report).toContainText('For the period January 1, 2026 to September 30, 2026')
       await expect(report.locator('table').first()).toBeVisible()
-      await expect(report).toContainText('Prepared by:')
-      await expect(report).toContainText('Noted by:')
+      await expect(report).not.toContainText('Prepared by:')
+      await expect(report).not.toContainText('Noted by:')
     }
   })
 
@@ -117,7 +117,7 @@ test.describe('Reports, as BPLO', () => {
     expect(css).toMatch(/@page :first \{\s*@top-left \{ content: none; \}/)
   })
 
-  test('in print the signatures ride in the last table with its last rows, so they never start a page alone', async ({
+  test('in print the end of the report rides in the last table with its last rows, so it never starts a page alone', async ({
     page,
   }) => {
     await page.goto('/staff/analytics/reports?report=collections&from=2023-10-01&to=2026-10-01&office=BPLO')
@@ -129,18 +129,17 @@ test.describe('Reports, as BPLO', () => {
     const tail = report.locator('tbody.lgu-report-tail')
     await expect(tail).toHaveCount(1)
     expect(await tail.evaluate((el) => getComputedStyle(el).breakInside)).toBe('avoid')
-    // The last three months, the total and the signatures, in one unbreakable group.
+    // The last three months, the total and the closing line, in one unbreakable group.
     await expect(tail.locator('tr')).toHaveCount(5)
     await expect(tail).toContainText('October 2026')
     await expect(tail).toContainText('Total')
-    await expect(tail.getByText('Prepared by:')).toBeVisible()
-    await expect(tail.getByText('Noted by:')).toBeVisible()
-    // Exactly one copy of the signatures on paper.
-    await expect(report.getByText('Prepared by:').filter({ visible: true })).toHaveCount(1)
+    await expect(tail.getByText('Generated from the BizTrack register')).toBeVisible()
+    // Exactly one copy of the closing line on paper.
+    await expect(report.getByText('Generated from the BizTrack register').filter({ visible: true })).toHaveCount(1)
 
     await page.emulateMedia({ media: 'screen' })
-    await expect(tail.getByText('Prepared by:')).toBeHidden()
-    await expect(report.getByText('Prepared by:').filter({ visible: true })).toHaveCount(1)
+    await expect(tail.getByText('Generated from the BizTrack register')).toBeHidden()
+    await expect(report.getByText('Generated from the BizTrack register').filter({ visible: true })).toHaveCount(1)
   })
 
   test('printing shows the document and nothing else', async ({ page }) => {

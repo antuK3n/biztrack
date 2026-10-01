@@ -27,7 +27,7 @@ import { OfficeScope } from './OfficeScope'
  * App\Support\LguReports for what each one is modelled on.
  *
  * THE SCREEN IS THE DOCUMENT. What is shown under the controls is the page that
- * prints: the City of Malabon header, the report, and the signature lines. The
+ * prints: the City of Malabon header and the report. The
  * print stylesheet at the bottom hides everything else and sets A4, so "Print"
  * and the browser's "Save as PDF" both produce the filed copy. There is no
  * separate PDF rendering to drift from the screen.
@@ -100,27 +100,26 @@ function formatCell(value: string | number | null | undefined, format: ReportCol
 }
 
 /*
- * How many of the last section's rows travel with the signatures. Three is
- * enough that the "Noted by" line visibly signs the end of a table rather than
- * a total floating on its own, and few enough that the page before is not left
- * noticeably short.
+ * How many of the last section's rows travel with the closing line. Three is
+ * enough that the total never floats on a page of its own, and few enough
+ * that the page before is not left noticeably short.
  */
 const TAIL_ROWS = 3
 
 /**
  * One section's table.
  *
- * `closing` is passed to the LAST section only: the signature block, which in
- * print rides inside this table's final row group together with the last few
- * rows, the total and the note. That row group is `break-inside: avoid`, so
- * the signatures can never start a page on their own — they move with the end
- * of the figures they sign. On screen the same block is drawn after the
- * document instead (see ReportDocument), and the in-table copy is not shown.
+ * `closing` is passed to the LAST section only: the "generated on" line, which
+ * in print rides inside this table's final row group together with the last
+ * few rows, the total and the note. That row group is `break-inside: avoid`,
+ * so the end of the report can never start a page on its own. On screen the
+ * same line is drawn after the document instead (see ReportDocument), and the
+ * in-table copy is not shown.
  *
  * Why inside the table rather than `break-before: avoid` on a block after it:
  * that was tried, and Chrome honoured it only for some page heights. On the
  * three-year BPLO collections report it still printed a third page holding
- * the signatures and nothing else. A row group that may not be split is a
+ * the closing block and nothing else. A row group that may not be split is a
  * rule Chrome keeps every time.
  */
 function SectionTable({ section, closing }: { section: ReportSection; closing?: ReactNode }) {
@@ -246,13 +245,13 @@ function SectionTable({ section, closing }: { section: ReportSection; closing?: 
         </table>
       </div>
       {/* With a closing block the note prints inside the table's last row
-          group, beside the signatures; on screen it is drawn here as always. */}
+          group, beside the closing line; on screen it is drawn here as always. */}
       {note(closing ? 'print:hidden' : '')}
     </section>
   )
 }
 
-/** A print-only, borderless row spanning the table: where the signatures ride. */
+/** A print-only, borderless row spanning the table: where the closing line rides. */
 function ClosingRow({ span, children }: { span: number; children: ReactNode }) {
   return (
     <tr className="hidden print:table-row">
@@ -263,18 +262,7 @@ function ClosingRow({ span, children }: { span: number; children: ReactNode }) {
   )
 }
 
-function SignatureLine({ label, name, position }: { label: string; name?: string; position?: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[12px] text-ink-secondary">{label}</p>
-      <div className="mt-8 border-b border-ink" aria-hidden="true" />
-      <p className="mt-1 text-[13px] font-semibold uppercase text-ink">{name || ' '}</p>
-      <p className="text-[12px] text-ink-secondary">{position || ' '}</p>
-    </div>
-  )
-}
-
-/** "Prepared by", "Noted by" and the line saying when the figures were counted. */
+/** The line saying when the figures were counted. */
 function ReportClosing({ report }: { report: LguReport }) {
   const generated = new Date(report.generated_at).toLocaleString('en-PH', {
     month: 'long',
@@ -285,29 +273,14 @@ function ReportClosing({ report }: { report: LguReport }) {
   })
 
   return (
-    <>
-      <div className="mt-10 grid grid-cols-2 gap-10">
-        <SignatureLine
-          label="Prepared by:"
-          name={report.prepared_by.name}
-          position={report.prepared_by.position}
-        />
-        <SignatureLine
-          label="Noted by:"
-          name={report.noted_by?.name}
-          position={report.noted_by?.position ?? 'Head of Office'}
-        />
-      </div>
-
-      <p className="mt-8 border-t border-line pt-2 text-[10.5px] text-ink-muted">
-        Generated from the BizTrack register on {generated}. Figures are counted from the register
-        as it stood at that moment.
-      </p>
-    </>
+    <p className="mt-8 border-t border-line pt-2 text-[10.5px] text-ink-muted">
+      Generated from the BizTrack register on {generated}. Figures are counted from the register
+      as it stood at that moment.
+    </p>
   )
 }
 
-/** The printable document: header, report, signatures. */
+/** The printable document: header and report. */
 function ReportDocument({ report }: { report: LguReport }) {
   const office =
     report.scope.office === null ? 'Business Permits and Licensing Office' : report.scope.office_name
@@ -350,7 +323,7 @@ function ReportDocument({ report }: { report: LguReport }) {
         ))}
       </div>
 
-      {/* The screen's copy of the signatures. Print uses the one inside the
+      {/* The screen's copy of the closing line. Print uses the one inside the
           last table (see SectionTable), so this one stays off paper. A report
           with no sections at all has no table to carry it, and prints this. */}
       <div className={last >= 0 ? 'print:hidden' : undefined}>
@@ -397,12 +370,9 @@ function cssString(value: string): string {
  * row inside every table, which would print the title three times on page one
  * of a three-table report.
  *
- * THE SIGNATURES KEEP COMPANY. The last table's final row group — its last
- * few rows, the total, the note and the signatures — is `break-inside: avoid`
- * (see SectionTable), so the "Prepared by" and "Noted by" lines move to a new
- * page only together with the end of the figures they sign. The three-year
- * BPLO collections report used to end on a page holding the signatures and
- * nothing else.
+ * THE END KEEPS COMPANY. The last table's final row group — its last few
+ * rows, the total, the note and the closing line — is `break-inside: avoid`
+ * (see SectionTable), so the end of a report never prints alone on a page.
  */
 function printCss(report: LguReport | null): string {
   const running = report

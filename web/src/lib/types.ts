@@ -1677,9 +1677,6 @@ export interface LguReport {
   period: { from: string; to: string }
   scope: AnalyticsScope
   generated_at: string
-  prepared_by: { name: string; position: string }
-  /** From Office Signatories; null when the office has none, or for all offices. */
-  noted_by: { name: string; position: string } | null
 }
 
 /** One dataset variant's outcome from a manual refresh. */
