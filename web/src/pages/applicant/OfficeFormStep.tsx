@@ -1603,8 +1603,29 @@ const DENR_GLOSSARY: { code: string; meaning: string }[] = [
  * in the copy beneath it is worse, because the applicant would go and ask them.
  */
 const REQUIREMENTS_META: Partial<Record<OfficeFormCode, { title: string; office: string }>> = {
-  ZONING: { title: 'Checklist of Requirements', office: 'CPDD' },
-  CEC: { title: 'Requirements for Application', office: 'CENRO' },
+  /*
+   * ── The office's name, as the LGU writes it ──────────────────────────
+   *
+   * These were acronyms, and one of them was not even ours: the zoning
+   * office read "CPDD" while the register seeds it as CPDO and the city's
+   * own verification table calls it the Planning/Zoning Office. An
+   * applicant reading "CPDD returned this about one item" is being told
+   * which office sent their filing back in letters they have never seen.
+   *
+   * Taken from the client's own document-verification table (1 October
+   * 2026), which is the same list `departments.name` holds:
+   *
+   *   Occupancy Permit                   Office of the Local Building Official
+   *   Sanitary Permit/Health Certificate City Health Office
+   *   City Environmental Certificate     City Environmental and Natural Resources Office
+   *   Fire Safety Inspection Certificate Bureau of Fire Protection
+   *   Zoning Clearance                   Planning/Zoning Office
+   */
+  ZONING: { title: 'Checklist of Requirements', office: 'Planning/Zoning Office' },
+  CEC: {
+    title: 'Requirements for Application',
+    office: 'City Environmental and Natural Resources Office',
+  },
 }
 
 function RequirementsChecklist({
