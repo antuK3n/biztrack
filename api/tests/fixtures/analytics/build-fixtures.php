@@ -99,7 +99,7 @@ foreach ([1.0, 2.0, 3.0] as $days) {
 foreach ([4.0, 5.0] as $days) {
     $stageObservations[] = ['code' => 'CHO', 'name' => 'City Health Office', 'days' => $days];
 }
-foreach ([['OBO', 'Office of the Building Official'], ['CENRO', 'City Environment Office'], ['BFP', 'Bureau of Fire Protection']] as [$code, $name]) {
+foreach ([['OBO', 'Office of the Local Building Official'], ['CENRO', 'City Environment Office'], ['BFP', 'Bureau of Fire Protection']] as [$code, $name]) {
     $stageObservations[] = ['code' => $code, 'name' => $name, 'days' => 0.0];
 }
 
@@ -278,9 +278,9 @@ $dashboard = [
 
     'permit_type_columns' => [
         ['code' => 'BUSINESS', 'label' => "Mayor's / Business Permit"],
-        ['code' => 'SANITARY', 'label' => 'Sanitary Permit / Health Certificate'],
+        ['code' => 'SANITARY', 'label' => 'Sanitary Permit'],
         ['code' => 'FSIC', 'label' => 'Fire Safety Inspection Certificate'],
-        ['code' => 'ZONING', 'label' => 'Zoning / Locational Clearance'],
+        ['code' => 'ZONING', 'label' => 'Zoning Clearance'],
     ],
     'expiring_permits' => $expiringPermits,
     'barangays' => $barangays,
