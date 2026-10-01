@@ -909,42 +909,47 @@ export function ClearanceStage({
    * applicant doing what they came to do. What it adds is the one fact the
    * button cannot: that this is the last moment to change anything.
    */
+  /*
+   * ── Which act is being confirmed ────────────────────────────────────
+   *
+   * The same modal serves two of them. Answering a RETURN is not handing
+   * a form in for the first time: the office has already read this sheet,
+   * asked for one thing, and is waiting on that one thing. Told "Have you
+   * finished reviewing your Zoning Clearance? … you will not be able to
+   * change your answers", an applicant who corrected a single blurry
+   * photograph is being asked about a form they are not submitting, and
+   * warned about losing answers they did not touch.
+   *
+   * `correctCode` is what the corrections dialog is open on, so the two
+   * cases are told apart by the state that opened them rather than by a
+   * flag somebody has to remember to set.
+   */
+  const promptIsCorrection = submitPrompt !== null && submitPrompt === correctCode
+  const promptRow = rows?.find((r) => r.permit_type.code === submitPrompt)
+  const promptPermitName = promptRow?.permit_type.name ?? 'application form'
+  const promptOfficeName = promptRow?.permit_type.department?.name ?? 'the issuing office'
+
   const submitPromptModal = submitPrompt !== null && (
           /*
-            ── The last look before a one-way press ─────────────────────────────
+            ── The last look before a one-way press ───────────────────────
 
-          It lives HERE, inside the `if (formCode)` branch, and that is the
-          whole of the bug reported on 17 September 2026: "why does this submit
-          button not work?"
-
-          It did work. It set `submitPrompt` and the component re-rendered —
-          and this file returns early at `if (formCode)` to draw the open
-          sheet, while the modal sat in the FINAL return, the branch that draws
-          the clearance cards. So the state changed and nothing mounted. Only
-          the sheet carries the Submit button, so only the sheet can set that
-          state: the copy down there was unreachable from the day it was
-          written, and no test noticed because a modal that never opens looks
-          exactly like a modal nobody asked for.
-
-            The client asked for it by name: "before submitting each form, please
-            create a modal that will ask them if they are already finished
-            reviewing before submitting."
+            The client asked for it by name: "before submitting each form,
+            please create a modal that will ask them if they are already
+            finished reviewing before submitting."
 
             It earns its place on the same test the two dialogs above pass —
-            something happens here that cannot be undone from this screen. Once
-            submitted the sheet is the office's and the applicant cannot change
-            it; getting it back means messaging the office and asking them to
-            return it. Until today that press was the same size as saving a draft.
+            something happens here that cannot be undone from this screen.
+            Once it is sent the sheet is the office's again, and getting it
+            back means asking them to return it a second time.
 
-            Blue, not red. Nothing is destroyed and nothing is wrong — this is the
-            applicant doing the thing they came to do, and dressing it as a
-            warning would say otherwise. What the dialog adds is the one fact the
-            button cannot: that this is the last moment to change anything.
+            Blue, not red. Nothing is destroyed and nothing is wrong — this
+            is the applicant doing the thing they came to do, and dressing
+            it as a warning would say otherwise.
           */
           <ProtoModal
-            title="SUBMIT THIS FORM"
+            title={promptIsCorrection ? 'SEND YOUR CORRECTIONS' : 'SUBMIT THIS FORM'}
             cancelLabel="Keep checking"
-            confirmLabel="Yes, submit it"
+            confirmLabel={promptIsCorrection ? 'Yes, send them' : 'Yes, submit it'}
             onCancel={() => setSubmitPrompt(null)}
             onConfirm={() => {
               /*
@@ -959,25 +964,44 @@ export function ClearanceStage({
             }}
           >
             <p className="text-center text-base text-ink">
-              Have you finished reviewing your{' '}
-              <span className="font-bold">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
-                  'application form'}
-              </span>
-              ?
+              {promptIsCorrection ? (
+                <>
+                  Send your corrections to{' '}
+                  <span className="font-bold">{promptOfficeName}</span>?
+                </>
+              ) : (
+                <>
+                  Have you finished reviewing your{' '}
+                  <span className="font-bold">{promptPermitName}</span>?
+                </>
+              )}
             </p>
             <p className="mt-3 text-center text-sm text-ink-secondary">
-              Once you submit it,{' '}
-              <span className="font-semibold text-ink">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
-                  ?.name ?? 'the issuing office'}
-              </span>{' '}
-              receives it and you will not be able to change your answers. You can still read them
-              back at any time.
+              {promptIsCorrection ? (
+                <>
+                  Only what they asked you to fix is being sent back for another look.
+                  Everything else you already filed stays exactly as it is.
+                </>
+              ) : (
+                <>
+                  Once you submit it, <span className="font-semibold text-ink">{promptOfficeName}</span>{' '}
+                  receives it and you will not be able to change your answers. You can still read
+                  them back at any time.
+                </>
+              )}
             </p>
             <p className="mt-3 text-center text-sm text-ink-secondary">
-              If you spot a mistake after submitting, message the office from this clearance&rsquo;s
-              card and they can send the form back to you.
+              {promptIsCorrection ? (
+                <>
+                  If you spot something else afterwards, message the office from this
+                  clearance&rsquo;s card and they can send it back to you again.
+                </>
+              ) : (
+                <>
+                  If you spot a mistake after submitting, message the office from this
+                  clearance&rsquo;s card and they can send the form back to you.
+                </>
+              )}
             </p>
           </ProtoModal>
   )
