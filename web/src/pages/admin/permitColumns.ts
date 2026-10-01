@@ -48,19 +48,40 @@ export interface PermitColumn {
  *
  * A permit belongs to an office THROUGH the certificate it is: CENRO issues
  * the CEC, BFP the FSIC. `permits` carries a permit type, never a department,
- * so the code is the permit type's and the office name is what the letterhead
- * says — CPDD for zoning, though the register still seeds that office as CPDO.
+ * so the code is the permit type's and the office name is the LGU's own.
+ *
+ * These were acronyms until 1 October 2026, and zoning's was wrong twice
+ * over: it read CPDD, the register seeds CPDO, and the city's document
+ * verification table calls the office the Planning/Zoning Office. The
+ * names here now match that table and `departments.name`, so a column
+ * heading and the office's own letterhead say the same thing.
  *
  * MARKET is not here. It was a permit type until 6 September 2026, when the
  * client confirmed with the LGU that neither it nor its office is needed.
  */
 export const OFFICES = [
-  { code: 'BUSINESS', office: 'BPLO', name: "Mayor's / Business Permit" },
-  { code: 'ZONING', office: 'CPDD', name: 'Zoning Clearance' },
-  { code: 'SANITARY', office: 'CHO', name: 'Sanitary Permit' },
-  { code: 'FSIC', office: 'BFP', name: 'Fire Safety Inspection Certificate' },
-  { code: 'OCCUPANCY', office: 'OBO', name: 'Occupancy Permit' },
-  { code: 'CEC', office: 'CENRO', name: 'City Environmental Certificate' },
+  {
+    code: 'BUSINESS',
+    office: 'Business Permits and Licensing Office',
+    name: "Mayor's / Business Permit",
+  },
+  { code: 'ZONING', office: 'Planning/Zoning Office', name: 'Zoning Clearance' },
+  { code: 'SANITARY', office: 'City Health Office', name: 'Sanitary Permit' },
+  {
+    code: 'FSIC',
+    office: 'Bureau of Fire Protection',
+    name: 'Fire Safety Inspection Certificate',
+  },
+  {
+    code: 'OCCUPANCY',
+    office: 'Office of the Local Building Official',
+    name: 'Occupancy Permit',
+  },
+  {
+    code: 'CEC',
+    office: 'City Environmental and Natural Resources Office',
+    name: 'City Environmental Certificate',
+  },
 ] as const
 
 export type OfficeCode = (typeof OFFICES)[number]['code']
