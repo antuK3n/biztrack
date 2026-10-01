@@ -1308,7 +1308,18 @@ export function OwnersPage() {
                         {row.unbilled_fees === undefined ? (
                           <span className="text-ink-muted">—</span>
                         ) : row.unbilled_fees.total === 0 ? (
-                          <span className="text-ink-muted">—</span>
+                          /*
+                            "None", not an em-dash.
+
+                            The client has objected to this exact shape once
+                            already, on the permit register: "'—' bat may ganyan
+                            pa sa holding, kung wala, it should be automatic na
+                            'nothing'" [27 September 2026]. A dash is a
+                            typographic shrug — it reads as "no data" as easily
+                            as "nothing owed", and a column of them tells a
+                            reader nothing either way. The word says which.
+                          */
+                          <span className="text-ink-muted">None</span>
                         ) : (
                           <button
                             type="button"
