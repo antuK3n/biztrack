@@ -41,8 +41,11 @@ export function OfficeScope({
    * folds the chosen option into the control's accessible name ("Office All
    * offices BPLO — …"), which a screen reader then announces on every visit.
    *
-   * Capped width: the longest office name would otherwise size the select wider
-   * than a phone, and the dashboard scrolled sideways at 390px because of it.
+   * Capped width on a phone only: the longest office name would otherwise size
+   * the select wider than the screen, and the dashboard scrolled sideways at
+   * 390px because of it. From `sm` up the select takes the width of its longest
+   * option instead. The phone's cap used to apply everywhere, so at 1440px the
+   * closed menu read "BPLO — Business Permits an" with room to spare beside it.
    */
   return (
     <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink-secondary">
@@ -51,7 +54,7 @@ export function OfficeScope({
         id={id}
         value={scope.office ?? ALL_OFFICES}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full min-w-0 max-w-[15rem] rounded-lg border border-line bg-white px-3 text-[14px] font-medium text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
+        className="h-10 w-full min-w-0 max-w-[15rem] rounded-lg sm:w-auto sm:max-w-none border border-line bg-white px-3 text-[14px] font-medium text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
       >
         <option value={ALL_OFFICES}>All offices</option>
         {scope.offices.map((office) => (

@@ -77,6 +77,72 @@ test.describe('Reports, as BPLO', () => {
     await expect(page.getByLabel('From')).toHaveValue(`${new Date().getFullYear()}-01-01`)
   })
 
+  test('the grand total is the last row of its table, not a footer that repeats on every page', async ({
+    page,
+  }) => {
+    await page.goto('/staff/analytics/reports?report=collections&from=2023-10-01&to=2026-10-01&office=BPLO')
+    await waitForAnalytics(page, 'Reports')
+    const report = page.getByRole('article')
+    await expect(report.locator('table').first()).toBeVisible()
+
+    // A <tfoot> is what print repeats at the foot of every page.
+    await expect(report.locator('tfoot')).toHaveCount(0)
+    const lastRows = await report.locator('table').evaluateAll((tables) =>
+      tables.map((table) => {
+        const rows = [...table.querySelectorAll('tbody tr')].filter(
+          (row) => getComputedStyle(row).display !== 'none',
+        )
+        return rows[rows.length - 1]?.querySelector('th')?.textContent ?? ''
+      }),
+    )
+    expect(lastRows).toEqual(['Total', 'Total', 'Total'])
+  })
+
+  test('every printed page after the first names the report, period and office, and is numbered', async ({
+    page,
+  }) => {
+    await page.goto('/staff/analytics/reports?report=collections&from=2023-10-01&to=2026-10-01&office=BPLO')
+    await waitForAnalytics(page, 'Reports')
+    await expect(page.getByRole('article')).toBeVisible()
+
+    // The running line and the page number live in @page margin boxes, built
+    // from the report on screen; the first page leaves the running line out.
+    const css = await page.locator('style').evaluateAll((styles) =>
+      styles.map((s) => s.textContent ?? '').join('\n'),
+    )
+    expect(css).toMatch(
+      /@top-left \{\s*content: "Collections by Nature of Fee · October 1, 2023 to October 1, 2026 · Business Permits and Licensing Office"/,
+    )
+    expect(css).toContain('content: "Page " counter(page) " of " counter(pages)')
+    expect(css).toMatch(/@page :first \{\s*@top-left \{ content: none; \}/)
+  })
+
+  test('in print the signatures ride in the last table with its last rows, so they never start a page alone', async ({
+    page,
+  }) => {
+    await page.goto('/staff/analytics/reports?report=collections&from=2023-10-01&to=2026-10-01&office=BPLO')
+    await waitForAnalytics(page, 'Reports')
+    const report = page.getByRole('article')
+    await expect(report).toBeVisible()
+
+    await page.emulateMedia({ media: 'print' })
+    const tail = report.locator('tbody.lgu-report-tail')
+    await expect(tail).toHaveCount(1)
+    expect(await tail.evaluate((el) => getComputedStyle(el).breakInside)).toBe('avoid')
+    // The last three months, the total and the signatures, in one unbreakable group.
+    await expect(tail.locator('tr')).toHaveCount(5)
+    await expect(tail).toContainText('October 2026')
+    await expect(tail).toContainText('Total')
+    await expect(tail.getByText('Prepared by:')).toBeVisible()
+    await expect(tail.getByText('Noted by:')).toBeVisible()
+    // Exactly one copy of the signatures on paper.
+    await expect(report.getByText('Prepared by:').filter({ visible: true })).toHaveCount(1)
+
+    await page.emulateMedia({ media: 'screen' })
+    await expect(tail.getByText('Prepared by:')).toBeHidden()
+    await expect(report.getByText('Prepared by:').filter({ visible: true })).toHaveCount(1)
+  })
+
   test('printing shows the document and nothing else', async ({ page }) => {
     await page.goto('/staff/analytics/reports?report=collections')
     await waitForAnalytics(page, 'Reports')
@@ -105,5 +171,19 @@ test.describe('Reports, as an office admin (City Health)', () => {
     await waitForAnalytics(page, 'Reports')
     await expect(page.getByRole('article')).toHaveCount(0)
     await expect(page.getByText(/only see your own office/i)).toBeVisible()
+  })
+
+  test('a refusal is said plainly, without a "Try again" that would only be refused again', async ({
+    page,
+  }) => {
+    await page.goto('/staff/analytics/reports?office=BFP')
+    await waitForAnalytics(page, 'Reports')
+    await expect(page.getByText(/only see your own office/i)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await expect(page.getByText("We couldn't load this")).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'Show my office instead' }).click()
+    await expect(page).not.toHaveURL(/office=/)
+    await expect(page.getByRole('article').locator('header')).toContainText('City Health Office')
   })
 })

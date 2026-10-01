@@ -127,8 +127,7 @@ export function ChartFrame({
       </div>
 
       {/* grid-cols-1, not the implicit auto column: an auto track grows to its
-          longest label and pushed a PSIC name 60px past a phone's edge, where
-          `truncate` could never engage. */}
+          longest label and pushed a PSIC name 60px past a phone's edge. */}
       {legend && legend.length > 0 && (
         <ul
           className={`mt-2 grid grid-cols-1 gap-x-4 gap-y-1 ${
@@ -142,9 +141,10 @@ export function ChartFrame({
                 style={{ backgroundColor: item.color }}
                 aria-hidden="true"
               />
-              <span className="min-w-0 flex-1 truncate text-ink" title={item.label}>
-                {item.label}
-              </span>
+              {/* Wraps, never truncates. A PSIC category cut to "Water collection,
+                  treatment and suppl…" on a phone dropped the words that say what
+                  the business is; the legend is where the full name lives. */}
+              <span className="min-w-0 flex-1 text-ink [overflow-wrap:anywhere]">{item.label}</span>
               <span className="tnum shrink-0 font-semibold text-ink">{item.value}</span>
               {item.note && <span className="tnum shrink-0 text-ink-muted">{item.note}</span>}
             </li>
