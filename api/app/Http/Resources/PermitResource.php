@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\RenewalWindow;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -31,6 +32,30 @@ class PermitResource extends JsonResource
                 'tracking_id' => $this->application->tracking_id,
             ] : null,
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$this->permit_number,
+            /*
+             * Why this permit cannot be renewed today, or null if it can.
+             *
+             * The renewal picker offered EVERY active and expired permit and
+             * had no way to know the server would refuse one: a clearance
+             * lapsed past the window was ticked, the whole wizard filled in,
+             * and the refusal arrived as a 422 on the last screen. The rule
+             * was added on 1 October 2026 and this is the half of it the
+             * applicant can see.
+             *
+             * The SENTENCE, not a boolean. "Too early, come back on this
+             * date" and "too late, file a New Application" are different
+             * news and the picker should not have to reconstruct which from
+             * a flag; `RenewalWindow` already words both, and wording them
+             * twice is how the two copies drift apart.
+             *
+             * Needs `permitType` to answer, since the business permit is
+             * exempt. Unloaded, it says nothing rather than guessing — a
+             * caller that did not ask for the relation is not a caller that
+             * is drawing a renewal picker.
+             */
+            'renewal_blocked_reason' => $this->relationLoaded('permitType')
+                ? RenewalWindow::refusalFor($this->resource)
+                : null,
         ];
     }
 }

@@ -515,6 +515,33 @@ class WorkflowService
             }
         }
 
+        /*
+         * ── A line worth nothing is not printed ─────────────────────────
+         *
+         * A renewal walked end to end on 1 October 2026 came out with
+         * "Garbage fee — Schedule T: bulky/special waste collection (old
+         * furniture, appliances, construction debris/waste, earthmound, and
+         * the like), per trip … ₱0.00" on a sari-sari store's Tax Order of
+         * Payment. The rule matched, computed nothing, and printed a
+         * sentence about construction debris on a corner shop's bill.
+         *
+         * A charge of zero is not a charge. It reads as something the
+         * applicant might owe, invites a question at the counter, and
+         * pushes the lines that ARE owed further down the page.
+         *
+         * AFTER the flat-schedule substitution above, which needs the zero
+         * lines to decide which permits it covers, and BEFORE the sweep
+         * below, which brings in deferred rows. Those keep their zeros on
+         * purpose: `recordAmendmentFee` writes a ₱0 row so the amendment
+         * appears on the January bill saying what it is for, ready for the
+         * day BPLO names a figure. That is a line with a reason; this is a
+         * rule that happened to compute nothing.
+         */
+        $items = array_values(array_filter(
+            $items,
+            fn (array $i) => round((float) ($i['amount'] ?? 0), 2) !== 0.0,
+        ));
+
         $total = round(collect($items)->sum(fn (array $i) => (float) ($i['amount'] ?? 0)), 2);
 
         /*
@@ -4270,6 +4297,33 @@ class WorkflowService
             'interest' => $penalty['interest'],
             'months_late' => $penalty['months_counted'],
         ]);
+
+        /*
+         * And tell the applicant, now rather than in January.
+         *
+         * They have just been handed a certificate and asked for no money,
+         * which reads as "paid" unless somebody says otherwise. Months later
+         * the fee — and the surcharge, if the renewal was late — lands on a
+         * bill they had no reason to expect. The rule is right; meeting it
+         * for the first time at the counter is what turns it into a
+         * complaint.
+         *
+         * After the audit, and outside it: a notification that fails must not
+         * lose the receivable. The debt is the record, the message is a
+         * courtesy, and `permitIssuedUnbilled` returns quietly when the
+         * permit has no reachable owner.
+         */
+        $issued = Permit::where('application_id', $app->id)
+            ->where('permit_type_id', $type->id)
+            ->first();
+
+        if ($issued !== null) {
+            $this->notify->permitIssuedUnbilled(
+                $issued,
+                $amount,
+                round($penalty['surcharge'] + $penalty['interest'], 2),
+            );
+        }
     }
 
     /**

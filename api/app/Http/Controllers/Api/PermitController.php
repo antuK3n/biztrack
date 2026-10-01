@@ -8,10 +8,11 @@ use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\ApplicationDocument;
 use App\Models\Permit;
+use App\Models\UnbilledPermitFee;
+use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
-use App\Services\WorkflowService;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -291,9 +292,68 @@ class PermitController extends Controller
 
         $resource = $detail ? PermitRegisterResource::class : PermitResource::class;
 
+        /*
+         * ── What the owner owes but has not been billed for ──────────────
+         *
+         * A clearance renewed out of season is ISSUED AND NOT BILLED, by
+         * rule, and until now the only screen that said so was the admin
+         * Owners page. The applicant was handed a certificate, asked for no
+         * money — which reads as paid — and met the fee months later on a
+         * January bill they had no reason to expect.
+         *
+         * This is their own permits page, which is where they look at those
+         * certificates, so it is where the outstanding amount belongs.
+         *
+         * Owners only. An officer reading the register is looking at many
+         * businesses and "what YOU owe" is meaningless to them;
+         * `permit.view_all` is the same test the query above scopes by, so
+         * the two cannot disagree about who is being served.
+         */
+        $meta = $this->pageMeta($permits);
+        $reader = $request->user();
+
+        if ($reader !== null && ! $reader->hasPermission('permit.view_all')) {
+            $owed = UnbilledPermitFee::query()
+                ->whereHas('business', fn ($b) => $b->where('owner_user_id', $reader->id))
+                ->outstanding()
+                /*
+                 * Rows worth nothing are not shown to the applicant.
+                 *
+                 * `recordAmendmentFee` deliberately writes a ₱0 row until
+                 * BPLO names an amendment fee, so the line appears on the
+                 * January bill the day a figure exists. That is right for
+                 * the BILL and wrong here: the first run of this screen
+                 * showed the owner "Mayor's / Business Permit … ₱0.00"
+                 * under a heading about fees due, which is a debt that is
+                 * not one. Caught by the E2E snapshot, not by reasoning.
+                 */
+                ->whereRaw('(amount + surcharge + interest) > 0')
+                ->with('permitType')
+                ->orderBy('incurred_at')
+                ->get();
+
+            /*
+             * An empty list and a zero, never omitted keys: a screen has to
+             * tell "nothing owed" from "not loaded", and a missing key reads
+             * as the second.
+             */
+            $meta['unbilled_fees'] = [
+                'total' => round($owed->sum(
+                    fn ($f) => (float) $f->amount + (float) $f->surcharge + (float) $f->interest
+                ), 2),
+                'items' => $owed->map(fn ($f) => [
+                    'permit_type' => $f->permitType?->name,
+                    'amount' => (float) $f->amount,
+                    'surcharge' => round((float) $f->surcharge + (float) $f->interest, 2),
+                    'months_late' => (int) $f->months_late,
+                    'incurred_at' => optional($f->incurred_at)->toDateString(),
+                ])->values(),
+            ];
+        }
+
         return response()->json([
             'data' => $resource::collection($permits->items()),
-            'meta' => $this->pageMeta($permits),
+            'meta' => $meta,
         ]);
     }
 
