@@ -3,15 +3,16 @@
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
-use App\Models\DocumentType;
 use App\Models\Barangay;
 use App\Models\Department;
+use App\Models\DocumentType;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Ra11032;
+use App\Support\SheetRequirements;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -369,7 +370,7 @@ function satisfyChecklist(Application $application, PermitType|string $type): Ap
 {
     $code = $type instanceof PermitType ? $type->code : $type;
 
-    foreach (App\Support\SheetRequirements::for($application, $code) ?? [] as $row) {
+    foreach (SheetRequirements::for($application, $code) ?? [] as $row) {
         if (($row['blocking'] ?? false) !== true || ($row['satisfied'] ?? false) === true) {
             continue;
         }
@@ -382,7 +383,7 @@ function satisfyChecklist(Application $application, PermitType|string $type): Ap
         $typeId = $row['code'] !== null
             // An upload slot's document type is made on demand, exactly as the
             // upload endpoint makes it.
-            ? App\Support\SheetRequirements::documentType($code, $row['code'])->id
+            ? SheetRequirements::documentType($code, $row['code'])->id
             : DocumentType::where('code', $documentCode)->value('id');
 
         if ($typeId === null) {

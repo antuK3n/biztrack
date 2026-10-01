@@ -179,7 +179,19 @@ it('records a change of barangay, and keeps the map pin', function () {
     $address = $app->business->address;
     $address->update(['latitude' => 14.6600, 'longitude' => 120.9600]);
 
-    $elsewhere = Barangay::where('id', '!=', $address->barangay_id)->firstOrFail();
+    /*
+     * The barangay the pin actually sits in, not just any other one. Since
+     * 1 October 2026 the API refuses a pin outside the barangay the business
+     * names (MalabonGeo::pinProblem), so moving the business to an arbitrary
+     * barangay with the pin left in Tonsuya is refused before anything is
+     * recorded. Moving it to the pin's own barangay is the correction an
+     * officer would actually make, and it still changes the barangay.
+     */
+    $pinBarangay = App\Support\MalabonGeo::barangayContaining(14.6600, 120.9600);
+    $elsewhere = Barangay::where('name', $pinBarangay)->firstOrFail();
+    if ($elsewhere->id === $address->barangay_id) {
+        $address->update(['barangay_id' => Barangay::where('id', '!=', $elsewhere->id)->value('id')]);
+    }
 
     $sanitary = authAs('sanitary@biztrack.local');
     $changed = test()->withHeaders($sanitary)
