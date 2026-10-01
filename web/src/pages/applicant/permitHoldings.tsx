@@ -271,8 +271,24 @@ function HeldCopyRow({ copy, business }: { copy: HeldClearance; business: string
  * assistive tech can be told what the triangle opens. The triangle itself is
  * decorative — the button's own text is the business name.
  */
-export function BusinessRow({ group }: { group: BusinessGroup }) {
-  const [open, setOpen] = useState(false)
+export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGroup; defaultOpen?: boolean }) {
+  /*
+   * ---- Open, because the page exists to show these -------------------------
+   *
+   * Every section started collapsed, so a screen built "for more visibility and
+   * accessibility" of approved permits [client brief] opened showing none of
+   * them: four business names and a count, and a click needed before a single
+   * permit was on screen.
+   *
+   * Collapsed-by-default is right for a disclosure that hides detail nobody
+   * asked for. Here the detail IS what was asked for, and the heading rows are
+   * the navigation through it rather than the content.
+   *
+   * It stays a real disclosure, so a reader with a dozen businesses can shut
+   * the ones they are not working on — and `defaultOpen` is a prop rather than
+   * a constant so a caller with a long list can start them closed.
+   */
+  const [open, setOpen] = useState(defaultOpen)
   const panelId = useId()
   const headingId = useId()
 
