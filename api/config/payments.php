@@ -43,6 +43,14 @@ return [
         'payment_type' => env('KWIKPAY_PAYMENT_TYPE'),
 
         /*
+         * Testing only: when set (e.g. "1.00"), KwikPay is asked to collect this
+         * amount instead of the bill. The bill, the payment record and the
+         * receipt keep the real assessed amount. Leave empty for real use; the
+         * full amount is then charged. See docs/payment-gateway.md.
+         */
+        'charge_override' => env('KWIKPAY_CHARGE_OVERRIDE') ?: null,
+
+        /*
          * Where KwikPay reaches us. The callback has to be a PUBLIC address, so
          * APP_URL (usually localhost) is only the fallback; set this to the
          * tunnel or the server's real address, without the /api/v1 part.

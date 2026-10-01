@@ -24,7 +24,7 @@ class Payment extends Model
     public const GATEWAY_KWIKPAY = 'kwikpay';
 
     protected $fillable = [
-        'application_id', 'fee_assessment_id', 'reference_number', 'amount',
+        'application_id', 'fee_assessment_id', 'reference_number', 'amount', 'gateway_amount',
         'method', 'status', 'receipt_path', 'paid_at',
         'gateway', 'gateway_order_id', 'pay_url', 'pay_url_kind', 'next_check_at', 'check_attempts',
         'flagged_at', 'gateway_note', 'abandoned_at', 'refund_review_at',
@@ -34,6 +34,7 @@ class Payment extends Model
         'status' => PaymentStatus::class,
         'method' => PaymentMethod::class,
         'amount' => 'decimal:2',
+        'gateway_amount' => 'decimal:2',
         'paid_at' => 'datetime',
         'next_check_at' => 'datetime',
         'flagged_at' => 'datetime',
