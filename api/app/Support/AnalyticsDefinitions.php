@@ -213,8 +213,8 @@ final class AnalyticsDefinitions
              */
             'expiry' => [
                 'label' => 'Permits Approaching Expiry',
-                'formula' => 'Permits still in force that expire within 30, 60 and 90 days of today, per permit type, and permits already past their expiry date.',
-                'covers' => 'The windows nest: a permit 20 days out is counted in all three. Expired is its own row. A permit on a closed business, or one that was revoked, is left out.',
+                'formula' => 'Permits still in force that expire within 30, 60 and 90 days of today, per permit type. The Expired row counts businesses whose latest permit of that type has run out, with no newer one in force.',
+                'covers' => 'The windows nest: a permit 20 days out is counted in all three. A business that renewed is not expired, however many old permits it holds, and one lapsed on two permit types is one business in two columns. A closed business, and a permit that was revoked or suspended, are left out.',
                 'why' => 'How much renewal work is coming, and for which office, before it arrives at the counter.',
             ],
 
