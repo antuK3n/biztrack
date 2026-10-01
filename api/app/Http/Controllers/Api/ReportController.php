@@ -171,8 +171,10 @@ class ReportController extends Controller
         $today = CarbonImmutable::parse(ManilaCalendar::today()->toDateString());
 
         $validated = Validator::make($request->query(), [
-            'from' => ['nullable', 'date_format:Y-m-d'],
-            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+            // `string` first: `?from[]=…` reached date_format as an array and
+            // answered 500 instead of saying what was wrong.
+            'from' => ['nullable', 'string', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'string', 'date_format:Y-m-d', 'after_or_equal:from'],
         ], [
             'to.after_or_equal' => 'The end date has to be on or after the start date.',
         ])->validate();

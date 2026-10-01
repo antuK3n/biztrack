@@ -99,6 +99,10 @@ final class AnalyticsOffice
      */
     public static function forRequest(User $user, mixed $requested): ?string
     {
+        // One office or none. A list (`?office[]=BFP`) used to be read as "no
+        // office asked for" and quietly answered with the caller's own office,
+        // which hid a malformed request behind a plausible-looking answer.
+        abort_if($requested !== null && ! is_string($requested), 422, 'Choose one office.');
         $requested = is_string($requested) ? strtoupper(trim($requested)) : '';
         $own = self::ownCode($user);
 
