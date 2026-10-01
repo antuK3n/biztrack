@@ -1635,6 +1635,24 @@ class WorkflowService
                 'rejection_note' => $reason,
                 'rejection_remedy' => $remedy !== '' ? $remedy : null,
             ]);
+            /*
+             * And a row of its own. `rejected_at` above is the LATEST refusal
+             * — what the office's "refused before" banner reads — and a
+             * second refusal after the applicant re-applies overwrites it.
+             * The Reports tab counts refusals per period, so each one is kept
+             * here as well (migration of 1 October 2026).
+             */
+            DB::table('clearance_refusals')->insert([
+                'application_permit_type_id' => $row->id,
+                'application_id' => $row->application_id,
+                'permit_type_id' => $row->permit_type_id,
+                'refused_at' => $row->rejected_at,
+                'reason' => $reason,
+                'remedy' => $remedy !== '' ? $remedy : null,
+                'refused_by_user_id' => Auth::id(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
             $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
 
             /*
