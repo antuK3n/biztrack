@@ -40,6 +40,8 @@ import { AnalyticsError } from './AnalyticsError'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { OfficeScope } from './OfficeScope'
+import { officePermit } from './officePermit'
+import type { OfficePermit } from './officePermit'
 
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
@@ -734,15 +736,52 @@ function StagePanel({ report }: { report: DashboardReport }) {
  * invites a reader to average or compare them. Each card states its own
  * denominator underneath for the same reason.
  */
-function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
+/*
+ * The words each card is printed with, for the office on screen.
+ *
+ * The permit-validity card is the one whose meaning moves with the office: for
+ * City Health it tests sanitary permits only, so "Business permit compliance"
+ * and "hold a valid permit for every type they have been issued" were both
+ * wrong there. Scoped to one office the office issues one permit type, so the
+ * sentence names it. Every office together keeps the server's wording.
+ */
+function complianceWords(
+  indicator: ComplianceIndicator,
+  permit: OfficePermit,
+  scoped: boolean,
+): { label: string; numerator: string; denominator: string } {
+  if (indicator.indicator === 'permit_validity' && scoped) {
+    return {
+      label: `${permit.label} compliance`,
+      numerator: `hold a ${permit.noun} that is valid today`,
+      denominator: `businesses ever issued a ${permit.noun}`,
+    }
+  }
+  return {
+    label: indicator.label,
+    numerator: indicator.numerator_label,
+    denominator: indicator.denominator_label,
+  }
+}
+
+function ComplianceCard({
+  indicator,
+  permit,
+  scoped,
+}: {
+  indicator: ComplianceIndicator
+  permit: OfficePermit
+  scoped: boolean
+}) {
   const unavailable = indicator.rate === null
+  const words = complianceWords(indicator, permit, scoped)
 
   return (
     <StatCard
       value={unavailable ? 'Cannot be computed' : `${indicator.rate?.toFixed(0)}`}
       unit={unavailable ? undefined : '%'}
       unavailable={unavailable}
-      label={indicator.label}
+      label={words.label}
       // Keyed off the row's own identifier rather than a literal, so the three
       // indicators cannot be wired to each other's definitions.
       metric={`compliance.${indicator.indicator}`}
@@ -750,17 +789,25 @@ function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
         unavailable
           ? (indicator.unavailable_reason ??
             `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`)
-          : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${indicator.denominator_label} ${indicator.numerator_label}.`
+          : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${words.denominator} ${words.numerator}.`
       }
     />
   )
 }
 
-function CompliancePanel({ report }: { report: DashboardReport }) {
+function CompliancePanel({
+  report,
+  permit,
+  scoped,
+}: {
+  report: DashboardReport
+  permit: OfficePermit
+  scoped: boolean
+}) {
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       {report.compliance.map((indicator) => (
-        <ComplianceCard key={indicator.indicator} indicator={indicator} />
+        <ComplianceCard key={indicator.indicator} indicator={indicator} permit={permit} scoped={scoped} />
       ))}
     </div>
   )
@@ -1328,9 +1375,22 @@ function pointBounds(points: MapPoint[]): [[number, number], [number, number]] |
   ]
 }
 
-function BusinessMap({ report }: { report: DashboardReport }) {
+function BusinessMap({ report, permit }: { report: DashboardReport; permit: OfficePermit }) {
   const { points, plotted, mapped, total_businesses } = report.map
   const bounds = pointBounds(points)
+
+  /*
+   * What a red pin can and cannot claim. The payload's `lapsed` means only "no
+   * valid permit today": a business whose permit expired and one whose first
+   * filing is still being processed both arrive as `lapsed`, and nothing in the
+   * payload tells them apart. A legend reading "lapsed", or one that implies
+   * every red pin let a permit run out, would accuse the second kind of
+   * something they have not done. So the legend says what is known and names
+   * both possibilities. Scoped to one office it names that office's permit,
+   * because a red pin on City Health's map is about the sanitary permit.
+   */
+  const validLabel = `${permit.label} valid today`
+  const missingLabel = `No valid ${permit.noun} today`
 
   /*
    * Lapsed permits render last, which in Leaflet means on top.
@@ -1366,7 +1426,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
             style={{ borderColor: MAP_VALID }}
             aria-hidden="true"
           />
-          Permit valid today
+          {validLabel}
         </span>
         <span className="flex items-center gap-1.5">
           <span
@@ -1374,7 +1434,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
             style={{ backgroundColor: MAP_LAPSED }}
             aria-hidden="true"
           />
-          No valid permit
+          {missingLabel} (lapsed, or not issued yet)
         </span>
       </p>
       <div className="overflow-hidden rounded-lg">
@@ -1443,7 +1503,7 @@ function BusinessMap({ report }: { report: DashboardReport }) {
                 <span className="font-semibold">{point.business}</span>
                 {point.barangay && <> · {point.barangay}</>}
                 <br />
-                {point.permit_state === 'active' ? 'Permit valid today' : 'No valid permit'}
+                {point.permit_state === 'active' ? validLabel : missingLabel}
               </Popup>
             </CircleMarker>
           ))}
@@ -1529,6 +1589,10 @@ export function AnalyticsPage() {
     : ''
   const trailing = data ? `Last ${data.window_months} months to ${dateLabel(data.today)}` : ''
   const asOf = data ? `As of ${dateLabel(data.today)}` : ''
+  // Whose permit the figures count: the office on screen, as the SERVER scoped
+  // it (see officePermit).
+  const scoped = Boolean(scope?.office)
+  const permit = officePermit(scope?.office)
 
   return (
     <div>
@@ -1592,7 +1656,7 @@ export function AnalyticsPage() {
             <Kpi
               value={num(data.kpis.active_businesses)}
               label="Active Businesses"
-              hint="holding a permit valid today"
+              hint={`holding a ${permit.noun} valid today`}
               metric="kpis.active_businesses"
             />
             {/*
@@ -1628,7 +1692,7 @@ export function AnalyticsPage() {
                   : `${data.kpis.compliance_rate.toFixed(0)}%`
               }
               label="Compliance Rate"
-              hint="permit validity"
+              hint={scoped ? `${permit.noun} validity, today` : 'permit validity, today'}
               metric="kpis.compliance_rate"
             />
           </div>
@@ -1677,7 +1741,7 @@ export function AnalyticsPage() {
               what CompliancePanel does.
             */}
             <SectionHeading note={trailing}>Compliance Rate</SectionHeading>
-            <CompliancePanel report={data} />
+            <CompliancePanel report={data} permit={permit} scoped={scoped} />
           </section>
 
           {/*
@@ -1795,7 +1859,7 @@ export function AnalyticsPage() {
 
           <section className="mt-5">
             <SectionHeading note={asOf} metric="map">GIS Mapping</SectionHeading>
-            <BusinessMap report={data} />
+            <BusinessMap report={data} permit={permit} />
           </section>
         </MetricDefinitions>
       ) : null}
