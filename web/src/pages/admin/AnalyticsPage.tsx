@@ -549,7 +549,7 @@ function TierPanel({ report }: { report: DashboardReport }) {
           categoryHeading="Tier and legal limit"
           valueHeading="Average working days"
           noteHeading="Legal limit"
-          categoryWidth={156}
+          categoryWidth={108}
           rowHeight={34}
           reference={{ value: 100, label: 'Legal limit', color: '#1a1f2b' }}
           /*
