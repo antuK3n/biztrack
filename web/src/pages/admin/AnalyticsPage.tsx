@@ -1674,12 +1674,22 @@ export function AnalyticsPage() {
             own row above, beside New and Closed Businesses.
           */}
           <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
-            <section>
-              {/* Same as Decision Outcomes above: the pass-rate info button
-                  already sits beside the pass rate inside the panel. */}
-              <SectionHeading note={trailing}>Inspections</SectionHeading>
-              <InspectionsPanel report={data} />
-            </section>
+            {/*
+              Only for an office that inspects. The payload has a row for every
+              inspecting office in scope, even at zero visits, so no rows means
+              the office on screen books no visits at all — BPLO, which issues
+              the Mayor's Permit on the strength of the clearances. It used to
+              get an empty chart over "No pass rate overall — 0 passed of 0".
+              Without it the block is four sections, two rows of two.
+            */}
+            {data.inspections.rows.length > 0 && (
+              <section>
+                {/* Same as Decision Outcomes above: the pass-rate info button
+                    already sits beside the pass rate inside the panel. */}
+                <SectionHeading note={trailing}>Inspections</SectionHeading>
+                <InspectionsPanel report={data} />
+              </section>
+            )}
 
             {/*
               The count stays in the title. The shares under these two charts do
