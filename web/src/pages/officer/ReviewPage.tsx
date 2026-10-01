@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftIcon,
   CheckCircleFilledIcon,
-  CheckIcon,
   ChevronDownIcon,
   ClipboardIcon,
   EyeIcon,
@@ -2915,12 +2914,50 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * row whose formatting has to match the breakdown above it, and two copies is
    * how the peso sign ends up on one of them.
    */
+  /*
+   * ── A bill with no business tax on it, said out loud ────────────────────
+   *
+   * Found on 1 October 2026 by filing a renewal through the API and watching
+   * it to the end: with no Section B answers the engine had no gross receipts
+   * to assess, so the Tax Order of Payment was three fixed charges — filing
+   * fee, plates, sticker, ₱375 — and no business tax at all. It was paid and
+   * a permit was issued. The same filing with Section B answered is ₱19,125.
+   *
+   * A SUBMIT GATE was tried first and reverted the same day: requiring the
+   * profile before submission broke 277 tests across twelve files, because
+   * fixtures that exercise office scoping, assignments and messages submit
+   * filings without ever walking the tax step, and they are right not to.
+   *
+   * So it is told to the person who can act on it instead. BPLO reads this
+   * sheet before the first approval, which is the moment the bill becomes
+   * payable, and Return is already the remedy. The wizard always sends
+   * Section B, so a filing without it arrived another way and is worth a
+   * human look rather than an automatic refusal.
+   *
+   * Keyed on the ABSENT TAX LINE, not on the absent profile: what matters is
+   * the bill that resulted, and a profile that produced no tax for some other
+   * reason is just as worth seeing.
+   */
+  const hasBusinessTax = (app.fee_assessment?.line_items ?? []).some((item) =>
+    /tax/i.test(item.label ?? ''),
+  )
+
   const taxOrderBlock =
     (app.fee_assessment?.line_items?.length ?? 0) > 0 ? (
       <div className="mt-6 rounded-lg border border-line bg-white px-5 py-5">
         <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
           Tax Order of Payment
         </p>
+        {!hasBusinessTax && (
+          <p
+            role="alert"
+            className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-4 py-2.5 text-sm font-semibold text-s-orange-ink"
+          >
+            No business tax on this assessment. The filing carries no Business &amp; Tax
+            Profile, so only the fixed charges were computed — return it for Section B
+            before approving.
+          </p>
+        )}
         <div className="mt-4">
           <TaxOrderBreakdown fee={app.fee_assessment} showCitations />
         </div>
@@ -6857,37 +6894,50 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             the letters are the paper's, not a count of what we draw.
           */}
 
-            {/* Consent note (p72) */}
-            <div className="mt-6 rounded-md border border-s-green bg-s-green-tint px-4 py-3">
-              <p className="flex items-center gap-2 text-sm font-bold text-s-green">
-                <CheckIcon size={16} />
-                Data Privacy Consent: agreed by applicant
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                Consent recorded {formatDateTime(app.submitted_at)} · under RA 10173 (Data Privacy
-                Act of 2012).
-              </p>
-            </div>
+            {/*
+              The consent note is not drawn here any more (client, 1 October
+              2026). It reported a fact the officer cannot act on: consent is
+              required to submit, so EVERY filing that reaches this sheet has
+              it, and a green panel that is always green on every filing tells
+              a reader nothing and costs a block of the screen they scroll
+              past.
 
-            {/* Signatures (p72) */}
-            <div className="mt-6 grid gap-6 sm:grid-cols-2">
-              <div>
-                <div className="flex h-16 items-center justify-center rounded-md border border-line bg-white shadow-card">
-                  <span className="display-serif italic text-royal">{app.applicant.name}</span>
-                </div>
-                <p className="mt-2 border-t border-ink/40 pt-1.5 text-center text-[11px] text-ink-secondary">
-                  Signature of Applicant / Owner over Printed Name · Sole Proprietor
-                </p>
-              </div>
-              <div>
-                <div className="flex h-16 items-center justify-center rounded-md border border-line bg-white shadow-card">
-                  <span className="text-xs text-ink-muted">No representative</span>
-                </div>
-                <p className="mt-2 border-t border-ink/40 pt-1.5 text-center text-[11px] text-ink-secondary">
-                  Signature of Representative over Printed Name
-                </p>
-              </div>
-            </div>
+              Only the DISPLAY goes. `data_privacy_consent` and the submission
+              timestamp stay on the record — see the picker in that
+              conversation: the tick is the lawful basis for processing the
+              applicant's personal data under RA 10173, and a controller that
+              cannot show consent was given has no answer if it is ever asked.
+            */}
+
+            {/*
+              ── The signature block is GONE, and that is the point ─────────
+
+              The paper (p72) prints two signature boxes, and this drew them:
+              the applicant's ACCOUNT NAME set in italic serif, in royal, in a
+              bordered box captioned "Signature of Applicant / Owner over
+              Printed Name". Nobody ever signed anything. BizTrack does not
+              collect a signature, and the client confirmed on 1 October 2026
+              that it will not — identity is established from the uploaded
+              documents instead.
+
+              So the officer deciding the filing was shown a typeset name
+              dressed as handwriting, under a caption asserting it was a
+              signature. This codebase already has the rule, two screens
+              away: PermitDetailPage leaves the Mayor's and the OIC's lines
+              EMPTY because "a name written here in code would be a forgery
+              that keeps printing after the officeholder has moved on". The
+              same objection applies to the applicant's.
+
+              Removed rather than blanked. Blank lines are right on the
+              PERMIT, which is a document someone signs in ink; this is a
+              screen for reading a filing, and an empty box captioned
+              "Signature" on a system that collects none reads as something
+              broken or not yet done.
+
+              What the applicant actually did is recorded directly above and
+              stays: the Data Privacy Consent, with the timestamp it was
+              given at. That is the real act, and it is the one worth showing.
+            */}
 
             {/* ── End of the applicant's filed sheet (#application-as-filed) ──── */}
           </div>
