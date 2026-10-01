@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
-import { businessName, formatDate } from '../../lib/format'
+import { businessName } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit, PermitRegisterRow } from '../../lib/types'
 import type { PermitSort } from '../../lib/resources'
@@ -235,8 +235,19 @@ export function PermitsPage() {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
-  const [issuedFrom, setIssuedFrom] = useState('')
-  const [issuedTo, setIssuedTo] = useState('')
+  /*
+   * No issued-date range. The Filter panel carried a From / To pair over
+   * `issued_at` and the client took it out [1 October 2026].
+   *
+   * The register is already ordered by issuance, newest first, and the Sort
+   * menu offers that column in both directions — so the question the pair
+   * answered is one the table answers by scrolling, at the cost of two date
+   * inputs that are the only typing in a menu of choices.
+   *
+   * `issued_from` / `issued_to` remain on the API (see PermitController), so
+   * nothing server-side is lost and a reader that wants the range back needs
+   * only the control.
+   */
   /*
    * ── Where the picker starts ──────────────────────────────────────────────
    *
@@ -292,14 +303,12 @@ export function PermitsPage() {
         q: query || undefined,
         status: status || undefined,
         permit_type: office || undefined,
-        issued_from: issuedFrom || undefined,
-        issued_to: issuedTo || undefined,
         sort: sort?.key,
         dir: sort?.dir,
         page,
         per_page: PAGE_SIZE,
       }),
-    [query, status, office, issuedFrom, issuedTo, sort?.key, sort?.dir, page],
+    [query, status, office, sort?.key, sort?.dir, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -341,8 +350,6 @@ export function PermitsPage() {
    */
   const narrowed = [
     status !== '',
-    issuedFrom !== '',
-    issuedTo !== '',
     query !== '',
     locked === null && chosen !== '',
   ].filter(Boolean).length
@@ -434,9 +441,21 @@ export function PermitsPage() {
             {/*
               A placeholder is not an accessible name — it disappears on the
               first keystroke — so the field carries a real label, and that
-              label names EVERYTHING `q` matches. The list grew with the table:
-              a box that shows a value it will not match makes a correct query
-              look like missing data.
+              label names EVERYTHING `q` matches.
+
+              The PLACEHOLDER no longer tries to. It read "Permit no., BAN,
+              business, owner or tracking ID…", which is forty-six characters
+              in a 320px box: it was clipped mid-list on the screen it was
+              written for, so the reader got "…business, owner or tracki" and
+              could not tell whether the sixth thing they wanted to search by
+              was in the part they could not see.
+
+              The list is still told, twice, in the two places it is wanted:
+              here for a screen reader, and in the empty state — "Search
+              matches the permit number, the BAN, the business name, the
+              owner, the tracking ID and the permit type" — which is the
+              moment a correct query looks like missing data and the only
+              moment the full list changes what the reader does next.
             */}
             <label htmlFor="permits-search" className="sr-only">
               Search permits by permit number, BAN, business name, owner, tracking ID or permit type
@@ -446,7 +465,7 @@ export function PermitsPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Permit no., BAN, business, owner or tracking ID…"
+              placeholder="Search permits…"
               className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
             {/*
@@ -488,15 +507,6 @@ export function PermitsPage() {
                     ]
                   : []),
               ]}
-              dateRange={{
-                from: issuedFrom,
-                to: issuedTo,
-                onChange: (from: string, to: string) => {
-                  setIssuedFrom(from)
-                  setIssuedTo(to)
-                  setPage(1)
-                },
-              }}
             />
             <button
               type="button"
@@ -834,8 +844,6 @@ export function PermitsPage() {
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
                 {office !== '' && ` issued by ${officeOf(office)}`}
-                {issuedFrom && ` issued from ${formatDate(issuedFrom)}`}
-                {issuedTo && ` issued up to ${formatDate(issuedTo)}`}
                 {query && ' matching your search'}
               </p>
               <p className="mt-1 text-xs text-ink-muted">
