@@ -249,3 +249,35 @@ it('keeps the whole-city snapshot key the one stored before offices existed', fu
     expect(dashboardAs('admin@biztrack.local')['meta']['fallback_reason'])->toBe('not_yet_refreshed')
         ->and(dashboardAs('bplo@biztrack.local', '?office=CHO')['meta']['fallback_reason'])->toBe('not_yet_refreshed');
 });
+
+it('puts a business holding only an imported permit on its office map and count', function () {
+    // A sanitary permit from the old register: no filing, so nothing routed to CHO.
+    $business = \App\Models\Business::query()->firstOrFail()->replicate(['registration_number', 'ban']);
+    $business->name = 'Old Register Eatery';
+    $business->save();
+    $barangay = \App\Models\Barangay::query()->firstOrFail();
+    \Illuminate\Support\Facades\DB::table('business_addresses')->insert([
+        'business_id' => $business->id,
+        'address_type' => 'business_location',
+        'line1' => '1 Old Road',
+        'barangay_id' => $barangay->id,
+        'latitude' => 14.66,
+        'longitude' => 120.95,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    \App\Models\Permit::create([
+        'permit_number' => 'HC-OLD-000001',
+        'application_id' => null,
+        'business_id' => $business->id,
+        'permit_type_id' => \App\Models\PermitType::where('code', 'SANITARY')->firstOrFail()->id,
+        'status' => 'active',
+        'valid_from' => now()->startOfYear()->toDateString(),
+        'valid_until' => now()->endOfYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+
+    $cho = DashboardAnalytics::build(12, 'CHO');
+
+    expect(collect($cho['map']['points'])->pluck('business_id'))->toContain($business->id);
+});

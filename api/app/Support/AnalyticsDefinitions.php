@@ -310,7 +310,7 @@ final class AnalyticsDefinitions
             'map' => [
                 'label' => 'Business locations',
                 'formula' => 'Business locations plotted from recorded coordinates, marked by whether the business holds a valid permit today.',
-                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn.',
+                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn. For one office, its businesses are those with a filing sent to it or a permit it issued, including permits brought over from the old register; the other panels on this page use the same set.',
                 'why' => 'Turns the barangay ranking into something that can be walked. Lapsed permits are drawn rather than hidden, since a cluster of them is the pattern worth seeing.',
             ],
         ];
