@@ -331,6 +331,19 @@ function VolumePanel({ report }: { report: DashboardReport }) {
    * the leader-highlight ramp the ranked panels use would be pointing at
    * whichever type happened to come first in the payload.
    */
+  /*
+   * Nothing filed yet: a sentence, not three bars of height zero. On the first
+   * of the month that is every office's dashboard, and three empty bars over
+   * "0 total submitted" read as a chart that failed to load.
+   */
+  if (report.volume.total === 0) {
+    return (
+      <ProtoCard className="px-5 py-4">
+        <p className="text-[13px] text-ink-secondary">Nothing filed yet this month.</p>
+      </ProtoCard>
+    )
+  }
+
   const data: BarDatum[] = report.volume.rows.map((row) => ({
     key: row.type,
     label: row.label,
@@ -380,6 +393,19 @@ const OUTCOME_COLORS: Record<string, string> = {
 
 function DecisionsPanel({ report }: { report: DashboardReport }) {
   const { rows, approval_rate, approved, decisioned, total } = report.decisions
+
+  /*
+   * With nothing filed this month there is nothing to have decided, and
+   * "Nothing filed this month has been decided yet" implied filings waiting on
+   * a decision that do not exist. Same sentence as the volume panel beside it.
+   */
+  if (total === 0) {
+    return (
+      <ProtoCard className="px-5 py-4">
+        <p className="text-[13px] text-ink-secondary">Nothing filed yet this month.</p>
+      </ProtoCard>
+    )
+  }
   /*
    * Cancelled only earns a slice once it has happened — otherwise it is a
    * permanent zero explaining nothing. Zero-count outcomes are dropped from the

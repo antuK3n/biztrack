@@ -203,6 +203,21 @@ function kpi(page: Page, label: string) {
   )
 }
 
+/**
+ * Decision Outcomes has drawn: as its chart, or, in a month with nothing filed
+ * yet, as the sentence the dashboard prints instead of an empty donut. On the
+ * first of a month the second is the honest state, and the test below then
+ * skips for want of a filing to decide rather than failing to find a chart.
+ */
+async function decisionsDrawn(page: Page) {
+  await expect(
+    page
+      .getByRole('table', { name: DECISIONS })
+      .or(page.getByText('Nothing filed yet this month.'))
+      .first(),
+  ).toBeAttached()
+}
+
 /** Open a BPLO analytics screen and wait for its charts to have drawn. */
 async function openDashboard(page: Page) {
   /*
@@ -213,9 +228,9 @@ async function openDashboard(page: Page) {
    */
   await page.goto('/staff/analytics?office=all')
   await waitForAnalytics(page, 'Analytics Dashboard')
-  // The frame renders after the payload resolves, so the table is the ready
+  // The frame renders after the payload resolves, so the panel is the ready
   // signal for the figures specifically rather than for the page.
-  await expect(page.getByRole('table', { name: DECISIONS })).toHaveCount(1)
+  await decisionsDrawn(page)
 }
 
 /**
@@ -252,7 +267,7 @@ test.describe('the dashboard answers to the register', () => {
     await refreshAnalytics(page)
     await page.reload()
     await waitForAnalytics(page, 'Analytics Dashboard')
-    await expect(page.getByRole('table', { name: DECISIONS })).toHaveCount(1)
+    await decisionsDrawn(page)
 
     const barangaysBefore = await figures(page, BARANGAYS)
     const before = await decisions(page)
