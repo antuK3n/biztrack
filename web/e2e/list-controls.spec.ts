@@ -416,33 +416,44 @@ test.describe('Other Requirements list controls', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toContainText('oldest first')
   })
 
-  test('a dialog waiting on an answer keeps its Confirm reachable', async ({ page }) => {
+  test('a dialog waiting on an answer says so when pressed, rather than greying out', async ({ page }) => {
     /*
-     * AGENTS.md §6.2, and ProtoModal's own comment argued for it twenty lines
-     * above the line breaking it: a `disabled` button leaves the tab order, so
-     * a screen-reader user never reaches the one control that would tell them
-     * the dialog is waiting on something, and a sighted user gets a greyed
-     * button with no stated reason (WCAG 3.3.1/3.3.3).
+     * ---- What this test used to assert, and why it asserts more now ------
      *
-     * This is the confirm button of EVERY dialog in the app — Edit Profile,
-     * Change Status, Deactivate, Reassign, Add officer — so it was the same
-     * dead end on each. Asserted here on the requirement reason dialog, which
-     * is one instance of it; the fix is in the shared component.
+     * It held ProtoModal's confirm to `aria-disabled` plus a place in the tab
+     * order: AGENTS.md 6.2, because a `disabled` button leaves the tab order
+     * and a screen-reader user never reaches the one control that would tell
+     * them the dialog is waiting on something.
+     *
+     * This dialog has since moved to the stronger of the two patterns the
+     * component documents - `confirmDescribedBy`. Confirm is not merely
+     * reachable, it is PRESSABLE, and pressing it with the box empty names
+     * what is missing (WCAG 3.3.1 identify the error, 3.3.3 suggest the fix).
+     * A greyed button with no stated cause satisfies neither; it sends the
+     * reader back to the letter hunting for what they left out.
+     *
+     * The `aria-disabled` contract is still the shared component's, and is
+     * still asserted - on the dialogs that use it, in confirm-dialogs.spec.ts.
      */
     await page.locator('tbody tr', { hasText: 'Water potability test' }).getByRole('button').click()
     await page.getByRole('button', { name: 'Mark Rejected' }).click()
 
-    const confirm = page.getByRole('button', { name: 'Save status' })
+    const confirm = page.getByRole('button', { name: /^Yes, mark/ })
     await expect(confirm).toBeVisible()
 
-    // Announced as unavailable, and still in the tab order to say why.
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    // Reachable, pressable, and native `disabled` nowhere near it.
     expect(await confirm.evaluate((el) => el.hasAttribute('disabled'))).toBe(false)
     expect(await confirm.evaluate((el) => (el as HTMLElement).tabIndex)).toBe(0)
+    await expect(confirm).toBeEnabled()
 
-    // Answer the question and it becomes pressable.
+    // Pressed with nothing written: the dialog stays, and says why.
+    await confirm.click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(/Say why first/i)).toBeVisible()
+
+    // Answer it and the warning goes with the answer.
     await page.locator('div.fixed.inset-0 textarea').fill('The scan is cut off at the seal.')
-    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(page.getByText(/Say why first/i)).toHaveCount(0)
   })
 
   test('an empty filter blames the filter, not the register', async ({ page }) => {

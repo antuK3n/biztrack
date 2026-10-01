@@ -41,17 +41,12 @@ const BPLO_ENQUIRY = /\/messages\?application=general/
  */
 const CONTACT = { name: 'Message the City BPLO', exact: true } as const
 
-const SUSPENDED_BUSINESS = {
-  id: 4101,
-  name: 'Nena’s Sari-Sari Store',
-  trade_name: null,
-  registration_type: 'sole',
-  registration_number: null,
-  tin: null,
-  ban: 'BAN-2026-0007',
-  is_active: true,
-  status: 'suspended',
-}
+/*
+ * The suspended business that was stubbed here has gone with the two pop-up
+ * tests, to e2e/account-restriction.spec.ts. Nothing in this file reads the
+ * business list any more: what is left is the NOTIFICATION, which carries its
+ * own copy of the notice.
+ */
 
 /** The notification the LGU sends when it changes a business's standing. */
 function accountStatusNotice(id: number, title: string, body: string, read = false) {
@@ -91,47 +86,22 @@ const NOTICES = [
 
 /* ── The pop-up ───────────────────────────────────────────────────────────── */
 
-test.describe('the suspension pop-up', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route('**/api/v1/businesses*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: [SUSPENDED_BUSINESS],
-          meta: { current_page: 1, last_page: 1, per_page: 50, total: 1 },
-        }),
-      })
-    })
-    await page.goto('/dashboard')
-  })
-
-  test('offers a way to reach BPLO, and reaching it opens the conversation', async ({ page }) => {
-    const dialog = page.getByRole('alertdialog', { name: 'Account Suspended' })
-    await expect(dialog).toBeVisible()
-
-    const contact = dialog.getByRole('link', CONTACT)
-    await expect(contact, 'the pop-up tells the owner to appeal and offers no way to').toBeVisible()
-
-    await contact.click()
-
-    // Not just "a route changed" — the conversation with BPLO is open, which is
-    // the only thing that makes the button an answer rather than a redirect.
-    await expect(page).toHaveURL(BPLO_ENQUIRY)
-    await expect(page.getByRole('heading', { name: 'Messages', level: 1 })).toBeVisible()
-    await expect(page.getByRole('textbox', { name: /message/i }).first()).toBeVisible({
-      timeout: 20_000,
-    })
-  })
-
-  test('still dismisses, because the owner may only want to read it', async ({ page }) => {
-    const dialog = page.getByRole('alertdialog', { name: 'Account Suspended' })
-    await expect(dialog).toBeVisible()
-
-    await dialog.getByRole('button', { name: 'Understood' }).click()
-    await expect(dialog).toBeHidden()
-  })
-})
+/*
+ * The two tests that lived here have moved to e2e/account-restriction.spec.ts.
+ *
+ * They stubbed `/api/v1/businesses` and visited /dashboard, because the notice
+ * was raised by the home page from the list of the owner's businesses. Neither
+ * half of that is true any more [client, 30 September 2026]: the notice is
+ * raised by the shell, from the session's own `restriction`, so that it greets
+ * an owner wherever they open the account rather than only on the home page —
+ * and a barred account is redirected off /dashboard before it renders.
+ *
+ * What they asserted is asserted there, against the source the product now
+ * uses: the pop-up appears, names a destination, reaches it, and dismisses.
+ * They were also both red before the move, on a dialog title ("Account
+ * Suspended") that the component stopped using when the copy was split between
+ * a suspension and a blacklisting on 27 September.
+ */
 
 /* ── The notification ─────────────────────────────────────────────────────── */
 
