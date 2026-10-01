@@ -778,9 +778,17 @@ outright miss.
 
 **Why it matters.** The permit certificate prints signatory names from a table
 an administrator edits — deliberately never written into the template, because
-signatories change. Only two names are loaded today, both for CENRO. Every
-other office prints a blank signature line, which is honest but not usable. We
-will not invent names.
+signatories change — and each office's reports print its last signatory as
+"Noted by". Only two names are loaded today, both for CENRO. Every other office
+prints a blank signature line, which is honest but not usable. We will not
+invent names.
+
+**What we assumed meanwhile.** The super admin is the one who may change them,
+on the Office Signatories screen: add, edit, change the printed order, and
+retire (the entry is kept, never deleted). No office can change its own. If
+City Hall says someone else should — BPLO, or each office head for their own
+office — that is a change to who holds the permission, and for the second,
+to which office's names they are shown.
 
 ## B7. Is our barangay list right?
 
