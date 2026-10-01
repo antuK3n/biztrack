@@ -131,6 +131,22 @@ function anaAssignment(int $applicationId, string $departmentCode, array $attrs 
 }
 
 /**
+ * The filing carries this permit type (an application_permit_types row).
+ *
+ * @param  array<string, mixed>  $attrs
+ */
+function anaCarries(int $applicationId, string $typeCode, array $attrs = []): int
+{
+    return DB::table('application_permit_types')->insertGetId($attrs + [
+        'application_id' => $applicationId,
+        'permit_type_id' => anaPermitTypeId($typeCode),
+        'status' => 'for_approval',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+}
+
+/**
  * A filing's status history, one [to_status, at] pair per move, in order.
  *
  * @param  list<array{0: string, 1: string}>  $moves

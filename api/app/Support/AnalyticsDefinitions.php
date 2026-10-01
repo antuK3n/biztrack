@@ -199,9 +199,9 @@ final class AnalyticsDefinitions
 
             'compliance.renewal' => [
                 'label' => 'Renewal Compliance',
-                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100.',
-                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed against. A draft is not a renewal; it has to be submitted.',
-                'why' => 'Whether businesses renew before lapsing. When too few renewals record which permit they replace it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
+                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100. A renewal counts for a permit when the same business filed one carrying that permit type during the permit\'s term.',
+                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed for. A draft is not a renewal; it has to be submitted.',
+                'why' => 'Whether businesses renew before lapsing. When no renewal on the register can be matched to a permit that fell due it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
             ],
 
             /*

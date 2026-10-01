@@ -756,127 +756,152 @@ final class DashboardAnalytics
      * Share of permits that fell due in the window whose renewal was filed
      * before they expired.
      *
-     * A renewal is linked to the permit it replaces by `applications.prior_permit_id`,
-     * the only such link in the schema. Never-submitted drafts are not on-time.
+     * ── WHICH RENEWAL RENEWS WHICH PERMIT ───────────────────────────────────
      *
-     * THE FAILURE MODE THIS GUARDS. That link is set on almost none of the
-     * register's renewal filings — 2 of 746 at the time of writing. Divide anyway
-     * and the indicator reports 0%, which does not read as "we cannot tell": it
-     * reads as "not one business in Malabon renewed on time", which is a much
-     * stronger and entirely false claim. So when the window has permits that fell
-     * due but not one of them has a renewal filing linked to it, the indicator
-     * declines to compute and says why.
+     * This matched a renewal to a permit by `applications.prior_permit_id`
+     * alone. A renewal filing carries one prior permit — in practice the
+     * business permit — and the clearances riding on the same filing have no
+     * link of their own, so the five clearance offices could never be credited
+     * with a renewal. Their dashboards read "Renewal compliance" blank whatever
+     * their businesses did.
      *
-     * The test is on the data, not a flag: link the filings and the indicator
-     * starts working with no change here.
+     * A permit is now renewed by a submitted renewal filing of the SAME
+     * BUSINESS that carries the SAME PERMIT TYPE (`application_permit_types`),
+     * filed during the permit's term — on or after its first valid day, and
+     * not the filing that produced it. On time is filed on or before its
+     * expiry date, both read in Manila. `prior_permit_id`, where it is set,
+     * still links its permit directly. Never-submitted drafts are not renewals.
+     *
+     * ── THE DENOMINATOR STAYS COMMENSURABLE WITH THE NUMERATOR ───────────────
+     *
+     * Only the permit types renewals are actually filed for are due: the types
+     * any submitted renewal filing carries, derived from the register. The old
+     * reason for narrowing it — a prior-permit link could only ever credit one
+     * permit per filing, so counting every type due built a denominator the
+     * numerator could not reach (21.2% that was an arithmetic artefact) — is
+     * answered by matching on the type instead, so every type a renewal
+     * carries can now be credited.
+     *
+     * THE FAILURE MODE THIS STILL GUARDS. When permits fell due but not one of
+     * them has a renewal matched to it, the indicator declines to compute and
+     * says why, rather than reading 0% — which would claim that not one
+     * business renewed on time, when it may be the register that cannot see
+     * them.
      *
      * @return array{indicator: string, label: string, numerator: int, denominator: int, numerator_label: string, denominator_label: string, unavailable_reason?: string}
      */
     private static function renewalCompliance(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        /*
-         * THE DENOMINATOR HAS TO BE COMMENSURABLE WITH THE NUMERATOR.
-         *
-         * A renewal application carries exactly one `prior_permit_id`, so it can
-         * only ever be credited against one permit — in practice the business
-         * permit, with the sanitary, fire and zoning clearances riding along on
-         * the same filing. Counting every permit type that fell due therefore
-         * built a denominator the numerator could not reach by construction:
-         * 1,257 permits due (444 business, 321 sanitary, 321 fire, 71 zoning)
-         * against a numerator capped at the number of filings. The indicator read
-         * 21.2% and looked like a compliance catastrophe when it was an
-         * arithmetic artefact.
-         *
-         * So restrict the denominator to the permit types renewals actually
-         * re-validate, derived from the register rather than hardcoded, which
-         * keeps this correct if this LGU ever starts filing standalone renewals
-         * for a clearance. Same rows, scoped: 266 of 444 = 59.9%.
-         *
-         * The remaining shortfall is a real finding, not an artefact — 169
-         * business permits fell due with no renewal filed at all, while 91% of
-         * the renewals that were filed arrived on time.
-         */
-        $renewablePermitTypes = DB::table('applications')
-            ->join('permits', 'permits.id', '=', 'applications.prior_permit_id')
+        $renewalFilings = static fn () => DB::table('applications')
             ->whereNull('applications.deleted_at')
             ->where('applications.application_type', ApplicationType::Renewal->value)
-            ->whereNotNull('applications.submitted_at')
+            ->whereNotNull('applications.submitted_at');
+
+        $renewablePermitTypes = DB::table('application_permit_types')
+            ->whereIn('application_id', $renewalFilings()->select('applications.id'))
             ->distinct()
-            ->pluck('permits.permit_type_id')
+            ->pluck('permit_type_id')
+            ->merge($renewalFilings()
+                ->join('permits', 'permits.id', '=', 'applications.prior_permit_id')
+                ->distinct()
+                ->pluck('permits.permit_type_id'))
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
             ->all();
 
         /*
          * Scoped, the office's own types among those. An office none of whose
-         * types is ever renewed on its own filing has nothing due here, and the
-         * indicator says "nothing in the denominator" rather than borrowing the
-         * city's figure.
+         * types is ever renewed has nothing due here, and the indicator says
+         * "nothing in the denominator" rather than borrowing the city's figure.
          */
         if ($scope !== null) {
-            $renewablePermitTypes = array_values(array_intersect(
-                array_map('intval', $renewablePermitTypes),
-                $scope['permit_type_ids'],
-            ));
-            if ($renewablePermitTypes === []) {
-                $renewablePermitTypes = [0];
-            }
+            $renewablePermitTypes = array_values(array_intersect($renewablePermitTypes, $scope['permit_type_ids']));
         }
 
         $due = DB::table('permits')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
-            ->when(
-                $renewablePermitTypes !== [],
-                static fn ($q) => $q->whereIn('permits.permit_type_id', $renewablePermitTypes),
-            )
+            ->whereIn('permits.permit_type_id', $renewablePermitTypes === [] ? [0] : $renewablePermitTypes)
             // Manila dates: valid_until is a date the permit printed, and the
             // window runs from the Manila date it opened to today in Manila.
             ->whereDate('permits.valid_until', '>=', ManilaCalendar::dateOf($windowStart))
-            ->whereDate('permits.valid_until', '<=', ManilaCalendar::dateOf($now))
-            ->pluck('permits.valid_until', 'permits.id');
+            ->whereDate('permits.valid_until', '<=', ManilaCalendar::dateOf($now));
 
-        if ($due->isEmpty()) {
-            return [
-                'indicator' => 'renewal',
-                'label' => 'Renewal compliance',
-                'numerator' => 0,
-                'denominator' => 0,
-                'numerator_label' => 'renewed before expiry',
-                'denominator_label' => 'permits due for renewal',
-            ];
-        }
-
-        $renewals = DB::table('applications')
-            ->whereNull('deleted_at')
-            ->where('application_type', ApplicationType::Renewal->value)
-            ->whereNotNull('submitted_at')
-            ->whereIn('prior_permit_id', $due->keys()->all())
-            ->get(['prior_permit_id', 'submitted_at']);
-
-        $onTime = [];
-        $linked = [];
-        foreach ($renewals as $renewal) {
-            $permitId = (int) $renewal->prior_permit_id;
-            $linked[$permitId] = true;
-            // On time is filed on or before the expiry DATE, both read in
-            // Manila: a renewal filed at 7 am Manila on the last valid day is
-            // the previous evening in UTC, and was on time.
-            $expiry = CarbonImmutable::parse($due[$permitId])->toDateString();
-            if (ManilaCalendar::dateOf($renewal->submitted_at) <= $expiry) {
-                $onTime[$permitId] = true;
-            }
-        }
+        $permits = (clone $due)->get([
+            'permits.id', 'permits.business_id', 'permits.permit_type_id',
+            'permits.application_id', 'permits.valid_from', 'permits.valid_until',
+        ]);
 
         $fact = [
             'indicator' => 'renewal',
             'label' => 'Renewal compliance',
-            'numerator' => count($onTime),
-            'denominator' => $due->count(),
+            'numerator' => 0,
+            'denominator' => $permits->count(),
             'numerator_label' => 'renewed before expiry',
             'denominator_label' => 'permits due for renewal',
         ];
 
-        if ($linked === []) {
-            $fact['unavailable_reason'] = 'No renewal filing in this window records which permit it replaces, '
+        if ($permits->isEmpty()) {
+            return $fact;
+        }
+
+        /*
+         * Every submitted renewal of these businesses, once per permit type it
+         * carries, plus the permit it names as prior, if any. Subqueries, not
+         * id lists: a three-year window on a full register is thousands of
+         * permits, and an inline IN list of that size is a statement some
+         * drivers refuse.
+         */
+        $renewals = $renewalFilings()
+            ->whereIn('applications.business_id', (clone $due)->select('permits.business_id'))
+            ->leftJoin('application_permit_types', 'application_permit_types.application_id', '=', 'applications.id')
+            ->get([
+                'applications.id', 'applications.business_id', 'applications.prior_permit_id',
+                'applications.submitted_at', 'application_permit_types.permit_type_id',
+            ]);
+
+        $byType = [];
+        $byPrior = [];
+        foreach ($renewals as $renewal) {
+            $filed = ['id' => (int) $renewal->id, 'date' => ManilaCalendar::dateOf($renewal->submitted_at)];
+            if ($renewal->permit_type_id !== null) {
+                $byType[$renewal->business_id.'|'.$renewal->permit_type_id][] = $filed;
+            }
+            if ($renewal->prior_permit_id !== null) {
+                $byPrior[(int) $renewal->prior_permit_id][] = $filed;
+            }
+        }
+
+        $onTime = 0;
+        $linked = 0;
+        foreach ($permits as $permit) {
+            $from = CarbonImmutable::parse($permit->valid_from)->toDateString();
+            $until = CarbonImmutable::parse($permit->valid_until)->toDateString();
+
+            $earliest = null;
+            foreach ($byType[$permit->business_id.'|'.$permit->permit_type_id] ?? [] as $filed) {
+                // Filed during this permit's term, and not the filing that produced it.
+                if ($filed['date'] >= $from && $filed['id'] !== (int) $permit->application_id) {
+                    $earliest = $earliest === null ? $filed['date'] : min($earliest, $filed['date']);
+                }
+            }
+            foreach ($byPrior[(int) $permit->id] ?? [] as $filed) {
+                $earliest = $earliest === null ? $filed['date'] : min($earliest, $filed['date']);
+            }
+
+            if ($earliest !== null) {
+                $linked++;
+                if ($earliest <= $until) {
+                    $onTime++;
+                }
+            }
+        }
+
+        $fact['numerator'] = $onTime;
+
+        if ($linked === 0) {
+            $fact['unavailable_reason'] = 'No renewal filing in this window can be matched to a permit that fell due, '
                 .'so on-time renewals cannot be counted. This is a gap in the register, not a compliance finding.';
         }
 
