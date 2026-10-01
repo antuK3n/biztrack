@@ -592,9 +592,9 @@ const OWNER_OFFICES = [
   { code: 'BPLO', name: 'Business Permits and Licensing Office' },
   { code: 'CHO', name: 'City Health Office' },
   { code: 'BFP', name: 'Bureau of Fire Protection' },
-  { code: 'OBO', name: 'Office of the Building Official' },
-  { code: 'CENRO', name: 'City Environment and Natural Resources Office' },
-  { code: 'CPDO', name: 'City Planning and Development Office (Zoning)' },
+  { code: 'OBO', name: 'Office of the Local Building Official' },
+  { code: 'CENRO', name: 'City Environmental and Natural Resources Office' },
+  { code: 'CPDO', name: 'Planning/Zoning Office' },
   // Retired 6 September 2026; its old requirements are still in the register.
   { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
 ]

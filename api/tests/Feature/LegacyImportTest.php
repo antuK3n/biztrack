@@ -131,7 +131,7 @@ it('dry-runs a file into will-create, will-update and rejected, with a reason fo
 it('imports businesses unclaimed, with paper permits that have no filing, and audit-logs who, what file and how many', function () {
     $preview = previewAsAdmin(legacyCsv([
         legacyRow(),
-        legacyRow(['legacy_permit_id' => 'P-2', 'permit_type' => 'Sanitary Permit / Health Certificate', 'permit_number' => 'OLD-HC-1', 'valid_from' => '01/02/2020', 'valid_until' => '12/31/2020']),
+        legacyRow(['legacy_permit_id' => 'P-2', 'permit_type' => 'Sanitary Permit', 'permit_number' => 'OLD-HC-1', 'valid_from' => '01/02/2020', 'valid_until' => '12/31/2020']),
     ], 'bplo-2025.csv'));
 
     $done = runImport($preview['id']);
