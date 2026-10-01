@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Enums\PaymentStatus;
+use App\Models\PermitType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -155,16 +156,24 @@ final class LguReports
 
     /* ── 1. permits issued, new and renewal ──────────────────────────────── */
 
-    /** @return list<array<string, mixed>> */
+    /**
+     * ── Business permits by month, every type by type ─────────────────────
+     *
+     * The month table is the JMC 01-2016 count — business permits, new versus
+     * renewal — and for every office at once it added the five clearances into
+     * the same New and Renewal cells, so one new business opening with its
+     * sanitary, fire, occupancy, environmental and zoning papers read as six
+     * new permits. For every office the month table now counts the Mayor's
+     * (business) permit only; one office's report counts its own types as
+     * before. The permit-type table breaks down every type, each in its own
+     * row, so nothing is mixed and nothing is lost.
+     *
+     * @return list<array<string, mixed>>
+     */
     private static function permitsIssued(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        $rows = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
-            ->where('permits.issued_at', '>=', $from)
-            ->where('permits.issued_at', '<', $to)
-            ->orderBy('permit_types.id')
-            ->get(['permits.issued_at', 'applications.application_type', 'permit_types.name as type_name', 'permit_types.id as type_id']);
+        $rows = self::issued($from, $to, $scope);
+        $businessPermit = DB::table('permit_types')->where('code', PermitType::OUTCOME_CODE)->value('id');
 
         $months = self::months($from, $to);
         $byMonth = [];
@@ -174,14 +183,14 @@ final class LguReports
         $byType = [];
 
         foreach ($rows as $row) {
-            $type = self::transaction((string) $row->application_type);
-            $month = ManilaCalendar::monthOf($row->issued_at);
-            if (isset($byMonth[$month])) {
-                $byMonth[$month][$type]++;
+            $month = ManilaCalendar::monthOf($row['issued_at']);
+            if (isset($byMonth[$month]) && ($scope !== null || $row['type_id'] === (int) $businessPermit)) {
+                $byMonth[$month][$row['kind']]++;
             }
-            $byType[$row->type_id] ??= ['label' => (string) $row->type_name, 'new' => 0, 'renewal' => 0, 'amendment' => 0];
-            $byType[$row->type_id][$type]++;
+            $byType[$row['type_id']] ??= ['label' => $row['type_name'], 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+            $byType[$row['type_id']][$row['kind']]++;
         }
+        ksort($byType);
 
         $columns = [
             ['key' => 'label', 'label' => 'Month', 'format' => 'text'],
@@ -193,18 +202,117 @@ final class LguReports
 
         return [
             self::table(
-                'By month',
+                $scope === null ? 'Business permits by month' : 'By month',
                 $columns,
                 array_map(self::withTotal(...), array_values($byMonth)),
-                'Permits released in the period, counted by the kind of filing that produced them.',
+                ($scope === null
+                    ? 'Mayor’s (business) permits released in the period. The clearances are counted by type below and on the Clearances report, not added in here. '
+                    : 'Permits released in the period. ')
+                .self::KIND_NOTE,
             ),
             self::table(
                 'By permit type',
                 array_replace($columns, [0 => ['key' => 'label', 'label' => 'Permit type', 'format' => 'text']]),
                 array_map(self::withTotal(...), array_values($byType)),
-                'A permit that was later revoked, suspended or replaced by a renewal is still counted: it was issued in the period.',
+                'Every permit released in the period, one row per type. A permit later revoked, suspended or replaced by a renewal is still counted: it was issued in the period. Permits brought over from the old register are included.',
             ),
         ];
+    }
+
+    /** How a permit is classed, said once for every table that classes one. */
+    private const KIND_NOTE = 'A permit is a renewal when the business already held that type of permit before it was issued, or was renewing one issued on paper; an amendment when it reissues an amended permit; new otherwise.';
+
+    /**
+     * Every permit released in [from, to), oldest first, with how it is classed.
+     *
+     * ── New or renewal, by what the business already held ─────────────────
+     *
+     * This read the kind of FILING that produced the permit. Over a long
+     * period that is not the question the report answers — whether the City
+     * gained a permit holder or kept one — and a business's first permit of a
+     * type is new whatever form it came in on, while a business that already
+     * held the type is renewing. So:
+     *
+     *   amendment  the filing was an amendment: the same permit, reissued;
+     *   renewal    the business held a permit of this type issued before this
+     *              one, on BizTrack or brought over from the old register —
+     *              or the filing was a renewal, which covers a permit the
+     *              business renews from paper (AGENTS.md §11: in year one the
+     *              common case, and the register cannot see the paper);
+     *   new        anything else.
+     *
+     * ── Permits from the old register ──────────────────────────────────────
+     *
+     * Imported permits have no filing (`application_id` is null), and the
+     * inner join to `applications` dropped every one of them from every
+     * permit report. They are joined LEFT now, and classed by what the
+     * business held before them like any other permit.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     * @return list<array{id: int, business_id: int, type_id: int, type_name: string, issued_at: string, kind: string}>
+     */
+    private static function issued(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $inPeriod = self::issuedBy(DB::table('permits'), $scope)
+            ->where('permits.issued_at', '>=', $from)
+            ->where('permits.issued_at', '<', $to);
+
+        $rows = (clone $inPeriod)
+            ->leftJoin('applications', 'applications.id', '=', 'permits.application_id')
+            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
+            ->orderBy('permits.issued_at')
+            ->orderBy('permits.id')
+            ->get([
+                'permits.id', 'permits.business_id', 'permits.permit_type_id', 'permits.issued_at',
+                'applications.application_type', 'permit_types.name as type_name',
+            ]);
+
+        /*
+         * The earliest permit each of these businesses holds of each type:
+         * one row per (business, type), over the businesses in the period, so
+         * the cost follows the period and not the register.
+         */
+        $first = [];
+        foreach (DB::table('permits')
+            ->whereIn('business_id', (clone $inPeriod)->select('permits.business_id'))
+            ->whereNotNull('issued_at')
+            ->groupBy('business_id', 'permit_type_id')
+            ->selectRaw('business_id, permit_type_id, min(issued_at) as first_issued')
+            ->get() as $row) {
+            $first[$row->business_id.'|'.$row->permit_type_id] = (string) $row->first_issued;
+        }
+
+        $seenFirst = [];
+        $out = [];
+        foreach ($rows as $row) {
+            $key = $row->business_id.'|'.$row->permit_type_id;
+            $issuedAt = (string) $row->issued_at;
+            /*
+             * Held before: an earlier permit of this type exists. Two permits
+             * of one type issued in the same second are told apart by id —
+             * the first one seen (rows are oldest first) is the first.
+             */
+            $isFirst = ! isset($seenFirst[$key])
+                && CarbonImmutable::parse($issuedAt)->equalTo(CarbonImmutable::parse($first[$key] ?? $issuedAt));
+            $seenFirst[$key] = true;
+
+            $kind = match (true) {
+                $row->application_type === 'amendment' => 'amendment',
+                ! $isFirst, $row->application_type === 'renewal' => 'renewal',
+                default => 'new',
+            };
+
+            $out[] = [
+                'id' => (int) $row->id,
+                'business_id' => (int) $row->business_id,
+                'type_id' => (int) $row->permit_type_id,
+                'type_name' => (string) $row->type_name,
+                'issued_at' => $issuedAt,
+                'kind' => $kind,
+            ];
+        }
+
+        return $out;
     }
 
     /* ── 2. collections by nature of fee ─────────────────────────────────── */
@@ -319,18 +427,12 @@ final class LguReports
     /** @return list<array<string, mixed>> */
     private static function businessesByArea(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        // Each business once: the kind of its EARLIEST permit in the period.
-        $issued = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->where('permits.issued_at', '>=', $from)
-            ->where('permits.issued_at', '<', $to)
-            ->orderBy('permits.issued_at')
-            ->orderBy('permits.id')
-            ->get(['permits.business_id', 'applications.application_type']);
-
+        // Each business once: the kind of its EARLIEST permit in the period,
+        // classed as the permits report classes it (issued()), so a business
+        // that held permits before the period is not "new" in it.
         $kind = [];
-        foreach ($issued as $row) {
-            $kind[(int) $row->business_id] ??= self::transaction((string) $row->application_type);
+        foreach (self::issued($from, $to, $scope) as $row) {
+            $kind[$row['business_id']] ??= $row['kind'];
         }
         $businessIds = array_keys($kind);
 
@@ -389,7 +491,7 @@ final class LguReports
                 ['key' => 'amendment', 'label' => 'Amendment', 'format' => 'count'],
                 ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
             ], array_map(self::withTotal(...), array_values($barangays)),
-                'Each business is counted once, under its business location, as new or renewal by the first permit it was issued in the period.'),
+                'Each business is counted once, under its business location, by the first permit it was issued in the period: new if it held no permit of that type before. Permits from the old register are included.'),
             self::table('By kind of business', [
                 ['key' => 'label', 'label' => 'Kind of business', 'format' => 'text'],
                 ['key' => 'businesses', 'label' => 'Businesses', 'format' => 'count'],
@@ -420,16 +522,10 @@ final class LguReports
             ];
         }
 
-        $issued = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->where('permits.issued_at', '>=', $from)
-            ->where('permits.issued_at', '<', $to)
-            ->get(['permits.permit_type_id', 'applications.application_type']);
-        foreach ($issued as $row) {
-            $id = (int) $row->permit_type_id;
-            if (isset($rows[$id])) {
-                $rows[$id][self::transaction((string) $row->application_type)]++;
-                $rows[$id]['total']++;
+        foreach (self::issued($from, $to, $scope) as $row) {
+            if (isset($rows[$row['type_id']])) {
+                $rows[$row['type_id']][$row['kind']]++;
+                $rows[$row['type_id']]['total']++;
             }
         }
 
