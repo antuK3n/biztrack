@@ -128,3 +128,15 @@ it('keeps a live filing’s reviews open when it moves on', function () {
     // Completed by BPLO's approval, not closed: closing is for filings that end.
     expect(ApplicationAssignment::where('application_id', $appId)->sole()->status)->toBe(AssignmentStatus::Completed);
 });
+
+it('keeps an open review of an ended filing out of the backlog even if it was never closed', function () {
+    $openBplo = fn () => collect(OfficePerformanceAnalytics::build()['offices'])->firstWhere('code', 'BPLO')['open'];
+    $before = $openBplo();
+
+    // As the register held them before the workflow closed such rows.
+    $business = anaBusiness();
+    anaAssignment(anaFiling($business, ['status' => 'rejected', 'submitted_at' => now()->subDays(5)]), 'BPLO');
+    anaAssignment(anaFiling($business, ['status' => 'cancelled', 'submitted_at' => now()->subDays(5)]), 'BPLO');
+
+    expect($openBplo())->toBe($before);
+});

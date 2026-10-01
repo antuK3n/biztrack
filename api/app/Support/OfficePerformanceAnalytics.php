@@ -221,6 +221,16 @@ final class OfficePerformanceAnalytics
          */
         $open = ApplicationAssignment::query()
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
+            /*
+             * Not on a filing that has ended. The workflow closes those
+             * reviews as the filing is rejected or cancelled
+             * (AssignmentStatus::Closed), and a migration closed the ones
+             * written before it did; this is the same rule read from the
+             * filing's side, so a row the close missed still cannot sit in an
+             * office's backlog for good.
+             */
+            ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
+            ->whereNotIn('applications.status', FilingClock::ENDED)
             ->whereIn('application_assignments.status', [
                 AssignmentStatus::Pending->value,
                 AssignmentStatus::InProgress->value,
