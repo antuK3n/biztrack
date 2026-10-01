@@ -408,6 +408,14 @@ const CHIP_TONES = {
   red: 'bg-s-red text-white',
   gray: 'bg-line text-ink-secondary',
   // soft tints for table chips (super-admin p93/p99)
+  /*
+   * `tint-orange` completes the set. Its two colours already existed — the
+   * tint, and the darkened `s-orange-ink` that index.css says was made so a
+   * warm chip's label clears AA on it — but no tone paired them, so a table
+   * wanting "waiting on somebody" had to reach for the SOLID orange and put a
+   * block of white-on-orange in a column of soft ones.
+   */
+  'tint-orange': 'bg-s-orange-tint text-s-orange-ink',
   'tint-green': 'bg-s-green-tint text-s-green',
   'tint-yellow': 'bg-s-yellow-tint text-amber-800',
   'tint-red': 'bg-s-red-tint text-s-red',
