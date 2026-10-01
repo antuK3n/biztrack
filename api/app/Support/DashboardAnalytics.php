@@ -405,6 +405,16 @@ final class DashboardAnalytics
      * The upper bound stays. `now` is Laravel's clock for this build, and a
      * filing dated ahead of it is not yet part of the term being reported.
      *
+     * ── FILINGS, NOT DRAFTS, AND DATED BY SUBMISSION ─────────────────────────
+     *
+     * Both counts, like the volume and outcome panels below, are of SUBMITTED
+     * filings, dated by `submitted_at`. They counted every row from creation,
+     * drafts included — for every office at once only: an office's view never
+     * held drafts, because a draft is routed to nobody, so the city total and
+     * the sum of its offices disagreed by however many drafts were sitting
+     * unsent. A draft is not a filing until it is submitted, and a draft
+     * started in September and submitted in October was filed in October.
+     *
      * @return array<string, int>
      */
     private static function kpiFacts(
@@ -415,16 +425,26 @@ final class DashboardAnalytics
     ): array {
         return [
             'active_businesses' => count(self::activeBusinessIds($today, $scope)),
-            'applications_ytd' => self::routedTo(DB::table('applications'), $scope)
-                ->whereNull('deleted_at')
-                ->where('created_at', '<=', $now)
+            'applications_ytd' => self::submitted($scope)
+                ->where('submitted_at', '<=', $now)
                 ->count(),
-            'applications_this_month' => self::routedTo(DB::table('applications'), $scope)
-                ->whereNull('deleted_at')
-                ->where('created_at', '>=', $monthStart)
-                ->where('created_at', '<=', $now)
+            'applications_this_month' => self::submitted($scope)
+                ->where('submitted_at', '>=', $monthStart)
+                ->where('submitted_at', '<=', $now)
                 ->count(),
         ];
+    }
+
+    /**
+     * Submitted filings, routed to the office when there is one. Never a draft.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     */
+    private static function submitted(?array $scope): QueryBuilder
+    {
+        return self::routedTo(DB::table('applications'), $scope)
+            ->whereNull('deleted_at')
+            ->whereNotNull('submitted_at');
     }
 
     /**
@@ -472,10 +492,10 @@ final class DashboardAnalytics
      */
     private static function volumeFacts(CarbonImmutable $monthStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        $counts = self::routedTo(DB::table('applications'), $scope)
-            ->whereNull('deleted_at')
-            ->where('created_at', '>=', $monthStart)
-            ->where('created_at', '<=', $now)
+        // Submitted this month, never a draft — see kpiFacts().
+        $counts = self::submitted($scope)
+            ->where('submitted_at', '>=', $monthStart)
+            ->where('submitted_at', '<=', $now)
             ->groupBy('application_type')
             ->selectRaw('application_type, count(*) as c')
             ->pluck('c', 'application_type');
@@ -499,8 +519,8 @@ final class DashboardAnalytics
     /**
      * This month's filings bucketed by outcome.
      *
-     * `decisioned` marks the three buckets that belong in the Approval Rate
-     * denominator. Carrying the flag with the fact states the formula's one
+     * `decisioned` marks the two buckets that belong in the Approval Rate
+     * denominator: approved and rejected. Carrying the flag with the fact states the formula's one
      * subtlety — that Pending is excluded — next to the rows it applies to,
      * rather than leaving it as a list of outcome names buried in the arithmetic.
      *
@@ -515,10 +535,11 @@ final class DashboardAnalytics
          * application_permit_types and is the Office Performance screen's
          * subject, not this panel's.
          */
-        $counts = self::routedTo(DB::table('applications'), $scope)
-            ->whereNull('deleted_at')
-            ->where('created_at', '>=', $monthStart)
-            ->where('created_at', '<=', $now)
+        // Submitted this month, never a draft — see kpiFacts(). A draft was in
+        // the "pending" bucket below, as a decision nobody had been asked for.
+        $counts = self::submitted($scope)
+            ->where('submitted_at', '>=', $monthStart)
+            ->where('submitted_at', '<=', $now)
             ->groupBy('status')
             ->selectRaw('status, count(*) as c')
             ->pluck('c', 'status');
@@ -543,9 +564,17 @@ final class DashboardAnalytics
             }
         }
 
+        /*
+         * RETURNED IS NOT A DECISION. A returned filing is back with the
+         * applicant to fix and resubmit; nobody has decided it, and it comes
+         * back for the decision it is still owed. Counting it beside approved
+         * and rejected in the approval rate's denominator read every return as
+         * a refusal. It keeps its own row, so the reader can see how many are
+         * out with applicants, and is left out of the rate like Pending.
+         */
         return [
             ['outcome' => 'approved', 'label' => 'Approved', 'count' => $approved, 'decisioned' => true],
-            ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => $returned, 'decisioned' => true],
+            ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => $returned, 'decisioned' => false],
             ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => $rejected, 'decisioned' => true],
             ['outcome' => 'pending', 'label' => 'Pending', 'count' => $pending, 'decisioned' => false],
             ['outcome' => 'cancelled', 'label' => 'Cancelled', 'count' => $cancelled, 'decisioned' => false],
