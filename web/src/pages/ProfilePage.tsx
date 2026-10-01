@@ -12,11 +12,11 @@ import {
 } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { PageTitle, ProtoCard, SortFilter, type SortFilterOption } from '../components/ui/Proto'
-import { businessName, formatBytes, formatDate } from '../lib/format'
+import { businessName, formatBytes, formatDate, formatMoney } from '../lib/format'
 import { documents as documentsApi, permits as permitsApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
-import type { HeldClearance, Permit, User } from '../lib/types'
+import type { HeldClearance, PageMeta, Permit, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 
 /*
@@ -73,20 +73,114 @@ const NEARING_DAYS = 30
  */
 const MAX_PERMIT_PAGES = 10
 
-async function loadAllPermits(): Promise<Permit[]> {
+async function loadAllPermits(): Promise<{
+  permits: Permit[]
+  unbilled: PageMeta['unbilled_fees']
+}> {
   const all: Permit[] = []
+  let unbilled: PageMeta['unbilled_fees']
+
   for (let page = 1; page <= MAX_PERMIT_PAGES; page++) {
     const { data, meta } = await permitsApi.page({ page, per_page: 200 })
     all.push(...data)
+    // The same on every page; taken from the first and not re-read.
+    if (page === 1) unbilled = meta.unbilled_fees
     if (meta.current_page >= meta.last_page) break
   }
-  return all
+
+  return { permits: all, unbilled }
+}
+
+/**
+ * Permits issued to this owner that nobody has billed yet.
+ *
+ * ── Why an applicant needs telling at all ──────────────────────────────
+ *
+ * A clearance renewed outside January is issued UNBILLED by rule: the city
+ * collects once a year, so a sanitary permit renewed in June is handed over
+ * with nothing to pay and its fee waits for the January renewal. Being
+ * handed a certificate and asked for no money reads as "paid", and until
+ * 1 October 2026 the only screen that said otherwise was the ADMIN Owners
+ * page. The applicant met the charge months later, on a bill they had no
+ * reason to expect.
+ *
+ * ── Not an alarm ───────────────────────────────────────────────────────
+ *
+ * Nothing here is overdue and the applicant has done nothing wrong, so this
+ * is the ordinary card border rather than the red of a warning. What it has
+ * to carry is WHEN — "with your January renewal" — because a figure with no
+ * date reads as a demand.
+ *
+ * The late surcharge is its own column where there is one. It is the figure
+ * a business would dispute, and folding it into the fee would leave them
+ * nothing to point at.
+ */
+function UnbilledFeesCard({ unbilled }: { unbilled: PageMeta['unbilled_fees'] }) {
+  // Absent means an officer's payload; empty means nothing owed. Neither
+  // is worth a card that says zero.
+  if (unbilled === undefined || unbilled.items.length === 0) return null
+
+  const anyLate = unbilled.items.some((i) => i.surcharge > 0)
+
+  return (
+    <ProtoCard className="mb-6 overflow-hidden">
+      <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">
+        Fees due with your January renewal
+      </h2>
+      <p className="px-6 pt-4 text-sm text-ink-secondary">
+        These permits are already issued and there is nothing to pay today. The city
+        collects once a year, so their fees appear on your next business permit
+        renewal.
+      </p>
+      <ul className="mt-3 divide-y divide-line border-t border-line">
+        {unbilled.items.map((item, i) => (
+          <li
+            key={`${item.permit_type ?? 'permit'}-${item.incurred_at ?? i}`}
+            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-6 py-3"
+          >
+            <span className="text-sm font-semibold text-ink">
+              {item.permit_type ?? 'Permit'}
+              {item.incurred_at !== null && (
+                <span className="ml-2 font-normal text-ink-muted">
+                  issued {formatDate(item.incurred_at)}
+                </span>
+              )}
+            </span>
+            <span className="text-sm text-ink">
+              {formatMoney(item.amount)}
+              {item.surcharge > 0 && (
+                <span className="ml-2 font-semibold text-s-red">
+                  + {formatMoney(item.surcharge)} late
+                  {item.months_late > 0 && ` (${item.months_late} mo)`}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="flex items-baseline justify-between border-t border-line px-6 py-3.5">
+        <span className="text-sm font-bold text-ink">Total to be billed</span>
+        <span className="display-serif text-xl text-ink">{formatMoney(unbilled.total)}</span>
+      </p>
+      {anyLate && (
+        <p className="border-t border-line px-6 py-3 text-xs text-ink-secondary">
+          A permit renewed after it expired carries a 25% surcharge plus 2% for every
+          month it was late (Revenue Code Secs. 8A.04 and 8A.05).
+        </p>
+      )}
+    </ProtoCard>
+  )
 }
 
 /** What one fetch has to bring back before this page can group anything. */
 interface ProfileHoldings {
   permits: Permit[]
   held: HeldClearance[]
+  /*
+   * Ridden back on the FIRST page's meta, because it is a fact about the
+   * owner and not about the page — every page would repeat it.
+   */
+  unbilled: PageMeta['unbilled_fees']
 }
 
 /**
@@ -102,8 +196,8 @@ interface ProfileHoldings {
  * has nothing to defend against here.
  */
 async function loadHoldings(): Promise<ProfileHoldings> {
-  const [permits, held] = await Promise.all([loadAllPermits(), permitsApi.held()])
-  return { permits, held }
+  const [paged, held] = await Promise.all([loadAllPermits(), permitsApi.held()])
+  return { permits: paged.permits, held, unbilled: paged.unbilled }
 }
 
 /* ── Account record ───────────────────────────────────────────────────── */
@@ -554,7 +648,10 @@ export function ProfilePage() {
    */
   const isOwner = user?.roles.includes('business_owner') ?? false
   const { data, loading, error, reload } = useAsync<ProfileHoldings>(
-    () => (isOwner ? loadHoldings() : Promise.resolve({ permits: [], held: [] })),
+    () =>
+      isOwner
+        ? loadHoldings()
+        : Promise.resolve({ permits: [], held: [], unbilled: undefined }),
     [isOwner],
   )
   const [sort, setSort] = useState('name')
@@ -713,6 +810,13 @@ export function ProfilePage() {
           </p>
         )}
       </ProtoCard>
+
+      {/*
+        Above Account details, below the identity card: it is money, which
+        outranks a name and an e-mail the owner already knows, and it is
+        about the permits listed further down.
+      */}
+      {isOwner && !loading && !error && <UnbilledFeesCard unbilled={data?.unbilled} />}
 
       <ProtoCard className="overflow-hidden">
         <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">Account details</h2>

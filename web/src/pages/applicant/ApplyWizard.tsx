@@ -2450,8 +2450,25 @@ function IdentifyFilingModal({
                    * and needs no explanation; repeating the validity there would
                    * be noise on the answer the applicant just gave.
                    */
+                  /*
+                   * The server's own refusal, and it outranks everything
+                   * below — including the "Expired — tick it to renew"
+                   * line, which for a permit past the window is an
+                   * invitation to fill in a form that will be rejected on
+                   * its last screen.
+                   *
+                   * Shown on a ticked row too, unlike the notes below. A
+                   * permit can only be ticked here if it was ticked before
+                   * the window closed under it — a draft left over a
+                   * month-end — and hiding the reason on exactly the rows
+                   * that block submission is the worst place to hide it.
+                   */
+                  const blockedReason = p.renewal_blocked_reason ?? null
+
                   const reason =
-                    chosen || days === null
+                    blockedReason !== null
+                      ? { text: blockedReason, cls: 'text-s-red font-semibold' }
+                      : chosen || days === null
                       ? null
                       : days < 0
                         ? {
@@ -2474,13 +2491,25 @@ function IdentifyFilingModal({
                     // children, not list items wrapping them.
                     <li key={p.id}>
                       <label
-                        className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
-                          chosen ? 'bg-input' : 'hover:bg-royal-tint'
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                          blockedReason !== null
+                            ? 'cursor-not-allowed opacity-60'
+                            : chosen
+                              ? 'cursor-pointer bg-input'
+                              : 'cursor-pointer hover:bg-royal-tint'
                         }`}
                       >
                         <input
                           type="checkbox"
-                          checked={chosen}
+                          /*
+                           * Disabled, not hidden. A permit the business
+                           * holds and cannot renew is a fact the applicant
+                           * needs — dropping the row would leave them
+                           * hunting for a certificate they can see in their
+                           * own permit list, with no explanation anywhere.
+                           */
+                          disabled={blockedReason !== null}
+                          checked={chosen && blockedReason === null}
                           onChange={() => {
                             /*
                              * Appended, never inserted: the first tick is the

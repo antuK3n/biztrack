@@ -340,6 +340,7 @@ class NotificationService
             "BizTrack: Business Permit {$permit->permit_number} is active again.",
         );
     }
+
     // --- Messaging -----------------------------------------------------------
     public function newMessage(Application $app, User $recipient): void
     {
@@ -487,17 +488,90 @@ class NotificationService
         $unit = $threshold === 1 ? 'day' : 'days';
         $expiresOn = $permit->valid_until->format('j M Y');   // cast to a date on the model
 
+        /*
+         * ── The right permit's name, and only where it was wrong ────────
+         *
+         * This said "Business Permit expiring" for EVERY type, so an owner
+         * holding six certificates got reminders that all named the one
+         * certificate that was usually not the one expiring.
+         *
+         * But the business permit's own wording is not a slip to correct:
+         * `PermitExpiryRemindersTest` pins title and body as "the paper's
+         * reminder wording and the mockup's title", which makes them
+         * transcribed from the city's documents rather than written here.
+         * A first pass replaced both and failed that test, correctly —
+         * rewriting an LGU's own notice is the client's call, not a side
+         * effect of fixing a name.
+         *
+         * So the mockup's words stand for the permit they were written
+         * about, and the other five get the same sentence with their own
+         * name in it. `permitType->name` is not used for the business
+         * permit because the register calls it "Mayor's / Business
+         * Permit" and the mockup says "Business Permit".
+         */
+        $permit->loadMissing('permitType');
+        $isOutcome = $permit->permitType?->code === PermitType::OUTCOME_CODE;
+        $name = $isOutcome ? 'Business Permit' : ($permit->permitType?->name ?? 'Permit');
+        $subject = $isOutcome ? 'business permit' : $name;
+
+        /*
+         * The paper's sentence, then what lateness costs — APPENDED, not
+         * substituted. "To avoid penalties" was true and unactionable
+         * until 1 October 2026, because nothing called
+         * `FeeCalculator::latePenalty`; there are penalties now, and a
+         * reminder that names the number is a reason to act where one
+         * gesturing at consequences is furniture. Appending keeps the
+         * transcribed wording intact and still says the new thing.
+         */
         $this->push(
             $owner,
             'expiry',
-            "Business Permit expiring in {$threshold} {$unit}",
-            "Reminder: Your business permit will expire in {$threshold} {$unit}. Please renew your "
+            "{$name} expiring in {$threshold} {$unit}",
+            "Reminder: Your {$subject} will expire in {$threshold} {$unit}. Please renew your "
                 ."permit before the expiration date to avoid penalties. Permit {$permit->permit_number} "
-                ."expires on {$expiresOn}.",
+                ."expires on {$expiresOn}. Renewing after that date adds a 25% surcharge plus 2% "
+                .'for every month it is late (Revenue Code Secs. 8A.04 and 8A.05).',
             '/permits',
             $permit,
         );
         $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).');
+    }
+
+    /**
+     * This permit is yours, and its fee arrives in January.
+     *
+     * A clearance renewed out of season is issued UNBILLED — the city
+     * collects once a year — and until now nothing told the applicant so.
+     * They were handed a certificate, paid nothing, and met the charge
+     * months later on a bill they had no reason to expect, which is how a
+     * correct rule becomes a complaint at the counter.
+     *
+     * The surcharge is named separately when there is one. Lumping it into
+     * the fee would hide the one figure the applicant might dispute, and
+     * this message is the first and best chance to raise it — months
+     * before the bill, while the filing dates are still checkable.
+     */
+    public function permitIssuedUnbilled(Permit $permit, float $fee, float $penalty): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+
+        $permit->loadMissing('permitType');
+        $name = $permit->permitType?->name ?? 'Permit';
+        $money = fn (float $v) => '₱'.number_format($v, 2);
+
+        $body = "Your {$name} ({$permit->permit_number}) has been issued. "
+            ."There is nothing to pay today: its fee of {$money($fee)} is collected "
+            .'with your next business permit renewal in January.';
+
+        if ($penalty > 0.0) {
+            $body .= " A late-renewal surcharge of {$money($penalty)} is included, "
+                .'because this permit was renewed after it expired.';
+        }
+
+        $this->push($owner, 'payment', "{$name} issued — fee due in January", $body, '/permits', $permit);
     }
 
     public function permitExpired(Permit $permit): void
