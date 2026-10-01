@@ -989,6 +989,21 @@ export interface Permit {
   business: { id: number; name: string }
   application: { id: number; tracking_id: string }
   verify_url: string
+  /**
+   * Why this permit cannot be renewed today, in the applicant's words, or
+   * null if it can.
+   *
+   * The renewal picker listed every active and expired permit and had no way
+   * to know the server would refuse one, so a clearance lapsed past the
+   * window was ticked, the whole wizard filled in, and the refusal arrived as
+   * a 422 on the last screen. The sentence rather than a flag, because "too
+   * early, come back on this date" and "too late, file a New Application" are
+   * different news and only the server knows which — see `RenewalWindow`.
+   *
+   * Absent on payloads that did not load the permit type, which are the ones
+   * not drawing a picker.
+   */
+  renewal_blocked_reason?: string | null
 }
 
 /**
@@ -1596,6 +1611,33 @@ export interface PageMeta {
   last_page: number
   per_page: number
   total: number
+  /**
+   * What this owner has been issued and not yet billed for.
+   *
+   * Only on `/permits`, and only for an owner — an officer reading the
+   * register is looking at many businesses and "what you owe" means nothing
+   * to them, so the API omits it rather than sending a zero they might print.
+   *
+   * A clearance renewed outside January is issued unbilled by rule, and until
+   * 1 October 2026 the only screen that said so was the admin Owners page: the
+   * applicant was handed a certificate, asked for no money, and met the fee
+   * months later on a bill they had no reason to expect.
+   *
+   * `surcharge` is the late penalty (Secs. 8A.04/8A.05) folded from its
+   * surcharge and interest halves — separate from `amount` because the
+   * penalty is the figure a business disputes, and one merged number gives
+   * them nothing to dispute.
+   */
+  unbilled_fees?: {
+    total: number
+    items: {
+      permit_type: string | null
+      amount: number
+      surcharge: number
+      months_late: number
+      incurred_at: string | null
+    }[]
+  }
 }
 
 /** A page of results together with its meta. Both must reach the screen. */

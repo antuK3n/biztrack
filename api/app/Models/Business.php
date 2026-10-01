@@ -390,6 +390,18 @@ class Business extends Model
      */
     public function unbilledPermitFeeTotal(): float
     {
-        return (float) $this->unbilledPermitFees()->outstanding()->sum('amount');
+        /*
+         * Fee PLUS penalty, and the penalty half was missed for a day.
+         *
+         * This summed `amount` alone, which was the whole debt until
+         * 1 October 2026 and stopped being it the moment a late renewal
+         * began freezing a surcharge onto the row. An arrears total that
+         * counts the fee and not the 25% understates what the business
+         * owes, on the screen an officer uses to chase it.
+         */
+        return (float) $this->unbilledPermitFees()
+            ->outstanding()
+            ->selectRaw('coalesce(sum(amount + surcharge + interest), 0) as owed')
+            ->value('owed');
     }
 }

@@ -152,11 +152,28 @@ class BusinessStatusController extends Controller
                  * tell those apart.
                  */
                 'unbilled_fees' => [
-                    'total' => round((float) $b->unbilledPermitFees->sum('amount'), 2),
+                    /*
+                     * Fee plus penalty. A late renewal freezes a surcharge
+                     * onto its row (Secs. 8A.04/8A.05) and a total that
+                     * counted only `amount` would understate the arrears
+                     * on the very screen used to chase them.
+                     */
+                    'total' => round((float) $b->unbilledPermitFees->sum(
+                        fn ($f) => (float) $f->amount + (float) $f->surcharge + (float) $f->interest
+                    ), 2),
                     'items' => $b->unbilledPermitFees->map(fn ($fee) => [
                         'permit_type' => $fee->permitType?->name,
                         'permit_code' => $fee->permitType?->code,
                         'amount' => (float) $fee->amount,
+                        /*
+                         * Separate from the fee, never folded in: the
+                         * penalty is the figure a business disputes, and
+                         * one merged number gives them nothing to dispute
+                         * and the officer nothing to explain.
+                         */
+                        'surcharge' => (float) $fee->surcharge,
+                        'interest' => (float) $fee->interest,
+                        'months_late' => (int) $fee->months_late,
                         'incurred_at' => optional($fee->incurred_at)->toISOString(),
                         /*
                          * Claimed but unpaid is a real and different state: the
