@@ -708,6 +708,23 @@ than picked from the city's list. If BPLO answers that filing must wait, the
 submit gate that already holds a filing for an unconfirmed email
 (`EmailSwitch`, checklist Register 1) is where the same check would go.
 
+
+## A28. Are the occupancy permit and the zoning clearance renewed every year, or issued once?
+
+BizTrack treats all six permits as valid for 365 days: the business permit and
+the five clearances (sanitary, fire, building occupancy, environmental, zoning).
+
+**Why it matters.** The all-offices compliance rate counts a business as
+compliant only when every permit it has ever held is still in force. If the
+occupancy permit or the zoning clearance is really issued once for the life of
+a building or a location, BizTrack marks those businesses as lapsed a year
+later, and the citywide rate reads far lower than it is (39% against BPLO's
+own 76% on the test data). The renewal reminders for those two would also be
+wrong.
+
+**What we assumed meanwhile.** Every permit runs for one year, like the
+business permit.
+
 ---
 
 # B. For MISD — systems, data, hosting, accounts
@@ -924,8 +941,11 @@ records when each office received and finished its part.
 **Why it matters.** If a report is due, it is nearly free to export — the
 figures exist. If the format is a spreadsheet template, we need the template.
 
-**What we assumed meanwhile.** Nothing is exported. Office Performance shows
-the figures on screen for the administrator only.
+**What we assumed meanwhile.** Partly answered by what is built: the Reports
+tab prints and exports (CSV) a "Processing Time and Pending Applications"
+report per office and for the whole city, against the 3 / 7 / 20 working-day
+limits. It is our own layout. If ARTA requires a set template (for example the
+yearly zero-backlog report), we still need a copy of it.
 
 ## B21. Where is the City's public-holiday calendar kept?
 

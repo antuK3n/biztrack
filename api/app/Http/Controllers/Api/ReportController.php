@@ -7,6 +7,7 @@ use App\Models\OfficeSignatory;
 use App\Models\User;
 use App\Support\AnalyticsOffice;
 use App\Support\LguReports;
+use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -90,11 +91,18 @@ class ReportController extends Controller
                 fputcsv($out, [$section['heading']]);
                 fputcsv($out, array_column($section['columns'], 'label'));
                 $keys = array_column($section['columns'], 'key');
+                $formats = array_column($section['columns'], 'format', 'key');
+                // Money always with two decimals (503000.00, not 503000 or
+                // 55845.8), so a spreadsheet column reads as one kind of number.
+                // No peso sign: it would make the column text.
+                $cell = static fn (string $k, array $r) => ($formats[$k] ?? null) === 'money' && is_numeric($r[$k] ?? null)
+                    ? number_format((float) $r[$k], 2, '.', '')
+                    : ($r[$k] ?? '');
                 foreach ($section['rows'] as $row) {
-                    fputcsv($out, array_map(static fn (string $k) => $row[$k] ?? '', $keys));
+                    fputcsv($out, array_map(static fn (string $k) => $cell($k, $row), $keys));
                 }
                 if (is_array($section['total'])) {
-                    fputcsv($out, array_map(static fn (string $k) => $section['total'][$k] ?? '', $keys));
+                    fputcsv($out, array_map(static fn (string $k) => $cell($k, $section['total']), $keys));
                 }
                 if ($section['note'] !== null) {
                     fputcsv($out, [$section['note']]);
@@ -120,7 +128,10 @@ class ReportController extends Controller
         return $compiled + [
             'period' => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
             'scope' => AnalyticsOffice::describe($user, $office),
-            'generated_at' => CarbonImmutable::now()->toISOString(),
+            // Manila time with its offset, to the second: a clerk reading the
+            // file sees when it was made in their own day, not UTC with
+            // microseconds.
+            'generated_at' => ManilaCalendar::local(CarbonImmutable::now())->format('Y-m-d\\TH:i:sP'),
             'prepared_by' => [
                 'name' => (string) $user->name,
                 'position' => (string) ($user->roles()->value('display_name') ?? ''),
@@ -157,17 +168,23 @@ class ReportController extends Controller
     /**
      * The reporting period. Defaults to the current month to date, which is the
      * report an office is most often asked for. Dates only, inclusive at both
-     * ends.
+     * ends, and MANILA dates: "today" is the City's today, not the UTC one,
+     * which is still yesterday until 8 am in Malabon. LguReports turns the two
+     * dates into the instants that bound them (ManilaCalendar::period).
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
      */
     private function period(Request $request): array
     {
-        $today = CarbonImmutable::today();
+        // Held as a bare date, like the parsed query values below, so the two
+        // compare and subtract as dates whatever zone either came from.
+        $today = CarbonImmutable::parse(ManilaCalendar::today()->toDateString());
 
         $validated = Validator::make($request->query(), [
-            'from' => ['nullable', 'date_format:Y-m-d'],
-            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+            // `string` first: `?from[]=…` reached date_format as an array and
+            // answered 500 instead of saying what was wrong.
+            'from' => ['nullable', 'string', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'string', 'date_format:Y-m-d', 'after_or_equal:from'],
         ], [
             'to.after_or_equal' => 'The end date has to be on or after the start date.',
         ])->validate();

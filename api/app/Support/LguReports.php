@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\PaymentStatus;
+use App\Models\PermitType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +65,15 @@ use Illuminate\Support\Facades\DB;
  *
  * Everything is computed on request. The date range is arbitrary, so there is
  * no snapshot to serve.
+ *
+ * ── MANILA DATES ────────────────────────────────────────────────────────────
+ *
+ * The period is two Manila dates, inclusive, and every section counts the UTC
+ * instants between the first moment of the first and the first moment after
+ * the last (ManilaCalendar::period). Months are Manila months, bucketed in PHP
+ * so SQLite and PostgreSQL bucket alike. This was the UTC day, which put
+ * everything filed before 8 am Manila on the 1st into the previous month and
+ * dropped the last eight hours of the period.
  */
 final class LguReports
 {
@@ -122,8 +132,12 @@ final class LguReports
      */
     public static function build(string $key, CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        $from = $from->startOfDay();
-        $to = $to->endOfDay();
+        /*
+         * $from and $to arrive as Manila dates. From here on they are the UTC
+         * instants that bound the period: $from its first moment, $to the
+         * first moment AFTER it — every comparison against $to is `<`.
+         */
+        [$from, $to] = ManilaCalendar::period($from->toDateString(), $to->toDateString());
 
         $sections = match ($key) {
             'permits-issued' => self::permitsIssued($from, $to, $scope),
@@ -143,15 +157,24 @@ final class LguReports
 
     /* ── 1. permits issued, new and renewal ──────────────────────────────── */
 
-    /** @return list<array<string, mixed>> */
+    /**
+     * ── Business permits by month, every type by type ─────────────────────
+     *
+     * The month table is the JMC 01-2016 count — business permits, new versus
+     * renewal — and for every office at once it added the five clearances into
+     * the same New and Renewal cells, so one new business opening with its
+     * sanitary, fire, occupancy, environmental and zoning papers read as six
+     * new permits. For every office the month table now counts the Mayor's
+     * (business) permit only; one office's report counts its own types as
+     * before. The permit-type table breaks down every type, each in its own
+     * row, so nothing is mixed and nothing is lost.
+     *
+     * @return list<array<string, mixed>>
+     */
     private static function permitsIssued(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        $rows = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
-            ->orderBy('permit_types.id')
-            ->get(['permits.issued_at', 'applications.application_type', 'permit_types.name as type_name', 'permit_types.id as type_id']);
+        $rows = self::issued($from, $to, $scope);
+        $businessPermit = DB::table('permit_types')->where('code', PermitType::OUTCOME_CODE)->value('id');
 
         $months = self::months($from, $to);
         $byMonth = [];
@@ -161,14 +184,14 @@ final class LguReports
         $byType = [];
 
         foreach ($rows as $row) {
-            $type = self::transaction((string) $row->application_type);
-            $month = CarbonImmutable::parse($row->issued_at)->format('Y-m');
-            if (isset($byMonth[$month])) {
-                $byMonth[$month][$type]++;
+            $month = ManilaCalendar::monthOf($row['issued_at']);
+            if (isset($byMonth[$month]) && ($scope !== null || $row['type_id'] === (int) $businessPermit)) {
+                $byMonth[$month][$row['kind']]++;
             }
-            $byType[$row->type_id] ??= ['label' => (string) $row->type_name, 'new' => 0, 'renewal' => 0, 'amendment' => 0];
-            $byType[$row->type_id][$type]++;
+            $byType[$row['type_id']] ??= ['label' => $row['type_name'], 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+            $byType[$row['type_id']][$row['kind']]++;
         }
+        ksort($byType);
 
         $columns = [
             ['key' => 'label', 'label' => 'Month', 'format' => 'text'],
@@ -180,18 +203,117 @@ final class LguReports
 
         return [
             self::table(
-                'By month',
+                $scope === null ? 'Business permits by month' : 'By month',
                 $columns,
                 array_map(self::withTotal(...), array_values($byMonth)),
-                'Permits released in the period, counted by the kind of filing that produced them.',
+                ($scope === null
+                    ? 'Mayor’s (business) permits released in the period. The clearances are counted by type below and on the Clearances report, not added in here. '
+                    : 'Permits released in the period. ')
+                .self::KIND_NOTE,
             ),
             self::table(
                 'By permit type',
                 array_replace($columns, [0 => ['key' => 'label', 'label' => 'Permit type', 'format' => 'text']]),
                 array_map(self::withTotal(...), array_values($byType)),
-                'A permit that was later revoked, suspended or replaced by a renewal is still counted: it was issued in the period.',
+                'Every permit released in the period, one row per type. A permit later revoked, suspended or replaced by a renewal is still counted: it was issued in the period. Permits brought over from the old register are included.',
             ),
         ];
+    }
+
+    /** How a permit is classed, said once for every table that classes one. */
+    private const KIND_NOTE = 'A permit is a renewal when the business already held that type of permit before it was issued, or was renewing one issued on paper; an amendment when it reissues an amended permit; new otherwise.';
+
+    /**
+     * Every permit released in [from, to), oldest first, with how it is classed.
+     *
+     * ── New or renewal, by what the business already held ─────────────────
+     *
+     * This read the kind of FILING that produced the permit. Over a long
+     * period that is not the question the report answers — whether the City
+     * gained a permit holder or kept one — and a business's first permit of a
+     * type is new whatever form it came in on, while a business that already
+     * held the type is renewing. So:
+     *
+     *   amendment  the filing was an amendment: the same permit, reissued;
+     *   renewal    the business held a permit of this type issued before this
+     *              one, on BizTrack or brought over from the old register —
+     *              or the filing was a renewal, which covers a permit the
+     *              business renews from paper (AGENTS.md §11: in year one the
+     *              common case, and the register cannot see the paper);
+     *   new        anything else.
+     *
+     * ── Permits from the old register ──────────────────────────────────────
+     *
+     * Imported permits have no filing (`application_id` is null), and the
+     * inner join to `applications` dropped every one of them from every
+     * permit report. They are joined LEFT now, and classed by what the
+     * business held before them like any other permit.
+     *
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     * @return list<array{id: int, business_id: int, type_id: int, type_name: string, issued_at: string, kind: string}>
+     */
+    private static function issued(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $inPeriod = self::issuedBy(DB::table('permits'), $scope)
+            ->where('permits.issued_at', '>=', $from)
+            ->where('permits.issued_at', '<', $to);
+
+        $rows = (clone $inPeriod)
+            ->leftJoin('applications', 'applications.id', '=', 'permits.application_id')
+            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
+            ->orderBy('permits.issued_at')
+            ->orderBy('permits.id')
+            ->get([
+                'permits.id', 'permits.business_id', 'permits.permit_type_id', 'permits.issued_at',
+                'applications.application_type', 'permit_types.name as type_name',
+            ]);
+
+        /*
+         * The earliest permit each of these businesses holds of each type:
+         * one row per (business, type), over the businesses in the period, so
+         * the cost follows the period and not the register.
+         */
+        $first = [];
+        foreach (DB::table('permits')
+            ->whereIn('business_id', (clone $inPeriod)->select('permits.business_id'))
+            ->whereNotNull('issued_at')
+            ->groupBy('business_id', 'permit_type_id')
+            ->selectRaw('business_id, permit_type_id, min(issued_at) as first_issued')
+            ->get() as $row) {
+            $first[$row->business_id.'|'.$row->permit_type_id] = (string) $row->first_issued;
+        }
+
+        $seenFirst = [];
+        $out = [];
+        foreach ($rows as $row) {
+            $key = $row->business_id.'|'.$row->permit_type_id;
+            $issuedAt = (string) $row->issued_at;
+            /*
+             * Held before: an earlier permit of this type exists. Two permits
+             * of one type issued in the same second are told apart by id —
+             * the first one seen (rows are oldest first) is the first.
+             */
+            $isFirst = ! isset($seenFirst[$key])
+                && CarbonImmutable::parse($issuedAt)->equalTo(CarbonImmutable::parse($first[$key] ?? $issuedAt));
+            $seenFirst[$key] = true;
+
+            $kind = match (true) {
+                $row->application_type === 'amendment' => 'amendment',
+                ! $isFirst, $row->application_type === 'renewal' => 'renewal',
+                default => 'new',
+            };
+
+            $out[] = [
+                'id' => (int) $row->id,
+                'business_id' => (int) $row->business_id,
+                'type_id' => (int) $row->permit_type_id,
+                'type_name' => (string) $row->type_name,
+                'issued_at' => $issuedAt,
+                'kind' => $kind,
+            ];
+        }
+
+        return $out;
     }
 
     /* ── 2. collections by nature of fee ─────────────────────────────────── */
@@ -202,11 +324,13 @@ final class LguReports
         $payments = DB::table('payments')
             ->join('fee_assessments', 'fee_assessments.id', '=', 'payments.fee_assessment_id')
             ->where('payments.status', PaymentStatus::Completed->value)
-            ->whereBetween('payments.paid_at', [$from, $to])
+            ->where('payments.paid_at', '>=', $from)
+            ->where('payments.paid_at', '<', $to)
             ->orderBy('payments.id')
             ->get(['payments.id', 'payments.amount', 'payments.paid_at', 'fee_assessments.line_items', 'fee_assessments.total_amount']);
 
         $offices = self::officeNames();
+        $officeOfPermit = self::issuingOfficeByPermitCode();
         $byOffice = [];
         $byNature = [];
         $byMonth = [];
@@ -226,7 +350,7 @@ final class LguReports
             $touched = false;
             $paidHere = 0.0;
             foreach ($lines as $line) {
-                $office = (string) ($line['office'] ?? '');
+                $office = self::lineOffice($line, $officeOfPermit);
                 if ($scope !== null && $office !== $scope['code']) {
                     continue;
                 }
@@ -248,7 +372,7 @@ final class LguReports
                 $byNature[$natureLabel]['amount'] += $amount;
             }
 
-            $month = CarbonImmutable::parse($payment->paid_at)->format('Y-m');
+            $month = ManilaCalendar::monthOf($payment->paid_at);
             if ($touched && isset($byMonth[$month])) {
                 $byMonth[$month]['payments']++;
                 $byMonth[$month]['amount'] += $paidHere;
@@ -305,17 +429,12 @@ final class LguReports
     /** @return list<array<string, mixed>> */
     private static function businessesByArea(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        // Each business once: the kind of its EARLIEST permit in the period.
-        $issued = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
-            ->orderBy('permits.issued_at')
-            ->orderBy('permits.id')
-            ->get(['permits.business_id', 'applications.application_type']);
-
+        // Each business once: the kind of its EARLIEST permit in the period,
+        // classed as the permits report classes it (issued()), so a business
+        // that held permits before the period is not "new" in it.
         $kind = [];
-        foreach ($issued as $row) {
-            $kind[(int) $row->business_id] ??= self::transaction((string) $row->application_type);
+        foreach (self::issued($from, $to, $scope) as $row) {
+            $kind[$row['business_id']] ??= $row['kind'];
         }
         $businessIds = array_keys($kind);
 
@@ -374,7 +493,7 @@ final class LguReports
                 ['key' => 'amendment', 'label' => 'Amendment', 'format' => 'count'],
                 ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
             ], array_map(self::withTotal(...), array_values($barangays)),
-                'Each business is counted once, under its business location, as new or renewal by the first permit it was issued in the period.'),
+                'Each business is counted once, under its business location, by the first permit it was issued in the period: new if it held no permit of that type before. Permits from the old register are included.'),
             self::table('By kind of business', [
                 ['key' => 'label', 'label' => 'Kind of business', 'format' => 'text'],
                 ['key' => 'businesses', 'label' => 'Businesses', 'format' => 'count'],
@@ -405,29 +524,59 @@ final class LguReports
             ];
         }
 
-        $issued = self::issuedBy(DB::table('permits'), $scope)
-            ->join('applications', 'applications.id', '=', 'permits.application_id')
-            ->whereBetween('permits.issued_at', [$from, $to])
-            ->get(['permits.permit_type_id', 'applications.application_type']);
-        foreach ($issued as $row) {
-            $id = (int) $row->permit_type_id;
-            if (isset($rows[$id])) {
-                $rows[$id][self::transaction((string) $row->application_type)]++;
-                $rows[$id]['total']++;
+        foreach (self::issued($from, $to, $scope) as $row) {
+            if (isset($rows[$row['type_id']])) {
+                $rows[$row['type_id']][$row['kind']]++;
+                $rows[$row['type_id']]['total']++;
             }
         }
 
-        $refused = DB::table('application_permit_types')
-            ->whereNotNull('rejected_at')
-            ->whereBetween('rejected_at', [$from, $to])
-            ->when($scope !== null, static fn ($q) => $q->whereIn('permit_type_id', $scope['permit_type_ids']))
-            ->groupBy('permit_type_id')
-            ->selectRaw('permit_type_id, count(*) as c')
+        /*
+         * Refused, two sources, because two different acts refuse:
+         *
+         *  - an office refusing its clearance — every refusal, from
+         *    `clearance_refusals`. This read `rejected_at` on the permit row,
+         *    which a second refusal overwrites, so a permit refused in
+         *    September and again in October vanished from September's report;
+         *  - BPLO rejecting the filing, which refuses the business permit. That
+         *    lives on the filing (status, `rejection_reason`), not on a permit
+         *    row, and was not counted at all. It is counted from status
+         *    history, which keeps the moment of each rejection; a rejected
+         *    filing with no history row falls back to its `decided_at`.
+         */
+        $refused = DB::table('clearance_refusals')
+            ->join('applications', 'applications.id', '=', 'clearance_refusals.application_id')
+            ->whereNull('applications.deleted_at')
+            ->where('clearance_refusals.refused_at', '>=', $from)
+            ->where('clearance_refusals.refused_at', '<', $to)
+            ->when($scope !== null, static fn ($q) => $q->whereIn('clearance_refusals.permit_type_id', $scope['permit_type_ids']))
+            ->groupBy('clearance_refusals.permit_type_id')
+            ->selectRaw('clearance_refusals.permit_type_id, count(*) as c')
             ->pluck('c', 'permit_type_id');
         foreach ($refused as $id => $count) {
             if (isset($rows[(int) $id])) {
-                $rows[(int) $id]['refused'] = (int) $count;
+                $rows[(int) $id]['refused'] += (int) $count;
             }
+        }
+
+        $businessPermit = (int) DB::table('permit_types')->where('code', PermitType::OUTCOME_CODE)->value('id');
+        if (isset($rows[$businessPermit])) {
+            $rejectedHistory = DB::table('application_status_history')
+                ->where('to_status', ApplicationStatus::Rejected->value);
+            $rows[$businessPermit]['refused'] += DB::table('applications')
+                ->whereNull('deleted_at')
+                ->whereIn('id', (clone $rejectedHistory)
+                    ->where('created_at', '>=', $from)
+                    ->where('created_at', '<', $to)
+                    ->select('application_id'))
+                ->count();
+            $rows[$businessPermit]['refused'] += DB::table('applications')
+                ->whereNull('deleted_at')
+                ->where('status', ApplicationStatus::Rejected->value)
+                ->where('decided_at', '>=', $from)
+                ->where('decided_at', '<', $to)
+                ->whereNotIn('id', (clone $rejectedHistory)->select('application_id'))
+                ->count();
         }
 
         $rows = array_values($rows);
@@ -446,7 +595,7 @@ final class LguReports
                 ['key' => 'total', 'label' => 'Issued', 'format' => 'count'],
                 ['key' => 'refused', 'label' => 'Refused', 'format' => 'count'],
             ], $rows,
-                'Issued counts permits released in the period. Refused counts clearances an office refused in the period, whether or not the applicant later filed again.',
+                'Issued counts permits released in the period. Refused counts each refusal in the period: an office refusing its clearance, every time it did, whether or not the applicant later filed again; and BPLO rejecting a filing, under the business permit.',
                 $total),
         ];
     }
@@ -456,27 +605,27 @@ final class LguReports
     /** @return list<array<string, mixed>> */
     private static function pendingProcessing(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        // Decided in the period, against the filing's own RA 11032 tier.
-        $decided = self::routedTo(DB::table('applications'), $scope)
-            ->whereNull('deleted_at')
-            ->whereNotNull('submitted_at')
-            ->whereNotNull('decided_at')
-            ->whereBetween('decided_at', [$from, $to])
-            ->get(['complexity', 'submitted_at', 'decided_at']);
-
+        /*
+         * Decided in the period, against the filing's own RA 11032 tier, timed
+         * the way the dashboard's tier panel times it — FilingClock, one
+         * implementation for both. All offices: submission to decision, less
+         * the stretches the filing sat with its applicant. One office: that
+         * office's own review (BPLO: the time at its desk). This used to time
+         * every routed filing's whole lifetime even on an office's report.
+         */
         $tiers = [];
         foreach (Ra11032::TIERS as $tier => $rule) {
             $tiers[$tier] = ['label' => $rule['label'].' ('.$rule['statutory_working_days'].' working days)', 'decided' => 0, 'days' => 0, 'within' => 0];
         }
         $untiered = 0;
-        foreach ($decided as $row) {
-            $tier = (string) $row->complexity;
+        foreach (FilingClock::decided($from, $to, $scope) as $row) {
+            $tier = (string) $row['tier'];
             if (! isset($tiers[$tier])) {
                 $untiered++;
 
                 continue;
             }
-            $days = self::workingDaysBetween(CarbonImmutable::parse($row->submitted_at), CarbonImmutable::parse($row->decided_at));
+            $days = $row['working_days'];
             $tiers[$tier]['decided']++;
             $tiers[$tier]['days'] += $days;
             if ($days <= Ra11032::TIERS[$tier]['statutory_working_days']) {
@@ -491,46 +640,32 @@ final class LguReports
             'within_rate' => $row['decided'] === 0 ? null : round($row['within'] / $row['decided'] * 100, 1),
         ], array_values($tiers));
 
-        // Still pending at the end of the period, aged in working days.
+        /*
+         * Still pending at the end of the period, aged in working days. Not
+         * pending: a filing rejected or cancelled by then, and one that was
+         * waiting on its applicant at that moment (to pay, or to resubmit) —
+         * that is the applicant's queue, not the City's. See FilingClock.
+         */
         $buckets = ['within_3' => 3, 'within_7' => 7, 'within_20' => 20];
         $pendingRows = [];
         foreach (self::TYPES as $type => $label) {
             $pendingRows[$type] = ['label' => $label, 'within_3' => 0, 'within_7' => 0, 'within_20' => 0, 'over_20' => 0];
         }
 
-        if ($scope !== null) {
-            // An office's pending work is its own review, from when it was routed.
-            $pending = DB::table('application_assignments')
-                ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
-                ->whereNull('applications.deleted_at')
-                ->where('application_assignments.department_id', $scope['department_id'])
-                ->whereNotNull('application_assignments.assigned_at')
-                ->where('application_assignments.assigned_at', '<=', $to)
-                ->where(static fn ($q) => $q->whereNull('application_assignments.completed_at')
-                    ->orWhere('application_assignments.completed_at', '>', $to))
-                ->get(['application_assignments.assigned_at as since', 'applications.application_type']);
-        } else {
-            // Every office: the filing as a whole, from submission to decision.
-            $pending = DB::table('applications')
-                ->whereNull('deleted_at')
-                ->whereNotNull('submitted_at')
-                ->where('submitted_at', '<=', $to)
-                ->whereNotIn('status', [ApplicationStatus::Cancelled->value, ApplicationStatus::Draft->value])
-                ->where(static fn ($q) => $q->whereNull('decided_at')->orWhere('decided_at', '>', $to))
-                ->get(['submitted_at as since', 'application_type']);
-        }
-
-        $asOf = $to->greaterThan(CarbonImmutable::now()) ? CarbonImmutable::now() : $to;
-        foreach ($pending as $row) {
-            $age = self::workingDaysBetween(CarbonImmutable::parse($row->since), $asOf);
+        // The last moment of the period, or now if the period has not ended
+        // yet. $to itself is the first moment AFTER the period — on the next
+        // Manila date — and ageing to it would add a working day.
+        $current = $to->greaterThan(CarbonImmutable::now());
+        $asOf = $current ? CarbonImmutable::now() : $to->subSecond();
+        foreach (FilingClock::pending($to, $asOf, $scope, $current) as $row) {
             $bucket = 'over_20';
             foreach ($buckets as $key => $limit) {
-                if ($age <= $limit) {
+                if ($row['age'] <= $limit) {
                     $bucket = $key;
                     break;
                 }
             }
-            $pendingRows[self::transaction((string) $row->application_type)][$bucket]++;
+            $pendingRows[self::transaction($row['application_type'])][$bucket]++;
         }
         $pendingRows = array_map(static function (array $row): array {
             $row['total'] = $row['within_3'] + $row['within_7'] + $row['within_20'] + $row['over_20'];
@@ -545,6 +680,13 @@ final class LguReports
         $decidedTotal = array_sum(array_column($tierRows, 'decided'));
         $withinTotal = array_sum(array_column($tierRows, 'within'));
 
+        $bplo = $scope !== null && FilingClock::bplo($scope);
+        $decidedNote = match (true) {
+            $scope === null => 'Working days from submission to decision, leaving out the time a filing waited on its applicant to pay or to resubmit.',
+            $bplo => 'Working days the filings decided in the period spent at BPLO’s desk (For Approval and For Final Approval) — BPLO’s own time, not the other offices’. Filings handled before September 2026, when every office reviewed at once, cannot show BPLO’s own days and are left out.',
+            default => 'This office’s reviews finished in the period: working days from the filing reaching the office to the office finishing it, leaving out time the filing waited on its applicant.',
+        };
+
         return [
             self::table('Decided in the period, against RA 11032', [
                 ['key' => 'label', 'label' => 'Tier (statutory limit)', 'format' => 'text'],
@@ -553,8 +695,8 @@ final class LguReports
                 ['key' => 'within', 'label' => 'Within the limit', 'format' => 'count'],
                 ['key' => 'within_rate', 'label' => 'Within the limit (%)', 'format' => 'percent'],
             ], $tierRows,
-                'Working days from submission to decision, weekends excluded; holidays are not on the register, so figures around them read slightly long.'
-                .($untiered > 0 ? " {$untiered} decided filings have no tier on record and are left out." : ''),
+                $decidedNote.' Weekends are excluded; holidays are not on the register and count as working days, so no figure here is shorter than the real one.'
+                .($untiered > 0 ? " {$untiered} with no tier on record are left out." : ''),
                 [
                     'label' => 'Total', 'decided' => $decidedTotal, 'mean_days' => null, 'within' => $withinTotal,
                     'within_rate' => $decidedTotal === 0 ? null : round($withinTotal / $decidedTotal * 100, 1),
@@ -567,9 +709,11 @@ final class LguReports
                 ['key' => 'over_20', 'label' => 'Over 20', 'format' => 'count'],
                 ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
             ], $pendingRows,
-                $scope === null
-                    ? 'Filings submitted and not yet decided on the last day of the period, aged from submission.'
-                    : 'This office’s reviews not yet completed on the last day of the period, aged from when the filing was routed to it.',
+                match (true) {
+                    $scope === null => 'Filings submitted and not yet decided on the last day of the period, aged from submission. Rejected and cancelled filings are left out, and so are filings waiting on their applicant to pay or to resubmit; that time is also left out of the age.',
+                    $bplo => 'Filings at BPLO’s desk (For Approval or For Final Approval) on the last day of the period, aged by the working days they have spent there.',
+                    default => 'This office’s reviews not yet finished on the last day of the period, aged from when the filing reached the office. Rejected and cancelled filings are left out, and so are filings waiting on their applicant; that time is also left out of the age.',
+                },
                 $pendingTotal),
         ];
     }
@@ -616,11 +760,19 @@ final class LguReports
         return array_key_exists($type, self::TYPES) ? $type : 'amendment';
     }
 
-    /** @return array<string, string> "2026-09" => "September 2026", every month the range touches */
+    /**
+     * "2026-09" => "September 2026", every Manila month the period touches.
+     *
+     * $to is the exclusive end instant, so the last month is the one its
+     * previous second falls in.
+     *
+     * @return array<string, string>
+     */
     private static function months(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $out = [];
-        for ($cursor = $from->startOfMonth(); $cursor->lessThanOrEqualTo($to); $cursor = $cursor->addMonth()) {
+        $last = ManilaCalendar::monthOf($to->subSecond());
+        for ($cursor = ManilaCalendar::local($from)->startOfMonth(); $cursor->format('Y-m') <= $last; $cursor = $cursor->addMonth()) {
             $out[$cursor->format('Y-m')] = $cursor->format('F Y');
         }
 
@@ -628,6 +780,48 @@ final class LguReports
     }
 
     /** @return array<string, string> office code => name, departments plus the fee-only offices */
+    /**
+     * Which office a fee line belongs to.
+     *
+     * Most lines carry their office. The flat-schedule lines and the deferred
+     * "unbilled until now" lines carry only the permit they are for
+     * (`permit_codes`), so an office's own collections report left them out
+     * and they surfaced only in the all-offices total as "Not itemised by
+     * office". A line naming permits of exactly one office is that office's;
+     * one naming several offices' permits stays unassigned rather than being
+     * guessed.
+     *
+     * @param  array<string, mixed>  $line
+     * @param  array<string, string>  $officeOfPermit
+     */
+    private static function lineOffice(array $line, array $officeOfPermit): string
+    {
+        $office = (string) ($line['office'] ?? '');
+        if ($office !== '') {
+            return $office;
+        }
+
+        $owners = array_values(array_unique(array_filter(array_map(
+            static fn ($code): string => $officeOfPermit[(string) $code] ?? '',
+            (array) ($line['permit_codes'] ?? []),
+        ))));
+
+        return count($owners) === 1 ? $owners[0] : '';
+    }
+
+    /** @return array<string, string> permit type code => issuing office code */
+    private static function issuingOfficeByPermitCode(): array
+    {
+        return DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            // Aliased: both tables call the column `code`, and an unaliased
+            // pluck reads the permit's own code back as its office.
+            ->select('permit_types.code as permit_code', 'departments.code as office_code')
+            ->pluck('office_code', 'permit_code')
+            ->map(static fn ($c): string => (string) $c)
+            ->all();
+    }
+
     private static function officeNames(): array
     {
         $names = DB::table('departments')->pluck('name', 'code')->map(static fn ($n): string => (string) $n)->all();
@@ -654,21 +848,5 @@ final class LguReports
         return $scope === null ? $query : $query->whereIn('applications.id', DB::table('application_assignments')
             ->select('application_id')
             ->where('department_id', $scope['department_id']));
-    }
-
-    /** Whole working days, weekends excluded — the dashboard's count. */
-    private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
-    {
-        $cursor = $from->startOfDay();
-        $end = $to->startOfDay();
-        $days = 0;
-        while ($cursor->lessThan($end)) {
-            $cursor = $cursor->addDay();
-            if (! $cursor->isWeekend()) {
-                $days++;
-            }
-        }
-
-        return $days;
     }
 }

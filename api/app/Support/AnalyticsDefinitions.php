@@ -116,15 +116,15 @@ final class AnalyticsDefinitions
              */
             'kpis.applications_ytd' => [
                 'label' => 'Applications (all time)',
-                'formula' => 'Every filing on record, counted from creation.',
-                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are included; filings removed from the register are left out.',
+                'formula' => 'Every submitted filing on record.',
+                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are left out, and so are filings removed from the register.',
                 'why' => 'The full-term workload figure: everything the office has ever been asked to process. It sits beside This Month so the total and the current load can be read together.',
             ],
 
             'kpis.applications_this_month' => [
                 'label' => 'This Month',
-                'formula' => 'Filings created since the first day of this month.',
-                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate.',
+                'formula' => 'Filings submitted since the first day of this month (Manila time).',
+                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate. Drafts not yet submitted are left out.',
                 'why' => 'Current load, for staffing the counter this week.',
             ],
 
@@ -138,14 +138,14 @@ final class AnalyticsDefinitions
             'volume' => [
                 'label' => 'Application Volume',
                 'formula' => 'Filings this month by transaction type: new, renewal, amendment. Total is the sum of the three.',
-                'covers' => 'This calendar month, counted from creation. All three types are shown even at zero, so an empty row means none were filed.',
+                'covers' => 'This calendar month (Manila time), counted from submission; drafts not yet submitted are left out. All three types are shown even at zero, so an empty row means none were filed.',
                 'why' => 'Shows what kind of work is arriving, not just how much. Renewal season and new-registration season staff differently.',
             ],
 
             'decisions.approval_rate' => [
                 'label' => 'Approval rate',
-                'formula' => 'Approved filings ÷ decided filings (approved + returned + rejected) × 100.',
-                'covers' => 'Decided filings only. Pending and cancelled filings are left out — a withdrawn filing is not a decision the office made.',
+                'formula' => 'Approved filings ÷ decided filings (approved + rejected) × 100.',
+                'covers' => 'Decided filings only. Pending, returned and cancelled filings are left out: a returned filing is back with the applicant to fix and still owed a decision, and a withdrawn one is not a decision the office made.',
                 'why' => 'Measures how the office decides, not how fast. Leaving pending filings out is why a growing backlog does not move it.',
             ],
 
@@ -155,8 +155,13 @@ final class AnalyticsDefinitions
                 // Tier", which said "tier" twice over — once in the heading and
                 // again in every bar label underneath it.
                 'label' => 'Average Processing Time (RA 11032)',
-                'formula' => 'Average working days from submission to decision, per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical.',
-                'covers' => 'Decided filings in the months set by the filter that record a tier, a submission and a decision. Working days skip weekends. Holidays are not allowed for, so a real turnaround is never faster than shown.',
+                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, For Final Approval); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
+                /*
+                 * The holiday sentence read "never faster than shown", which
+                 * is backwards: a holiday counted as a working day makes the
+                 * figure LONGER than the truth, so the truth is never slower.
+                 */
+                'covers' => 'Filings decided, or one office\'s reviews finished, in the months set by the filter, with a tier on record. Days the filing waited on the applicant to pay or to resubmit are left out; a single permit sent back by its own office still counts against that office. Working days skip weekends. Holidays are not on the register and count as working days, so a real turnaround is never slower than shown.',
                 'why' => 'RA 11032 sets a legal deadline, not an office target: going over it breaks the law. The limit here is the statutory one, never the flat deadline this system stamps on a filing — that field does not change with the tier.',
             ],
 
@@ -167,21 +172,21 @@ final class AnalyticsDefinitions
                 // "Time-in-Stage", which stays gone.
                 'label' => 'Average Processing Time by Department',
                 'formula' => 'Average office days from a review reaching an office to that office finishing it. Only office hours count (Monday to Friday, 8:00 to 17:00): a review that arrives at 7 pm starts at 8 the next morning, weekends are not counted, and one office day is 9 office hours.',
-                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. Read this beside the review counts.',
+                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. An office with fewer than three finished reviews is not drawn. BPLO is left out: its record is stamped again at the final approval, so its time is the whole filing, not its own step.',
                 'why' => 'A permit waits on six offices in turn, so the slowest sets the total. This says which office to give people to.',
             ],
 
             'stages.bottleneck' => [
                 'label' => 'Slowest department',
                 'formula' => 'The department with the highest average, with how far above the all-department average it sits and what share of reviews it handled.',
-                'covers' => 'The same finished reviews as the panel above.',
+                'covers' => 'The same finished reviews as the panel above, and only the departments drawn there: one with fewer than three reviews is never named the slowest.',
                 'why' => 'Slowest can mean hardest or busiest. The share of reviews sits beside it so the two can be told apart before anyone is reassigned.',
             ],
 
             'compliance.ra11032_processing' => [
                 'label' => 'Processing Rate Compliance to RA 11032',
                 'formula' => 'Filings decided inside the legal deadline for their own tier ÷ decided filings that record a tier × 100.',
-                'covers' => 'The months set by the filter. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
+                'covers' => 'The months set by the filter, timed as in Average Processing Time: the applicant\'s days are left out, and one office is judged on its own review only. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
                 'why' => 'The pass rate against the law. It counts filings, so it cannot be averaged with the two cards beside it.',
             ],
 
@@ -194,9 +199,9 @@ final class AnalyticsDefinitions
 
             'compliance.renewal' => [
                 'label' => 'Renewal Compliance',
-                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100.',
-                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed against. A draft is not a renewal; it has to be submitted.',
-                'why' => 'Whether businesses renew before lapsing. When too few renewals record which permit they replace it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
+                'formula' => 'Permits that fell due and had a renewal filed before expiry ÷ permits that fell due × 100. A renewal counts for a permit when the same business filed one carrying that permit type during the permit\'s term.',
+                'covers' => 'Permits expiring in the months set by the filter, for the types renewals are actually filed for. A draft is not a renewal; it has to be submitted.',
+                'why' => 'Whether businesses renew before lapsing. When no renewal on the register can be matched to a permit that fell due it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
             ],
 
             /*
@@ -208,8 +213,8 @@ final class AnalyticsDefinitions
              */
             'expiry' => [
                 'label' => 'Permits Approaching Expiry',
-                'formula' => 'Permits still in force that expire within 30, 60 and 90 days of today, per permit type, and permits already past their expiry date.',
-                'covers' => 'The windows nest: a permit 20 days out is counted in all three. Expired is its own row. A permit on a closed business, or one that was revoked, is left out.',
+                'formula' => 'Permits still in force that expire within 30, 60 and 90 days of today, per permit type. The Expired row counts businesses whose latest permit of that type has run out, with no newer one in force.',
+                'covers' => 'The windows nest: a permit 20 days out is counted in all three. A business that renewed is not expired, however many old permits it holds, and one lapsed on two permit types is one business in two columns. A closed business, and a permit that was revoked or suspended, are left out.',
                 'why' => 'How much renewal work is coming, and for which office, before it arrives at the counter.',
             ],
 
@@ -221,7 +226,7 @@ final class AnalyticsDefinitions
             'business_movement' => [
                 'label' => 'New and Closed Businesses',
                 'formula' => 'Businesses registered each month, and businesses removed from the register or blacklisted each month, across the window.',
-                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month.',
+                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month, and so is the current one, which is marked as still running rather than read as a drop.',
                 'why' => 'Whether the register is growing or only replacing what it loses.',
             ],
 
@@ -266,7 +271,7 @@ final class AnalyticsDefinitions
                 'label' => 'Pass rate',
                 'formula' => 'Inspections passed ÷ inspections completed × 100.',
                 'covers' => 'Completed inspections only, never the ones merely scheduled. One not yet carried out has no result, and counting it as a fail would punish an office for its own backlog.',
-                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog.',
+                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog. A cancelled visit is not counted as scheduled; a rescheduled one is, because it is still owed.',
             ],
 
             'officer_activity.mean_response_hours' => [
@@ -305,7 +310,7 @@ final class AnalyticsDefinitions
             'map' => [
                 'label' => 'Business locations',
                 'formula' => 'Business locations plotted from recorded coordinates, marked by whether the business holds a valid permit today.',
-                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn.',
+                'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the mapped count and the register total are all shown. Past a fixed cap the rest are counted in a note instead of drawn. For one office, its businesses are those with a filing sent to it or a permit it issued, including permits brought over from the old register; the other panels on this page use the same set.',
                 'why' => 'Turns the barangay ranking into something that can be walked. Lapsed permits are drawn rather than hidden, since a cluster of them is the pattern worth seeing.',
             ],
         ];
