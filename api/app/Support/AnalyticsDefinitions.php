@@ -116,15 +116,15 @@ final class AnalyticsDefinitions
              */
             'kpis.applications_ytd' => [
                 'label' => 'Applications (all time)',
-                'formula' => 'Every filing on record, counted from creation.',
-                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are included; filings removed from the register are left out.',
+                'formula' => 'Every submitted filing on record.',
+                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are left out, and so are filings removed from the register.',
                 'why' => 'The full-term workload figure: everything the office has ever been asked to process. It sits beside This Month so the total and the current load can be read together.',
             ],
 
             'kpis.applications_this_month' => [
                 'label' => 'This Month',
-                'formula' => 'Filings created since the first day of this month.',
-                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate.',
+                'formula' => 'Filings submitted since the first day of this month (Manila time).',
+                'covers' => 'A part month until the month ends. On the 3rd this is three days of filings, not a monthly rate. Drafts not yet submitted are left out.',
                 'why' => 'Current load, for staffing the counter this week.',
             ],
 
@@ -138,14 +138,14 @@ final class AnalyticsDefinitions
             'volume' => [
                 'label' => 'Application Volume',
                 'formula' => 'Filings this month by transaction type: new, renewal, amendment. Total is the sum of the three.',
-                'covers' => 'This calendar month, counted from creation. All three types are shown even at zero, so an empty row means none were filed.',
+                'covers' => 'This calendar month (Manila time), counted from submission; drafts not yet submitted are left out. All three types are shown even at zero, so an empty row means none were filed.',
                 'why' => 'Shows what kind of work is arriving, not just how much. Renewal season and new-registration season staff differently.',
             ],
 
             'decisions.approval_rate' => [
                 'label' => 'Approval rate',
-                'formula' => 'Approved filings ÷ decided filings (approved + returned + rejected) × 100.',
-                'covers' => 'Decided filings only. Pending and cancelled filings are left out — a withdrawn filing is not a decision the office made.',
+                'formula' => 'Approved filings ÷ decided filings (approved + rejected) × 100.',
+                'covers' => 'Decided filings only. Pending, returned and cancelled filings are left out: a returned filing is back with the applicant to fix and still owed a decision, and a withdrawn one is not a decision the office made.',
                 'why' => 'Measures how the office decides, not how fast. Leaving pending filings out is why a growing backlog does not move it.',
             ],
 
@@ -226,7 +226,7 @@ final class AnalyticsDefinitions
             'business_movement' => [
                 'label' => 'New and Closed Businesses',
                 'formula' => 'Businesses registered each month, and businesses removed from the register or blacklisted each month, across the window.',
-                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month.',
+                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month, and so is the current one, which is marked as still running rather than read as a drop.',
                 'why' => 'Whether the register is growing or only replacing what it loses.',
             ],
 
@@ -271,7 +271,7 @@ final class AnalyticsDefinitions
                 'label' => 'Pass rate',
                 'formula' => 'Inspections passed ÷ inspections completed × 100.',
                 'covers' => 'Completed inspections only, never the ones merely scheduled. One not yet carried out has no result, and counting it as a fail would punish an office for its own backlog.',
-                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog.',
+                'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog. A cancelled visit is not counted as scheduled; a rescheduled one is, because it is still owed.',
             ],
 
             'officer_activity.mean_response_hours' => [
