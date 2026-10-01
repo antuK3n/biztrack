@@ -235,7 +235,42 @@ class LegacyImporter
                 'business_legacy_id' => $d['legacy_id'],
             ];
             $lookups->permitNumbers[Lookups::number($p['permit_number'])] = $p['legacy_id'];
+
+            $this->registeredNoLaterThan($business, $p['valid_from']);
         }
+    }
+
+    /**
+     * Date the business by the old register, not by the import.
+     *
+     * `businesses.created_at` is what the dashboard's New and Closed
+     * Businesses panel counts as a registration. Left to Eloquent it is the
+     * moment the import ran, so loading the old register would draw every
+     * business the City has ever licensed as "new" in one month — a spike
+     * that is an artefact of the migration and reads as a boom.
+     *
+     * The old register's own date is the earliest permit it holds for the
+     * business: the template has no separate registration date (MISD has not
+     * sent a sample, docs/questions-for-malabon.md B28), and a business was
+     * on the register at least from its first permit. Set like `issued_at`,
+     * from the permit's first valid day, and only ever moved EARLIER — a
+     * later row, or a re-import, cannot make a business younger than a
+     * permit already on file says it is. A row without a permit leaves the
+     * import date in place: there is nothing older to go on.
+     *
+     * Written with the query builder so the business's `updated_at` keeps
+     * meaning "its details changed".
+     */
+    private function registeredNoLaterThan(Business $business, ?string $validFrom): void
+    {
+        if ($validFrom === null) {
+            return;
+        }
+
+        DB::table('businesses')
+            ->where('id', $business->id)
+            ->where(fn ($q) => $q->whereNull('created_at')->orWhere('created_at', '>', $validFrom))
+            ->update(['created_at' => $validFrom.' 00:00:00']);
     }
 
     /**

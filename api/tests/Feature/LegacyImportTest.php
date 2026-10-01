@@ -8,6 +8,7 @@ use App\Models\LegacyImport;
 use App\Models\LegacyOwner;
 use App\Models\Permit;
 use App\Models\User;
+use App\Support\DashboardAnalytics;
 use App\Support\LegacyImport\Template;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Artisan;
@@ -160,6 +161,27 @@ it('imports businesses unclaimed, with paper permits that have no filing, and au
 
     // The upload held owners' personal data; it goes once the run is done.
     expect(LegacyImport::find($preview['id'])->stored_path)->toBeNull();
+});
+
+it('dates an imported business by its earliest permit on the old register, not by the day of the import', function () {
+    $monthBefore = collect(DashboardAnalytics::build()['business_movement']['rows'])->last()['registered'];
+
+    runImport(previewAsAdmin(legacyCsv([
+        legacyRow(),
+        legacyRow(['legacy_permit_id' => 'P-2', 'permit_type' => 'SANITARY', 'permit_number' => 'OLD-HC-1', 'valid_from' => '01/02/2020', 'valid_until' => '12/31/2020']),
+        // No permit on the row: nothing older than the import to go on.
+        legacyRow(['legacy_business_id' => 'B-2', 'business_name' => 'Walang Permit', 'legacy_permit_id' => '', 'permit_type' => '', 'permit_number' => '', 'valid_from' => '', 'valid_until' => '']),
+    ]))['id']);
+
+    expect(Business::where('legacy_id', 'B-1')->firstOrFail()->created_at->toDateString())->toBe('2020-01-02')
+        ->and(Business::where('legacy_id', 'B-2')->firstOrFail()->created_at->isToday())->toBeTrue();
+
+    // A re-import carrying only a later permit does not make it younger.
+    runImport(previewAsAdmin(legacyCsv([legacyRow(['legacy_permit_id' => 'P-3', 'permit_number' => 'OLD-MP-2026-0001', 'valid_from' => '2026-01-10'])]))['id']);
+    expect(Business::where('legacy_id', 'B-1')->firstOrFail()->created_at->toDateString())->toBe('2020-01-02');
+
+    // So the import is one new business this month (B-2), not a spike of three.
+    expect(collect(DashboardAnalytics::build()['business_movement']['rows'])->last()['registered'] - $monthBefore)->toBe(1);
 });
 
 it('updates on re-import instead of adding a second copy', function () {
