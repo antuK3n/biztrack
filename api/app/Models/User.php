@@ -97,6 +97,20 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(Business::class, 'owner_user_id');
     }
 
+    /**
+     * The general enquiries this person owns: one per office they have written
+     * to, with no filing behind any of them.
+     *
+     * Only the enquiry threads are theirs. A filing's conversation belongs to
+     * the application, not to a person, which is why `user_id` is null on one -
+     * so this relation cannot accidentally hand somebody another party's
+     * correspondence on a permit.
+     */
+    public function messageThreads(): HasMany
+    {
+        return $this->hasMany(MessageThread::class, 'user_id');
+    }
+
     public function notifications(): HasMany
     {
         return $this->hasMany(AppNotification::class);

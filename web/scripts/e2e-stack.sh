@@ -64,6 +64,30 @@ php -r '
   $source->exec("VACUUM INTO ".$source->quote($argv[2]));
 ' "$LIVE_DB" "$E2E_DB"
 
+# ── Lifting the register's restrictions off the copy ─────────────────────────
+#
+# A suspended or blacklisted account may reach its messages and its notices and
+# nothing else, which is the product working as asked. It also makes that
+# account useless as a fixture: every owner journey in the suite — apply, renew,
+# pay, upload, read a permit — is refused before it starts.
+#
+# The register holds one today, recorded against owner@biztrack.local on
+# 27 September, and it is a demonstration rather than a mistake. Copied in, it
+# would have every owner spec failing on somebody else's demo, for a reason no
+# failure message would name.
+#
+# So the copy is normalised. The restriction's OWN behaviour is not tested from
+# the register — e2e/account-restriction.spec.ts stubs it, for the reason
+# suspended-owner.spec.ts has always stated: writing a finding onto a live
+# tester's account is not something a test may do, and taking it back off again
+# is a second write that can fail and leave them locked out.
+echo "Lifting the register's account restrictions on the copy…"
+php -r '
+  $db = new PDO("sqlite:".$argv[1]);
+  $db->exec("UPDATE users SET blacklisted_at = NULL, blacklist_reason = NULL, blacklisted_by = NULL");
+  $db->exec("UPDATE businesses SET status = \"active\" WHERE status IN (\"blacklisted\", \"suspended\")");
+' "$E2E_DB"
+
 cleanup() {
   echo
   echo "Stopping the test stack…"
