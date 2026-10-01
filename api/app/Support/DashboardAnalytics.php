@@ -640,7 +640,10 @@ final class DashboardAnalytics
             $observations[] = [
                 'code' => (string) $row->code,
                 'name' => (string) $row->name,
-                'days' => Rounding::statistic($assigned->diffInHours($completed) / 24),
+                // Office days, not wall-clock days: a review that reaches an
+                // office at 7 pm has its clock start at 8 the next morning,
+                // and the weekend is not the office's (OfficeHours::hoursBetween).
+                'days' => Rounding::statistic(OfficeHours::hoursBetween($assigned, $completed) / OfficeHours::hoursPerDay()),
             ];
         }
 
@@ -1251,7 +1254,9 @@ final class DashboardAnalytics
             }
 
             if (isset($awaiting[$threadId])) {
-                $latencies[] = Rounding::statistic($awaiting[$threadId]->diffInMinutes($sentAt) / 60);
+                // Office hours only: a message sent at 9 pm and answered at
+                // 8:30 the next morning waited half an hour of office time.
+                $latencies[] = Rounding::statistic(OfficeHours::hoursBetween($awaiting[$threadId], $sentAt));
                 unset($awaiting[$threadId]);
             }
         }
