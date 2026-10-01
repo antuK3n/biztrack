@@ -874,8 +874,116 @@ export function ClearanceStage({
   }
 
   /** Hand the open sheet to its office. Only ever called on a complete one. */
-  async function saveForm() {
-    if (!formCode) return
+  /**
+   * Hand a sheet to its office.
+   *
+   * Takes the code rather than reading `formCode`, because there are two
+   * callers and only one of them has a sheet open. The correction dialog is
+   * reached from the clearance CARDS, where `formCode` is null — so
+   * `if (!formCode) return` meant that confirming a resubmission from there
+   * did nothing whatsoever, without a word. See `submitPromptModal`.
+   */
+  /*
+   * ── The last look before a one-way press, reachable from BOTH screens ──
+   *
+   * Defined here and rendered in both returns, because this file draws two
+   * different screens and the submission can start on either: the office
+   * SHEET has a Submit button, and the clearance CARDS have a correction
+   * dialog whose Submit does the same thing.
+   *
+   * It sat inside the `if (formCode)` branch, which is the sheet's. Pressing
+   * Submit corrections on the cards set `submitPrompt` and the component
+   * re-rendered — into the branch that has no modal in it. Nothing mounted,
+   * nothing was sent, nothing was said. The applicant pressed a blue button
+   * and watched it do nothing.
+   *
+   * That is the SECOND time this exact fault has been reported against this
+   * modal. On 17 September 2026 it was the other way round — the modal lived
+   * in the cards branch and only the sheet could open it — and the fix moved
+   * it into the sheet's branch, which broke the corrections path the moment
+   * that path started using it. Moving it a third time would just wait for
+   * the next caller. One definition, mounted in both places, cannot be
+   * reached from a screen that does not render it.
+   *
+   * Blue, not red. Nothing is destroyed and nothing is wrong — this is the
+   * applicant doing what they came to do. What it adds is the one fact the
+   * button cannot: that this is the last moment to change anything.
+   */
+  const submitPromptModal = submitPrompt !== null && (
+          /*
+            ── The last look before a one-way press ─────────────────────────────
+
+          It lives HERE, inside the `if (formCode)` branch, and that is the
+          whole of the bug reported on 17 September 2026: "why does this submit
+          button not work?"
+
+          It did work. It set `submitPrompt` and the component re-rendered —
+          and this file returns early at `if (formCode)` to draw the open
+          sheet, while the modal sat in the FINAL return, the branch that draws
+          the clearance cards. So the state changed and nothing mounted. Only
+          the sheet carries the Submit button, so only the sheet can set that
+          state: the copy down there was unreachable from the day it was
+          written, and no test noticed because a modal that never opens looks
+          exactly like a modal nobody asked for.
+
+            The client asked for it by name: "before submitting each form, please
+            create a modal that will ask them if they are already finished
+            reviewing before submitting."
+
+            It earns its place on the same test the two dialogs above pass —
+            something happens here that cannot be undone from this screen. Once
+            submitted the sheet is the office's and the applicant cannot change
+            it; getting it back means messaging the office and asking them to
+            return it. Until today that press was the same size as saving a draft.
+
+            Blue, not red. Nothing is destroyed and nothing is wrong — this is the
+            applicant doing the thing they came to do, and dressing it as a
+            warning would say otherwise. What the dialog adds is the one fact the
+            button cannot: that this is the last moment to change anything.
+          */
+          <ProtoModal
+            title="SUBMIT THIS FORM"
+            cancelLabel="Keep checking"
+            confirmLabel="Yes, submit it"
+            onCancel={() => setSubmitPrompt(null)}
+            onConfirm={() => {
+              /*
+               * `submitPrompt`, not the default. It is the code that opened
+               * this dialog and the only one true on BOTH screens — on the
+               * cards `formCode` is null, which is what made the default
+               * silently do nothing.
+               */
+              const code = submitPrompt
+              setSubmitPrompt(null)
+              void saveForm(code)
+            }}
+          >
+            <p className="text-center text-base text-ink">
+              Have you finished reviewing your{' '}
+              <span className="font-bold">
+                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
+                  'application form'}
+              </span>
+              ?
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              Once you submit it,{' '}
+              <span className="font-semibold text-ink">
+                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
+                  ?.name ?? 'the issuing office'}
+              </span>{' '}
+              receives it and you will not be able to change your answers. You can still read them
+              back at any time.
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              If you spot a mistake after submitting, message the office from this clearance&rsquo;s
+              card and they can send the form back to you.
+            </p>
+          </ProtoModal>
+  )
+
+  async function saveForm(code: OfficeFormCode | null = formCode) {
+    if (!code) return
     setFormSaving(true)
     setFormError(null)
     try {
@@ -889,9 +997,15 @@ export function ClearanceStage({
        * only thing left to do is hand them over. The button is shut while
        * anything is missing, so a call reaching here is a complete sheet.
        */
-      await officeForms.save(applicationId, formCode, officeData[formCode] ?? {}, true)
-      savedSheets.current[formCode] = JSON.stringify(officeData[formCode] ?? {})
+      await officeForms.save(applicationId, code, officeData[code] ?? {}, true)
+      savedSheets.current[code] = JSON.stringify(officeData[code] ?? {})
       setFormCode(null)
+      /*
+       * And shut the correction dialog, where that is what opened this.
+       * Left standing it would go on showing the return the applicant has
+       * just answered, over a card that now reads For Approval.
+       */
+      onCorrectionsClose()
       // The sheet being complete is part of the row, so re-read it.
       await load()
     } catch (err) {
@@ -1289,71 +1403,7 @@ export function ClearanceStage({
             </>
           )}
         </div>
-        {submitPrompt && (
-          /*
-            ── The last look before a one-way press ─────────────────────────────
-
-          It lives HERE, inside the `if (formCode)` branch, and that is the
-          whole of the bug reported on 17 September 2026: "why does this submit
-          button not work?"
-
-          It did work. It set `submitPrompt` and the component re-rendered —
-          and this file returns early at `if (formCode)` to draw the open
-          sheet, while the modal sat in the FINAL return, the branch that draws
-          the clearance cards. So the state changed and nothing mounted. Only
-          the sheet carries the Submit button, so only the sheet can set that
-          state: the copy down there was unreachable from the day it was
-          written, and no test noticed because a modal that never opens looks
-          exactly like a modal nobody asked for.
-
-            The client asked for it by name: "before submitting each form, please
-            create a modal that will ask them if they are already finished
-            reviewing before submitting."
-
-            It earns its place on the same test the two dialogs above pass —
-            something happens here that cannot be undone from this screen. Once
-            submitted the sheet is the office's and the applicant cannot change
-            it; getting it back means messaging the office and asking them to
-            return it. Until today that press was the same size as saving a draft.
-
-            Blue, not red. Nothing is destroyed and nothing is wrong — this is the
-            applicant doing the thing they came to do, and dressing it as a
-            warning would say otherwise. What the dialog adds is the one fact the
-            button cannot: that this is the last moment to change anything.
-          */
-          <ProtoModal
-            title="SUBMIT THIS FORM"
-            cancelLabel="Keep checking"
-            confirmLabel="Yes, submit it"
-            onCancel={() => setSubmitPrompt(null)}
-            onConfirm={() => {
-              setSubmitPrompt(null)
-              void saveForm()
-            }}
-          >
-            <p className="text-center text-base text-ink">
-              Have you finished reviewing your{' '}
-              <span className="font-bold">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
-                  'application form'}
-              </span>
-              ?
-            </p>
-            <p className="mt-3 text-center text-sm text-ink-secondary">
-              Once you submit it,{' '}
-              <span className="font-semibold text-ink">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
-                  ?.name ?? 'the issuing office'}
-              </span>{' '}
-              receives it and you will not be able to change your answers. You can still read them
-              back at any time.
-            </p>
-            <p className="mt-3 text-center text-sm text-ink-secondary">
-              If you spot a mistake after submitting, message the office from this clearance&rsquo;s
-              card and they can send the form back to you.
-            </p>
-          </ProtoModal>
-        )}
+        {submitPromptModal}
       </div>
     )
   }
@@ -2491,6 +2541,12 @@ export function ClearanceStage({
         </ProtoModal>
       )}
 
+      {/*
+        The same modal the sheet branch mounts, and that is the whole point:
+        Submit corrections on a card sets `submitPrompt`, and until today
+        nothing in THIS branch rendered it, so the press did nothing.
+      */}
+      {submitPromptModal}
     </div>
   )
 }
