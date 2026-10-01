@@ -94,7 +94,8 @@ it('lets the super admin create a staff account without a home address', functio
             'gender' => 'F',
             'email' => 'new.bplo@biztrack.local',
             'mobile_number' => '09171234567',
-            'password' => 'biztrack1',
+            // Staff passwords need mixed case, a number and a symbol (StaffCredentials).
+            'password' => 'Biztrack-2026!',
             'role' => 'bplo_staff',
             'department_id' => Department::where('code', 'BPLO')->value('id'),
         ])->assertCreated()->json('data');
@@ -105,7 +106,7 @@ it('lets the super admin create a staff account without a home address', functio
 
     // And a staff account is never told it owes one.
     $this->app['auth']->forgetGuards();
-    $token = loginToken('new.bplo@biztrack.local');
+    $token = loginToken('new.bplo@biztrack.local', 'Biztrack-2026!', 'staff');
     $this->app['auth']->forgetGuards();
     $this->withToken($token)->getJson('/api/v1/auth/me')
         ->assertOk()
