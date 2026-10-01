@@ -2098,6 +2098,45 @@ export interface AdminRole {
   available: boolean
 }
 
+/**
+ * One name in an office's signature block (GET /admin/office-signatories).
+ *
+ * Admin-edited data, never a literal: the permit certificate prints an office's
+ * current signatories in `sort_order`, and its reports print the highest-order
+ * current one as "Noted by".
+ */
+export interface OfficeSignatory {
+  id: number
+  department_id: number
+  /** The position as printed under the name — "Chief-CENRO". */
+  role: string
+  name: string
+  /** Lower prints first. 0–99, and no two current signatories of an office share one. */
+  sort_order: number
+  /** False once retired. The row is kept: it records whose name issued forms carry. */
+  is_active: boolean
+}
+
+/** An office and everyone who has signed for it, retired included, in signature-block order. */
+export interface SignatoryOffice {
+  id: number
+  code: string
+  name: string
+  signatories: OfficeSignatory[]
+}
+
+/**
+ * What the add and edit dialogs send. `sort_order` may be null: an emptied box
+ * is sent as typed so the API's sentence about it comes back, rather than the
+ * screen quietly substituting a number.
+ */
+export interface OfficeSignatoryPayload {
+  role: string
+  name: string
+  sort_order: number | null
+  is_active: boolean
+}
+
 export interface AdminUserPayload {
   first_name: string
   middle_name?: string
