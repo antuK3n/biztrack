@@ -14,8 +14,8 @@ use Illuminate\Support\Facades\Schema;
  * silently: the form keeps printing someone who left the post, and the only
  * route to a fix is a code change and a redeploy.
  *
- * So they live here, one row per (office, role), editable by anyone holding
- * reference.manage, and are rendered onto generated forms at output time.
+ * So they live here, one current row per (office, role), editable by anyone
+ * holding reference.manage, and are rendered onto generated forms at output time.
  */
 return new class extends Migration
 {
@@ -35,7 +35,11 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            // One person per role per office. Re-seeding updates rather than duplicates.
+            /*
+             * One person per role per office — as first written. Since
+             * 2026_10_02_000100 the index covers ACTIVE rows only, so a retired
+             * holder no longer blocks their successor from the same post.
+             */
             $table->unique(['department_id', 'role']);
         });
     }
