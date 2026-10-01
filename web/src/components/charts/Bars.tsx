@@ -195,6 +195,14 @@ export function HorizontalBars({
   // told to leave room for it — otherwise it renders clipped by the SVG edge.
   const topMargin = reference ? 18 : 4
   const height = Math.max(96, data.length * rowHeight + 28 + topMargin)
+  /*
+   * Room at the bar ends for the longest value written there. A fixed 56px fit
+   * "8.7d" and clipped "8.7 working days" — and the unit is the part that must
+   * not be cut, because two panels side by side count different kinds of day.
+   * ~8px a character at the label's 12px semibold; recharts wraps a label
+   * that does not fit, so erring wide keeps "2.2 office days" on one line.
+   */
+  const valueRoom = Math.max(56, Math.max(0, ...data.map((row) => row.valueText.length)) * 8 + 8)
 
   return (
     <ChartFrame
@@ -207,7 +215,7 @@ export function HorizontalBars({
       <BarChart
         data={data}
         layout="vertical"
-        margin={{ top: topMargin, right: 56, left: 0, bottom: 4 }}
+        margin={{ top: topMargin, right: valueRoom, left: 0, bottom: 4 }}
         barCategoryGap="22%"
       >
         <XAxis

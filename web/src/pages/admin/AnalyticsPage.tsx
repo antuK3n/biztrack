@@ -459,12 +459,18 @@ function TierPanel({ report }: { report: DashboardReport }) {
 
   const data: BarDatum[] = measured.map((row) => {
     const mean = row.mean_working_days as number
+    /*
+     * The unit is written on every figure: WORKING days here, because RA 11032
+     * sets its limits in working days. The department panel beside this one is
+     * in OFFICE days, a different clock, and a bare "8.7d" beside a bare
+     * "2.2d" invited reading the two as the same measure.
+     */
     return {
       key: row.tier,
-      label: `${row.label} · ${row.statutory_working_days}d`,
+      label: `${row.label} · ${row.statutory_working_days}-day limit`,
       value: Number(((mean / row.statutory_working_days) * 100).toFixed(1)),
-      valueText: `${mean.toFixed(1)}d`,
-      note: `${row.statutory_working_days}-day legal limit`,
+      valueText: `${mean.toFixed(1)} working days`,
+      note: `${row.statutory_working_days} working days`,
       color: row.breaching ? BREACH : CHART_ROYAL,
     }
   })
@@ -485,7 +491,7 @@ function TierPanel({ report }: { report: DashboardReport }) {
           categoryHeading="Tier and legal limit"
           valueHeading="Average working days"
           noteHeading="Legal limit"
-          categoryWidth={132}
+          categoryWidth={156}
           rowHeight={34}
           reference={{ value: 100, label: 'Legal limit', color: '#1a1f2b' }}
           /*
@@ -514,16 +520,16 @@ function TierPanel({ report }: { report: DashboardReport }) {
                 style={{ color: BREACH, backgroundColor: BREACH_TINT }}
               >
                 <WarningGlyph />
-                {row.label}: over by {row.overage_days?.toFixed(1)}d
+                {row.label}: {row.overage_days?.toFixed(1)} working days over
               </span>
             ) : (
               <span className="font-semibold text-ink-secondary">
-                {row.label}: inside by {Math.abs(row.overage_days ?? 0).toFixed(1)}d
+                {row.label}: {Math.abs(row.overage_days ?? 0).toFixed(1)} working days inside
               </span>
             )}
             <span className="text-ink-muted">
-              {num(row.within_statutory)}/{num(row.observations)} inside the limit (
-              {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)}d calendar
+              {num(row.within_statutory)} of {num(row.observations)} decided inside the limit (
+              {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)} calendar days
             </span>
           </li>
         ))}
@@ -617,11 +623,17 @@ function StagePanel({ report }: { report: DashboardReport }) {
    * already ranks them, so colour is only pointing at the answer to "who is the
    * bottleneck" — which is the question this panel exists for.
    */
+  /*
+   * OFFICE days, said on every figure. Since bcf16a3 the API counts only the
+   * hours City Hall is open (Monday to Friday, 8:00 to 17:00 Manila) and
+   * reports them in office days of 9 office hours — not the working days of
+   * the RA 11032 panel beside this one, and not calendar days.
+   */
   const data: BarDatum[] = rows.map((row) => ({
     key: row.code,
     label: DEPARTMENT_HEADINGS[row.code] ?? row.code,
     value: row.mean_days,
-    valueText: `${row.mean_days.toFixed(1)}d`,
+    valueText: `${row.mean_days.toFixed(1)} office days`,
     note: `${num(row.reviews)} reviews`,
     color: row.code === bottleneck?.code ? CHART_ROYAL : CHART_MUTED,
   }))
@@ -629,13 +641,13 @@ function StagePanel({ report }: { report: DashboardReport }) {
   return (
     <ProtoCard className="px-4 pb-3 pt-4">
       <HorizontalBars
-        title="Average days a review spends with each department"
+        title="Average office days a review spends with each department"
         data={data}
         categoryHeading="Department"
-        valueHeading="Average days per review"
+        valueHeading="Average office days per review"
         noteHeading="Reviews completed"
         categoryWidth={104}
-        tooltipUnit="days per review"
+        tooltipUnit="office days per review"
         /*
          * Assembled from the computed values, never a fixed sentence: a
          * hardcoded "Fire Protection is the bottleneck" would keep reading as
@@ -645,12 +657,13 @@ function StagePanel({ report }: { report: DashboardReport }) {
           bottleneck && (
             <>
               <strong className="font-semibold text-ink">{bottleneck.name}</strong> is the slowest at{' '}
-              {bottleneck.mean_days.toFixed(1)}d
+              {bottleneck.mean_days.toFixed(1)} office days
               {bottleneck.above_average_days !== null && bottleneck.above_average_days > 0 && (
-                <> ({bottleneck.above_average_days.toFixed(1)}d over the {mean_days?.toFixed(1)}d
+                <> ({bottleneck.above_average_days.toFixed(1)} over the {mean_days?.toFixed(1)}-day
                   average)</>
               )}
-              , handling {bottleneck.share_of_reviews.toFixed(1)}% of reviews.
+              , handling {bottleneck.share_of_reviews.toFixed(1)}% of reviews. An office day is 9 office
+              hours, Monday to Friday.
             </>
           )
         }
