@@ -44,3 +44,26 @@ it('gives an office the fee lines that name only its permit', function () {
 
     expect(json_encode($body))->toContain('300');
 });
+
+it('writes money in the CSV with two decimals and the time in Manila', function () {
+    $application = \App\Models\Application::whereNull('deleted_at')->firstOrFail();
+    $fee = \App\Models\FeeAssessment::create([
+        'application_id' => $application->id,
+        'line_items' => [['label' => 'Fee', 'amount' => 503000.0, 'group' => 'regulatory', 'office' => 'BPLO']],
+        'total_amount' => 503000.0,
+    ]);
+    \App\Models\Payment::create([
+        'application_id' => $application->id, 'fee_assessment_id' => $fee->id,
+        'reference_number' => 'PAY-TEST-CSV-1', 'amount' => 503000.0,
+        'method' => 'gcash', 'status' => 'completed', 'paid_at' => now(),
+    ]);
+
+    $day = \App\Support\ManilaCalendar::today()->toDateString();
+    $csv = $this->withHeaders(authAs('bplo@biztrack.local'))
+        ->get("/api/v1/analytics/reports/collections/csv?from={$day}&to={$day}")
+        ->assertOk()
+        ->streamedContent();
+
+    expect($csv)->toContain('503000.00')
+        ->and($csv)->toMatch('/Generated,\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00/');
+});

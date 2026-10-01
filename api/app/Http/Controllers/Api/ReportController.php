@@ -91,11 +91,18 @@ class ReportController extends Controller
                 fputcsv($out, [$section['heading']]);
                 fputcsv($out, array_column($section['columns'], 'label'));
                 $keys = array_column($section['columns'], 'key');
+                $formats = array_column($section['columns'], 'format', 'key');
+                // Money always with two decimals (503000.00, not 503000 or
+                // 55845.8), so a spreadsheet column reads as one kind of number.
+                // No peso sign: it would make the column text.
+                $cell = static fn (string $k, array $r) => ($formats[$k] ?? null) === 'money' && is_numeric($r[$k] ?? null)
+                    ? number_format((float) $r[$k], 2, '.', '')
+                    : ($r[$k] ?? '');
                 foreach ($section['rows'] as $row) {
-                    fputcsv($out, array_map(static fn (string $k) => $row[$k] ?? '', $keys));
+                    fputcsv($out, array_map(static fn (string $k) => $cell($k, $row), $keys));
                 }
                 if (is_array($section['total'])) {
-                    fputcsv($out, array_map(static fn (string $k) => $section['total'][$k] ?? '', $keys));
+                    fputcsv($out, array_map(static fn (string $k) => $cell($k, $section['total']), $keys));
                 }
                 if ($section['note'] !== null) {
                     fputcsv($out, [$section['note']]);
@@ -121,7 +128,10 @@ class ReportController extends Controller
         return $compiled + [
             'period' => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
             'scope' => AnalyticsOffice::describe($user, $office),
-            'generated_at' => CarbonImmutable::now()->toISOString(),
+            // Manila time with its offset, to the second: a clerk reading the
+            // file sees when it was made in their own day, not UTC with
+            // microseconds.
+            'generated_at' => ManilaCalendar::local(CarbonImmutable::now())->format('Y-m-d\\TH:i:sP'),
             'prepared_by' => [
                 'name' => (string) $user->name,
                 'position' => (string) ($user->roles()->value('display_name') ?? ''),
