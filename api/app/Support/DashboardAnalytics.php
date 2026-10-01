@@ -110,6 +110,20 @@ final class DashboardAnalytics
     private const EXPIRY_WINDOWS = [30, 60, 90];
 
     /**
+     * Reviews an office must have finished in the window before its average
+     * is drawn, or it can be named the slowest department.
+     *
+     * A mean over one or two reviews is an anecdote, not a department's
+     * processing time. The screen already hid offices under this line
+     * (AnalyticsPage MIN_REVIEWS_FOR_STAGE), but the bottleneck was chosen
+     * here from every office — so the sentence under the chart could name an
+     * office the chart did not draw. The threshold is decided here now and
+     * travels as `stages.min_reviews`. Same number, and the same reason, as
+     * the control chart's (Spc::MIN_COMPLETIONS_PER_WEEK).
+     */
+    public const MIN_REVIEWS_FOR_STAGE = Spc::MIN_COMPLETIONS_PER_WEEK;
+
+    /**
      * The short name each inspecting office's visit goes by on the panel.
      *
      * NAMES ONLY — this map does not decide who appears. Which offices inspect
@@ -222,6 +236,7 @@ final class DashboardAnalytics
             'decisions' => self::decisionFacts($monthStart, $now, $scope),
             'tier_observations' => $tierObservations,
             'stage_observations' => self::stageObservations($windowStart, $now, $scope),
+            'stage_rules' => self::stageRules($scope),
             'compliance' => self::complianceFacts($today, $windowStart, $now, $tierObservations, $scope),
             'permit_type_columns' => self::permitTypeColumns($scope),
             'expiring_permits' => self::expiringPermits($today, $scope),
@@ -325,7 +340,13 @@ final class DashboardAnalytics
             'volume' => self::computeVolume($dataset['volume']),
             'decisions' => $decisions,
             'processing_tiers' => self::computeTiers($dataset['tiers'], $dataset['tier_observations']),
-            'stages' => self::computeStages($dataset['stage_observations']),
+            // Rules absent from a snapshot or fixture written before they
+            // travelled: the threshold the screen has always applied, and no
+            // office set aside.
+            'stages' => self::computeStages(
+                $dataset['stage_observations'],
+                $dataset['stage_rules'] ?? ['min_reviews' => self::MIN_REVIEWS_FOR_STAGE, 'excluded' => []],
+            ),
             'compliance' => $compliance,
             'expiry' => self::computeExpiry(
                 $dataset['permit_type_columns'],
@@ -601,6 +622,14 @@ final class DashboardAnalytics
     /**
      * One row per completed review assignment in the window.
      *
+     * BPLO's reviews are left out, the way Office Performance leaves them out
+     * (OfficePerformanceAnalytics::NOT_COMPARABLE): BPLO's assignment is
+     * stamped a second time at the final approval, so its recorded span is
+     * the whole filing — every other office's review inside it — and averaging
+     * it beside the five offices' own spans made BPLO look like a department
+     * with a queue of its own the length of the whole process. stageRules()
+     * names it, with the reason, so the panel can say why it is not drawn.
+     *
      * @return list<array{code: string, name: string, days: float}>
      */
     private static function stageObservations(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
@@ -608,6 +637,7 @@ final class DashboardAnalytics
         $rows = DB::table('application_assignments')
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
             ->when($scope !== null, static fn ($q) => $q->where('application_assignments.department_id', $scope['department_id']))
+            ->whereNotIn('departments.code', array_keys(OfficePerformanceAnalytics::NOT_COMPARABLE))
             ->whereNotNull('application_assignments.completed_at')
             ->where('application_assignments.completed_at', '>=', $windowStart)
             ->where('application_assignments.completed_at', '<=', $now)
@@ -635,6 +665,33 @@ final class DashboardAnalytics
         }
 
         return $observations;
+    }
+
+    /**
+     * The department panel's rules: the review threshold, and the offices
+     * whose time is set aside, with the sentence that says why.
+     *
+     * @return array{min_reviews: int, excluded: list<array{code: string, name: string, reason: string}>}
+     */
+    private static function stageRules(?array $scope = null): array
+    {
+        $excluded = [];
+        // The office list is Office Performance's; the sentence is this
+        // panel's, because Office Performance's also speaks to its own
+        // columns (volume, open caseload) that this panel does not have.
+        $reason = 'The time recorded against this office is the whole filing, every other office’s review included, '
+            .'because its review is stamped again at the final approval. It is not averaged beside the others.';
+        foreach (array_keys(OfficePerformanceAnalytics::NOT_COMPARABLE) as $code) {
+            if ($scope !== null && $scope['code'] !== $code) {
+                continue;
+            }
+            $name = DB::table('departments')->where('code', $code)->value('name');
+            if ($name !== null) {
+                $excluded[] = ['code' => $code, 'name' => (string) $name, 'reason' => $reason];
+            }
+        }
+
+        return ['min_reviews' => self::MIN_REVIEWS_FOR_STAGE, 'excluded' => $excluded];
     }
 
     /* ── facts: the three compliance indicators ────────────────────────── */
@@ -1679,16 +1736,26 @@ final class DashboardAnalytics
     /**
      * Mean time-in-stage per department, and which one is the bottleneck.
      *
-     * The bottleneck is the slowest department by mean, and the summary sentence
-     * is assembled from the computed values — never a fixed string. A hardcoded
-     * "Fire Protection is the bottleneck" would keep reading as true after Fire
-     * Protection got faster.
+     * The bottleneck is the slowest department by mean AMONG THOSE WITH
+     * ENOUGH REVIEWS TO BE DRAWN (`min_reviews`), and the summary sentence
+     * is assembled from the computed values — never a fixed string. A
+     * hardcoded "Fire Protection is the bottleneck" would keep reading as true
+     * after Fire Protection got faster. Every office is still listed in
+     * `rows`, each saying whether it is `drawn`.
      *
      * @param  list<array{code: string, name: string, days: float}>  $observations
+     * @param  array{min_reviews: int, excluded: list<array{code: string, name: string, reason: string}>}  $rules
      * @return array<string, mixed>
      */
-    private static function computeStages(array $observations): array
+    private static function computeStages(array $observations, array $rules): array
     {
+        $minReviews = (int) $rules['min_reviews'];
+        $excludedCodes = array_column($rules['excluded'], 'code');
+        $observations = array_values(array_filter(
+            $observations,
+            static fn (array $o): bool => ! in_array((string) $o['code'], $excludedCodes, true),
+        ));
+
         $grouped = [];
         foreach ($observations as $observation) {
             $code = (string) $observation['code'];
@@ -1704,6 +1771,7 @@ final class DashboardAnalytics
                 'name' => $group['name'],
                 'reviews' => $n,
                 'mean_days' => Rounding::statistic(array_sum($group['days']) / $n, 1),
+                'drawn' => $n >= $minReviews,
             ];
         }
 
@@ -1729,8 +1797,9 @@ final class DashboardAnalytics
             );
 
         $bottleneck = null;
-        if ($rows !== []) {
-            $slowest = $rows[0];
+        $drawn = array_values(array_filter($rows, static fn (array $row): bool => $row['drawn']));
+        if ($drawn !== []) {
+            $slowest = $drawn[0];
             $bottleneck = [
                 'code' => $slowest['code'],
                 'name' => $slowest['name'],
@@ -1753,6 +1822,8 @@ final class DashboardAnalytics
             'reviews' => count($observations),
             'mean_days' => $overall,
             'bottleneck' => $bottleneck,
+            'min_reviews' => $minReviews,
+            'excluded' => array_values($rules['excluded']),
         ];
     }
 

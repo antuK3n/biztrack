@@ -119,43 +119,50 @@
         "code": "CHO",
         "name": "City Health Office",
         "reviews": 2,
-        "mean_days": 4.5
+        "mean_days": 4.5,
+        "drawn": false
       },
       {
         "code": "BPLO",
         "name": "Business Permits and Licensing Office",
         "reviews": 3,
-        "mean_days": 2
+        "mean_days": 2,
+        "drawn": true
       },
       {
         "code": "BFP",
         "name": "Bureau of Fire Protection",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       },
       {
         "code": "CENRO",
         "name": "City Environment Office",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       },
       {
         "code": "OBO",
         "name": "Office of the Building Official",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       }
     ],
     "reviews": 8,
     "mean_days": 1.9,
     "bottleneck": {
-      "code": "CHO",
-      "name": "City Health Office",
-      "mean_days": 4.5,
-      "reviews": 2,
-      "above_average_days": 2.6,
-      "share_of_reviews": 25
-    }
+      "code": "BPLO",
+      "name": "Business Permits and Licensing Office",
+      "mean_days": 2,
+      "reviews": 3,
+      "above_average_days": 0.1,
+      "share_of_reviews": 37.5
+    },
+    "min_reviews": 3,
+    "excluded": []
   },
   "compliance": [
     {
