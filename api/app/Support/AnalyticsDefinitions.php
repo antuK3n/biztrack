@@ -172,14 +172,14 @@ final class AnalyticsDefinitions
                 // "Time-in-Stage", which stays gone.
                 'label' => 'Average Processing Time by Department',
                 'formula' => 'Average office days from a review reaching an office to that office finishing it. Only office hours count (Monday to Friday, 8:00 to 17:00): a review that arrives at 7 pm starts at 8 the next morning, weekends are not counted, and one office day is 9 office hours.',
-                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. Read this beside the review counts.',
+                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. An office with fewer than three finished reviews is not drawn. BPLO is left out: its record is stamped again at the final approval, so its time is the whole filing, not its own step.',
                 'why' => 'A permit waits on six offices in turn, so the slowest sets the total. This says which office to give people to.',
             ],
 
             'stages.bottleneck' => [
                 'label' => 'Slowest department',
                 'formula' => 'The department with the highest average, with how far above the all-department average it sits and what share of reviews it handled.',
-                'covers' => 'The same finished reviews as the panel above.',
+                'covers' => 'The same finished reviews as the panel above, and only the departments drawn there: one with fewer than three reviews is never named the slowest.',
                 'why' => 'Slowest can mean hardest or busiest. The share of reviews sits beside it so the two can be told apart before anyone is reassigned.',
             ],
 
