@@ -764,6 +764,25 @@ function complianceWords(
   }
 }
 
+/**
+ * Why a rate is missing, when the server did not say.
+ *
+ * A null rate with no `unavailable_reason` means an empty denominator. For the
+ * renewal card that used to print "No permits due for renewal in this window",
+ * which is a claim, and for most offices a false one: City Health's sanitary
+ * permits fall due every month. What is actually empty is the set of due
+ * permits a renewal filing can be credited against — a renewal names the one
+ * permit it replaces (`prior_permit_id`), and an office whose permit is never
+ * the one named has nothing to count. The sentence says that, and claims
+ * nothing about how many permits fell due.
+ */
+function missingRateReason(indicator: ComplianceIndicator, permit: OfficePermit): string {
+  if (indicator.indicator === 'renewal') {
+    return `No ${permit.noun} that fell due in this window is named by a renewal filing, so there is nothing to count on-time renewals against.`
+  }
+  return `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`
+}
+
 function ComplianceCard({
   indicator,
   permit,
@@ -787,8 +806,7 @@ function ComplianceCard({
       metric={`compliance.${indicator.indicator}`}
       detail={
         unavailable
-          ? (indicator.unavailable_reason ??
-            `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`)
+          ? (indicator.unavailable_reason ?? missingRateReason(indicator, permit))
           : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${words.denominator} ${words.numerator}.`
       }
     />
