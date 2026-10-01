@@ -172,8 +172,20 @@ class AnalyticsController extends Controller
      * nothing — so a refresh can still partly succeed, and the response still
      * reports per dataset rather than returning a bare 204.
      */
-    public function refresh(): JsonResponse
+    public function refresh(Request $request): JsonResponse
     {
+        /*
+         * BPLO and the super admin only: the two readers who see every office.
+         * One press recomputes every office's figures, and its response names
+         * every snapshot it rebuilt; an office that reads only its own figures
+         * has no business doing either. Its screen shows no button.
+         */
+        abort_unless(
+            AnalyticsOffice::canSwitch($request->user()),
+            403,
+            'Only BPLO and the super admin can recompute the figures. They are recomputed every night.',
+        );
+
         $outcome = AnalyticsRefresher::run();
 
         /*
