@@ -166,7 +166,7 @@ final class AnalyticsDefinitions
                 // same thing. The adviser's note here (§1.4) was to get rid of
                 // "Time-in-Stage", which stays gone.
                 'label' => 'Average Processing Time by Department',
-                'formula' => 'Average days from a review reaching an office to that office finishing it.',
+                'formula' => 'Average office days from a review reaching an office to that office finishing it. Only office hours count (Monday to Friday, 8:00 to 17:00): a review that arrives at 7 pm starts at 8 the next morning, weekends are not counted, and one office day is 9 office hours.',
                 'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. Read this beside the review counts.',
                 'why' => 'A permit waits on six offices in turn, so the slowest sets the total. This says which office to give people to.',
             ],
@@ -271,7 +271,7 @@ final class AnalyticsDefinitions
 
             'officer_activity.mean_response_hours' => [
                 'label' => 'Response time',
-                'formula' => 'Average hours from an unanswered applicant message to the next reply from an officer.',
+                'formula' => 'Average office hours from an unanswered applicant message to the next reply from an officer. Only office hours count (Monday to Friday, 8:00 to 17:00), so a message sent at night starts waiting when the office opens.',
                 'covers' => 'Replies sent in the months set by the filter. Only the first unanswered message starts the clock, so three follow-ups are one wait. Conversations still waiting are counted separately.',
                 'why' => 'How long an applicant waits to be spoken to. The middle wait and the number still waiting sit beside it, because an average hides both long waits and unanswered questions.',
             ],
