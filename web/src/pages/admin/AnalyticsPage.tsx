@@ -299,6 +299,7 @@ function StatCard({
   detail,
   unavailable,
   metric,
+  window,
 }: {
   value: string
   unit?: string
@@ -306,6 +307,8 @@ function StatCard({
   detail: string
   unavailable?: boolean
   metric?: string
+  /** The card's own window, when the cards in a row do not share one. */
+  window?: string
 }) {
   return (
     <ProtoCard className="px-4 py-3.5">
@@ -322,6 +325,7 @@ function StatCard({
         </p>
       )}
       <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">{detail}</p>
+      {window && <p className="mt-1 text-[11px] font-semibold text-ink-secondary">{window}</p>}
     </ProtoCard>
   )
 }
@@ -787,10 +791,12 @@ function ComplianceCard({
   indicator,
   permit,
   scoped,
+  window,
 }: {
   indicator: ComplianceIndicator
   permit: OfficePermit
   scoped: boolean
+  window: string
 }) {
   const unavailable = indicator.rate === null
   const words = complianceWords(indicator, permit, scoped)
@@ -809,23 +815,41 @@ function ComplianceCard({
           ? (indicator.unavailable_reason ?? missingRateReason(indicator, permit))
           : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${words.denominator} ${words.numerator}.`
       }
+      window={window}
     />
   )
 }
 
+/*
+ * Each card states its own window, and the heading states none. The three do
+ * not share one: RA 11032 processing and renewals count the trailing months
+ * the filter sets, while permit validity is a fact about today. A heading
+ * reading "Last 12 months" over all three put a twelve-month label on an
+ * as-of-today figure.
+ */
 function CompliancePanel({
   report,
   permit,
   scoped,
+  trailing,
+  asOf,
 }: {
   report: DashboardReport
   permit: OfficePermit
   scoped: boolean
+  trailing: string
+  asOf: string
 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       {report.compliance.map((indicator) => (
-        <ComplianceCard key={indicator.indicator} indicator={indicator} permit={permit} scoped={scoped} />
+        <ComplianceCard
+          key={indicator.indicator}
+          indicator={indicator}
+          permit={permit}
+          scoped={scoped}
+          window={indicator.indicator === 'permit_validity' ? asOf : trailing}
+        />
       ))}
     </div>
   )
@@ -1758,8 +1782,8 @@ export function AnalyticsPage() {
               indicators be split apart with their own denominators, and that is
               what CompliancePanel does.
             */}
-            <SectionHeading note={trailing}>Compliance Rate</SectionHeading>
-            <CompliancePanel report={data} permit={permit} scoped={scoped} />
+            <SectionHeading>Compliance Rate</SectionHeading>
+            <CompliancePanel report={data} permit={permit} scoped={scoped} trailing={trailing} asOf={asOf} />
           </section>
 
           {/*
