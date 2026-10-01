@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
+use App\Models\BusinessLine;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
@@ -103,10 +104,16 @@ class PermitFace
             'address' => $address?->line1,
             'barangay' => $address?->barangay?->name,
             'city' => $address?->city,
-            // Every declared line, joined: a permit face lists the activities
-            // it covers, and a business may carry more than one.
+            /*
+             * Every declared line, joined: a permit face lists the activities
+             * it covers, and a business may carry more than one.
+             *
+             * `tradeName()`, not the PSIC title — a line filed under the
+             * catch-all code printed "Other (not listed)" on the certificate
+             * where the applicant had typed their trade. See the method.
+             */
             'line_of_business' => $business?->lines
-                ->map(fn ($l) => $l->psicCode?->title)
+                ->map(fn (BusinessLine $l) => $l->tradeName())
                 ->filter()
                 ->implode(', ') ?: null,
         ];
