@@ -281,3 +281,15 @@ it('puts a business holding only an imported permit on its office map and count'
 
     expect(collect($cho['map']['points'])->pluck('business_id'))->toContain($business->id);
 });
+
+it('words the compliance info buttons for the office reading them', function () {
+    $cho = test()->withHeaders(authAs('sanitary@biztrack.local'))->getJson('/api/v1/analytics/dashboard')->assertOk()->json('meta.definitions');
+    $permit = \App\Models\PermitType::where('code', 'SANITARY')->value('name');
+
+    expect($cho['compliance.permit_validity']['label'])->toBe("{$permit} Compliance")
+        ->and($cho['compliance.permit_validity']['formula'])->not->toContain('every type')
+        ->and($cho['kpis.active_businesses']['formula'])->toContain($permit);
+
+    $all = test()->withHeaders(authAs('admin@biztrack.local'))->getJson('/api/v1/analytics/dashboard?office=all')->assertOk()->json('meta.definitions');
+    expect($all['compliance.permit_validity']['label'])->toBe('Business Permit Compliance');
+});

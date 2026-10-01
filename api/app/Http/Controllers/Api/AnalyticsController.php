@@ -11,6 +11,7 @@ use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Support\AnalyticsDatasets;
+use App\Support\AnalyticsDefinitions;
 use App\Support\AnalyticsOffice;
 use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
@@ -56,6 +57,7 @@ class AnalyticsController extends Controller
     {
         $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
         $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, $this->dashboardParams($request, $office));
+        $resolved['meta']['definitions'] = AnalyticsDefinitions::forOffice($resolved['meta']['definitions'] ?? [], $office);
 
         return response()->json([
             'data' => $resolved['data'],

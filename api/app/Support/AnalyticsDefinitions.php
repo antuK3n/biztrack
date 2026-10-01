@@ -438,4 +438,56 @@ final class AnalyticsDefinitions
             ],
         ];
     }
+
+    /**
+     * The dashboard's definitions as one office reads them.
+     *
+     * Scoped to an office, three figures count only the permit that office
+     * issues, but their info buttons still said "Business Permit Compliance"
+     * and "a valid permit of every type" — true for the whole city, wrong in
+     * CHO's view, where the number is about sanitary permits. The permit's own
+     * name comes from the register (permit_types), never from this file.
+     *
+     * @param  array<string, array<string, string>>  $definitions
+     * @return array<string, array<string, string>>
+     */
+    public static function forOffice(array $definitions, ?string $office): array
+    {
+        if ($office === null) {
+            return $definitions;
+        }
+
+        $permit = \Illuminate\Support\Facades\DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            ->where('departments.code', $office)
+            ->orderBy('permit_types.id')
+            ->value('permit_types.name');
+        if ($permit === null) {
+            return $definitions;
+        }
+        $permit = (string) $permit;
+
+        $rate = [
+            'formula' => "Businesses holding a valid {$permit} today ÷ businesses ever issued one × 100.",
+            'covers' => "Every business ever issued a {$permit}. One never issued it is left out of both sides.",
+        ];
+
+        foreach (['kpis.compliance_rate', 'compliance.permit_validity'] as $key) {
+            if (isset($definitions[$key])) {
+                $definitions[$key] = array_replace($definitions[$key], $rate);
+            }
+        }
+        if (isset($definitions['compliance.permit_validity'])) {
+            $definitions['compliance.permit_validity']['label'] = "{$permit} Compliance";
+        }
+        if (isset($definitions['kpis.compliance_rate']['why'])) {
+            $definitions['kpis.compliance_rate']['why'] = "The one number leadership asks for. The {$permit} Compliance card below shows the same rate with its counts.";
+        }
+        if (isset($definitions['kpis.active_businesses'])) {
+            $definitions['kpis.active_businesses']['formula'] = "Businesses holding a {$permit} still in force today.";
+        }
+
+        return $definitions;
+    }
+
 }
