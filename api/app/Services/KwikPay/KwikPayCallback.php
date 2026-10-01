@@ -89,7 +89,7 @@ class KwikPayCallback
         if (! KwikPayGateway::sameAmount($fields['amount'] ?? null, $payment)) {
             $this->gateway->flag(
                 $payment,
-                'KwikPay sent '.($fields['amount'] ?? 'no amount').' for a payment of '.$payment->amount.'. Not credited.'
+                'KwikPay sent '.($fields['amount'] ?? 'no amount').' for a payment of '.KwikPayGateway::requestedAmount($payment).'. Not credited.'
             );
 
             return self::AMOUNT_MISMATCH;

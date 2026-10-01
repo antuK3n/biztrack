@@ -30,6 +30,7 @@ All are listed in `api/.env.example` with empty values.
 | `KWIKPAY_CALLBACK_IPS` | Optional comma-separated allowlist for callbacks. KwikPay's docs give `34.21.238.122`. Leave it empty unless trusted proxies are set up (see §6). The signature is always checked either way. | empty (not enforced) |
 | `KWIKPAY_TIMEOUT` | Seconds to wait for KwikPay. | `15` |
 | `KWIKPAY_FAKE` | Turns on the practice KwikPay (§4). Only works when `APP_ENV` is `local` or `testing`. | `false` |
+| `KWIKPAY_CHARGE_OVERRIDE` | **Testing only.** When set (e.g. `1.00`), KwikPay is asked to collect this amount instead of the bill. The bill, the payment record and the receipt keep the real assessed amount; the requested amount is kept in `payments.gateway_amount` and a confirmation is checked against it. **Empty it before real use**, or every bill is settled for ₱1. | empty (full amount) |
 
 The server refuses to switch to KwikPay while `KWIKPAY_MERCHANT`, `KWIKPAY_KEY`
 or `KWIKPAY_PAYMENT_TYPE` is missing. The refusal lists the missing keys by

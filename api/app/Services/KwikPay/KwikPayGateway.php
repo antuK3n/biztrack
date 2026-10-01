@@ -64,6 +64,7 @@ class KwikPayGateway
     public function open(FeeAssessment $fee, PaymentMethod $method, float $amount): Payment
     {
         $reference = Numbering::paymentReference();
+        $charge = self::chargeFor($amount);
 
         $payment = Payment::create([
             'application_id' => $fee->application_id,
@@ -74,6 +75,10 @@ class KwikPayGateway
             // [A-Za-z0-9]; upper-cased so a clerk can read it aloud.
             'gateway_order_id' => $reference.'-'.strtoupper(Str::random(6)),
             'amount' => $amount,
+            // What KwikPay is asked to collect. The same as `amount` unless
+            // the testing override is set; kept so a confirmation is checked
+            // against what was actually requested.
+            'gateway_amount' => $charge,
             'method' => $method,
             'status' => PaymentStatus::Pending,
             'next_check_at' => now()->addMinutes(self::FIRST_CHECK_AFTER_MINUTES),
@@ -81,7 +86,7 @@ class KwikPayGateway
 
         $result = $this->client->transfer([
             'payment_type' => (string) config('payments.kwikpay.payment_type'),
-            'amount' => number_format($amount, 2, '.', ''),
+            'amount' => number_format($charge, 2, '.', ''),
             'order_id' => $payment->gateway_order_id,
             'bank_code' => (string) $method->kwikpayBankCode(),
             'callback_url' => self::callbackUrl(),
@@ -168,7 +173,7 @@ class KwikPayGateway
             if ($result->status() === '5') {
                 $reported = $result->body['amount'] ?? null;
                 if ($reported !== null && (float) $reported > 0 && ! self::sameAmount($reported, $payment)) {
-                    $this->flag($payment, 'KwikPay reports it paid, but for '.$reported.' instead of '.$payment->amount.'. Not credited.');
+                    $this->flag($payment, 'KwikPay reports it paid, but for '.$reported.' instead of '.self::requestedAmount($payment).'. Not credited.');
 
                     return $payment->fresh();
                 }
@@ -402,7 +407,25 @@ class KwikPayGateway
             return false;
         }
 
-        return (int) round(((float) $reported) * 100) === (int) round(((float) $payment->amount) * 100);
+        return (int) round(((float) $reported) * 100) === (int) round(self::requestedAmount($payment) * 100);
+    }
+
+    /**
+     * What KwikPay was asked to collect for this payment: the testing override
+     * if one was set when the order was opened, otherwise the bill itself.
+     * Older payments, opened before the column existed, fall back to `amount`.
+     */
+    public static function requestedAmount(Payment $payment): float
+    {
+        return (float) ($payment->gateway_amount ?? $payment->amount);
+    }
+
+    /** The amount to ask KwikPay for: the configured override, or the bill. */
+    public static function chargeFor(float $amount): float
+    {
+        $override = config('payments.kwikpay.charge_override');
+
+        return is_numeric($override) && (float) $override > 0 ? round((float) $override, 2) : $amount;
     }
 
     /** 2, 4, 8, 16, 32, then every 60 minutes. */

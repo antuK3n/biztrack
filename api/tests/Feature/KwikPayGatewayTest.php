@@ -818,3 +818,54 @@ it('allows at most three set-asides per application per hour', function () {
     kpAbandon($fourth)->assertOk();
     expect($fourth->fresh()->abandoned_at)->not->toBeNull();
 });
+
+/* ── Testing with a token charge (KWIKPAY_CHARGE_OVERRIDE) ───────────────── */
+
+it('asks KwikPay for the override amount while the bill and payment keep the real amount', function () {
+    config(['payments.kwikpay.charge_override' => '1.00']);
+    $app = kpFiling();
+    $payment = kpOpen($app);
+
+    expect((float) $payment->amount)->toBeGreaterThan(1.0)
+        ->and((float) $payment->gateway_amount)->toBe(1.0);
+    Http::assertSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/transfer') && $r['amount'] === '1.00');
+});
+
+it('completes the full bill on a signed callback for the override amount', function () {
+    config(['payments.kwikpay.charge_override' => '1.00']);
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    $billed = (float) $payment->amount;
+
+    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+
+    $payment->refresh();
+    expect($payment->status)->toBe(PaymentStatus::Completed)
+        ->and((float) $payment->amount)->toBe($billed);
+    expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
+});
+
+it('refuses a callback for the full bill when KwikPay was only asked for the override', function () {
+    config(['payments.kwikpay.charge_override' => '1.00']);
+    $payment = kpOpen(kpFiling());
+
+    kpPostCallback(kpCallback($payment, ['amount' => number_format((float) $payment->amount, 6, '.', '')]));
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending);
+});
+
+it('keeps checking an order against what was asked even after the override is removed', function () {
+    config(['payments.kwikpay.charge_override' => '1.00']);
+    $payment = kpOpen(kpFiling());
+    config(['payments.kwikpay.charge_override' => null]);
+
+    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Completed);
+});
+
+it('asks for the full bill when no override is set', function () {
+    $payment = kpOpen(kpFiling());
+
+    expect((float) $payment->gateway_amount)->toBe((float) $payment->amount);
+});
