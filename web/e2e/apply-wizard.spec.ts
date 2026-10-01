@@ -331,7 +331,9 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   expect(box).not.toBeNull()
   const onTop = await page.evaluate((b) => {
     const el = document.elementFromPoint(b!.x + 8, b!.y + b!.height / 2)
-    return el?.textContent?.trim() ?? null
+    // The heading's own tick icon is part of the confirmation, not on top of
+    // it, so the hit is read up to the paragraph it belongs to.
+    return (el?.closest('p') ?? el)?.textContent?.trim() ?? null
   }, box)
   expect(onTop, 'something is covering the selection confirmation').toContain(
     'Your line of business',
@@ -816,21 +818,21 @@ test('a neighbouring city inside the old bounding box is refused', async ({ page
   expect(verdicts.cityHall).toBe(true)
 })
 
-test('the map is locked until a line of business is chosen, then takes a pin before any barangay', async ({
+test('the map is locked until the line of business and the barangay are both answered, then opens on that barangay', async ({
   page,
 }) => {
   /*
-   * Two checklist items in one test, because they are two DIFFERENT gates and
-   * conflating them is how each one keeps getting dropped in turn.
+   * Ken's layout (27 September 2026): the step is numbered in the order it is
+   * answered, and the map is step 3, so it waits for step 1 (the trade AND
+   * Products / Services) and step 2 (the barangay). The barangay was once
+   * deliberately NOT a gate, when a pin could be dropped first and reconciled
+   * later; Zoning 7 reversed that — the map zooms to the chosen barangay when
+   * it opens, and a new barangay clears the pin — which only makes sense if
+   * the barangay comes first.
    *
-   * Item 4 locks the map until a LINE OF BUSINESS is chosen — the zoning verdict
-   * is given against a trade, so a pin placed before it locates a business
-   * nobody has described. Item 8 governs what the BARANGAY does to a pin, and
-   * the client was explicit that the barangay is NOT a gate: the pin may be
-   * dropped first and the disagreement settled when the barangay is named.
-   *
-   * The lock has moved from the trade to the barangay and back once already.
-   * Asserting both here means neither can be satisfied at the other's expense.
+   * Each partial state is asserted, because the lock's sentence has to name
+   * exactly what is still missing: a map that will not take a click and says
+   * the wrong reason sends the applicant to the wrong field.
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
@@ -839,58 +841,60 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
   await expect(map).toBeVisible()
+  const lock = page.getByRole('status').filter({ hasText: /first\.$/ })
 
-  /*
-   * Item 4. The map is still SHOWN — hiding it until the trade is chosen would
-   * make the step look empty — but it is inert and says so twice: in the scrim,
-   * and in the map's own accessible name, so it reaches somebody who never sees
-   * an overlay.
-   */
-  await expect(page.getByText(/choose your line of business above/i)).toBeVisible()
+  // Nothing answered: both named, in plain words, on the map and in its name.
+  await expect(lock).toHaveText('Choose your line of business and barangay first.')
   await expect(page.getByLabel(/not yet clickable/i)).toBeVisible()
   await map.click()
   await expect(page.getByText(/pin placed/i)).toBeHidden()
 
-  /*
-   * And the barangay is NOT what holds it: the lock's own sentence (the scrim,
-   * role="status") must not ask for one. Scoped to the scrim, because "Choose
-   * your barangay first" is back as ADVICE in the amber note above the map
-   * (client's lead, 24 September 2026) — advice about order, not a lock, which
-   * is what the rest of this test proves by dropping a pin with none chosen.
-   */
-  await expect(page.getByRole('status').filter({ hasText: /choose your barangay/i })).toHaveCount(0)
-
-  // Choose the trade. Same click below, different outcome — which is what
-  // proves the lock was the cause and not some unrelated dead click.
+  // The trade alone is not step 1: Products / Services is part of it.
   const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
   await search.fill('sari-sari')
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
   await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
-  await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
+  await expect(lock).toHaveText('Fill in Products / Services and choose your barangay first.')
+  await page.getByRole('textbox', { name: /products \/ services/i }).fill('rice, canned goods')
+  await expect(lock).toHaveText('Choose your barangay first.')
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
+
+  // Barangay alone, with step 1 undone, holds it too.
+  await page.getByRole('button', { name: /clear line of business/i }).click()
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Dampalit' })
+  await expect(lock).toHaveText('Choose your line of business first.')
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
+
+  // Both answered: the lock lifts.
+  await search.click()
+  await search.fill('sari-sari')
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+  await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
+  await page.getByRole('textbox', { name: /products \/ services/i }).fill('rice, canned goods')
+  await expect(page.getByLabel(/not yet clickable/i)).toHaveCount(0)
+  await expect(lock).toHaveCount(0)
 
   /*
-   * Item 8. The click now lands with the barangay dropdown still empty. Centre
-   * of the map, which opens on Malabon City Hall — inside the city, so the only
-   * remaining guard in `onPick` passes and the pin is taken.
+   * And it opened on Dampalit. The map would otherwise sit on City Hall, in
+   * Longos, 3.8 km south — so a click in the middle of the map landing inside
+   * Dampalit is what proves the zoom, read off the pin the app itself stored
+   * rather than off pixel arithmetic.
    */
   await map.scrollIntoViewIfNeeded()
   await map.click()
   await expect(page.getByText(/pin placed/i)).toBeVisible()
-  // The coordinates are on the pin line's data attributes, not on screen:
-  // an applicant has no use for them (client's lead, 24 September 2026).
   const coords = await pinCoords(page)
-  expect(coords.latitude).not.toBeNull()
-
-  /*
-   * Now name the barangay that pin is already sitting in. It must survive, and
-   * survive UNCHANGED — same coordinates, not a re-placed pin — because the
-   * applicant answered consistently and has nothing to redo.
-   */
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
-  await expect(pinStatus(page)).toHaveAttribute('data-latitude', coords.latitude!)
-  await expect(pinStatus(page)).toHaveAttribute('data-longitude', coords.longitude!)
-  await expect(page.getByRole('alert').filter({ hasText: /but you selected/i })).toBeHidden()
+  const inside = await page.evaluate(
+    async ({ lat, lng }) => {
+      const geo = await import('/src/lib/malabonGeo.ts')
+      return geo.barangayContaining(lat, lng)
+    },
+    { lat: Number(coords.latitude), lng: Number(coords.longitude) },
+  )
+  expect(inside).toBe('Dampalit')
 })
 
 test('changing the barangay clears the pin, so nothing is left pinned outside it', async ({
@@ -899,7 +903,9 @@ test('changing the barangay clears the pin, so nothing is left pinned outside it
   /*
    * Item 8's second half, and the client's stated reason for it: "to avoid
    * pinning outside the selected barangay". A pin that survives the change is a
-   * pin that was checked against a question since answered differently.
+   * pin that was checked against a question since answered differently. Since
+   * Zoning 7 the clear is unconditional on a real change: the map now opens on
+   * the barangay chosen, so every pin was placed inside one already named.
    *
    * This is the prevention that replaced the old catch-it-on-the-way-out check,
    * so it is asserted at the moment of the change rather than at the step gate.
@@ -938,12 +944,15 @@ test('changing the barangay clears the pin, so nothing is left pinned outside it
   /*
    * And the map is still open, because a barangay is still chosen. Losing the
    * pin must not also cost the applicant the ability to place another one — the
-   * point is to make them re-place it, not to lock them out. Checked on the
-   * map itself, not on a sentence: the amber note now advises choosing the
-   * barangay first, and advice is not a lock.
+   * point is to make them re-place it, not to lock them out. It reopened on
+   * the NEW barangay, so the same click in the middle now lands in Tugatog.
    */
   await expect(page.getByLabel(/not yet clickable/i)).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: /choose your barangay/i })).toHaveCount(0)
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+  const moved = await pinCoords(page)
+  expect(moved.latitude).not.toBe(coords.latitude)
 })
 
 test('a pin that contradicts the chosen barangay is refused, and names both', async ({ page }) => {
@@ -963,15 +972,28 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
 
-  // Tugatog claimed; the centre of the map is Malabon City Hall, in Longos.
+  /*
+   * Tugatog claimed. The map opens zoomed to Tugatog now, so the click is aimed
+   * 120 px left of Tugatog's highlighted shape — several hundred metres into a
+   * neighbour at this zoom, far past the 150 m tolerance — rather than at the
+   * middle, which is inside it.
+   */
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Tugatog' })
-  await map.click()
+  const chosen = map.locator('svg path[fill-opacity="0.1"]')
+  await expect(chosen).toHaveCount(1)
+  const shape = (await chosen.boundingBox())!
+  const mapBox = (await map.boundingBox())!
+  const aim = { x: shape.x - mapBox.x - 120, y: shape.y - mapBox.y + shape.height / 2 }
+  expect(aim.x).toBeGreaterThan(0)
+  await map.click({ position: aim })
 
   const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
   await expect(refusal).toBeVisible()
   // Names both sides of the disagreement: the one claimed, and the one the pin
   // is really in. Either could be the mistake, and the applicant picks.
-  await expect(refusal).toContainText(/Longos/)
+  const actual = (await refusal.innerText()).match(/pin is in (.+?), but you selected/i)?.[1]
+  expect(actual).toBeTruthy()
+  expect(actual).not.toBe('Tugatog')
   await expect(refusal).toContainText(/Tugatog/)
   // And no pin was stored to be argued with later.
   await expect(page.getByText(/pin placed/i)).toBeHidden()
@@ -990,10 +1012,10 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await expect(stillNeeded).toBeVisible()
   await expect(stillNeeded).toContainText(/pin on the map/i)
 
-  // Naming the barangay the pin would actually fall in lets the same click
-  // through, which is what proves the block was the barangay and not a stuck
-  // form. The change also clears the stale refusal.
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  // Naming the barangay the pin would actually fall in opens the map there,
+  // and a click in it goes through, which is what proves the block was the
+  // barangay and not a stuck form. The change also clears the stale refusal.
+  await page.getByLabel(/barangay name/i).selectOption({ label: actual! })
   await expect(refusal).toBeHidden()
   await map.click()
   await expect(page.getByText(/pin placed/i)).toBeVisible()
@@ -1039,6 +1061,8 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
   )
 
   await goToZoningStep(page)
+  // Step 2 before the map will take anything, suggested pins included.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
 
@@ -1085,15 +1109,20 @@ test('the address lookup asks OSM for the street alone, and once per street', as
   })
 
   await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await page.getByLabel(/^street/i).fill('Blk 5 Lot 12 24 Rizal St.')
   await expect(page.getByText(/placed from your address, on rizal street/i)).toBeVisible({
     timeout: 10_000,
   })
   expect(queries).toEqual(['Rizal Street, Malabon City, Metro Manila, Philippines'])
 
-  // Naming the barangay re-checks the same answer; it does not ask again.
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
-  await expect(page.getByText(/pin placed/i)).toBeVisible()
+  /*
+   * Changing the barangay clears the pin and re-checks the same answer
+   * against the new one; it does not ask again. Tugatog does not hold the
+   * answer (it is in Longos), so no pin comes back — and still one request.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Tugatog' })
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
   await page.waitForTimeout(1500)
   expect(queries).toHaveLength(1)
 })
@@ -1193,6 +1222,161 @@ test('the zoning step says to choose the barangay first, before the map', async 
   expect(noteBox!.y).toBeLessThan(mapBox!.y)
 })
 
+for (const width of [1440, 390]) {
+  test(`the location step reads top to bottom in the order it is answered, at ${width} px`, async ({
+    page,
+  }) => {
+    /*
+     * Ken's layout (27 September 2026): one column of numbered steps — trade,
+     * barangay, pin, address, emergency contact — at every width. Asserted by
+     * position rather than by DOM order, because a grid can put a later element
+     * beside an earlier one and the order on screen is what people follow. And
+     * no sideways scroll at phone width: a map or a card wider than the screen
+     * is the usual way a stacked layout breaks.
+     */
+    await page.setViewportSize({ width, height: 900 })
+    await goToZoningStep(page)
+    const titles = [
+      /line of business/i,
+      /^step 2: barangay/i,
+      /pin your business on the map/i,
+      /^step 4: address/i,
+      /in case of emergency/i,
+    ]
+    let previous = -Infinity
+    for (const [index, title] of titles.entries()) {
+      const heading = page.getByRole('heading', { level: 2, name: title })
+      await expect(heading, `step ${index + 1}`).toBeVisible()
+      await expect(heading).toContainText(new RegExp(`^Step ${index + 1}:`))
+      const top = (await heading.boundingBox())!.y
+      expect(top, `step ${index + 1} sits below step ${index}`).toBeGreaterThan(previous)
+      previous = top
+    }
+    // The map is inside step 3, and the address fields inside step 4.
+    await expect(page.getByTestId('location-step-3').locator('.leaflet-container')).toBeVisible()
+    await expect(page.getByTestId('location-step-4').getByLabel(/^street/i)).toBeVisible()
+    await expect(page.getByTestId('location-step-5').getByLabel(/emergency contact person/i)).toBeVisible()
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow, 'no sideways scroll').toBeLessThanOrEqual(0)
+  })
+}
+
+test('the chosen line of business and Products / Services are shown large and plain', async ({
+  page,
+}) => {
+  /*
+   * Zoning 11 (Ken: "the products and services aren't apparent"). The chosen
+   * trade was a 14px line in a pale box and Products / Services a muted
+   * caption over a thin box. Asserted on what a reader sees: size, weight and
+   * a border that marks the choice, with the words "Your line of business"
+   * saying it too, so the selected state is not colour alone.
+   */
+  await goToZoningStep(page)
+  const chosen = page.getByTestId('chosen-line')
+  await expect(chosen).toBeVisible()
+  const title = await chosen.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { size: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) }
+  })
+  expect(title.size).toBeGreaterThanOrEqual(17)
+  expect(title.weight).toBeGreaterThanOrEqual(700)
+
+  const panel = chosen.locator('xpath=ancestor::div[contains(@class, "border-2")][1]')
+  await expect(panel).toContainText(/your line of business/i)
+  expect(await panel.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('2px')
+
+  const products = page.getByRole('textbox', { name: /products \/ services/i })
+  const label = page.getByText('Products / Services', { exact: false }).filter({ hasText: /^Products \/ Services/ }).first()
+  const labelStyle = await label.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { size: parseFloat(cs.fontSize), weight: Number(cs.fontWeight), color: cs.color }
+  })
+  expect(labelStyle.size).toBeGreaterThanOrEqual(16)
+  expect(labelStyle.weight).toBeGreaterThanOrEqual(700)
+  expect(parseFloat(await products.evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16)
+})
+
+test('the zoning note under the map is loud, green when listed and amber with an appeal when not', async ({
+  page,
+}) => {
+  /*
+   * Zoning 8: the note was being overlooked — 14px in a pale box, read as a
+   * caption. Zoning 13: when the trade is not on the list, say the owner may
+   * appeal in person at the City's zoning office.
+   *
+   * The verdict comes from the ordinance lookup, which depends on the seeded
+   * uses; so the real response is fetched and only its verdict is set, once
+   * each way, to test the note rather than the matcher.
+   */
+  let verdict: 'listed' | 'not_listed' = 'not_listed'
+  await page.route('**/location-insights**', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    const zones = (body.data.zoning?.zones ?? []) as { listed: boolean }[]
+    body.data.zoning = {
+      ...(body.data.zoning ?? {}),
+      verdict,
+      zones: zones.length > 0 ? zones.map((z, i) => ({ ...z, listed: verdict === 'listed' && i === 0 })) : [{ code: 'C-1', name: 'C-1', listed: verdict === 'listed', matched_use: null }],
+    }
+    await route.fulfill({ response, json: body })
+  })
+
+  await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+
+  const note = page.getByTestId('zoning-note')
+  await expect(note).toBeVisible({ timeout: 15_000 })
+  await expect(note).toHaveAttribute('data-verdict', 'not_listed')
+  // Said in words, not only in amber.
+  await expect(note).toContainText(/not on the zoning list/i)
+  await expect(note).toContainText(/not on the zoning rules’ list for longos/i)
+  // Zoning 13, in plain words.
+  await expect(note).toContainText(/you may appeal in person at that office/i)
+  await expect(note).toContainText(/the city’s zoning office \(cpdo\)/i)
+
+  const loud = async () =>
+    note.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      const sentence = el.querySelector('p.text-lg') as HTMLElement
+      return {
+        border: cs.borderTopWidth,
+        borderColour: cs.borderTopColor,
+        colour: cs.color,
+        size: parseFloat(getComputedStyle(sentence).fontSize),
+        weight: Number(getComputedStyle(sentence).fontWeight),
+      }
+    })
+  const amber = await loud()
+  expect(amber.border).toBe('2px')
+  expect(amber.size).toBeGreaterThanOrEqual(18)
+  expect(amber.weight).toBeGreaterThanOrEqual(700)
+  // Red Means Stop: neither the error red nor the status red.
+  for (const red of ['rgb(189, 0, 0)', 'rgb(193, 18, 18)']) {
+    expect(amber.borderColour).not.toBe(red)
+    expect(amber.colour).not.toBe(red)
+  }
+
+  // Listed: a clear positive, and no appeal line.
+  verdict = 'listed'
+  const box = (await map.boundingBox())!
+  await map.click({ position: { x: box.width / 2 + 10, y: box.height / 2 + 10 } })
+  await expect(note).toHaveAttribute('data-verdict', 'listed', { timeout: 15_000 })
+  await expect(note).toContainText(/allowed here/i)
+  await expect(note).toContainText(/your type of business is allowed in longos/i)
+  await expect(note).not.toContainText(/appeal/i)
+  const green = await loud()
+  expect(green.border).toBe('2px')
+  expect(green.size).toBeGreaterThanOrEqual(18)
+  expect(green.borderColour).not.toBe(amber.borderColour)
+})
+
 /**
  * Nominatim's reverse endpoint, stubbed with a queue of answers in order.
  * Registered after the suite's blanket abort, so it wins for /reverse only;
@@ -1223,6 +1407,8 @@ test('placing the pin fills the street from the map, and says so until it is edi
   const street = page.getByLabel(/^street/i)
   const house = page.getByLabel(/house \/ bldg\. no\./i)
   const barangay = page.getByLabel(/barangay name/i)
+  await barangay.selectOption({ label: 'Longos' })
+  const chosen = await barangay.inputValue()
   await expect(street).toHaveValue('')
 
   const map = page.locator('.leaflet-container')
@@ -1235,8 +1421,8 @@ test('placing the pin fills the street from the map, and says so until it is edi
   expect(served).toHaveLength(1)
   // OSM sent no house number, so the box stays empty rather than guessed.
   await expect(house).toHaveValue('')
-  // The barangay is the applicant's to choose; the pin does not choose it.
-  await expect(barangay).toHaveValue('')
+  // The barangay is the applicant's to choose; the pin does not change it.
+  await expect(barangay).toHaveValue(chosen)
 
   const note = page.getByTestId('address-autofill-note')
   await expect(note).toHaveText(/filled in from your pin\. check it and fix anything/i)
@@ -1253,6 +1439,7 @@ test('a street the applicant typed is not overwritten when the pin moves', async
     { road: 'Leoncio Street', house_number: '7' },
   ])
   await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   const street = page.getByLabel(/^street/i)
   const house = page.getByLabel(/house \/ bldg\. no\./i)
   const map = page.locator('.leaflet-container')
@@ -1662,7 +1849,7 @@ async function goToZoningStep(page: Page) {
    * they were declared before the field was required, so any number of them can
    * arrive empty. Filling one already answered would be overwriting the record.
    */
-  const products = page.getByLabel(/products \/ services/i)
+  const products = page.getByRole('textbox', { name: /products \/ services/i })
   for (let i = 0; i < (await products.count()); i += 1) {
     const box = products.nth(i)
     if ((await box.inputValue()).trim() === '') await box.fill('milk tea, fried snacks')

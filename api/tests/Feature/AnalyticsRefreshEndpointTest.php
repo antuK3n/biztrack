@@ -33,23 +33,23 @@ function refreshAs(string $email): TestResponse
 
 it('refuses the refresh to anyone without analytics.view', function () {
     // Not a read: it recomputes and overwrites every stored figure set, so it
-    // sits on the same permission as the figures it rewrites. BPLO holds that
-    // permission (checklist item 78) and so is not asserted here — the "Refresh
-    // now" button sits on the screens it was given, and a button that 403s would
-    // be worse than no button.
-    refreshAs('sanitary@biztrack.local')->assertForbidden();
+    // sits on the same permission as the figures it rewrites.
     refreshAs('owner@biztrack.local')->assertForbidden();
+});
 
+it('lets only BPLO and the super admin recompute every office', function () {
     /*
-     * The super admin is refused too, which is the one that needs saying. It
-     * holds `analytics.processing_time` only, and refresh recomputes every
-     * dataset — dashboard, renewal risk and business growth among them. Letting
-     * it through would mean the office that cannot read three of these screens
-     * can still make the app rewrite their snapshots. Processing Time is
-     * refreshed by the nightly run like everything else; nobody loses a figure
-     * over this.
+     * One press recomputes every office's snapshot and the response names each
+     * one it rebuilt, so it belongs to the two readers who see every office.
+     * An office reads only its own figures, which are recomputed every night;
+     * its screen shows no button.
      */
-    refreshAs('admin@biztrack.local')->assertForbidden();
+    refreshAs('sanitary@biztrack.local')->assertForbidden()
+        ->assertJsonMissingPath('data.results');
+    refreshAs('fire@biztrack.local')->assertForbidden();
+
+    refreshAs('bplo@biztrack.local')->assertOk();
+    refreshAs('admin@biztrack.local')->assertOk();
 });
 
 it('refuses the refresh to a caller with no session', function () {

@@ -9,6 +9,11 @@ issued, expiry reminders, account suspended or restored. The code is finished.
 Until those lines are in, e-mails are written to `api/storage/logs/laravel.log`
 instead of being sent (`MAIL_MAILER=log`). Nothing breaks either way.
 
+**Setting a real mailer also switches on three account rules** (section 7): a
+six-digit code by e-mail at every sign-in, a confirmed address before an owner
+can file, and a code by e-mail before a password change in Settings. Read
+section 7 before changing `MAIL_MAILER`.
+
 SMS is not part of this. The SMS driver still only writes to the log.
 
 ---
@@ -22,8 +27,9 @@ number), the business name and a link into the owner's site built from
 `FRONTEND_URL`. A **queue worker** picks the job up and sends it through the
 configured mailer. The job tries 3 times (1 minute, then 5 minutes apart). If
 the mail server is down, the officer's action still goes through. The failure
-is only logged. Staff do not get these e-mails. Email verification is a separate
-e-mail and is not affected.
+is only logged. Staff do not get these e-mails. The sign-in, confirmation and
+password-change codes (section 7) are separate e-mails, sent straight away
+rather than queued.
 
 Code: `api/app/Jobs/SendOwnerUpdateEmail.php`, `api/app/Mail/OwnerUpdate.php`,
 `api/resources/views/mail/owner-update*.blade.php`,
@@ -163,13 +169,88 @@ The day's usage is shown in the Brevo dashboard.
 - **Owner opt-out.** Every update e-mails the owner. There is no setting to turn
   it off or reduce it to decisions only. It would be a per-user preference checked
   in `NotificationService::queueOwnerEmail()`. Not required for now.
-- **Unverified addresses are e-mailed.** Email verification is built but not
-  enforced at login (`docs/misd-questions.md`), so an owner who never confirmed
-  their address still gets updates. If enforcement is switched on, consider
-  e-mailing only verified addresses.
+- **Unverified addresses are e-mailed.** An owner who never confirmed their
+  address still gets updates. With mail on they cannot file until they confirm
+  (section 7), and any sign-in confirms the address, so this shrinks on its own;
+  e-mailing only confirmed addresses is still not built.
+- **"Trust this device for 30 days."** Not built. Every sign-in asks for a code.
 - **Staff e-mail.** Officers get in-app notices only, by design (they are signed
   in all day). Revisit if an office asks for it.
 - **SMS.** Out of scope for now; `SMS_DRIVER=log`.
+
+## 7. Sign-in, address and password-change codes — on with the mailer
+
+Three more e-mails, all a six-digit code, all built and all **off while
+`MAIL_MAILER` is `log` or `array`**. The moment it is anything else (`smtp` for
+Brevo), all three switch on together. The decision is made in one place,
+`api/app/Support/EmailSwitch.php`; there is no separate flag.
+
+| | Mail off (`log`, today) | Mail on (`smtp`) |
+|---|---|---|
+| Sign-in (all three doors) | password only | password, then a code e-mailed to the account |
+| Sign-up | the old confirmation link is written to the log | a confirmation code is e-mailed |
+| Filing (Submit on a draft) | allowed | refused until the address is confirmed |
+| Profile | nothing extra | "Confirm your email address" box, for owners who have not |
+| Change Password (Settings, every account) | current password only | current password, then a code e-mailed to the account |
+
+**The sign-in code** (`Your BizTrack sign-in code`). Sent after a correct
+password, for owners, officers and the super admin. Works for 10 minutes and 5
+wrong tries. Wrong codes count toward the same 15-minute lockout as wrong
+passwords. "Send a new code" works once a minute, up to 5 e-mails per sign-in.
+Typing the code also confirms the address, so an owner who signs in never needs
+the second e-mail.
+
+**The confirmation code** (`Confirm your email address for BizTrack`). Sent on
+sign-up and from the "Send a new code" button on Profile or in the application
+wizard. Works for 30 minutes and 5 wrong tries; only the newest one works. The
+resend is limited to 3 in 15 minutes per account. Drafting is never blocked,
+only Submit, and resubmitting a filing an office sent back is not blocked.
+
+**The password-change code** (`Your code to change your BizTrack password`).
+Sent from Settings → Change Password → Send Code, only after the current
+password is checked, so a signed-in session on its own cannot trigger one.
+Works for 10 minutes and 5 wrong tries, like the sign-in code. Wrong codes
+count toward the same 15-minute lockout as wrong passwords and wrong sign-in
+codes; the lockout stops further codes and guesses but does not sign out the
+session in use. "Send a new code" works once a minute, up to 5 e-mails per
+code. A sign-in code is never accepted here, nor this code at sign-in. No
+"your password was changed" e-mail is sent afterwards (not built; the change
+already signs out every other device).
+
+All three are **sent immediately, not queued**: somebody is waiting at the
+screen that asked, and a queued code with no worker running would never arrive.
+No worker is needed for these.
+
+Codes are stored only as hashes (`email_codes` table). The code is not in the
+subject line, so it does not show on a locked phone's notification.
+
+Settings: `api/config/auth.php` → `email_codes` (expiry, tries, resend wait).
+Code: `api/app/Support/EmailCodes.php`, `api/app/Mail/OneTimeCode.php`,
+`api/resources/views/mail/one-time-code*.blade.php`, the sign-in and confirm
+methods in `AuthController` (and `requestPasswordCode` / `updatePassword` for
+the password code), `EnsureEmailConfirmedToFile` on the submit route,
+`web/src/components/ChangePasswordModal.tsx`.
+Tests: `api/tests/Feature/EmailCodeTest.php`,
+`api/tests/Feature/PasswordChangeCodeTest.php`,
+`web/e2e/password-change.spec.ts`.
+
+**Before switching the mailer on:**
+
+1. **Check the sender works** with `php artisan biztrack:mail-test you@example.com`
+   (section 4). If the relay refuses, nobody can sign in: the sign-in page says
+   the code could not be sent and does not fall back to the password. To get
+   back in, set `MAIL_MAILER=log` again and run `php artisan config:clear`.
+2. **Mind the 300-a-day limit** (section 5). Every sign-in is now one e-mail,
+   on top of the owner updates. A busy day can use the quota up, and then
+   nobody can sign in until it resets. A paid Brevo plan removes that limit.
+3. **Existing owners are mostly unconfirmed.** Most accounts in the register
+   have never confirmed their address (verification was a stub until item #61).
+   They can still sign in, and signing in confirms them. Nobody is locked out,
+   but an owner who registered and never signs in again cannot file until they
+   do.
+4. Run the migration that adds `email_codes`, one file at a time as AGENTS.md
+   §2.2 asks:
+   `php artisan migrate --path=database/migrations/2026_09_27_000100_email_codes_for_sign_in_and_address_confirmation.php --force`
 
 ---
 

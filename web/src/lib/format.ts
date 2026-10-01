@@ -250,6 +250,8 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   gcash: 'GCash',
   maya: 'Maya',
   card: 'Card',
+  qrph: 'QR Ph',
+  gotyme: 'GoTyme',
 }
 
 export function paymentMethodLabel(method: string): string {

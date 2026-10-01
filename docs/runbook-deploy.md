@@ -29,6 +29,10 @@ docker compose -f infra/docker-compose.prod.yml exec app php artisan migrate --s
 ```
 Open `http://<host>`. Demo accounts per seeder (password = DEMO_PASSWORD).
 
+`--seed` runs the demo storyline, which is right for this box and wrong for the
+real register. Production seeds with `db:seed --class=ProductionSeeder` instead
+(`docs/postgres.md` §3).
+
 ## 3. Daily ops
 - Scheduler container runs `schedule:work` (expiry scans etc. — see `biztrack:scan-permits`).
 - Queue container processes the database queue.

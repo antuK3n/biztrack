@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Middleware\EnsureEmailConfirmedToFile;
+use App\Http\Middleware\EnsurePermission;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,9 +18,20 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'permission' => \App\Http\Middleware\EnsurePermission::class,
+            'permission' => EnsurePermission::class,
+            'email.confirmed' => EnsureEmailConfirmedToFile::class,
         ]);
-        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+        $middleware->append(SecurityHeaders::class);
+        /*
+         * KwikPay signs the callback over the RAW field values — `remark` may be
+         * "" and is signed as "", and a value is hashed exactly as sent (docs
+         * FAQ, "My recomputed callback signature never matches"). Trimming, or
+         * turning "" into null, would change what we hash and fail every such
+         * callback. See KwikPayCallbackController.
+         */
+        $kwikpayCallback = fn (Request $request) => $request->is('api/v1/payments/kwikpay/callback');
+        $middleware->trimStrings(except: [$kwikpayCallback]);
+        $middleware->convertEmptyStringsToNull(except: [$kwikpayCallback]);
         /*
          * API-only app: there is no named 'login' route to bounce a guest to.
          * Returning null makes Authenticate throw AuthenticationException, which
@@ -63,6 +77,17 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trimStrings(except: [
             fn (Request $request) => $request->is('api/*/wizard-drafts*'),
         ]);
+        /*
+         * Behind a reverse proxy every request arrives from the proxy's address,
+         * so without this the sign-in lockout and the audit log would see one
+         * visitor: a stranger's wrong passwords would lock everyone out. On the
+         * Azure server Caddy and nginx sit in front of PHP on Docker's private
+         * network, so TRUSTED_PROXIES names that network there. Unset (local
+         * dev, tests) it trusts nobody, exactly as before.
+         */
+        if (filled(env('TRUSTED_PROXIES'))) {
+            $middleware->trustProxies(at: array_map('trim', explode(',', (string) env('TRUSTED_PROXIES'))));
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

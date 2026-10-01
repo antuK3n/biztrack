@@ -60,7 +60,9 @@ class InspectionController extends Controller
             $query->where('status', $status);
         }
 
-        $inspections = $query->orderByDesc('scheduled_at')
+        // An unscheduled visit after the dated ones, as it always sorted on
+        // SQLite; PostgreSQL puts NULL first in a descending sort unless told.
+        $inspections = $query->orderByRaw('scheduled_at desc nulls last')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
 

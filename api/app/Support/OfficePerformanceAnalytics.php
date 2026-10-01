@@ -109,9 +109,13 @@ final class OfficePerformanceAnalytics
      * "Never Color Alone" applied to an absence: an unexplained gap is a
      * colour-only signal made of whitespace.
      *
+     * Public because the dashboard and the reports ask the same question —
+     * whose recorded review time is not their own step — and must not keep a
+     * second list (FilingClock::bplo, DashboardAnalytics::stageObservations).
+     *
      * @var array<string, string>
      */
-    private const NOT_COMPARABLE = [
+    public const NOT_COMPARABLE = [
         'BPLO' => 'BPLO is stamped again at final approval, so its recorded time is the whole '
             .'filing rather than BPLO\'s own step. Volume and open caseload are unaffected.',
     ];
@@ -130,6 +134,10 @@ final class OfficePerformanceAnalytics
      * prefixes catch them without a wildcard loose enough to catch a real trade.
      * A genuine business called "Test" is conceivable; one called "E2E Wizard
      * Clearances" followed by a millisecond timestamp is not.
+     *
+     * Matched ignoring case (`orWhereLike`), which is what SQLite's LIKE always
+     * did; PostgreSQL's plain LIKE would not, and "test shop" would quietly stop
+     * counting as test data on the production database.
      *
      * @var list<string>
      */
@@ -166,7 +174,7 @@ final class OfficePerformanceAnalytics
         $testShaped = static function ($query, string $column): void {
             $query->where(function ($inner) use ($column): void {
                 foreach (self::TEST_DATA_PATTERNS as $pattern) {
-                    $inner->orWhere($column, 'like', $pattern);
+                    $inner->orWhereLike($column, $pattern);
                 }
             });
         };
@@ -213,6 +221,16 @@ final class OfficePerformanceAnalytics
          */
         $open = ApplicationAssignment::query()
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
+            /*
+             * Not on a filing that has ended. The workflow closes those
+             * reviews as the filing is rejected or cancelled
+             * (AssignmentStatus::Closed), and a migration closed the ones
+             * written before it did; this is the same rule read from the
+             * filing's side, so a row the close missed still cannot sit in an
+             * office's backlog for good.
+             */
+            ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
+            ->whereNotIn('applications.status', FilingClock::ENDED)
             ->whereIn('application_assignments.status', [
                 AssignmentStatus::Pending->value,
                 AssignmentStatus::InProgress->value,
@@ -524,38 +542,15 @@ final class OfficePerformanceAnalytics
      * there are in the same unit and can be compared without a conversion —
      * which is the whole reason this is not simply a difference in hours.
      *
-     * Counted over the half-open interval (from, to]: a filing received and
-     * decided the same day took zero working days, and one received Friday and
-     * decided Monday took one. Public holidays are not modelled, here or in
-     * Ra11032, which makes every count slightly generous to the office — a hold
-     * this method calls a breach is genuinely a breach.
-     *
-     * Arithmetic rather than a day-by-day loop for the whole span: any seven
-     * consecutive days contain exactly five weekdays, so only the remainder has
-     * to be walked. The register holds thousands of assignments per window and a
-     * naive loop is a year of iterations per row.
+     * The count itself is ManilaCalendar's, shared with the dashboard and the
+     * reports: Manila dates, the half-open interval (from, to], weekends out,
+     * public holidays in (so a hold this calls a breach is genuinely a breach).
+     * This class kept its own arithmetic copy on the UTC date until the three
+     * were found to disagree about a filing received before 8 am Manila.
      */
     private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): float
     {
-        $start = $from->startOfDay();
-        $end = $to->startOfDay();
-
-        if ($end <= $start) {
-            return 0.0;
-        }
-
-        $days = (int) $start->diffInDays($end);
-        $count = intdiv($days, 7) * 5;
-
-        $cursor = $start;
-        for ($i = 0; $i < $days % 7; $i++) {
-            $cursor = $cursor->addDay();
-            if ($cursor->isWeekday()) {
-                $count++;
-            }
-        }
-
-        return (float) $count;
+        return (float) ManilaCalendar::workingDaysBetween($from, $to);
     }
 
     /**

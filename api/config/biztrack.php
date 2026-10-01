@@ -111,4 +111,14 @@ return [
         'closes_months_after' => env('BIZTRACK_RENEWAL_CLOSES_MONTHS_AFTER', 36),
     ],
 
+    /*
+     * The read-only PostgreSQL role ODBC reporting tools sign in as — the one
+     * `php artisan biztrack:report-role-sql` creates (docs/odbc.md). Named here
+     * because a migration run re-creates the report views, and a re-created
+     * view has lost every grant the old one carried: App\Support\ReportViews
+     * grants this role SELECT on them again afterwards. Change it only if the
+     * role was created under another name.
+     */
+    'report_role' => env('DB_REPORT_ROLE', 'biztrack_report'),
+
 ];

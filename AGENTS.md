@@ -394,10 +394,14 @@ opens a Cloudflare quick tunnel.
   `App\Support\ApplicationVisibility` is the predicate and every office-scoped
   read goes through it. Widening it caused a real leak — a sanitary officer saw
   115 filings of which 38 were theirs.
-- Analytics is split: `analytics.view` (BPLO — dashboard, renewal risk, business
-  growth) and `analytics.processing_time` (super admin — that screen only).
-  Neither role holds both, deliberately: Processing Time measures the
-  departments, BPLO among them.
+- Analytics: `analytics.view` (every office admin, BPLO and the super admin —
+  the dashboard and Reports) and `analytics.processing_time` (super admin only —
+  Office Performance, Processing Time). Holding `analytics.view` is not a
+  register-wide read: `App\Support\AnalyticsOffice` answers an office account
+  with its own office and refuses any other; only `application.view_any_office`
+  holders (BPLO, super admin) may switch office or view all. BPLO still does not
+  hold `analytics.processing_time`: that screen measures the departments, BPLO
+  among them. (Checklist 2026-09-27, items 1 and 6.)
 
 ---
 

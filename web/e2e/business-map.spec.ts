@@ -6,7 +6,7 @@ import { sessionFor } from './helpers'
  *
  * Two halves, and both are needed.
  *
- * The stubbed tests pin the RULES: three states, three silhouettes, a legend
+ * The stubbed tests pin the RULES: five states, five silhouettes, a legend
  * that agrees with the map, a filter that narrows it. A narrowing assertion has
  * to know exactly which rows exist, and this suite may be pointed at a copy of
  * the live register whose contents move.
@@ -28,8 +28,12 @@ const ENDPOINT = '**/api/v1/admin/business-map'
  * both filters have something real to bite on:
  *
  *   active · agrees      inside Longos, declares Longos
- *   lapsed · disagrees   inside Catmon, declares Tinajeros (267 m out)
+ *   expired · disagrees  inside Catmon, declares Tinajeros (267 m out)
  *   none   · off-city    east of the city border entirely
+ *
+ * Suspended and revoked (checklist item 16's other two states) sit on the
+ * active row's point, declaring Longos, so they agree with their barangay and
+ * the pin-check counts below move by exactly them.
  *
  * Every coordinate here was RUN through the shipped polygons before being
  * written down, and that was not ceremony. The first draft of this fixture put
@@ -47,6 +51,7 @@ const FIXTURE = {
       longitude: 120.96024,
       barangay: 'Longos',
       state: 'active',
+      permit_id: 101,
       permit_number: 'MCB-2026-000001',
       valid_until: '2026-12-31',
     },
@@ -56,7 +61,8 @@ const FIXTURE = {
       latitude: 14.6712,
       longitude: 120.9605,
       barangay: 'Tinajeros',
-      state: 'lapsed',
+      state: 'expired',
+      permit_id: 102,
       permit_number: 'MCB-2024-000044',
       valid_until: '2025-01-31',
     },
@@ -67,16 +73,41 @@ const FIXTURE = {
       longitude: 120.995,
       barangay: 'Tinajeros',
       state: 'none',
+      permit_id: null,
       permit_number: null,
       valid_until: null,
     },
+    {
+      id: 4,
+      name: 'Kusina ni Lola',
+      latitude: 14.65397,
+      longitude: 120.96024,
+      barangay: 'Longos',
+      state: 'suspended',
+      permit_id: 104,
+      permit_number: 'MP-2026-000004',
+      valid_until: '2026-12-31',
+    },
+    {
+      id: 5,
+      name: 'Tambakan Junk Shop',
+      latitude: 14.65397,
+      longitude: 120.96024,
+      barangay: 'Longos',
+      state: 'revoked',
+      permit_id: 105,
+      permit_number: 'MP-2026-000005',
+      valid_until: '2026-12-31',
+    },
   ],
   meta: {
-    plotted: 3,
-    businesses_total: 5,
+    plotted: 5,
+    businesses_total: 7,
     unmapped: 2,
-    counts: { active: 1, lapsed: 1, none: 1 },
+    counts: { active: 1, expired: 1, suspended: 1, revoked: 1, none: 1 },
     as_of: '2026-09-17',
+    truncated: false,
+    max_points: 5000,
   },
 }
 
@@ -103,7 +134,7 @@ test('every business with a pin gets a marker', async ({ page }) => {
   await page.goto(PATH)
 
   await expect(page.getByRole('heading', { name: 'Business Map' })).toBeVisible()
-  await expect(page.locator('.biztrack-map-pin')).toHaveCount(3)
+  await expect(page.locator('.biztrack-map-pin')).toHaveCount(5)
 })
 
 /*
@@ -118,17 +149,28 @@ test('every business with a pin gets a marker', async ({ page }) => {
  * purpose. Asserting `fill="#3242ca"` would pass for two identical circles in
  * two colours, which is the exact failure the rule exists to prevent.
  */
-test('an active permit and a lapsed one differ by shape, not only by colour', async ({ page }) => {
+test('the five permit states differ by shape, not only by colour', async ({ page }) => {
   await stub(page)
   await page.goto(PATH)
 
+  // Active: a disc, nothing else.
   await expect(page.locator('.biztrack-map-pin--active svg circle')).toHaveCount(1)
   await expect(page.locator('.biztrack-map-pin--active svg path')).toHaveCount(0)
 
-  await expect(page.locator('.biztrack-map-pin--lapsed svg path')).toHaveCount(1)
-  await expect(page.locator('.biztrack-map-pin--lapsed svg circle')).toHaveCount(0)
+  // Expired: a diamond path, no circle.
+  await expect(page.locator('.biztrack-map-pin--expired svg path')).toHaveCount(1)
+  await expect(page.locator('.biztrack-map-pin--expired svg circle')).toHaveCount(0)
 
-  // And "never held one" is its own silhouette, not a third colour of either.
+  // Suspended: a square (rect) — the only state drawn with one.
+  await expect(page.locator('.biztrack-map-pin--suspended svg rect')).toHaveCount(1)
+  await expect(page.locator('.biztrack-map-pin svg rect')).toHaveCount(1)
+
+  // Revoked: a cross — strokes only, no disc and no square.
+  await expect(page.locator('.biztrack-map-pin--revoked svg circle')).toHaveCount(0)
+  await expect(page.locator('.biztrack-map-pin--revoked svg rect')).toHaveCount(0)
+  await expect(page.locator('.biztrack-map-pin--revoked svg path')).toHaveCount(2)
+
+  // And "never held one" is its own silhouette, not another colour of a disc.
   await expect(page.locator('.biztrack-map-pin--none svg circle')).toHaveCount(1)
 })
 
@@ -145,8 +187,9 @@ test('the marker states are readable as a table, in words, with their counts', a
 
   const active = page.getByRole('row').filter({ hasText: 'Permit active' })
   await expect(active).toContainText('1')
-  await expect(page.getByRole('row').filter({ hasText: 'Permit lapsed' })).toContainText('1')
-  await expect(page.getByRole('row').filter({ hasText: 'No permit on file' })).toContainText('1')
+  for (const label of ['Permit expired', 'Permit suspended', 'Permit revoked', 'No permit on file']) {
+    await expect(page.getByRole('row').filter({ hasText: label })).toContainText('1')
+  }
 })
 
 /* Both numbers, never one — a bare "3 businesses" hides what was left out. */
@@ -154,19 +197,39 @@ test('the map says how much of the register is missing from it', async ({ page }
   await stub(page)
   await page.goto(PATH)
 
-  await expect(page.getByText('3 of the 5 businesses on file')).toBeVisible()
+  await expect(page.getByText('5 of the 7 businesses on file')).toBeVisible()
   await expect(page.getByText('2 have no pin')).toBeVisible()
 })
 
 test('filtering to one permit state leaves only that state on the map', async ({ page }) => {
   await stub(page)
   await page.goto(PATH)
-  await expect(page.locator('.biztrack-map-pin')).toHaveCount(3)
+  await expect(page.locator('.biztrack-map-pin')).toHaveCount(5)
 
-  await page.getByRole('button', { name: /Permit lapsed/ }).click()
+  await page.getByRole('button', { name: /Permit revoked/ }).click()
 
   await expect(page.locator('.biztrack-map-pin')).toHaveCount(1)
-  await expect(page.locator('.biztrack-map-pin--lapsed')).toHaveCount(1)
+  await expect(page.locator('.biztrack-map-pin--revoked')).toHaveCount(1)
+  // Both numbers, once something narrows it.
+  await expect(page.getByText('Showing 1 of the 5 businesses on the map.')).toBeVisible()
+})
+
+test('filtering to one barangay leaves only the businesses that declared it', async ({ page }) => {
+  await stub(page)
+  await page.goto(PATH)
+
+  const barangay = page.getByRole('combobox', { name: 'Barangay', exact: true })
+  // Offered from the data: the barangays businesses declared, and no others.
+  await expect(barangay.locator('option')).toHaveText(['All barangays', 'Longos', 'Tinajeros'])
+
+  await barangay.selectOption('Tinajeros')
+  await expect(page.locator('.biztrack-map-pin')).toHaveCount(2)
+  await expect(page.getByText('Showing 2 of the 5 businesses on the map in Tinajeros.')).toBeVisible()
+
+  // The two filters combine.
+  await page.getByRole('button', { name: /No permit on file/ }).click()
+  await expect(page.locator('.biztrack-map-pin')).toHaveCount(1)
+  await expect(page.locator('.biztrack-map-pin--none')).toHaveCount(1)
 })
 
 /*
@@ -186,10 +249,11 @@ test('the pin check separates a wrong barangay from a pin outside the city', asy
 
   await page.getByLabel('Pin check').selectOption('agrees')
   await expect(page.locator('.biztrack-map-pin--active')).toHaveCount(1)
-  await expect(page.locator('.biztrack-map-pin')).toHaveCount(1)
+  // Suspended and revoked sit on the same Longos point (see the fixture note).
+  await expect(page.locator('.biztrack-map-pin')).toHaveCount(3)
 
   await page.getByLabel('Pin check').selectOption('disagrees')
-  await expect(page.locator('.biztrack-map-pin--lapsed')).toHaveCount(1)
+  await expect(page.locator('.biztrack-map-pin--expired')).toHaveCount(1)
   await expect(page.locator('.biztrack-map-pin')).toHaveCount(1)
 
   await page.getByLabel('Pin check').selectOption('off-city')
@@ -201,12 +265,40 @@ test('a marker says its permit state in words, not only in colour', async ({ pag
   await stub(page)
   await page.goto(PATH)
 
-  await page.locator('.biztrack-map-pin--lapsed').click()
+  await page.locator('.biztrack-map-pin--expired').click()
 
   const popup = page.locator('.leaflet-popup')
   await expect(popup).toContainText('RxCare Pharmacy')
-  await expect(popup).toContainText('Permit lapsed')
+  await expect(popup).toContainText('Permit expired')
   await expect(popup).toContainText('MCB-2024-000044')
+})
+
+test('a marker’s popup leads to the permit’s details', async ({ page }) => {
+  /*
+   * Checklist item 16: "click a marker for business name, permit number,
+   * status, link to details". The standalone screen links into the Permits
+   * register, searched for the permit and widened to every office so it is
+   * found whichever office the reader would open on.
+   */
+  await stub(page)
+  await page.goto(PATH)
+
+  await page.locator('.biztrack-map-pin--revoked').click()
+  const popup = page.locator('.leaflet-popup')
+  await expect(popup).toContainText('Permit revoked')
+  await expect(popup.getByRole('button', { name: 'View certificate MP-2026-000005' })).toBeVisible()
+
+  await popup.getByRole('link', { name: 'Find MP-2026-000005 in the register' }).click()
+  await expect(page).toHaveURL(/\/staff\/admin\/permits\?q=MP-2026-000005&office=all/)
+  await expect(
+    page.getByRole('searchbox', { name: /Search permits/ }),
+  ).toHaveValue('MP-2026-000005')
+
+  // A business that never held a permit has nothing to lead to, and says nothing.
+  await page.goto(PATH)
+  await page.locator('.biztrack-map-pin--none').click()
+  await expect(page.locator('.leaflet-popup')).toContainText('No permit on file')
+  await expect(page.locator('.leaflet-popup').getByRole('link')).toHaveCount(0)
 })
 
 /*

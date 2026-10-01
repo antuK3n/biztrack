@@ -788,10 +788,16 @@ class ClearanceService
              * with BPLO; until it is answered, withdrawing an optional permit
              * costs what it cost.
              */
+            // One row at a time rather than a bulk delete, so each removed
+            // assignment is copied into the audit log first (Audit Log 1).
             ApplicationAssignment::where('application_id', $application->id)
                 ->where('department_id', $type->issuing_department_id)
                 ->where('status', AssignmentStatus::Pending->value)
-                ->delete();
+                ->get()
+                ->each(function (ApplicationAssignment $assignment) use ($type) {
+                    Audit::removed('assignment.removed', $assignment, ['permit_type' => $type->code]);
+                    $assignment->delete();
+                });
 
             Audit::log('clearance.unapplied', $application, ['permit_type' => $type->code]);
         });

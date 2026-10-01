@@ -113,7 +113,39 @@ class WorkflowService
             'note' => $note,
         ]);
         Audit::log('application.status_changed', $app, ['from' => $from?->value, 'to' => $to->value]);
+
+        if (in_array($to, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
+            $this->closeOpenReviews($app);
+        }
+
         $this->notify->applicationStatus($app, $to, $note);
+    }
+
+    /**
+     * A filing that has ended takes every office's open review with it.
+     *
+     * Here, in the one writer of `applications.status`, rather than in
+     * `rejectApplication` and `cancel` separately, because the gap was exactly
+     * that neither of them did it: BPLO rejecting a filing left CHO, BFP and
+     * the rest holding `pending` reviews of something that no longer existed,
+     * and a cancellation left BPLO's own. Those rows sat in every office's
+     * For Approval tab and in its open backlog for good — 106 of them on the
+     * copy of the register this was measured on. Any route to Rejected or
+     * Cancelled added later is covered without remembering to.
+     *
+     * Closed, not Completed: see AssignmentStatus::Closed for why
+     * `completed_at` stays null.
+     */
+    private function closeOpenReviews(Application $app): void
+    {
+        $open = ApplicationAssignment::where('application_id', $app->id)
+            ->whereIn('status', AssignmentStatus::openValues())
+            ->get();
+
+        foreach ($open as $assignment) {
+            $assignment->update(['status' => AssignmentStatus::Closed]);
+            Audit::log('assignment.closed', $assignment, ['application_status' => $app->status?->value]);
+        }
     }
 
     /**
@@ -1573,46 +1605,57 @@ class WorkflowService
         }
     }
 
-    /** Terminal rejection of the whole filing. Reachable from any live status. */
+    /**
+     * Terminal rejection of the whole filing. Reachable from any live status.
+     *
+     * The other offices' open reviews are closed by `transition()` on the way
+     * to Rejected (closeOpenReviews), in the same transaction as the decision,
+     * so a filing cannot be rejected and still sit in CHO's queue.
+     */
     public function rejectApplication(Application $app, string $reason): void
     {
-        $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
-        $this->transition($app, ApplicationStatus::Rejected, $reason);
-
-        /*
-         * ── The certificate goes with the filing ─────────────────────────
-         *
-         * This method wrote to the application row and nothing else, which
-         * was right while the permit was minted at the very end. Since the
-         * release moved to payment on 24 September 2026 it was not: BPLO
-         * could reject a paid filing and leave the Business Permit Active and
-         * still answering yes on the public /verify page, so the applicant
-         * kept trading on a certificate attached to a refused application.
-         *
-         * Suspended rather than revoked — see the note above the method.
-         *
-         * Only an ACTIVE one, the same rule `suspendOutcomePermit` follows: an
-         * expired or superseded certificate is not something anyone can trade
-         * on, and overwriting its status would lose how its term actually
-         * ended.
-         */
-        $permit = $this->outcomePermitFor($app);
-        if ($permit !== null && $permit->status === PermitStatus::Active) {
-            $permit->update(['status' => PermitStatus::Suspended]);
+        DB::transaction(function () use ($app, $reason) {
+            $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
+            $this->transition($app, ApplicationStatus::Rejected, $reason);
 
             /*
-             * Its own audit action, not `permit.suspended`. That one records
-             * WHICH office refused WHICH clearance, and nothing was refused
-             * here — BPLO ended the filing. Reusing it would put a cause in
-             * the trail that did not happen.
+             * ── The certificate goes with the filing ─────────────────────────
+             *
+             * This method wrote to the application row and nothing else, which
+             * was right while the permit was minted at the very end. Since the
+             * release moved to payment on 24 September 2026 it was not: BPLO
+             * could reject a paid filing and leave the Business Permit Active and
+             * still answering yes on the public /verify page, so the applicant
+             * kept trading on a certificate attached to a refused application.
+             *
+             * Suspended rather than revoked — see the note above the method.
+             *
+             * Only an ACTIVE one, the same rule `suspendOutcomePermit` follows: an
+             * expired or superseded certificate is not something anyone can trade
+             * on, and overwriting its status would lose how its term actually
+             * ended.
+             *
+             * Inside the same transaction as the status: if the suspension
+             * fails, the rejection rolls back with it and BPLO sees the error,
+             * so a rejected filing is never left holding an Active permit.
              */
-            Audit::log('permit.suspended_on_rejection', $permit, [
-                'application_id' => $app->id,
-                'business_id' => $app->business_id,
-                'reason' => $reason,
-            ]);
-        }
+            $permit = $this->outcomePermitFor($app);
+            if ($permit !== null && $permit->status === PermitStatus::Active) {
+                $permit->update(['status' => PermitStatus::Suspended]);
 
+                /*
+                 * Its own audit action, not `permit.suspended`. That one records
+                 * WHICH office refused WHICH clearance, and nothing was refused
+                 * here — BPLO ended the filing. Reusing it would put a cause in
+                 * the trail that did not happen.
+                 */
+                Audit::log('permit.suspended_on_rejection', $permit, [
+                    'application_id' => $app->id,
+                    'business_id' => $app->business_id,
+                    'reason' => $reason,
+                ]);
+            }
+        });
         $this->notify->applicationRejected($app, $reason);
     }
 
@@ -2524,6 +2567,24 @@ class WorkflowService
                 ->where('permit_type_id', $row->permit_type_id)
                 ->delete();
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
+            /*
+             * And a row of its own. `rejected_at` above is the LATEST refusal
+             * — what the office's "refused before" banner reads — and a
+             * second refusal after the applicant re-applies overwrites it.
+             * The Reports tab counts refusals per period, so each one is kept
+             * here as well (migration of 1 October 2026).
+             */
+            DB::table('clearance_refusals')->insert([
+                'application_permit_type_id' => $row->id,
+                'application_id' => $row->application_id,
+                'permit_type_id' => $row->permit_type_id,
+                'refused_at' => $row->rejected_at,
+                'reason' => $reason,
+                'remedy' => $remedy !== '' ? $remedy : null,
+                'refused_by_user_id' => Auth::id(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
             $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
 
             /*
@@ -2578,6 +2639,8 @@ class WorkflowService
         }
 
         if ($permit->status === PermitStatus::Active) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
@@ -2586,7 +2649,7 @@ class WorkflowService
                 'because_permit_type_id' => $refused->id,
                 'because_permit_type' => $refused->name,
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
@@ -2680,13 +2743,15 @@ class WorkflowService
         $permits = $business->permits()->where('status', PermitStatus::Active->value)->get();
 
         foreach ($permits as $permit) {
+            // Suspension retires the certificate; keep it as it stood (Audit Log 1).
+            $snapshot = Audit::snapshot($permit);
             $permit->update(['status' => PermitStatus::Suspended]);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
                 'cause' => 'business_status',
                 'reason' => $reason,
-            ]);
+            ], $snapshot);
         }
 
         return $permits->count();
@@ -2794,6 +2859,80 @@ class WorkflowService
         if ($app !== null) {
             $this->notify->outcomePermitReinstated($app, $permit, $reason);
         }
+
+        return $permit;
+    }
+
+    /**
+     * Take a permit away (checklist item 23, question A26).
+     *
+     * ── Who, and what may be revoked ─────────────────────────────────────────
+     *
+     * BPLO and the super admin, through `permit.revoke` on the route; Ken's
+     * decision for the checklist. Any certificate type, because both roles read
+     * the whole register and the screen offers it wherever they can see a row —
+     * whether BFP should be the one to revoke its own FSIC is still open in A26.
+     *
+     * Only a certificate that is in force can be revoked: Active, or Suspended
+     * (a suspension is the lighter version of the same act, and escalating it
+     * is a real case). Expired and superseded certificates have already stopped
+     * being valid, and revoking one would write an enforcement act onto a paper
+     * nobody can trade on — a record that says something happened for no
+     * effect. A revoked permit is refused too, so a double submit cannot
+     * overwrite the first reason and date.
+     *
+     * ── What it writes ───────────────────────────────────────────────────────
+     *
+     * The status, `revoked_at` and `revoked_reason` on the permit, in one
+     * update, so the register table's two revocation columns and the status
+     * chip cannot disagree. Then an audit row naming the permit, the business
+     * and the reason — Audit::log records the acting officer. Then the owner's
+     * notice, which push() also e-mails.
+     *
+     * Final. There is no un-revoke: whether a revocation can be reversed at all
+     * is A26's third question, and until it is answered the remedy is a fresh
+     * application. `reconsiderSuspension` only ever moves a Suspended permit,
+     * so it cannot quietly revive this one either.
+     */
+    public function revokePermit(Permit $permit, string $reason): Permit
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Say why this permit is being revoked. The owner is told, and it is audited.'],
+            ]);
+        }
+
+        if (! in_array($permit->status, [PermitStatus::Active, PermitStatus::Suspended], true)) {
+            throw ValidationException::withMessages([
+                'permit' => [
+                    "Permit {$permit->permit_number} is {$permit->status->label()}, so there is nothing in force to revoke.",
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($permit, $reason) {
+            $from = $permit->status;
+            // Revoking retires the certificate for good; keep it as it stood
+            // (Audit Log 1). Taken before the update, like suspension's.
+            $snapshot = Audit::snapshot($permit);
+
+            $permit->update([
+                'status' => PermitStatus::Revoked,
+                'revoked_at' => now(),
+                'revoked_reason' => $reason,
+            ]);
+
+            Audit::log('permit.revoked', $permit, [
+                'permit_number' => $permit->permit_number,
+                'business_id' => $permit->business_id,
+                'application_id' => $permit->application_id,
+                'from' => $from->value,
+                'reason' => $reason,
+            ], $snapshot);
+
+            $this->notify->permitRevoked($permit, $reason);
+        });
 
         return $permit;
     }
