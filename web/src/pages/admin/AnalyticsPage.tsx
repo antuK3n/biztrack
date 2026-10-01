@@ -175,6 +175,26 @@ const PERIOD_OPTIONS = [
   { value: '36', label: 'Last 36 months' },
 ]
 
+/**
+ * A wait in office hours, as a reader would say it.
+ *
+ * Under an hour it is minutes. "0.0h" was what a 20-minute reply printed: a
+ * figure that reads as instant, or as broken, and is neither. The API measures
+ * office time only (OfficeHours::hoursBetween), so this is office minutes too.
+ */
+function officeWait(hours: number): { value: string; unit: string } {
+  if (hours < 1) {
+    const minutes = Math.round(hours * 60)
+    return minutes < 1 ? { value: 'Under 1', unit: ' min' } : { value: String(minutes), unit: ' min' }
+  }
+  return { value: hours.toFixed(1), unit: ' office hours' }
+}
+
+function waitText(hours: number): string {
+  const { value, unit } = officeWait(hours)
+  return `${value.toLowerCase()}${unit}`
+}
+
 function pct(value: number | null): string {
   return value === null ? '—' : `${value.toFixed(1)}%`
 }
@@ -1164,12 +1184,14 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         label="Response time"
         metric="officer_activity.mean_response_hours"
         unavailable={a.mean_response_hours === null}
-        value={a.mean_response_hours === null ? 'No replies yet' : a.mean_response_hours.toFixed(1)}
-        unit="h"
+        value={a.mean_response_hours === null ? 'No replies yet' : officeWait(a.mean_response_hours).value}
+        unit={a.mean_response_hours === null ? undefined : officeWait(a.mean_response_hours).unit}
         detail={
           (a.mean_response_hours === null
             ? 'No applicant message has been answered in this window.'
-            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; middle wait ${a.median_response_hours?.toFixed(1)}h.`) +
+            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}${
+                a.median_response_hours === null ? '' : `; middle wait ${waitText(a.median_response_hours)}`
+              }. Office hours only.`) +
           (a.threads_awaiting_reply > 0
             ? ` ${num(a.threads_awaiting_reply)} still waiting.`
             : '')
