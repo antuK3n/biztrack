@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Enums\ApplicationStatus;
 use App\Enums\PaymentStatus;
 use App\Models\PermitType;
 use Carbon\CarbonImmutable;
@@ -529,18 +530,52 @@ final class LguReports
             }
         }
 
-        $refused = DB::table('application_permit_types')
-            ->whereNotNull('rejected_at')
-            ->where('rejected_at', '>=', $from)
-            ->where('rejected_at', '<', $to)
-            ->when($scope !== null, static fn ($q) => $q->whereIn('permit_type_id', $scope['permit_type_ids']))
-            ->groupBy('permit_type_id')
-            ->selectRaw('permit_type_id, count(*) as c')
+        /*
+         * Refused, two sources, because two different acts refuse:
+         *
+         *  - an office refusing its clearance — every refusal, from
+         *    `clearance_refusals`. This read `rejected_at` on the permit row,
+         *    which a second refusal overwrites, so a permit refused in
+         *    September and again in October vanished from September's report;
+         *  - BPLO rejecting the filing, which refuses the business permit. That
+         *    lives on the filing (status, `rejection_reason`), not on a permit
+         *    row, and was not counted at all. It is counted from status
+         *    history, which keeps the moment of each rejection; a rejected
+         *    filing with no history row falls back to its `decided_at`.
+         */
+        $refused = DB::table('clearance_refusals')
+            ->join('applications', 'applications.id', '=', 'clearance_refusals.application_id')
+            ->whereNull('applications.deleted_at')
+            ->where('clearance_refusals.refused_at', '>=', $from)
+            ->where('clearance_refusals.refused_at', '<', $to)
+            ->when($scope !== null, static fn ($q) => $q->whereIn('clearance_refusals.permit_type_id', $scope['permit_type_ids']))
+            ->groupBy('clearance_refusals.permit_type_id')
+            ->selectRaw('clearance_refusals.permit_type_id, count(*) as c')
             ->pluck('c', 'permit_type_id');
         foreach ($refused as $id => $count) {
             if (isset($rows[(int) $id])) {
-                $rows[(int) $id]['refused'] = (int) $count;
+                $rows[(int) $id]['refused'] += (int) $count;
             }
+        }
+
+        $businessPermit = (int) DB::table('permit_types')->where('code', PermitType::OUTCOME_CODE)->value('id');
+        if (isset($rows[$businessPermit])) {
+            $rejectedHistory = DB::table('application_status_history')
+                ->where('to_status', ApplicationStatus::Rejected->value);
+            $rows[$businessPermit]['refused'] += DB::table('applications')
+                ->whereNull('deleted_at')
+                ->whereIn('id', (clone $rejectedHistory)
+                    ->where('created_at', '>=', $from)
+                    ->where('created_at', '<', $to)
+                    ->select('application_id'))
+                ->count();
+            $rows[$businessPermit]['refused'] += DB::table('applications')
+                ->whereNull('deleted_at')
+                ->where('status', ApplicationStatus::Rejected->value)
+                ->where('decided_at', '>=', $from)
+                ->where('decided_at', '<', $to)
+                ->whereNotIn('id', (clone $rejectedHistory)->select('application_id'))
+                ->count();
         }
 
         $rows = array_values($rows);
@@ -559,7 +594,7 @@ final class LguReports
                 ['key' => 'total', 'label' => 'Issued', 'format' => 'count'],
                 ['key' => 'refused', 'label' => 'Refused', 'format' => 'count'],
             ], $rows,
-                'Issued counts permits released in the period. Refused counts clearances an office refused in the period, whether or not the applicant later filed again.',
+                'Issued counts permits released in the period. Refused counts each refusal in the period: an office refusing its clearance, every time it did, whether or not the applicant later filed again; and BPLO rejecting a filing, under the business permit.',
                 $total),
         ];
     }
