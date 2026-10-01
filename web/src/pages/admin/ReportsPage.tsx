@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ErrorState, Skeleton } from '../../components/ui/primitives'
+import { Skeleton } from '../../components/ui/primitives'
 import { FieldLabel, PageTitle, ProtoCard, inputCls } from '../../components/ui/Proto'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -12,6 +13,7 @@ import type {
   ReportRow,
   ReportSection,
 } from '../../lib/types'
+import { AnalyticsError } from './AnalyticsError'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { OfficeScope } from './OfficeScope'
 
@@ -97,9 +99,109 @@ function formatCell(value: string | number | null | undefined, format: ReportCol
   }
 }
 
-function SectionTable({ section }: { section: ReportSection }) {
+/*
+ * How many of the last section's rows travel with the signatures. Three is
+ * enough that the "Noted by" line visibly signs the end of a table rather than
+ * a total floating on its own, and few enough that the page before is not left
+ * noticeably short.
+ */
+const TAIL_ROWS = 3
+
+/**
+ * One section's table.
+ *
+ * `closing` is passed to the LAST section only: the signature block, which in
+ * print rides inside this table's final row group together with the last few
+ * rows, the total and the note. That row group is `break-inside: avoid`, so
+ * the signatures can never start a page on their own — they move with the end
+ * of the figures they sign. On screen the same block is drawn after the
+ * document instead (see ReportDocument), and the in-table copy is not shown.
+ *
+ * Why inside the table rather than `break-before: avoid` on a block after it:
+ * that was tried, and Chrome honoured it only for some page heights. On the
+ * three-year BPLO collections report it still printed a third page holding
+ * the signatures and nothing else. A row group that may not be split is a
+ * rule Chrome keeps every time.
+ */
+function SectionTable({ section, closing }: { section: ReportSection; closing?: ReactNode }) {
   const numeric = (column: ReportColumn) => column.format !== 'text'
   const cell = (row: ReportRow, column: ReportColumn) => formatCell(row[column.key], column.format)
+
+  const dataRow = (row: ReportRow, index: number) => (
+    <tr key={index}>
+      {section.columns.map((column, i) =>
+        i === 0 ? (
+          <th
+            key={column.key}
+            scope="row"
+            className="border border-ink/40 px-2 py-1 text-left font-normal text-ink"
+          >
+            {cell(row, column)}
+          </th>
+        ) : (
+          <td
+            key={column.key}
+            className={`tnum border border-ink/40 px-2 py-1 text-ink ${
+              numeric(column) ? 'text-right' : 'text-left'
+            }`}
+          >
+            {cell(row, column)}
+          </td>
+        ),
+      )}
+    </tr>
+  )
+
+  const emptyRow = (
+    <tr key="empty">
+      <td colSpan={section.columns.length} className="border border-ink/40 px-2 py-2 text-ink-muted">
+        Nothing on record for this period.
+      </td>
+    </tr>
+  )
+
+  /*
+   * The total is a row in the table's LAST ROW GROUP, never a <tfoot>. Print
+   * repeats a tfoot at the foot of every page the table crosses, so a
+   * three-year collections report printed "Total 3,079,096.36" under page
+   * one's nine months as if they summed to it. In the last row group it prints
+   * once, after the last row, which is where a ledger's total belongs.
+   */
+  const totalRow = section.total && section.rows.length > 0 && (
+    <tr key="total">
+      {section.columns.map((column, i) =>
+        i === 0 ? (
+          <th
+            key={column.key}
+            scope="row"
+            className="border border-ink/40 px-2 py-1.5 text-left font-bold text-ink"
+          >
+            {cell(section.total as ReportRow, column) || 'Total'}
+          </th>
+        ) : (
+          <td
+            key={column.key}
+            className={`tnum border border-ink/40 px-2 py-1.5 font-bold text-ink ${
+              numeric(column) ? 'text-right' : 'text-left'
+            }`}
+          >
+            {/* A total that does not apply (payments across offices)
+                is left blank rather than dashed: nothing is missing. */}
+            {section.total?.[column.key] === null ? '' : cell(section.total as ReportRow, column)}
+          </td>
+        ),
+      )}
+    </tr>
+  )
+
+  const note = (className: string) =>
+    section.note && (
+      <p className={`mt-1 text-[11px] leading-snug text-ink-secondary ${className}`}>{section.note}</p>
+    )
+
+  const split = closing ? Math.max(0, section.rows.length - TAIL_ROWS) : section.rows.length
+  const body = section.rows.slice(0, split)
+  const tail = section.rows.slice(split)
 
   return (
     <section className="lgu-report-section mt-5 first:mt-0">
@@ -121,72 +223,43 @@ function SectionTable({ section }: { section: ReportSection }) {
               ))}
             </tr>
           </thead>
-          <tbody>
-            {section.rows.length === 0 ? (
-              <tr>
-                <td colSpan={section.columns.length} className="border border-ink/40 px-2 py-2 text-ink-muted">
-                  Nothing on record for this period.
-                </td>
-              </tr>
-            ) : (
-              section.rows.map((row, index) => (
-                <tr key={index}>
-                  {section.columns.map((column, i) =>
-                    i === 0 ? (
-                      <th
-                        key={column.key}
-                        scope="row"
-                        className="border border-ink/40 px-2 py-1 text-left font-normal text-ink"
-                      >
-                        {cell(row, column)}
-                      </th>
-                    ) : (
-                      <td
-                        key={column.key}
-                        className={`tnum border border-ink/40 px-2 py-1 text-ink ${
-                          numeric(column) ? 'text-right' : 'text-left'
-                        }`}
-                      >
-                        {cell(row, column)}
-                      </td>
-                    ),
-                  )}
-                </tr>
-              ))
-            )}
-          </tbody>
-          {section.total && section.rows.length > 0 && (
-            <tfoot>
-              <tr>
-                {section.columns.map((column, i) =>
-                  i === 0 ? (
-                    <th
-                      key={column.key}
-                      scope="row"
-                      className="border border-ink/40 px-2 py-1.5 text-left font-bold text-ink"
-                    >
-                      {cell(section.total as ReportRow, column) || 'Total'}
-                    </th>
-                  ) : (
-                    <td
-                      key={column.key}
-                      className={`tnum border border-ink/40 px-2 py-1.5 font-bold text-ink ${
-                        numeric(column) ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      {/* A total that does not apply (payments across offices)
-                          is left blank rather than dashed: nothing is missing. */}
-                      {section.total?.[column.key] === null ? '' : cell(section.total as ReportRow, column)}
-                    </td>
-                  ),
+          {section.rows.length === 0 ? (
+            <tbody className={closing ? 'lgu-report-tail' : undefined}>
+              {emptyRow}
+              {closing && <ClosingRow span={section.columns.length}>{closing}</ClosingRow>}
+            </tbody>
+          ) : (
+            <>
+              {body.length > 0 && <tbody>{body.map(dataRow)}</tbody>}
+              <tbody className={closing ? 'lgu-report-tail' : undefined}>
+                {tail.map((row, index) => dataRow(row, split + index))}
+                {totalRow}
+                {closing && (
+                  <ClosingRow span={section.columns.length}>
+                    {note('')}
+                    {closing}
+                  </ClosingRow>
                 )}
-              </tr>
-            </tfoot>
+              </tbody>
+            </>
           )}
         </table>
       </div>
-      {section.note && <p className="mt-1 text-[11px] leading-snug text-ink-secondary">{section.note}</p>}
+      {/* With a closing block the note prints inside the table's last row
+          group, beside the signatures; on screen it is drawn here as always. */}
+      {note(closing ? 'print:hidden' : '')}
     </section>
+  )
+}
+
+/** A print-only, borderless row spanning the table: where the signatures ride. */
+function ClosingRow({ span, children }: { span: number; children: ReactNode }) {
+  return (
+    <tr className="hidden print:table-row">
+      <td colSpan={span} className="border-0 p-0">
+        {children}
+      </td>
+    </tr>
   )
 }
 
@@ -195,14 +268,14 @@ function SignatureLine({ label, name, position }: { label: string; name?: string
     <div className="min-w-0">
       <p className="text-[12px] text-ink-secondary">{label}</p>
       <div className="mt-8 border-b border-ink" aria-hidden="true" />
-      <p className="mt-1 text-[13px] font-semibold uppercase text-ink">{name || ' '}</p>
-      <p className="text-[12px] text-ink-secondary">{position || ' '}</p>
+      <p className="mt-1 text-[13px] font-semibold uppercase text-ink">{name || ' '}</p>
+      <p className="text-[12px] text-ink-secondary">{position || ' '}</p>
     </div>
   )
 }
 
-/** The printable document: header, report, signatures. */
-function ReportDocument({ report }: { report: LguReport }) {
+/** "Prepared by", "Noted by" and the line saying when the figures were counted. */
+function ReportClosing({ report }: { report: LguReport }) {
   const generated = new Date(report.generated_at).toLocaleString('en-PH', {
     month: 'long',
     day: 'numeric',
@@ -210,8 +283,35 @@ function ReportDocument({ report }: { report: LguReport }) {
     hour: 'numeric',
     minute: '2-digit',
   })
+
+  return (
+    <>
+      <div className="mt-10 grid grid-cols-2 gap-10">
+        <SignatureLine
+          label="Prepared by:"
+          name={report.prepared_by.name}
+          position={report.prepared_by.position}
+        />
+        <SignatureLine
+          label="Noted by:"
+          name={report.noted_by?.name}
+          position={report.noted_by?.position ?? 'Head of Office'}
+        />
+      </div>
+
+      <p className="mt-8 border-t border-line pt-2 text-[10.5px] text-ink-muted">
+        Generated from the BizTrack register on {generated}. Figures are counted from the register
+        as it stood at that moment.
+      </p>
+    </>
+  )
+}
+
+/** The printable document: header, report, signatures. */
+function ReportDocument({ report }: { report: LguReport }) {
   const office =
     report.scope.office === null ? 'Business Permits and Licensing Office' : report.scope.office_name
+  const last = report.sections.length - 1
 
   return (
     <article
@@ -237,55 +337,128 @@ function ReportDocument({ report }: { report: LguReport }) {
         <p className="mt-0.5 text-[13px]">
           For the period {longDate(report.period.from)} to {longDate(report.period.to)}
         </p>
-        <p className="text-[12px] text-ink-secondary">
-          {report.scope.office === null ? 'All offices' : report.scope.office_name}
-        </p>
+        <p className="text-[12px] text-ink-secondary">{reportOffice(report)}</p>
       </div>
 
       <div className="mt-5">
-        {report.sections.map((section) => (
-          <SectionTable key={section.heading} section={section} />
+        {report.sections.map((section, index) => (
+          <SectionTable
+            key={section.heading}
+            section={section}
+            closing={index === last ? <ReportClosing report={report} /> : undefined}
+          />
         ))}
       </div>
 
-      <div className="lgu-report-signatures mt-10 grid grid-cols-2 gap-10">
-        <SignatureLine
-          label="Prepared by:"
-          name={report.prepared_by.name}
-          position={report.prepared_by.position}
-        />
-        <SignatureLine
-          label="Noted by:"
-          name={report.noted_by?.name}
-          position={report.noted_by?.position ?? 'Head of Office'}
-        />
+      {/* The screen's copy of the signatures. Print uses the one inside the
+          last table (see SectionTable), so this one stays off paper. A report
+          with no sections at all has no table to carry it, and prints this. */}
+      <div className={last >= 0 ? 'print:hidden' : undefined}>
+        <ReportClosing report={report} />
       </div>
-
-      <p className="mt-8 border-t border-line pt-2 text-[10.5px] text-ink-muted">
-        Generated from the BizTrack register on {generated}. Figures are counted from the register
-        as it stood at that moment.
-      </p>
     </article>
   )
 }
 
+/** The office line a report is headed with. */
+function reportOffice(report: LguReport): string {
+  return report.scope.office === null ? 'All offices' : report.scope.office_name
+}
+
+/** A string as a CSS `content` value: quoted, with quotes and backslashes escaped. */
+function cssString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ')}"`
+}
+
 /*
- * Print: A4, the document only. `visibility` rather than `display: none` on
- * the app chrome, because the report sits inside the shell's layout and hiding
- * its ancestors with display would hide it too.
+ * Print: A4, the document only.
+ *
+ * THE REPORT PRINTS IN THE PAGE'S OWN FLOW. It used to be lifted out with
+ * `position: absolute` over an app shell hidden by `visibility`. Hidden is not
+ * gone: the invisible shell — title, tabs, the controls card — still took up
+ * its height, so the printout's page count was the shell's, not the report's,
+ * and a report that nearly filled its last page could print a blank one after
+ * it. Now everything that is neither the report nor one of its ancestors is
+ * `display: none`, and the ancestors (found with :has) are flattened to plain
+ * blocks with no padding, width or offset, so the report starts at the top
+ * left of page one as before and the paper ends where the report does.
+ *
+ * EVERY PAGE SAYS WHAT IT IS. Page two of a three-year collections report used
+ * to be a bare table of months: separated from page one, nothing on it said
+ * which report, which office or which period it belonged to. The running line
+ * and the page number go in the @page MARGIN BOXES, which Chrome and Edge have
+ * printed since version 131. They are built from the report on screen, so they
+ * change with it. Page one leaves the running line out, because the letterhead
+ * under it already says the same thing in full.
+ *
+ * Firefox and Safari do not print margin boxes yet. There the report still
+ * prints correctly — the table headings still repeat on every page — it just
+ * loses the running line and the page number. That was preferred to a running
+ * row inside every table, which would print the title three times on page one
+ * of a three-table report.
+ *
+ * THE SIGNATURES KEEP COMPANY. The last table's final row group — its last
+ * few rows, the total, the note and the signatures — is `break-inside: avoid`
+ * (see SectionTable), so the "Prepared by" and "Noted by" lines move to a new
+ * page only together with the end of the figures they sign. The three-year
+ * BPLO collections report used to end on a page holding the signatures and
+ * nothing else.
  */
-const PRINT_CSS = `
+function printCss(report: LguReport | null): string {
+  const running = report
+    ? `${report.title} · ${longDate(report.period.from)} to ${longDate(report.period.to)} · ${reportOffice(report)}`
+    : ''
+
+  return `
 @media print {
-  @page { size: A4 portrait; margin: 14mm 12mm; }
+  @page {
+    size: A4 portrait;
+    margin: 16mm 12mm 14mm;
+    @top-left {
+      content: ${cssString(running)};
+      font-family: 'Poppins', 'Segoe UI', system-ui, sans-serif;
+      font-size: 8pt;
+      color: #3c4350;
+      vertical-align: bottom;
+      padding-bottom: 3mm;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Poppins', 'Segoe UI', system-ui, sans-serif;
+      font-size: 8pt;
+      color: #3c4350;
+      vertical-align: top;
+      padding-top: 3mm;
+    }
+  }
+  @page :first {
+    @top-left { content: none; }
+  }
   body { background: #fff !important; }
-  body * { visibility: hidden; }
-  #lgu-report, #lgu-report * { visibility: visible; }
-  #lgu-report { position: absolute; left: 0; top: 0; width: 100%; }
+  body *:not(#lgu-report):not(#lgu-report *):not(:has(#lgu-report)) { display: none !important; }
+  body *:has(#lgu-report) {
+    display: block !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: none !important;
+    transform: none !important;
+  }
   #lgu-report thead { display: table-header-group; }
-  #lgu-report tr, .lgu-report-signatures { break-inside: avoid; }
+  #lgu-report tr { break-inside: avoid; }
   #lgu-report .lgu-report-section h3 { break-after: avoid; }
+  #lgu-report .lgu-report-tail { break-inside: avoid; }
 }
 `
+}
 
 export function ReportsPage() {
   const [params, setParams] = useSearchParams()
@@ -343,7 +516,7 @@ export function ReportsPage() {
 
   return (
     <div>
-      <style>{PRINT_CSS}</style>
+      <style>{printCss(report ?? null)}</style>
       <PageTitle>Reports</PageTitle>
 
       <div className="print:hidden">
@@ -470,7 +643,11 @@ export function ReportsPage() {
         </div>
       ) : error ? (
         <div className="print:hidden">
-          <ErrorState error={error} onRetry={reload} />
+          <AnalyticsError
+            error={error}
+            onRetry={reload}
+            onOwnOffice={office ? () => update({ office: undefined }) : undefined}
+          />
         </div>
       ) : report ? (
         <ReportDocument report={report} />
