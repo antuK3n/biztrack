@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
@@ -174,6 +174,11 @@ const PERIOD_OPTIONS = [
   { value: '24', label: 'Last 24 months' },
   { value: '36', label: 'Last 36 months' },
 ]
+
+/** The window the URL asks for, when it is one the menu offers; 12 otherwise. */
+function windowFrom(value: string | null): string {
+  return PERIOD_OPTIONS.some((option) => option.value === value) ? (value as string) : '12'
+}
 
 /**
  * A wait in office hours, as a reader would say it.
@@ -1476,7 +1481,6 @@ function LoadingState() {
 }
 
 export function AnalyticsPage() {
-  const [months, setMonths] = useState('12')
   /*
    * Undefined until the reader picks one: the first request asks for "my
    * default" and the server answers with the reader's own office (or every
@@ -1486,14 +1490,24 @@ export function AnalyticsPage() {
   /*
    * In the URL, so a reload, a bookmark or the Generate Report link keeps the
    * office. Still only a request: the server decides (AnalyticsOffice).
+   *
+   * The trailing window is in the URL too, beside the office. It was component
+   * state, so a reload or a shared link quietly went back to twelve months
+   * while the office it was opened for stayed put — two halves of one view
+   * kept two different ways. `months` is left out of the URL at its default,
+   * so the plain address stays the plain address.
    */
   const [params, setParams] = useSearchParams()
   const office = params.get('office') ?? undefined
-  const setOffice = (value: string) => {
+  const months = windowFrom(params.get('months'))
+  const setParam = (name: string, value: string | undefined) => {
     const next = new URLSearchParams(params)
-    next.set('office', value)
+    if (value === undefined) next.delete(name)
+    else next.set(name, value)
     setParams(next, { replace: true })
   }
+  const setOffice = (value: string) => setParam('office', value)
+  const setMonths = (value: string) => setParam('months', value === '12' ? undefined : value)
 
   const {
     data: result,
