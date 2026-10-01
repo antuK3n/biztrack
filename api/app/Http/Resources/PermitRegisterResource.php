@@ -91,7 +91,8 @@ class PermitRegisterResource extends PermitResource
              */
             'ban' => $this->whenLoaded('business', fn () => $this->business?->ban),
         ], parent::toArray($request), [
-            // The certificate face. Keys match PermitFace::KEYS exactly.
+            // The certificate face: PermitFace::KEYS, and the two
+            // SIGNATORY_KEYS that print under the ruled lines.
             'face' => $face,
 
             'valid_from' => optional($this->valid_from)->toDateString(),

@@ -13,12 +13,14 @@
     - dompdf has no flexbox and no grid. Every side-by-side pair below is a
       table with fixed column widths; that is the only layout primitive that
       renders the same in dompdf as it measures.
-    - Nothing here is a person's name. The signature block is rendered from
-      office_signatories rows (see the create_office_signatories_table
-      migration). When the issuing office has no signatories on file the block
-      still prints, as blank ruled lines under their role captions, because a
-      blank line is a document waiting for a wet signature while an invented
-      name is a forgery.
+    - Nothing here is a person's name. The signature block arrives built, from
+      PermitController::certificateData: the Mayor and the officer who issued
+      this permit, frozen onto the permit at signature, followed by any
+      office_signatories rows the issuing office configured (see the
+      create_office_signatories_table migration). A role whose name is null
+      still prints, as a blank ruled line under its caption, because a blank
+      line is a document waiting for a wet signature while an invented name is
+      a forgery.
 --}}
 <!DOCTYPE html>
 <html>
@@ -165,15 +167,16 @@
 
     @php
         /*
-         * Role captions only — no names. Used when the issuing office has no
-         * office_signatories rows yet, which is every office but CENRO on a
-         * freshly seeded register: the seeder deliberately seeds only the names
-         * that were read off an actual printed form.
+         * Whatever the controller built, with no fallback of its own.
+         *
+         * This held a literal City Mayor / Officer-in-Charge pair, duplicated
+         * in the React certificate, for the days when the register knew of no
+         * signatory but CENRO's. Both roles now come down in `$signatories`
+         * with their names on them — see PermitFace::signatureBlock — so a
+         * fallback here could only ever print a second, nameless copy of a
+         * line that is already on the sheet.
          */
-        $blocks = $signatories ?: [
-            ['role' => 'City Mayor', 'name' => null],
-            ['role' => 'Officer-in-Charge', 'name' => null],
-        ];
+        $blocks = $signatories;
     @endphp
     <table class="signatures">
         <tr>
