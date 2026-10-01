@@ -52,6 +52,20 @@ const REPORT_TITLES: Record<ReportKey, string> = {
 
 const REPORT_KEYS = Object.keys(REPORT_TITLES) as ReportKey[]
 
+/*
+ * "All reports": the five, one after another, each starting on a new page when
+ * printed, so one Print gives one PDF of the whole set. Before this, a full set
+ * meant printing five times and keeping five files [Ken, 2 October 2026:
+ * "shouldn't the generate report just generate one PDF?"].
+ *
+ * A choice in the same menu rather than a second button, so the period and
+ * office controls above still decide it. It is not a server report: the page
+ * asks for the five it already knows and stacks them, and each still prints
+ * exactly as it does on its own.
+ */
+const ALL_REPORTS = 'all'
+type ReportChoice = ReportKey | typeof ALL_REPORTS
+
 function iso(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -288,9 +302,9 @@ function ReportDocument({ report }: { report: LguReport }) {
 
   return (
     <article
-      id="lgu-report"
-      aria-labelledby="lgu-report-title"
-      className="mx-auto max-w-[210mm] bg-white px-6 py-7 text-ink shadow-card sm:px-10 print:max-w-none print:px-0 print:py-0 print:shadow-none"
+      id={`lgu-report-${report.key}`}
+      aria-labelledby={`lgu-report-title-${report.key}`}
+      className="lgu-report mx-auto max-w-[210mm] bg-white px-6 py-7 text-ink shadow-card sm:px-10 print:max-w-none print:px-0 print:py-0 print:shadow-none"
     >
       <header className="flex items-center gap-4 border-b-2 border-ink pb-3">
         {/* The seal carries no information the lines beside it do not; see
@@ -304,7 +318,7 @@ function ReportDocument({ report }: { report: LguReport }) {
       </header>
 
       <div className="mt-4 text-center">
-        <h2 id="lgu-report-title" className="text-[17px] font-bold uppercase tracking-wide">
+        <h2 id={`lgu-report-title-${report.key}`} className="text-[17px] font-bold uppercase tracking-wide">
           {report.title}
         </h2>
         <p className="mt-0.5 text-[13px]">
@@ -374,9 +388,13 @@ function cssString(value: string): string {
  * rows, the total, the note and the closing line — is `break-inside: avoid`
  * (see SectionTable), so the end of a report never prints alone on a page.
  */
-function printCss(report: LguReport | null): string {
-  const running = report
-    ? `${report.title} · ${longDate(report.period.from)} to ${longDate(report.period.to)} · ${reportOffice(report)}`
+function printCss(reports: LguReport[]): string {
+  const first = reports[0]
+  // One report names itself; the whole set is named as the set, because the
+  // running line repeats on every page and cannot change title part-way.
+  const title = reports.length > 1 ? 'All reports' : first?.title
+  const running = first
+    ? `${title} · ${longDate(first.period.from)} to ${longDate(first.period.to)} · ${reportOffice(first)}`
     : ''
 
   return `
@@ -405,8 +423,8 @@ function printCss(report: LguReport | null): string {
     @top-left { content: none; }
   }
   body { background: #fff !important; }
-  body *:not(#lgu-report):not(#lgu-report *):not(:has(#lgu-report)) { display: none !important; }
-  body *:has(#lgu-report) {
+  body *:not(#lgu-reports):not(#lgu-reports *):not(:has(#lgu-reports)) { display: none !important; }
+  body *:has(#lgu-reports) {
     display: block !important;
     position: static !important;
     margin: 0 !important;
@@ -422,10 +440,12 @@ function printCss(report: LguReport | null): string {
     background: none !important;
     transform: none !important;
   }
-  #lgu-report thead { display: table-header-group; }
-  #lgu-report tr { break-inside: avoid; }
-  #lgu-report .lgu-report-section h3 { break-after: avoid; }
-  #lgu-report .lgu-report-tail { break-inside: avoid; }
+  #lgu-reports thead { display: table-header-group; }
+  #lgu-reports tr { break-inside: avoid; }
+  #lgu-reports .lgu-report-section h3 { break-after: avoid; }
+  #lgu-reports .lgu-report-tail { break-inside: avoid; }
+  /* All reports: each starts on its own page, under its own letterhead. */
+  #lgu-reports .lgu-report + .lgu-report { break-before: page; }
 }
 `
 }
@@ -434,9 +454,12 @@ export function ReportsPage() {
   const [params, setParams] = useSearchParams()
   const defaults = presets()[0]
 
-  const key = (REPORT_KEYS as string[]).includes(params.get('report') ?? '')
-    ? (params.get('report') as ReportKey)
-    : 'permits-issued'
+  const requested = params.get('report') ?? ''
+  const choice: ReportChoice =
+    requested === ALL_REPORTS || (REPORT_KEYS as string[]).includes(requested)
+      ? (requested as ReportChoice)
+      : 'permits-issued'
+  const allReports = choice === ALL_REPORTS
   const from = params.get('from') ?? defaults.from
   const to = params.get('to') ?? defaults.to
   const office = params.get('office') ?? undefined
@@ -455,19 +478,31 @@ export function ReportsPage() {
 
   const periodInvalid = from > to
 
-  const { data: report, loading, error, reload } = useAsync(
+  /*
+   * Always a list: one report, or the five for "All reports". Fetched together
+   * so the set appears at once — five independent loads would draw the
+   * documents in whatever order the server answered and reflow the page under
+   * the reader as each arrived.
+   */
+  const { data: reports, loading, error, reload } = useAsync<LguReport[]>(
     () =>
       periodInvalid
         ? Promise.reject(new Error('The end date has to be on or after the start date.'))
-        : analytics.report(key, from, to, office),
-    [key, from, to, office],
+        : Promise.all(
+            (allReports ? REPORT_KEYS : [choice as ReportKey]).map((k) =>
+              analytics.report(k, from, to, office),
+            ),
+          ),
+    [choice, from, to, office],
   )
+  // The scope is the same on all five; the office picker reads it off the first.
+  const report = reports?.[0] ?? null
 
   async function downloadCsv() {
     setCsvBusy(true)
     setCsvError(null)
     try {
-      await analytics.reportCsv(key, from, to, office)
+      await analytics.reportCsv(choice as ReportKey, from, to, office)
     } catch (err) {
       setCsvError(toApiError(err).message)
     } finally {
@@ -486,7 +521,7 @@ export function ReportsPage() {
 
   return (
     <div>
-      <style>{printCss(report ?? null)}</style>
+      <style>{printCss(reports ?? [])}</style>
       <PageTitle>Reports</PageTitle>
 
       <div className="print:hidden">
@@ -501,7 +536,7 @@ export function ReportsPage() {
               <select
                 id="report-key"
                 className={inputCls}
-                value={key}
+                value={choice}
                 onChange={(event) => update({ report: event.target.value })}
               >
                 {REPORT_KEYS.map((k) => (
@@ -509,6 +544,7 @@ export function ReportsPage() {
                     {REPORT_TITLES[k]}
                   </option>
                 ))}
+                <option value={ALL_REPORTS}>All reports (one document)</option>
               </select>
             </div>
             <label className="block">
@@ -570,6 +606,12 @@ export function ReportsPage() {
                   {csvError}
                 </span>
               )}
+              {/* A CSV is one table of figures, so it stays one report at a time. */}
+              {allReports && (
+                <span id="report-csv-note" className="text-xs text-ink-secondary">
+                  Choose one report to download its CSV.
+                </span>
+              )}
               <button
                 type="button"
                 onClick={downloadDashboardPdf}
@@ -580,9 +622,10 @@ export function ReportsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (report && !csvBusy) void downloadCsv()
+                  if (report && !allReports && !csvBusy) void downloadCsv()
                 }}
-                aria-disabled={!report || csvBusy ? true : undefined}
+                aria-disabled={!report || allReports || csvBusy ? true : undefined}
+                aria-describedby={allReports ? 'report-csv-note' : undefined}
                 aria-busy={csvBusy}
                 className="rounded-lg border border-royal px-5 py-2.5 text-sm font-semibold text-royal hover:bg-royal-tint aria-disabled:opacity-60"
               >
@@ -619,8 +662,12 @@ export function ReportsPage() {
             onOwnOffice={office ? () => update({ office: undefined }) : undefined}
           />
         </div>
-      ) : report ? (
-        <ReportDocument report={report} />
+      ) : reports && reports.length > 0 ? (
+        <div id="lgu-reports" className="space-y-8 print:space-y-0">
+          {reports.map((r) => (
+            <ReportDocument key={r.key} report={r} />
+          ))}
+        </div>
       ) : null}
     </div>
   )

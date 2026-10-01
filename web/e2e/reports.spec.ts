@@ -142,6 +142,38 @@ test.describe('Reports, as BPLO', () => {
     await expect(report.getByText('Generated from the BizTrack register').filter({ visible: true })).toHaveCount(1)
   })
 
+  test('"All reports" is the five in one document, each on its own page when printed', async ({ page }) => {
+    await page.goto('/staff/analytics/reports?from=2026-01-01&to=2026-09-30&office=all')
+    await waitForAnalytics(page, 'Reports')
+    await page.getByLabel('Report', { exact: true }).selectOption({ label: 'All reports (one document)' })
+    await expect(page).toHaveURL(/report=all/)
+
+    // The five, in the menu's order, each under its own letterhead.
+    const reports = page.getByRole('article')
+    await expect(reports).toHaveCount(REPORTS.length)
+    await expect(reports.getByRole('heading', { level: 2 })).toHaveText(REPORTS)
+    for (const title of REPORTS) {
+      await expect(page.getByRole('article', { name: title })).toContainText('City of Malabon')
+    }
+
+    // One Print gives one PDF: each report after the first starts a new page,
+    // and the running line names the set, not the first report.
+    const css = await page.locator('style').evaluateAll((styles) =>
+      styles.map((s) => s.textContent ?? '').join('\n'),
+    )
+    expect(css).toContain('#lgu-reports .lgu-report + .lgu-report { break-before: page; }')
+    expect(css).toMatch(/@top-left \{\s*content: "All reports · January 1, 2026 to September 30, 2026 · All offices"/)
+    await page.emulateMedia({ media: 'print' })
+    await expect(reports).toHaveCount(REPORTS.length)
+    await expect(reports.last()).toBeVisible()
+    expect(await reports.nth(1).evaluate((el) => getComputedStyle(el).breakBefore)).toBe('page')
+    await page.emulateMedia({ media: 'screen' })
+
+    // A CSV is one table of figures, so it stays one report at a time.
+    await expect(page.getByRole('button', { name: 'Download CSV' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(page.getByText('Choose one report to download its CSV.')).toBeVisible()
+  })
+
   test('printing shows the document and nothing else', async ({ page }) => {
     await page.goto('/staff/analytics/reports?report=collections')
     await waitForAnalytics(page, 'Reports')
