@@ -1,4 +1,5 @@
 import { Bar, BarChart, Cell, LabelList, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts'
+import type { LabelProps } from 'recharts'
 import type { ReactNode } from 'react'
 import {
   CHART_AXIS_TICK,
@@ -50,6 +51,67 @@ function tableRows(data: BarDatum[], hasNote: boolean): ChartTableRow[] {
  */
 function rampColor(row: BarDatum, index: number): string {
   return row.color ?? (index === 0 ? CHART_ROYAL : CHART_MUTED)
+}
+
+/*
+ * Two-line labels for the horizontal bars, so a unit or a qualifier is never
+ * the part that has to go.
+ *
+ * "8.7 working days" on one line took 144px at the bar end, and with a
+ * category reading "Highly technical · 20-day limit" beside it the RA 11032
+ * chart had about 25px left for its bars on a 390px phone: three stubs that
+ * could not show which tier was furthest over. Written as the figure over its
+ * unit, and the category over its qualifier, both gutters roughly halve and
+ * nothing is shortened. A label without a unit or a " · " stays on one line.
+ */
+const LABEL_INK = '#1a1f2b'
+
+/** "8.7 working days" → ["8.7", "working days"]; "31" → ["31", null]. */
+function splitValue(text: string): [string, string | null] {
+  const at = text.indexOf(' ')
+  return at === -1 ? [text, null] : [text.slice(0, at), text.slice(at + 1)]
+}
+
+/** "Simple · 3-day limit" → ["Simple", "3-day limit"]. */
+function splitCategory(text: string): [string, string | null] {
+  const at = text.indexOf(' · ')
+  return at === -1 ? [text, null] : [text.slice(0, at), text.slice(at + 3)]
+}
+
+function CategoryTick({ x, y, payload }: { x: number | string; y: number | string; payload: { value: unknown } }) {
+  const [name, qualifier] = splitCategory(String(payload.value))
+  const tx = Number(x)
+  // dy in em centres the line, or the pair of lines, on the bar's middle.
+  return (
+    <text x={tx} y={Number(y)} textAnchor="end" fontSize={CHART_AXIS_TICK.fontSize} fill={CHART_AXIS_TICK.fill}>
+      <tspan x={tx} dy={qualifier === null ? '0.355em' : '-0.22em'}>
+        {name}
+      </tspan>
+      {qualifier !== null && (
+        <tspan x={tx} dy="1.15em">
+          {qualifier}
+        </tspan>
+      )}
+    </text>
+  )
+}
+
+function ValueLabel({ viewBox, value }: LabelProps) {
+  if (!viewBox || !('width' in viewBox)) return null
+  const [figure, unit] = splitValue(String(value ?? ''))
+  const x = viewBox.x + viewBox.width + 7
+  return (
+    <text x={x} y={viewBox.y + viewBox.height / 2} fontSize={12} fontWeight={600} fill={LABEL_INK}>
+      <tspan x={x} dy={unit === null ? '0.355em' : '-0.22em'}>
+        {figure}
+      </tspan>
+      {unit !== null && (
+        <tspan x={x} dy="1.15em" fontSize={10.5} fontWeight={500} fill={CHART_AXIS_TICK.fill}>
+          {unit}
+        </tspan>
+      )}
+    </text>
+  )
 }
 
 /* ── vertical ───────────────────────────────────────────────────────────── */
@@ -199,10 +261,17 @@ export function HorizontalBars({
    * Room at the bar ends for the longest value written there. A fixed 56px fit
    * "8.7d" and clipped "8.7 working days" — and the unit is the part that must
    * not be cut, because two panels side by side count different kinds of day.
-   * ~8px a character at the label's 12px semibold; recharts wraps a label
-   * that does not fit, so erring wide keeps "2.2 office days" on one line.
+   * The figure (~8px a character at 12px semibold) sits over its unit (~6.3px
+   * a character at 10.5px), so the wider of the two lines sets the room.
    */
-  const valueRoom = Math.max(56, Math.max(0, ...data.map((row) => row.valueText.length)) * 8 + 8)
+  const valueRoom = Math.max(
+    56,
+    ...data.map((row) => {
+      const [figure, unit] = splitValue(row.valueText)
+      return Math.ceil(Math.max(figure.length * 8, (unit?.length ?? 0) * 6.3)) + 12
+    }),
+  )
+  const qualified = data.some((row) => splitCategory(row.label)[1] !== null)
 
   return (
     <ChartFrame
@@ -226,7 +295,9 @@ export function HorizontalBars({
         <YAxis
           type="category"
           dataKey="label"
-          tick={CHART_AXIS_TICK}
+          // recharts' own tick wraps a long name to the gutter; the two-line
+          // tick is only for a name that carries a qualifier after " · ".
+          tick={qualified ? CategoryTick : CHART_AXIS_TICK}
           tickLine={false}
           axisLine={false}
           width={categoryWidth}
@@ -259,14 +330,7 @@ export function HorizontalBars({
           {data.map((row, i) => (
             <Cell key={row.key} fill={rampColor(row, i)} />
           ))}
-          <LabelList
-            dataKey="valueText"
-            position="right"
-            offset={7}
-            fontSize={12}
-            fontWeight={600}
-            fill="#1a1f2b"
-          />
+          <LabelList dataKey="valueText" content={ValueLabel} />
         </Bar>
       </BarChart>
     </ChartFrame>
