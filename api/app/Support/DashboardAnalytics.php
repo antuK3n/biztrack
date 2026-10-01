@@ -1282,7 +1282,17 @@ final class DashboardAnalytics
             $code = (string) $row->code;
             $open($code);
 
-            // Every inspection on record was scheduled at some point, so
+            // A cancelled visit was never going to happen, so it is not part of
+            // the work: counted as scheduled, it read as backlog forever (the
+            // gap between scheduled and completed is what this panel calls the
+            // backlog). A rescheduled one stays: rescheduling moves the same
+            // visit to a new date (InspectionController::reschedule), and it is
+            // still owed.
+            if ((string) $row->status === InspectionStatus::Cancelled->value) {
+                continue;
+            }
+
+            // Every other inspection on record counts as scheduled, so
             // "scheduled" is the total rather than the count still awaiting a
             // visit — otherwise a fully worked-through queue would report zero
             // scheduled and a pass rate with no context.
