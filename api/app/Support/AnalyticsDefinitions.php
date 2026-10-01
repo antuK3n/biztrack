@@ -155,8 +155,13 @@ final class AnalyticsDefinitions
                 // Tier", which said "tier" twice over — once in the heading and
                 // again in every bar label underneath it.
                 'label' => 'Average Processing Time (RA 11032)',
-                'formula' => 'Average working days from submission to decision, per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical.',
-                'covers' => 'Decided filings in the months set by the filter that record a tier, a submission and a decision. Working days skip weekends. Holidays are not allowed for, so a real turnaround is never faster than shown.',
+                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, For Final Approval); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
+                /*
+                 * The holiday sentence read "never faster than shown", which
+                 * is backwards: a holiday counted as a working day makes the
+                 * figure LONGER than the truth, so the truth is never slower.
+                 */
+                'covers' => 'Filings decided, or one office\'s reviews finished, in the months set by the filter, with a tier on record. Days the filing waited on the applicant to pay or to resubmit are left out; a single permit sent back by its own office still counts against that office. Working days skip weekends. Holidays are not on the register and count as working days, so a real turnaround is never slower than shown.',
                 'why' => 'RA 11032 sets a legal deadline, not an office target: going over it breaks the law. The limit here is the statutory one, never the flat deadline this system stamps on a filing — that field does not change with the tier.',
             ],
 
@@ -181,7 +186,7 @@ final class AnalyticsDefinitions
             'compliance.ra11032_processing' => [
                 'label' => 'Processing Rate Compliance to RA 11032',
                 'formula' => 'Filings decided inside the legal deadline for their own tier ÷ decided filings that record a tier × 100.',
-                'covers' => 'The months set by the filter. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
+                'covers' => 'The months set by the filter, timed as in Average Processing Time: the applicant\'s days are left out, and one office is judged on its own review only. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
                 'why' => 'The pass rate against the law. It counts filings, so it cannot be averaged with the two cards beside it.',
             ],
 
