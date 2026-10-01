@@ -330,6 +330,7 @@ final class LguReports
             ->get(['payments.id', 'payments.amount', 'payments.paid_at', 'fee_assessments.line_items', 'fee_assessments.total_amount']);
 
         $offices = self::officeNames();
+        $officeOfPermit = self::issuingOfficeByPermitCode();
         $byOffice = [];
         $byNature = [];
         $byMonth = [];
@@ -349,7 +350,7 @@ final class LguReports
             $touched = false;
             $paidHere = 0.0;
             foreach ($lines as $line) {
-                $office = (string) ($line['office'] ?? '');
+                $office = self::lineOffice($line, $officeOfPermit);
                 if ($scope !== null && $office !== $scope['code']) {
                     continue;
                 }
@@ -779,6 +780,48 @@ final class LguReports
     }
 
     /** @return array<string, string> office code => name, departments plus the fee-only offices */
+    /**
+     * Which office a fee line belongs to.
+     *
+     * Most lines carry their office. The flat-schedule lines and the deferred
+     * "unbilled until now" lines carry only the permit they are for
+     * (`permit_codes`), so an office's own collections report left them out
+     * and they surfaced only in the all-offices total as "Not itemised by
+     * office". A line naming permits of exactly one office is that office's;
+     * one naming several offices' permits stays unassigned rather than being
+     * guessed.
+     *
+     * @param  array<string, mixed>  $line
+     * @param  array<string, string>  $officeOfPermit
+     */
+    private static function lineOffice(array $line, array $officeOfPermit): string
+    {
+        $office = (string) ($line['office'] ?? '');
+        if ($office !== '') {
+            return $office;
+        }
+
+        $owners = array_values(array_unique(array_filter(array_map(
+            static fn ($code): string => $officeOfPermit[(string) $code] ?? '',
+            (array) ($line['permit_codes'] ?? []),
+        ))));
+
+        return count($owners) === 1 ? $owners[0] : '';
+    }
+
+    /** @return array<string, string> permit type code => issuing office code */
+    private static function issuingOfficeByPermitCode(): array
+    {
+        return DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            // Aliased: both tables call the column `code`, and an unaliased
+            // pluck reads the permit's own code back as its office.
+            ->select('permit_types.code as permit_code', 'departments.code as office_code')
+            ->pluck('office_code', 'permit_code')
+            ->map(static fn ($c): string => (string) $c)
+            ->all();
+    }
+
     private static function officeNames(): array
     {
         $names = DB::table('departments')->pluck('name', 'code')->map(static fn ($n): string => (string) $n)->all();
