@@ -7,8 +7,8 @@ use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\PermitType;
-use App\Support\AmendableFields;
 use App\Models\PsicCode;
+use App\Support\AmendableFields;
 use Illuminate\Http\JsonResponse;
 
 /**

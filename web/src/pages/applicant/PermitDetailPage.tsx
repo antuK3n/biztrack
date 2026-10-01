@@ -55,14 +55,12 @@ function CertField({
   label,
   value,
   absent,
-  wide,
   to,
 }: {
   label: string
   value: string | null
   /** What the box says when there is no value. Defaults to an em dash. */
   absent?: string
-  wide?: boolean
   /** Turns the value into a link. Used to walk back to the filing behind the permit. */
   to?: string
 }) {
@@ -72,20 +70,41 @@ function CertField({
    * replaced by an ellipsis — on the document that is supposed to say what the
    * permit covers. A taller box is the right trade against a shorter truth.
    */
-  const box = 'min-w-0 flex-1 break-words border border-line bg-royal-tint px-2.5 py-1 text-sm'
+  const box = 'min-w-0 break-words border border-line bg-royal-tint px-2.5 py-1 text-sm'
   const empty = value === null || value === ''
   // Greyed and italic when empty, so a box with nothing in it never reads as a
   // value that failed to render.
   const tone = empty ? 'italic text-ink-muted' : 'text-ink'
   const text = empty ? (absent ?? '—') : value
 
+  /*
+   * ── A grid, because a flex row broke this document twice ────────────────
+   *
+   * It was `flex items-baseline gap-3` with a `shrink-0` label and a `flex-1`
+   * box, and that failed at both ends:
+   *
+   *  - ON A PHONE the label took the width it wanted and the box collapsed to
+   *    what was left, so `break-words` broke inside the words. The permit
+   *    number rendered one character per line — M, C, B, -, 2, 0, 2, 6 down
+   *    the page — and so did the date of issue. On a certificate somebody
+   *    holds up to an inspector.
+   *  - ON A DESKTOP each label was a different length, so every value box
+   *    started at a different x: 487px, 484px, 462px, 502px. A government
+   *    form has one left edge for its values, and this had five.
+   *
+   * One fixed label column fixes both. Below `sm` the label sits on its own
+   * line above the value, which is what gives the box the whole width back.
+   */
   return (
-    <div className={`flex items-baseline gap-3 ${wide ? 'col-span-2' : ''}`}>
-      <span className="shrink-0 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+    <div className="grid grid-cols-1 items-baseline gap-x-3 gap-y-0.5 sm:grid-cols-[10.5rem_minmax(0,1fr)]">
+      <span className="text-[11px] font-bold uppercase leading-snug tracking-wide text-ink-secondary">
         {label}
       </span>
       {to && !empty ? (
-        <Link to={to} className={`${box} font-semibold text-royal underline underline-offset-2 hover:no-underline print:no-underline`}>
+        <Link
+          to={to}
+          className={`${box} font-semibold text-royal underline underline-offset-2 hover:no-underline print:no-underline`}
+        >
           {text}
         </Link>
       ) : (
@@ -169,24 +188,52 @@ export function PermitDetailPage() {
   return (
     <div className="mx-auto max-w-3xl">
       {/* Modal-like sheet: royal bar with white X (p59) */}
-      <div className="overflow-hidden rounded-md bg-white shadow-overlay">
-        <div className="flex items-center justify-end bg-royal px-4 py-2.5 print:hidden">
-          {/* Straight to Profile, which is where the permit was opened from now
-              that /permits only redirects there — one hop instead of two. */}
+      <div className="overflow-hidden rounded-md bg-white shadow-overlay print:rounded-none print:shadow-none">
+        {/*
+          ── The bar says which permit this is ──────────────────────────────
+
+          It was a bare royal band with an X at the right: 40 pixels of colour
+          carrying nothing. A reader arriving from a list of six certificates
+          had to read down into the document to find out which one they had
+          opened, and the only control on the screen was an unlabelled cross.
+
+          The number is the thing to name — it is what an inspector asks for
+          and what an owner reads out on the phone.
+        */}
+        <div className="flex items-center justify-between gap-4 bg-royal px-4 py-2.5 print:hidden">
+          {/*
+            The NUMBER survives a narrow screen and the type gives way: the
+            number is what an inspector asks for and what an owner reads out on
+            the phone, so truncating it to "MCB-2026-..." would lose the useful
+            half of the line.
+          */}
+          <p className="flex min-w-0 items-baseline gap-2 text-sm text-white">
+            <span className="min-w-0 truncate font-bold">
+              {cert?.permit_type_name ?? permit.permit_type.name}
+            </span>
+            <span className="tnum shrink-0 text-white/80">{permit.permit_number}</span>
+          </p>
+          {/* Back to the permits page, which is where it was opened from. */}
           <button
             type="button"
-            onClick={() => navigate('/profile')}
+            onClick={() => navigate('/permits')}
             aria-label="Close permit view"
-            className="text-white transition-opacity hover:opacity-80"
+            className="shrink-0 rounded text-white transition-opacity hover:opacity-80"
           >
             <XIcon size={22} />
           </button>
         </div>
 
         {/* The permit "document" */}
-        <article className="border-[6px] border-white bg-white px-6 py-7 sm:px-10 print:border-0">
-          <div className="border-2 border-ink/80 px-5 py-6 sm:px-8">
-            <header className="flex items-start justify-between gap-4">
+        <article className="border-[6px] border-white bg-white px-3 py-5 sm:px-10 sm:py-7 print:border-0 print:p-0">
+          <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-8 sm:py-6">
+            {/*
+              The seal block and the QR sat side by side at every width, so on
+              a phone "REPUBLIC OF THE PHILIPPINES" wrapped over four lines in
+              a column barely wider than the seal. They stack below `sm`, with
+              the QR on its own line where it stays scannable.
+            */}
+            <header className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
               <div>
                 {/*
                   Item 95. The BizTrack logo used to sit here, and it had no
@@ -221,7 +268,7 @@ export function PermitDetailPage() {
                   {cert?.department_name ?? 'Business Permits and Licensing Office'}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-center gap-1.5">
+              <div className="flex shrink-0 flex-col items-center gap-1.5 self-center sm:self-start">
                 <QRCodeSVG value={permit.verify_url} size={92} level="M" />
                 <p className="text-[10px] text-ink-muted">Scan to verify</p>
               </div>
@@ -229,7 +276,10 @@ export function PermitDetailPage() {
 
             {/* The permit type is the document's own title, as it is on paper —
                 a fire safety certificate should not be headed BUSINESS PERMIT. */}
-            <h1 className="display-serif mt-6 text-center text-3xl uppercase tracking-[0.18em] text-ink">
+            {/* Tighter tracking and a smaller size below `sm`: at 0.18em a
+                three-word permit name took three lines of a phone screen
+                before the document had said anything. */}
+            <h1 className="display-serif mt-6 text-balance text-center text-2xl uppercase tracking-[0.08em] text-ink sm:text-3xl sm:tracking-[0.18em]">
               {cert?.permit_type_name ?? permit.permit_type.name}
             </h1>
             {expired && (
@@ -285,18 +335,27 @@ export function PermitDetailPage() {
               </p>
             )}
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <CertField wide label="Name of Owner" value={ownerName} />
+            {/*
+              -- One column, all the way down ------------------------------
+
+              Four of these used to sit in a two-column row, and with a fixed
+              label column inside each half there was only ~135px left for the
+              value: "MCB-2026-000001" wrapped after the year, "December 31,
+              2026" after the comma, and a wide gap opened between the pairs.
+              A certificate reading down one aligned column is both correct and
+              quicker to read than two ragged ones.
+            */}
+            <div className="mt-6 grid gap-3">
+              <CertField label="Name of Owner" value={ownerName} />
               <CertField
-                wide
                 label="Business Name"
                 value={cert ? cert.business_name : permit.business?.name}
                 absent="Business removed from register"
               />
-              {cert?.trade_name && <CertField wide label="Trade Name" value={cert.trade_name} />}
-              <CertField wide label="Business Address" value={address} />
+              {cert?.trade_name && <CertField label="Trade Name" value={cert.trade_name} />}
+              <CertField label="Business Address" value={address} />
               {cert?.line_of_business && (
-                <CertField wide label="Line of Business" value={cert.line_of_business} />
+                <CertField label="Line of Business" value={cert.line_of_business} />
               )}
               <CertField label="Permit No." value={permit.permit_number} />
               <CertField label="Permit Type" value={permit.permit_type.name} />
@@ -304,7 +363,6 @@ export function PermitDetailPage() {
               <CertField label="Valid Until" value={formatDate(permit.valid_until)} />
               {/* Approved filings leave the tracking list; this walks back to one. */}
               <CertField
-                wide
                 label="Tracking ID"
                 value={permit.application?.tracking_id ?? null}
                 to={permit.application ? `/applications/${permit.application.id}` : undefined}
@@ -313,7 +371,19 @@ export function PermitDetailPage() {
 
             <div className="mt-5 h-1 bg-royal/70" />
 
-            <div className="mt-4">
+            {/*
+              ── Remarks is paper furniture ─────────────────────────────────
+
+              An empty bordered box, drawn on screen for a hand to write in.
+              Nothing can be typed into it and nothing is ever read out of it,
+              so on a screen it is two inches of nothing between the permit's
+              facts and its signatures — and a reader on a phone scrolls past
+              it wondering what they were meant to have filled in.
+
+              It stays for print, where it is what it has always been: the
+              space an officer writes a condition into on the issued copy.
+            */}
+            <div className="mt-4 hidden print:block">
               <p className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">Remarks:</p>
               <div className="mt-1 h-16 border border-line" />
             </div>
@@ -332,10 +402,18 @@ export function PermitDetailPage() {
               ))}
             </div>
 
+            {/*
+              The URL on its OWN line. `break-all` inside the sentence split it
+              mid-token — the footer read "…authenticity at htt" / "p://…" —
+              which on a document about authenticity looks like a broken link
+              rather than a long one.
+            */}
             <p className="mt-8 text-center text-[10px] leading-relaxed text-ink-muted">
               Subject to revocation for non-compliance with existing laws, ordinances, rules and
-              regulations. Verify authenticity at{' '}
-              <span className="break-all underline">{permit.verify_url}</span>
+              regulations. Verify authenticity at
+            </p>
+            <p className="mt-1 break-all text-center text-[10px] leading-relaxed text-ink-muted underline">
+              {permit.verify_url}
             </p>
           </div>
         </article>

@@ -216,7 +216,23 @@ test.describe('the office Track page', () => {
      * the paid stage), so the two narrow together — which is the useful
      * question: the filings I hold that are waiting on my review.
      */
-    const stages = ['For Approval', 'Pending Payment', 'For Inspection', 'Final Approval']
+    /*
+     * BPLO's stages, which are not every stage.
+     *
+     * This listed 'For Inspection' and 'Final Approval' and was written from
+     * a clearance office's row. Both are wrong for this seat:
+     *
+     *  - For Inspection is a CLEARANCE's stage, read from the office that
+     *    inspects. BPLO holds no clearance, so the tab was removed from its
+     *    row — it could never hold a line. See the note by `BPLO_ONLY_TABS`.
+     *  - the tab is labelled 'For Final Approval', not 'Final Approval'.
+     *
+     * The test went red on the dev merge that made both true, asserting a
+     * control that had been deliberately taken away. The claim it is here to
+     * make is unchanged: whatever stages this seat HAS, choosing a holder
+     * section does not take them away.
+     */
+    const stages = ['For Approval', 'Pending Payment', 'Awaiting Other Permits', 'For Final Approval']
 
     const hints: Record<string, RegExp> = {
       Unassigned: /for approval — filings nobody has taken yet/i,
@@ -388,6 +404,77 @@ test.describe('the super admin’s Officer in Charge page', () => {
     })
   })
 
+  test('releases a filing to the office queue without naming a successor', async ({ page }) => {
+    /*
+     * The one act this screen could not perform.
+     *
+     * Its dialog required a successor, so an office losing its last officer
+     * had nowhere to release work from — and `release` refuses another
+     * officer's case with the words "Only the system administrator can move
+     * it", a promise that endpoint did not keep. `officer_user_id: null` is
+     * the same meaning `reassign-caseload` has always given `to_user_id`.
+     */
+    const held = page.locator('tbody tr').filter({ hasText: 'Riverside Carinderia' })
+    await held.getByRole('button', { name: 'Reassign' }).click()
+
+    const picker = page.locator('div.fixed select').first()
+    await expect(picker.locator('option', { hasText: 'back to the office queue' })).toHaveCount(1)
+
+    await picker.selectOption('release')
+
+    // The label names the act, so a reader knows which of the two they are
+    // about to perform without re-reading the select above it.
+    const confirm = page.getByRole('button', { name: 'Release to office queue' })
+    await expect(confirm).toBeVisible()
+    await confirm.click()
+
+    await expect.poll(() => assigned.length).toBeGreaterThan(0)
+    expect(assigned[0].body).toMatchObject({ officer_user_id: null })
+  })
+
+  test('does not offer to release a filing nobody is holding', async ({ page }) => {
+    // Releasing an unheld filing is a no-op, and a choice with no effect is
+    // worse than no choice.
+    const free = page.locator('tbody tr').filter({ hasText: 'Aling Nena Bakery' })
+    await free.getByRole('button', { name: 'Reassign' }).click()
+
+    const picker = page.locator('div.fixed select').first()
+    await expect(picker.locator('option', { hasText: 'back to the office queue' })).toHaveCount(0)
+  })
+
+  test('the holder’s name opens their caseload', async ({ page }) => {
+    /*
+     * This screen answers "who has it"; the caseload page answers "what else
+     * are they holding, and can I move it in one go". They were two screens a
+     * reader had to join by hand — find the name here, then go to Officer
+     * Assignment and find it again.
+     */
+    const held = page.locator('tbody tr').filter({ hasText: 'Riverside Carinderia' })
+    const link = held.getByRole('link', { name: /Open .*caseload/ })
+
+    await expect(link).toBeVisible()
+    // Relative, so it lands on the portal this page is being read on.
+    await expect(link).toHaveAttribute('href', `/staff/admin/users/${COLLEAGUE.id}/reassign`)
+  })
+
+  test('offers a way back to Officer Assignment', async ({ page }) => {
+    /*
+     * This screen came off the sidebar on 27 September 2026 and is reached
+     * from Officer Assignment now. A page you arrive at through another page
+     * needs a way back to it: without one the only exit is the browser's own
+     * button, and a reader who followed a pasted link has no history to use it
+     * on.
+     */
+    const back = page.getByRole('link', { name: 'Back to Officer Assignment' })
+    await expect(back).toHaveCount(1)
+    await expect(back).toHaveAttribute('href', '/staff/admin/users')
+
+    // Above the title, where this app already puts a back link.
+    const anchor = await back.boundingBox()
+    const title = await page.getByRole('heading', { level: 1 }).boundingBox()
+    expect(anchor && title && anchor.y < title.y).toBe(true)
+  })
+
   test('carries every column the client asked for', async ({ page }) => {
     /*
      * Exact names. A loose match on "Business" also matches "Business No." and
@@ -396,7 +483,7 @@ test.describe('the super admin’s Officer in Charge page', () => {
      * the tracking ID, and a test that could not tell them apart would pass on
      * a table that printed either one twice.
      */
-    for (const column of ['Business', 'Business No.', 'Office', 'Officer in charge', 'Assigned', 'Status', 'Action']) {
+    for (const column of ['Business', 'Business No.', 'Office', 'Officer in charge', 'Assigned', 'Review step', 'Filing', 'Action']) {
       await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible()
     }
 
@@ -429,7 +516,9 @@ test.describe('the super admin’s Officer in Charge page', () => {
 
     await picker.selectOption(String(ME.id))
     await dialog.getByRole('textbox').fill('Marites is on leave.')
-    await dialog.getByRole('button', { name: 'Reassign', exact: true }).click()
+    // "Reassign to Nena Makiling" - the destination is on the button, so the
+    // last thing read before committing is where the filing is going.
+    await dialog.getByRole('button', { name: /^Reassign to / }).click()
 
     await expect.poll(() => assigned.map((a) => a.id)).toContain(13)
     expect(assigned.at(-1)?.body).toMatchObject({ officer_user_id: ME.id, reason: 'Marites is on leave.' })
@@ -573,129 +662,17 @@ const HELD_CASES = [
   },
 ]
 
-test.describe('Reassign on Officer Assignment', () => {
-  test.use({ storageState: sessionFor('admin') })
+/*
+ * ── The Reassign block moved with the screen ────────────────────────────────
+ *
+ * Three tests stood here and drove the Reassign DIALOG on Officer Assignment:
+ * that Scope listed the permits the officer was holding, that only the ticked
+ * ones were sent, and that unticking everything left nothing to confirm.
+ *
+ * Reassign is a page now [client, 27 September 2026], and the three claims are
+ * made against it in `officer-caseload.spec.ts` — "the tables are the Officer
+ * in Charge columns, per list", "the move names the rows and the reason, and
+ * asks the server", and "nothing can be moved until a filing and a reason are
+ * both given".
+ */
 
-  let moved: unknown[]
-
-  test.beforeEach(async ({ page }) => {
-    moved = []
-
-    await page.route('**/api/v1/admin/roles*', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
-    await page.route('**/api/v1/reference/departments*', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
-
-    await page.route('**/api/v1/admin/users?*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: [{
-            id: 50,
-            first_name: 'Rodel',
-            last_name: 'Cruz',
-            email: 'rodel@biztrack.local',
-            mobile_number: '09170000000',
-            gender: 'M',
-            is_active: true,
-            department: { id: 2, code: 'CHO', name: 'City Health Office' },
-            roles: ['sanitary_officer'],
-            created_at: '2026-08-01T00:00:00.000000Z',
-          }],
-          meta: { current_page: 1, last_page: 1, per_page: 20, total: 1 },
-        }),
-      }))
-
-    await page.route('**/api/v1/admin/users/50/caseload', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: {
-            user: { id: 50, name: 'Rodel Cruz' },
-            department: { id: 2, code: 'CHO', name: 'City Health Office' },
-            open_reviews: 2,
-            open_inspections: 0,
-            total: 2,
-            finished_reviews: 1,
-            cases: HELD_CASES,
-            candidates: [{ id: 13, name: 'Carlos Dizon', email: 'sanitary@biztrack.local', open_total: 0 }],
-          },
-        }),
-      }))
-
-    await page.route('**/api/v1/admin/users/50/reassign-caseload', async (route) => {
-      moved.push(route.request().postDataJSON())
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ data: { moved_reviews: 1, moved_inspections: 0, total: 1, to: { id: 13, name: 'Carlos Dizon' } } }),
-      })
-    })
-
-    await page.goto('/staff/admin/users')
-    await expect(page.getByRole('heading', { name: /officer assignment/i })).toBeVisible({ timeout: 30_000 })
-    await page.getByRole('button', { name: 'Reassign' }).first().click()
-  })
-
-  test('Scope lists the permits the officer is holding', async ({ page }) => {
-    const dialog = page.getByRole('dialog')
-
-    await expect(dialog).toContainText('the permits Rodel Cruz is holding')
-
-    for (const held of HELD_CASES) {
-      const row = dialog.getByRole('listitem').filter({ hasText: held.business })
-      await expect(row, `${held.business} is not listed`).toHaveCount(1)
-      // Business number, office and permit — the shape the rest of the feature
-      // uses, and what tells two rows of one business apart.
-      await expect(row).toContainText(held.tracking_id)
-      await expect(row).toContainText(held.office.name)
-      await expect(row).toContainText(held.permit)
-    }
-
-    // Everything ticked to start with: "this officer has gone, move their work"
-    // is still the common act and should not cost a click per case.
-    for (const box of await dialog.getByRole('checkbox').all()) {
-      await expect(box).toBeChecked()
-    }
-    await expect(dialog).toContainText('Also named on 1 finished review')
-  })
-
-  test('only the ticked permits are sent', async ({ page }) => {
-    const dialog = page.getByRole('dialog')
-
-    const second = dialog.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
-    await second.getByRole('checkbox').uncheck()
-
-    await dialog.getByLabel(/reassign to/i).selectOption('13')
-    await dialog.getByRole('textbox').fill('That filing is stuck.')
-    await dialog.getByRole('button', { name: /move caseload/i }).click()
-
-    await expect.poll(() => moved.length).toBe(1)
-    expect(moved[0]).toMatchObject({
-      to_user_id: 13,
-      cases: [{ kind: 'review', id: 41 }],
-      reason: 'That filing is stuck.',
-    })
-    // The category is not sent beside the list: the API takes one or the other,
-    // and both would be two answers to "what moves" with no rule saying which.
-    expect(moved[0]).not.toHaveProperty('scope')
-  })
-
-  test('untick everything and there is nothing to confirm', async ({ page }) => {
-    const dialog = page.getByRole('dialog')
-
-    await dialog.getByRole('button', { name: 'Clear all' }).click()
-    await dialog.getByRole('textbox').fill('Changed my mind.')
-
-    /*
-     * The endpoint refuses an empty move (it used to answer 200 with a zero and
-     * the screen printed a tick). This stops the reader reaching that far, and
-     * says why before they have typed anything.
-     */
-    await expect(dialog).toContainText('Nothing falls under the scope chosen above')
-    const confirm = dialog.getByRole('button', { name: /move caseload|release to office/i })
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-  })
-})

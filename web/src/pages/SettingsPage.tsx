@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GENDERS } from '../lib/fieldRules'
 import type { ChangeEvent, ReactNode, SVGProps } from 'react'
 import { ChevronRightIcon } from '../components/icons'
@@ -186,6 +186,37 @@ export function SettingsPage() {
   const [confirm, setConfirm] = useState('')
 
   /*
+   * -- The password change is confirmed by email ---------------------------
+   *
+   * It used to be one press: current password, new password, done. A session
+   * left open at a shared counter - or a borrowed phone, which is how most
+   * people here reach this app - was enough to take the account, because the
+   * change signs every other device out and the owner's way back in is the
+   * password they no longer have [client, 28 September 2026: *"implement email
+   * verification in the change password"*].
+   *
+   * So the dialog has two steps. `codeSent` is what tells them apart, and it
+   * holds the MASKED address the code went to: the reader needs to recognise
+   * which mailbox to open, and printing the address whole would hand it to the
+   * very person this step exists to stop.
+   */
+  const [codeSent, setCodeSent] = useState<{ email: string; minutes: number } | null>(null)
+  const [code, setCode] = useState('')
+  const [sendingCode, setSendingCode] = useState(false)
+  /*
+   * Seconds until another code can be asked for. The server refuses one inside
+   * a minute; counting it down here means the reader waits for a number rather
+   * than pressing a button that keeps saying no.
+   */
+  const [resendIn, setResendIn] = useState(0)
+
+  useEffect(() => {
+    if (resendIn <= 0) return
+    const id = window.setInterval(() => setResendIn((n) => Math.max(0, n - 1)), 1000)
+    return () => window.clearInterval(id)
+  }, [resendIn])
+
+  /*
    * The photo is its own small transaction, not part of Save Changes. It
    * uploads the moment a file is chosen and the modal's Cancel does not undo
    * it — which is why "Remove Photo" exists rather than being left to Cancel.
@@ -255,6 +286,9 @@ export function SettingsPage() {
     setCurrentPassword('')
     setPassword('')
     setConfirm('')
+    setCodeSent(null)
+    setCode('')
+    setResendIn(0)
     setNote(null)
     setFormError(null)
     setFieldErrors({})
@@ -291,6 +325,36 @@ export function SettingsPage() {
     }
   }
 
+  /**
+   * Step one: prove the current password, and have a code emailed.
+   *
+   * The new password is NOT sent here. It travels once, with the code, in the
+   * request that actually changes it - so the server never holds a password
+   * that is waiting to be applied, and there is nothing to clean up if the
+   * reader walks away at this point.
+   */
+  async function sendCode() {
+    setSendingCode(true)
+    setFormError(null)
+    setFieldErrors({})
+    try {
+      const { data } = await api.post<{ email: string; expires_in_minutes: number }>(
+        '/auth/password/code',
+        { current_password: currentPassword },
+      )
+      setCodeSent({ email: data.email, minutes: data.expires_in_minutes })
+      setCode('')
+      setResendIn(60)
+    } catch (error) {
+      const apiError = toApiError(error)
+      setFieldErrors(apiError.errors)
+      if (Object.keys(apiError.errors).length === 0) setFormError(apiError.message)
+    } finally {
+      setSendingCode(false)
+    }
+  }
+
+  /** Step two: the code, with the new password, in one request. */
   async function savePassword() {
     setSaving(true)
     setFormError(null)
@@ -300,6 +364,7 @@ export function SettingsPage() {
         current_password: currentPassword,
         password,
         password_confirmation: confirm,
+        code: code.trim(),
       })
       setOpen(null)
       setNote('Password updated. Any other signed-in devices have been logged out.')
@@ -550,19 +615,111 @@ export function SettingsPage() {
 
       {open === 'password' && (
         <ProtoModal
-          title="Change Password"
-          cancelLabel="Cancel"
-          confirmLabel={saving ? 'Saving…' : 'Save Changes'}
-          onCancel={() => setOpen(null)}
-          onConfirm={savePassword}
-          confirmDisabled={saving || !currentPassword || password.length < 8 || password !== confirm}
+          /*
+            -- Two steps, one dialog -----------------------------------------
+
+            The title, the buttons and the body all follow `codeSent`, so the
+            reader is never looking at a form whose button belongs to the other
+            half. Back returns to the fields with everything still typed — a
+            code that arrives at the wrong address is the commonest reason to
+            go back, and retyping a password to fix an email is punishment for
+            the wrong mistake.
+
+            Stacking a second dialog on top would have meant two focus traps
+            and an Escape key whose meaning depends on which one you believe is
+            in front.
+          */
+          title={codeSent ? 'Confirm with the code we emailed' : 'Change Password'}
+          cancelLabel={codeSent ? 'Back' : 'Cancel'}
+          confirmLabel={
+            codeSent
+              ? saving
+                ? 'Saving…'
+                : 'Change my password'
+              : sendingCode
+                ? 'Sending…'
+                : 'Email me a code'
+          }
+          onCancel={codeSent ? () => setCodeSent(null) : () => setOpen(null)}
+          onConfirm={codeSent ? savePassword : sendCode}
+          confirmDisabled={
+            codeSent
+              ? saving || code.trim().length !== 6
+              : sendingCode || !currentPassword || password.length < 8 || password !== confirm
+          }
+          confirmDescribedBy={codeSent ? undefined : 'settings-password-rules'}
         >
           {formError && (
             <p role="alert" className="mb-4 text-center text-sm font-medium text-s-red">
               {formError}
             </p>
           )}
-          <div className="grid gap-5 py-4 sm:grid-cols-2">
+          {codeSent && (
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-ink">
+                We sent a six-digit code to{' '}
+                <span className="font-bold">{codeSent.email}</span>. It expires in{' '}
+                {codeSent.minutes} minutes.
+              </p>
+
+              <div>
+                <label htmlFor="settings-code">
+                  <FieldLabel required>Six-digit code</FieldLabel>
+                </label>
+                {/*
+                  `inputMode="numeric"` and a 6-character cap, so a phone opens
+                  the number pad. NOT `type="number"`: that one strips a
+                  leading zero, and one code in ten starts with one.
+
+                  `autoComplete="one-time-code"` lets iOS and Android offer the
+                  digits straight from the notification, which is the
+                  difference between this step taking two seconds and taking a
+                  trip to another app.
+                */}
+                <input
+                  id="settings-code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                  aria-invalid={fieldErrors.code ? true : undefined}
+                  className={`${inputCls} tnum text-center text-lg tracking-[0.5em]`}
+                />
+                <FieldError id="settings-code-error" message={fieldErrors.code?.[0]} />
+              </div>
+
+              <p className="text-xs text-ink-muted">
+                Not arrived? Check your spam folder.{' '}
+                {resendIn > 0 ? (
+                  <span>Another code can be sent in {resendIn}s.</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void sendCode()}
+                    className="font-semibold text-royal underline underline-offset-2 hover:no-underline"
+                  >
+                    Send another code
+                  </button>
+                )}
+              </p>
+
+              {/*
+                The warning for the reader who did NOT do this. They are the
+                person the step exists for, and "ignore this" is the wrong
+                advice: whoever asked already holds a signed-in session, so
+                doing nothing leaves them holding it.
+              */}
+              <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
+                If you did not ask to change your password, do not enter the code — someone else
+                is signed in to your account. Sign out everywhere by changing your password from a
+                device you trust, and message the City BPLO.
+              </p>
+            </div>
+          )}
+
+          <div className={codeSent ? 'hidden' : 'grid gap-5 py-4 sm:grid-cols-2'} aria-hidden={codeSent ? true : undefined}>
             <div className="sm:col-span-2">
               <label htmlFor="settings-current">
                 <FieldLabel required>Current Password</FieldLabel>
@@ -608,9 +765,13 @@ export function SettingsPage() {
               />
             </div>
           </div>
-          <p className="text-center text-xs text-ink-muted">
-            At least 8 characters. Both fields must match to save. Saving signs out your other devices.
-          </p>
+          {!codeSent && (
+            <p id="settings-password-rules" className="text-center text-xs text-ink-muted">
+              At least 8 characters, and both new-password fields must match. We will email a
+              six-digit code to confirm it is you. Changing your password signs out your other
+              devices.
+            </p>
+          )}
         </ProtoModal>
       )}
     </div>

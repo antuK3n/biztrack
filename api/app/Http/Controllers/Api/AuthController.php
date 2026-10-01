@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
+use App\Notifications\PasswordChangeCode;
 use App\Support\Audit;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
@@ -480,15 +482,96 @@ class AuthController extends Controller
     }
 
     /**
-     * Change the signed-in user's password. Requires the current password and
-     * revokes every other token so a hijacked session dies with the old
-     * credential; the token making this request stays valid.
+     * Send a six-digit code to the registered address, to confirm a password
+     * change.
+     *
+     * ── Why the current password is checked HERE too ────────────────────────
+     *
+     * It is checked again when the change lands, so this looks redundant. It
+     * is not: without it, anybody holding a session could make the owner's
+     * inbox ring by posting this endpoint, and the mail would say somebody is
+     * changing their password when nobody had got past the first field. A
+     * warning that fires on nothing teaches its reader to ignore the next one.
+     */
+    public function sendPasswordCode(Request $request): JsonResponse
+    {
+        $data = $request->validate(['current_password' => ['required', 'string']]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is incorrect.'],
+            ]);
+        }
+
+        /*
+         * One code a minute. The button is otherwise an open relay: a held
+         * session can post it in a loop and bury the owner's inbox — including
+         * the warning mails this very feature sends.
+         */
+        $live = EmailCode::liveFor($user, EmailCode::PURPOSE_PASSWORD);
+        if ($live && $live->created_at->diffInSeconds(now()) < EmailCode::RESEND_SECONDS) {
+            $wait = EmailCode::RESEND_SECONDS - (int) $live->created_at->diffInSeconds(now());
+
+            throw ValidationException::withMessages([
+                'code' => ["A code was just sent. Wait {$wait} seconds before asking for another."],
+            ]);
+        }
+
+        $user->notify(new PasswordChangeCode(EmailCode::issue($user, EmailCode::PURPOSE_PASSWORD)));
+
+        Audit::log('user.password_code_sent', $user);
+
+        return response()->json([
+            'message' => 'We sent a six-digit code to your email address.',
+            /*
+             * Masked, never whole. The reader needs to recognise which address
+             * it went to; printing it in full would let anyone who has taken
+             * the session read the address they are about to be stopped by.
+             */
+            'email' => self::maskEmail($user->email),
+            'expires_in_minutes' => EmailCode::TTL_MINUTES,
+        ]);
+    }
+
+    /** `nena@example.com` → `n•••@example.com`. Enough to recognise, not to learn. */
+    private static function maskEmail(string $email): string
+    {
+        [$name, $domain] = array_pad(explode('@', $email, 2), 2, '');
+
+        return mb_substr($name, 0, 1).str_repeat('•', max(mb_strlen($name) - 1, 1)).'@'.$domain;
+    }
+
+    /**
+     * Change the signed-in user's password. Requires the current password AND
+     * a code from the registered address, and revokes every other token so a
+     * hijacked session dies with the old credential; the token making this
+     * request stays valid.
      */
     public function updatePassword(Request $request): JsonResponse
     {
         $data = $request->validate([
             'current_password' => ['required', 'string'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
+            /*
+             * ── The second factor ───────────────────────────────────────────
+             *
+             * This endpoint asked for the current password and nothing else,
+             * so a session left open at a shared counter was enough to take
+             * the account: type the password its owner had just typed in front
+             * of you, set a new one, and the change itself signs every other
+             * device out. The owner's way back in is the password they no
+             * longer have. [Client, 28 September 2026.]
+             *
+             * Six digits, `string` not `integer`: a code of `012345` is not
+             * the number 12345, and casting would drop the leading zero for
+             * one reader in ten.
+             */
+            'code' => ['required', 'string', 'size:6'],
+        ], [
+            'code.required' => 'Enter the six-digit code we emailed you.',
+            'code.size' => 'The code is six digits.',
         ]);
 
         $user = $request->user();
@@ -497,6 +580,20 @@ class AuthController extends Controller
             throw ValidationException::withMessages([
                 'current_password' => ['Your current password is incorrect.'],
             ]);
+        }
+
+        $code = EmailCode::liveFor($user, EmailCode::PURPOSE_PASSWORD);
+
+        if ($code === null) {
+            throw ValidationException::withMessages([
+                'code' => ['That code has expired. Ask for a new one.'],
+            ]);
+        }
+
+        // A REASON, not a boolean: "expired" sends the reader to the Send
+        // button and "wrong" sends them back to the mail. See EmailCode::spend.
+        if ($failure = $code->spend($data['code'])) {
+            throw ValidationException::withMessages(['code' => [$failure]]);
         }
 
         $user->forceFill(['password' => $data['password']])->save();

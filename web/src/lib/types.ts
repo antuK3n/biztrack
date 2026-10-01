@@ -2553,7 +2553,28 @@ export interface RenewalModelReport {
 
 /* ── Admin ────────────────────────────────────────────────────────────── */
 
-export interface AdminUser extends User {}
+export interface AdminUser extends User {
+  /**
+   * What this officer is CARRYING, when the caller asked for it.
+   *
+   * Optional because the server sends it only on the officer directory
+   * (`whenCounted` in UserResource) — every other payload built from that
+   * resource is unchanged, and a required field here would be a claim about
+   * those too.
+   *
+   * On `AdminUser` rather than on `User`: the auth user, the message
+   * participants and the assignment payloads all render `User`, and none of
+   * them carries a caseload.
+   *
+   * OPEN work only, by the rule the caseload screen uses. It can legitimately
+   * be smaller than the Officer in Charge register's count for the same
+   * person — that screen lists every assignment a name is on, finished ones
+   * included, and a finished review is not something anybody is still
+   * carrying.
+   */
+  open_reviews?: number
+  open_inspections?: number
+}
 
 /** A role an officer account can be given, as the API describes it. */
 export interface AdminRole {
@@ -2563,6 +2584,20 @@ export interface AdminRole {
   description: string | null
   /** False for the super admin, who works across every office and belongs to none. */
   wants_department: boolean
+  /**
+   * The offices where somebody currently holds this role.
+   *
+   * Derived from the accounts that hold it, not from a column — nothing in the
+   * register ties a role to an office, and nothing should: the office is what
+   * scopes an officer's work, and a BPLO account holding the Fire Inspector
+   * role is legal if unusual.
+   *
+   * It exists so the Role box can put the office's own roles first instead of
+   * offering six, five of which belong elsewhere. Empty for a role nobody
+   * holds yet — including one typed a moment ago — which is why unused roles
+   * are still shown rather than hidden.
+   */
+  used_in_departments?: number[]
   /*
    * Whether this role can still be handed out. False only for the super admin
    * once the single seat is taken — every office role stays available however
@@ -2590,6 +2625,19 @@ export interface AdminUserPayload {
    * now accepts either spelling; this is the one it has always documented.
    */
   roles: string[]
+  /**
+   * A job title typed in because the office has no role by that name.
+   *
+   * Read only when `roles` is empty. The server slugs it, reuses an existing
+   * role when one matches by slug or by label, and otherwise creates one
+   * carrying the permissions every office role has — a role created with none
+   * would sign its holder in to a blank app.
+   *
+   * It always belongs to an office: a typed name must never reach a
+   * departmentless role, because `admin` holds `user.manage` and that would be
+   * privilege escalation by spelling. The endpoint refuses it without one.
+   */
+  new_role?: string
   /** Null clears the office. Omit to leave it alone. */
   department_id?: number | null
 }
@@ -2655,6 +2703,19 @@ export interface CaseloadCase {
    */
   permit: string | null
   status_label: string | null
+  /**
+   * Where the FILING has got to — and the reason this row is on the officer's
+   * desk at all.
+   *
+   * Distinct from `status_label`, which is the OFFICE's own review step. The
+   * two carry the same words and mean different things: a step marked
+   * "Completed" on a filing still at "Pending Payment" is finished work on an
+   * unfinished application, and the officer is still in charge of it.
+   *
+   * Optional: a payload from before this shipped carries no such key, and the
+   * column prints a dash rather than inventing a state.
+   */
+  application_status_label?: string | null
   /** Assigned-at for a review, scheduled-at for a visit. */
   at: string | null
 }
@@ -2746,12 +2807,26 @@ export interface MessageThreadSummary {
    *
    * 'general' is an enquiry with no filing behind it — the conversation a
    * business owner can have with BPLO before they have applied for anything.
+   * 'admin' is an office account's standing line to the System Administrator,
+   * pinned to the top of their inbox: office accounts cannot edit their own
+   * details, so this is where they ask the account that can.
+   *
    * Stated rather than inferred from a null application_id, so a reader
    * branches on a fact instead of on a missing value that reads like a bug.
    */
-  kind: 'application' | 'general'
+  kind: 'application' | 'general' | 'admin'
   /** Set on a general row only; null on a filing, whose threads are per office. */
   thread_id: number | null
+  /**
+   * WHICH office a general enquiry is with. Null on a filing, which carries
+   * its offices in `offices` instead.
+   *
+   * A general row used to be one row - the owner's line to BPLO - so `kind`
+   * alone told the rows apart. Every office has a front door now [client, 28
+   * September 2026], so an inbox can hold several at once and this is what
+   * separates them: in the React key, in the URL, and in what gets sent.
+   */
+  department_id: number | null
   /** Whose enquiry it is — what an officer opens a general conversation by. */
   user_id: number | null
   /** Null on a general enquiry: there is no filing to point at. */
@@ -3026,7 +3101,18 @@ export interface AdminBusiness {
   tracking_id?: string | null
   /** How many filings this business has. 0 is a real answer. */
   applications_count?: number
-  owner: { id: number; name: string } | null
+  owner: {
+    id: number
+    name: string
+    /**
+     * Whether the PERSON is barred, as opposed to this shopfront.
+     *
+     * After a blacklisting cascades, three rows of one owner all read
+     * "Blacklisted" with nothing to say they are one sanction rather than
+     * three. This is what lets the row say so.
+     */
+    blacklisted?: boolean
+  } | null
   status: BusinessStatus
   status_label: string
   created_at: string
@@ -3059,6 +3145,18 @@ export interface AdminBusiness {
       on_a_bill: boolean
     }[]
   }
+  /**
+   * What the change actually did, beyond the row that was clicked.
+   *
+   * Blacklisting one business of three blacklists the owner and all three, so
+   * a reply describing only the clicked row hides two thirds of what just
+   * happened. These come back from POST /admin/businesses/{id}/status and are
+   * absent from the roster payload - hence optional.
+   */
+  owner_blacklisted?: boolean
+  others_blacklisted?: number
+  others_restored?: number
+
 }
 
 /* ── Per-office application forms (UI prototype Parts 4-7, pages 040-043) ── */
@@ -3430,4 +3528,61 @@ export interface VerifyResult {
     address: { barangay: { name: string }; city: string | null }
   }
   is_valid: boolean
+}
+
+/**
+ * One barred person, and everything registered to them.
+ *
+ * ── Why the register of blacklistings is a register of PEOPLE ─────────────
+ *
+ * A blacklisting is a finding about whoever is filing, not about a premises,
+ * and it bars every business they hold — including any they register
+ * afterwards. Listing it as businesses answers "which shopfronts are barred"
+ * and leaves the question an admin actually has ("who is barred, and what does
+ * it cover?") to be assembled by eye from rows that repeat one name.
+ */
+export interface BlacklistedOwner {
+  id: number
+  name: string
+  email: string
+  mobile_number: string | null
+  blacklisted_at: string | null
+  reason: string | null
+  /** The officer who imposed it. Null on records predating the column. */
+  blacklisted_by: string | null
+  businesses: {
+    id: number
+    name: string
+    status: BusinessStatus
+    status_label: string
+    /**
+     * Registered AFTER the bar, so no cascade ever touched it: its own status
+     * still reads Active while every filing attempt is refused. Shown, rather
+     * than left for an admin to notice and doubt.
+     */
+    registered_after: boolean
+  }[]
+}
+
+/**
+ * One office account on the System Administrator's inbox.
+ *
+ * ── Why it is a list of ACCOUNTS and not of conversations ─────────────────
+ *
+ * An officer who has never written has no thread, and that row is the way in:
+ * the administrator has to be able to start one too, which is how "your
+ * details have been updated" reaches the person who asked. A list built from
+ * threads would hide every officer who had not spoken yet.
+ */
+export interface StaffMessageRow {
+  user: { id: number; name: string; email: string }
+  office: { id: number; code: string | null; name: string } | null
+  /** Null until somebody writes. The row exists either way. */
+  thread_id: number | null
+  messages_count: number
+  /** Turns the reader has not opened. Never their own. */
+  unread_count: number
+  last_message_at: string | null
+  preview: string | null
+  last_sender: string | null
 }

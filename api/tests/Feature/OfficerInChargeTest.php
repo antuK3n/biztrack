@@ -1,9 +1,12 @@
 <?php
 
+use App\Enums\ApplicationStatus;
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\Role;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 
 /*
@@ -477,4 +480,296 @@ it('refuses an officer the power to hand their own case to a colleague', functio
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$id}/assign", ['officer_user_id' => $colleague->id])
         ->assertForbidden();
+});
+
+/*
+ * ── Releasing from the Officer in Charge screen ───────────────────────────
+ *
+ * `POST /assignments/{id}/assign` could only NAME a successor, so the one act
+ * the caseload screen could perform and this one could not was putting a
+ * filing back in its office's pool. An office losing its only officer had
+ * nowhere to release the work from — and `release` refuses another officer's
+ * case with the words "Only the system administrator can move it", a promise
+ * that endpoint did not keep.
+ *
+ * `officer_user_id: null` is that act, and it is the same meaning
+ * `reassign-caseload` has always given `to_user_id: null`.
+ */
+
+it('releases a filing to the office queue when no officer is named', function () {
+    $assignment = ApplicationAssignment::query()
+        ->whereNotNull('officer_user_id')
+        ->firstOr(function () {
+            $a = ApplicationAssignment::firstOrFail();
+            $officer = User::where('department_id', $a->department_id)->firstOrFail();
+            $a->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+
+            return $a->fresh();
+        });
+
+    expect($assignment->officer_user_id)->not->toBeNull();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", [
+            'officer_user_id' => null,
+            'reason' => 'Officer left the office.',
+        ])
+        ->assertOk()
+        // The same shape the naming branch answers with, so a caller cannot
+        // tell which branch ran except by reading `officer`.
+        ->assertJsonPath('data.officer', null);
+
+    $assignment->refresh();
+    expect($assignment->officer_user_id)->toBeNull();
+    /*
+     * `assigned_at` goes with the holder. It records when THIS officer took
+     * it, so leaving it behind would date a claim nobody has made — and the
+     * office queue orders by longest-waiting.
+     */
+    expect($assignment->assigned_at)->toBeNull();
+});
+
+it('records a release as a release, not as a reassignment', function () {
+    /*
+     * Its own audit action. An auditor reading the trail should not have to
+     * inspect the payload to tell a handover from a release.
+     */
+    $assignment = ApplicationAssignment::firstOrFail();
+    $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", ['officer_user_id' => null])
+        ->assertOk();
+
+    expect(
+        DB::table('audit_logs')
+            ->where('action', 'assignment.released')
+            ->where('auditable_id', $assignment->id)
+            ->exists()
+    )->toBeTrue();
+});
+
+it('treats releasing an already-free filing as nothing to do', function () {
+    // The reader asked for a state the filing is already in. Saying "no" to
+    // that would be pedantry, not a guard.
+    $assignment = ApplicationAssignment::firstOrFail();
+    $assignment->forceFill(['officer_user_id' => null, 'assigned_at' => null])->save();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", ['officer_user_id' => null])
+        ->assertOk();
+
+    expect($assignment->fresh()->officer_user_id)->toBeNull();
+});
+
+it('still refuses a request that forgets to say who holds it', function () {
+    /*
+     * `present`, not `sometimes`. A caller that simply omitted the field would
+     * otherwise release a filing silently, which is the one mistake this field
+     * can make.
+     */
+    $assignment = ApplicationAssignment::firstOrFail();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", ['reason' => 'no officer named'])
+        ->assertStatus(422);
+});
+
+it('will not let an office release another office’s filing', function () {
+    /*
+     * The boundary is unchanged by the new branch. `authorizeOicReassignment`
+     * exempts only a reader with no department — the super admin — and an
+     * office reviewer is still held to its own.
+     */
+    $cenro = User::where('email', 'cenro@biztrack.local')->firstOrFail();
+
+    $foreign = ApplicationAssignment::query()
+        ->where('department_id', '!=', $cenro->department_id)
+        ->firstOrFail();
+
+    test()->withHeaders(authAs('cenro@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$foreign->id}/assign", ['officer_user_id' => null])
+        ->assertForbidden();
+});
+
+/*
+ * ── The register and the officer directory must reconcile ─────────────────
+ *
+ * They count different things and both are right: the register counts every
+ * assignment a name is on, finished ones included, because it is the record of
+ * who did what; the directory's Holding column counts only work that can still
+ * be moved. On the live register that read 34 against 2 with nothing on either
+ * screen explaining the gap — the kind of disagreement nobody reports as a
+ * bug, they just stop trusting both numbers.
+ *
+ * `meta.open` and `meta.open_assigned` are the chain between them, and the
+ * second must equal what the Holding column adds up to. These tests are that
+ * equality.
+ */
+
+it('states how many assignments are still open, and how many of those are held', function () {
+    $meta = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/oic-assignments?per_page=5')
+        ->assertOk()
+        ->json('meta');
+
+    expect($meta)->toHaveKey('open');
+    expect($meta)->toHaveKey('open_assigned');
+
+    // The chain has to narrow, or it explains nothing.
+    expect($meta['open'])->toBeLessThanOrEqual($meta['total']);
+    expect($meta['open_assigned'])->toBeLessThanOrEqual($meta['open']);
+});
+
+it('reconciles exactly with the Holding column on the officer directory', function () {
+    $headers = authAs('admin@biztrack.local');
+
+    $meta = test()->withHeaders($headers)
+        ->getJson('/api/v1/admin/oic-assignments?per_page=5')
+        ->json('meta');
+
+    $holding = collect(
+        test()->withHeaders($headers)
+            ->getJson('/api/v1/admin/users?per_page=100&staff=1')
+            ->json('data')
+    )->sum(fn ($u) => ($u['open_reviews'] ?? 0) + ($u['open_inspections'] ?? 0));
+
+    /*
+     * Reviews only. `open_assigned` counts held ASSIGNMENTS; the directory's
+     * total adds inspections to them, which live in another table and are not
+     * on this register at all. Compared against the review half so the two
+     * figures describe the same rows.
+     */
+    $inspections = collect(
+        test()->withHeaders($headers)
+            ->getJson('/api/v1/admin/users?per_page=100&staff=1')
+            ->json('data')
+    )->sum(fn ($u) => $u['open_inspections'] ?? 0);
+
+    expect($meta['open_assigned'])->toBe($holding - $inspections);
+});
+
+it('narrows the register to still-open work', function () {
+    $headers = authAs('admin@biztrack.local');
+
+    $all = test()->withHeaders($headers)->getJson('/api/v1/admin/oic-assignments?per_page=200')->json();
+    $open = test()->withHeaders($headers)->getJson('/api/v1/admin/oic-assignments?per_page=200&state=open')->json();
+
+    expect($open['meta']['total'])->toBe($all['meta']['open']);
+
+    // Every row it returned is on a filing that has not been decided.
+    foreach ($open['data'] as $row) {
+        $status = Application::findOrFail($row['application_id'])->status;
+        expect($status?->isTerminal())->toBeFalse("{$row['tracking_id']} is decided and should not be here");
+    }
+});
+
+it('narrows the register to finished work, and the two halves make the whole', function () {
+    $headers = authAs('admin@biztrack.local');
+
+    $all = test()->withHeaders($headers)->getJson('/api/v1/admin/oic-assignments?per_page=200')->json('meta.total');
+    $open = test()->withHeaders($headers)->getJson('/api/v1/admin/oic-assignments?per_page=200&state=open')->json('meta.total');
+    $done = test()->withHeaders($headers)->getJson('/api/v1/admin/oic-assignments?per_page=200&state=finished')->json('meta.total');
+
+    // Nothing is in both and nothing is in neither — or the filter is lying
+    // about one of the two.
+    expect($open + $done)->toBe($all);
+});
+
+it('refuses a state it does not know', function () {
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/oic-assignments?state=halfway')
+        ->assertStatus(422);
+});
+
+it('keeps the reconciling figures steady while a filter moves', function () {
+    /*
+     * They are counted over the WHOLE register, ignoring the page and every
+     * filter. A reconciliation that moved when a filter did would reconcile
+     * nothing — the reader would be comparing a filtered figure against the
+     * directory's register-wide one.
+     */
+    $headers = authAs('admin@biztrack.local');
+
+    $meta = fn (string $qs = '') => test()->withHeaders($headers)
+        ->getJson('/api/v1/admin/oic-assignments?per_page=5'.$qs)
+        ->json('meta');
+
+    $plain = $meta();
+    $taken = $meta('&holder=assigned');
+    $free = $meta('&holder=unassigned');
+
+    /*
+     * Steady across BOTH halves of the filter, rather than across one of them.
+     *
+     * The first version narrowed by `holder=unassigned` and asserted the total
+     * had dropped — which is true of the live register and false of the test
+     * one, where every assignment is unheld. Asserting on the pair instead
+     * makes the claim without depending on which half happens to be empty.
+     */
+    foreach ([$taken, $free] as $narrowed) {
+        expect($narrowed['open'])->toBe($plain['open']);
+        expect($narrowed['open_assigned'])->toBe($plain['open_assigned']);
+    }
+
+    // And `total` — the figure that SHOULD follow the filter — does.
+    expect($taken['total'] + $free['total'])->toBe($plain['total']);
+});
+
+/*
+ * ── A decided filing has no officer in charge to change ───────────────────
+ *
+ * Client, 27 September 2026: *"yung finished bawal na mareassign kasi tapos na
+ * na."* The screen was the only thing saying so — the endpoint would rewrite
+ * the name on a filing approved months ago, which is not a reassignment but an
+ * edit to the record of who did the work.
+ */
+
+it('refuses to reassign an assignment whose filing has been decided', function () {
+    $assignment = ApplicationAssignment::firstOrFail();
+    $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
+
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", [
+            'officer_user_id' => $officer->id,
+            'reason' => 'Should not be possible.',
+        ])
+        ->assertStatus(422);
+
+    // And the name on the record is untouched.
+    expect($assignment->fresh()->officer_user_id)->toBe($assignment->officer_user_id);
+});
+
+it('refuses to release a decided filing back to the queue', function () {
+    // The other direction of the same act. Releasing a finished filing would
+    // erase who handled it just as surely as renaming them.
+    $assignment = ApplicationAssignment::firstOrFail();
+    $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", ['officer_user_id' => null])
+        ->assertStatus(422);
+
+    expect($assignment->fresh()->officer_user_id)->toBe($officer->id);
+});
+
+it('still allows a reassignment while the filing is live', function () {
+    // The guard must not close the door it was put there to keep open.
+    $assignment = ApplicationAssignment::firstOrFail();
+    $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
+
+    $assignment->application->forceFill(['status' => ApplicationStatus::ForApproval->value])->save();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/assign", [
+            'officer_user_id' => $officer->id,
+        ])
+        ->assertOk();
+
+    expect($assignment->fresh()->officer_user_id)->toBe($officer->id);
 });
