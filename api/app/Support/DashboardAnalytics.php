@@ -175,8 +175,20 @@ final class DashboardAnalytics
          */
         $scope = AnalyticsOffice::scope($office);
         $now = CarbonImmutable::now();
-        $today = $now->startOfDay();
-        $windowStart = $today->subMonths($windowMonths);
+        /*
+         * MANILA DAYS, NOT UTC ONES (ManilaCalendar). `$today` is the Manila
+         * date, carried as a Manila-zoned Carbon for date comparisons and
+         * printed as the date the City is living in. The `*Start` instants
+         * below are where those Manila days and months begin, converted back to
+         * UTC so they compare with the stored timestamps.
+         *
+         * This was `$now->startOfDay()` on the UTC clock. The nightly refresh
+         * runs at 03:00 Manila, which is 19:00 UTC the day before, so every
+         * stored dashboard was computed for yesterday: on the 1st of the month
+         * "This Month" was last month.
+         */
+        $today = ManilaCalendar::today($now);
+        $windowStart = ManilaCalendar::startOfDay($today->subMonths($windowMonths));
         /*
          * Still shipped, no longer used by a figure. `ytd_start` is a date label
          * that stayed behind when the yearly KPI became a full-term one; nothing
@@ -186,7 +198,7 @@ final class DashboardAnalytics
          * kpiFacts() — and that is now a call this codebase can make on its own.
          */
         $ytdStart = $today->startOfYear();
-        $monthStart = $today->startOfMonth();
+        $monthStart = ManilaCalendar::startOfDay($today->startOfMonth());
 
         // Gathered once: the RA 11032 compliance indicator is derived from these
         // same rows so the indicator and the tier panel cannot disagree.
@@ -195,10 +207,11 @@ final class DashboardAnalytics
         return [
             'params' => $office === null ? ['months' => $windowMonths] : ['months' => $windowMonths, 'office' => $office],
             'now' => $now->toISOString(),
+            // Manila dates, all four: the dates the screen prints.
             'today' => $today->toDateString(),
-            'window_start' => $windowStart->toDateString(),
+            'window_start' => ManilaCalendar::dateOf($windowStart),
             'ytd_start' => $ytdStart->toDateString(),
-            'month_start' => $monthStart->toDateString(),
+            'month_start' => ManilaCalendar::dateOf($monthStart),
             'top_n' => self::TOP_N,
             'expiry_windows' => self::EXPIRY_WINDOWS,
             'tiers' => self::tierRules(),
@@ -586,27 +599,16 @@ final class DashboardAnalytics
     }
 
     /**
-     * Whole working days from one instant to another, weekends excluded.
+     * Whole working days from one instant to another, by their Manila dates.
      *
-     * Matches how `deadline_at` is set (`addWeekdays`), so a filing's measured
-     * duration and its statutory deadline are counted on the same calendar.
-     * Philippine holidays are not modelled — the register does not carry a
-     * holiday table, so this slightly overstates working days around them.
+     * The shared count (ManilaCalendar::workingDaysBetween). This class kept
+     * its own copy on the UTC date, so a filing received at 7 am Manila on a
+     * Monday — Sunday night in UTC — was a day older here than on the deadline
+     * stamped on it.
      */
     private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
     {
-        $cursor = $from->startOfDay();
-        $end = $to->startOfDay();
-        $days = 0;
-
-        while ($cursor->lessThan($end)) {
-            $cursor = $cursor->addDay();
-            if (! $cursor->isWeekend()) {
-                $days++;
-            }
-        }
-
-        return $days;
+        return ManilaCalendar::workingDaysBetween($from, $to);
     }
 
     /* ── facts: time-in-stage per department ───────────────────────────── */
@@ -841,8 +843,10 @@ final class DashboardAnalytics
                 $renewablePermitTypes !== [],
                 static fn ($q) => $q->whereIn('permits.permit_type_id', $renewablePermitTypes),
             )
-            ->whereDate('permits.valid_until', '>=', $windowStart->toDateString())
-            ->whereDate('permits.valid_until', '<=', $now->toDateString())
+            // Manila dates: valid_until is a date the permit printed, and the
+            // window runs from the Manila date it opened to today in Manila.
+            ->whereDate('permits.valid_until', '>=', ManilaCalendar::dateOf($windowStart))
+            ->whereDate('permits.valid_until', '<=', ManilaCalendar::dateOf($now))
             ->pluck('permits.valid_until', 'permits.id');
 
         if ($due->isEmpty()) {
@@ -868,8 +872,11 @@ final class DashboardAnalytics
         foreach ($renewals as $renewal) {
             $permitId = (int) $renewal->prior_permit_id;
             $linked[$permitId] = true;
-            $expiry = CarbonImmutable::parse($due[$permitId])->startOfDay();
-            if (CarbonImmutable::parse($renewal->submitted_at)->startOfDay()->lessThanOrEqualTo($expiry)) {
+            // On time is filed on or before the expiry DATE, both read in
+            // Manila: a renewal filed at 7 am Manila on the last valid day is
+            // the previous evening in UTC, and was on time.
+            $expiry = CarbonImmutable::parse($due[$permitId])->toDateString();
+            if (ManilaCalendar::dateOf($renewal->submitted_at) <= $expiry) {
                 $onTime[$permitId] = true;
             }
         }
@@ -938,11 +945,16 @@ final class DashboardAnalytics
 
         $out = [];
         foreach ($rows as $row) {
-            $validUntil = CarbonImmutable::parse($row->valid_until)->startOfDay();
-
             $out[] = [
                 'code' => (string) $row->code,
-                'days_to_expiry' => (int) $today->diffInDays($validUntil, false),
+                // Date to date: today is a Manila date and valid_until is the
+                // date printed on the permit. Diffing a Manila midnight against
+                // a UTC one was eight hours off and truncated a permit that
+                // lapsed yesterday to "0 days left".
+                'days_to_expiry' => ManilaCalendar::daysBetweenDates(
+                    $today->toDateString(),
+                    CarbonImmutable::parse($row->valid_until)->toDateString(),
+                ),
             ];
         }
 
@@ -1318,9 +1330,12 @@ final class DashboardAnalytics
      */
     private static function movementFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
+        // Manila months: a business registered at 7 am Manila on the 1st is
+        // that month's, not the previous month's as the UTC clock had it.
         $buckets = [];
-        $cursor = $windowStart->startOfMonth();
-        while ($cursor->lessThanOrEqualTo($now)) {
+        $cursor = ManilaCalendar::local($windowStart)->startOfMonth();
+        $lastMonth = ManilaCalendar::monthOf($now);
+        while ($cursor->format('Y-m') <= $lastMonth) {
             $buckets[$cursor->format('Y-m')] = ['month' => $cursor->format('Y-m'), 'registered' => 0, 'closed' => 0];
             $cursor = $cursor->addMonth();
         }
@@ -1346,13 +1361,13 @@ final class DashboardAnalytics
             ->pluck('status_changed_at');
 
         foreach ($registered as $at) {
-            $month = CarbonImmutable::parse($at)->format('Y-m');
+            $month = ManilaCalendar::monthOf($at);
             if (isset($buckets[$month])) {
                 $buckets[$month]['registered']++;
             }
         }
         foreach ($removed->concat($blacklisted) as $at) {
-            $month = CarbonImmutable::parse($at)->format('Y-m');
+            $month = ManilaCalendar::monthOf($at);
             if (isset($buckets[$month])) {
                 $buckets[$month]['closed']++;
             }

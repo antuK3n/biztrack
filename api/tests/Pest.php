@@ -20,6 +20,9 @@ pest()->extend(TestCase::class)
 
 pest()->extend(TestCase::class)->in('Unit');
 
+// Register rows with chosen timestamps, for the analytics tests.
+require_once __DIR__.'/AnalyticsFixtures.php';
+
 /**
  * Log in a seeded demo account and return its bearer token.
  *
