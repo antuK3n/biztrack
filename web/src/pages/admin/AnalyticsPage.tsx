@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
-import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
+import { Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { HorizontalBars, VerticalBars } from '../../components/charts/Bars'
@@ -36,6 +36,7 @@ import type {
   RankedShareRow,
   StageRow,
 } from '../../lib/types'
+import { AnalyticsError } from './AnalyticsError'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { OfficeScope } from './OfficeScope'
@@ -1573,7 +1574,11 @@ export function AnalyticsPage() {
       {loading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState error={error} onRetry={reload} />
+        <AnalyticsError
+          error={error}
+          onRetry={reload}
+          onOwnOffice={office ? () => setParam('office', undefined) : undefined}
+        />
       ) : data ? (
         <MetricDefinitions value={meta?.definitions}>
           {/*
