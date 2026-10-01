@@ -139,6 +139,8 @@ it('counts a filing only for the offices it was routed to', function () {
     $filing = Application::query()->firstOrFail()->replicate(['tracking_id']);
     $filing->tracking_id = 'BIZ-SCOPE-000001';
     $filing->created_at = now();
+    // Counted by submission now, never by when a draft was started.
+    $filing->submitted_at = now();
     $filing->save();
     ApplicationAssignment::create([
         'application_id' => $filing->id,

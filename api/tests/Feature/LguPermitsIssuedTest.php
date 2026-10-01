@@ -24,7 +24,7 @@ function issuedReport(string $key = 'permits-issued'): array
 }
 
 /** A permit released in March 2031 from a filing of the given kind, or from none. */
-function issuedPermit(int $business, string $code, ?string $filing, string $issuedAt = '2031-03-10 02:00:00'): int
+function lguIssuedPermit(int $business, string $code, ?string $filing, string $issuedAt = '2031-03-10 02:00:00'): int
 {
     return anaPermit($business, $code, [
         'application_id' => $filing === null ? null : anaFiling($business, ['application_type' => $filing, 'status' => 'approved']),
@@ -34,9 +34,9 @@ function issuedPermit(int $business, string $code, ?string $filing, string $issu
 
 it('counts business permits alone in the all-offices month table, and every type in its own row', function () {
     $business = anaBusiness();
-    issuedPermit($business, 'BUSINESS', 'new');
-    issuedPermit($business, 'SANITARY', 'new');
-    issuedPermit($business, 'FSIC', 'new');
+    lguIssuedPermit($business, 'BUSINESS', 'new');
+    lguIssuedPermit($business, 'SANITARY', 'new');
+    lguIssuedPermit($business, 'FSIC', 'new');
 
     [$byMonth, $byType] = issuedReport()['sections'];
     $types = collect($byType['rows'])->keyBy('label');
@@ -53,16 +53,16 @@ it('classes a permit as a renewal when the business already held that type', fun
     // "new" in 2031: the City kept a permit holder, it did not gain one.
     $held = anaBusiness();
     anaPermit($held, 'BUSINESS', ['application_id' => null, 'issued_at' => '2030-01-10 02:00:00', 'valid_until' => '2030-12-31']);
-    issuedPermit($held, 'BUSINESS', 'new');
+    lguIssuedPermit($held, 'BUSINESS', 'new');
 
     // A renewal of a permit the City issued on paper: no earlier permit on
     // the register, and still a renewal.
-    issuedPermit(anaBusiness(), 'BUSINESS', 'renewal');
+    lguIssuedPermit(anaBusiness(), 'BUSINESS', 'renewal');
 
     // Two in the period for one business: the first is new, the second is not.
     $twice = anaBusiness();
-    issuedPermit($twice, 'BUSINESS', 'new', '2031-03-03 02:00:00');
-    issuedPermit($twice, 'BUSINESS', 'new', '2031-03-24 02:00:00');
+    lguIssuedPermit($twice, 'BUSINESS', 'new', '2031-03-03 02:00:00');
+    lguIssuedPermit($twice, 'BUSINESS', 'new', '2031-03-24 02:00:00');
 
     $total = issuedReport()['sections'][0]['total'];
 
@@ -72,8 +72,8 @@ it('classes a permit as a renewal when the business already held that type', fun
 
 it('counts a permit brought over from the old register', function () {
     $business = anaBusiness();
-    issuedPermit($business, 'BUSINESS', null);
-    issuedPermit($business, 'SANITARY', null);
+    lguIssuedPermit($business, 'BUSINESS', null);
+    lguIssuedPermit($business, 'SANITARY', null);
 
     $issued = issuedReport()['sections'][0]['total'];
     $byArea = issuedReport('businesses-by-area')['sections'][0]['total'];
@@ -87,7 +87,7 @@ it('counts a permit brought over from the old register', function () {
 it('counts a business in the area table as renewing when it held permits before the period', function () {
     $business = anaBusiness();
     anaPermit($business, 'BUSINESS', ['issued_at' => '2030-02-01 02:00:00', 'valid_until' => '2030-12-31']);
-    issuedPermit($business, 'BUSINESS', 'new');
+    lguIssuedPermit($business, 'BUSINESS', 'new');
 
     $total = issuedReport('businesses-by-area')['sections'][0]['total'];
 
