@@ -73,12 +73,30 @@ class AnalyticsController extends Controller
             'report' => $resolved['data'],
             'meta' => $resolved['meta'],
             'scope' => AnalyticsOffice::describe($request->user(), $office),
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
+            'generated_at' => $this->printedTime($resolved['data']['generated_at']),
         ])->setPaper('a4');
 
         $suffix = $office === null ? '' : '-'.strtolower($office);
 
         return PdfFile::render($pdf)->download("analytics-dashboard{$suffix}.pdf");
+    }
+
+    /**
+     * When the figures were computed, as a printed report states it: Manila
+     * clock time, with the zone said in words.
+     *
+     * The app runs in UTC, and this used to format the UTC instant as it
+     * stood, so a report computed at 9:16 in the evening in Malabon said
+     * "1:16 PM" with nothing to tell the reader it was eight hours behind.
+     * The zone is City Hall's (config/office_hours.php), the one every other
+     * time on the office screens is read in.
+     */
+    private function printedTime(string $iso): string
+    {
+        $zone = (string) config('office_hours.timezone', 'Asia/Manila');
+
+        return Carbon::parse($iso)->setTimezone($zone)->format('F j, Y g:i A')
+            .($zone === 'Asia/Manila' ? ' Manila time' : ' ('.$zone.')');
     }
 
     /**
@@ -143,7 +161,7 @@ class AnalyticsController extends Controller
         $pdf = Pdf::loadView('pdf.processing-time-report', [
             'report' => $resolved['data'],
             'meta' => $resolved['meta'],
-            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
+            'generated_at' => $this->printedTime($resolved['data']['generated_at']),
         ])->setPaper('a4');
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).

@@ -25,14 +25,19 @@
     </style>
 </head>
 <body>
+    {{--
+        The office this copy is FOR, from the same scope the figures were
+        computed for. It read "Business Permits and Licensing Office" on every
+        office's copy, so City Health's dashboard went out on BPLO's letterhead.
+        Named once, here; the line under the title no longer repeats it.
+    --}}
     <div class="header">
         <div class="city">CITY OF MALABON</div>
-        <div class="office">Business Permits and Licensing Office</div>
+        <div class="office">{{ $scope['office'] === null ? 'All offices' : $scope['office_name'] }}</div>
     </div>
 
     <h1>ANALYTICS DASHBOARD</h1>
     <div class="meta">
-        {{ $scope['office_name'] ?? 'All offices' }} &middot;
         @include('pdf.partials.computed-by') &middot;
         As of {{ $report['today'] }} &middot;
         Trailing window: {{ $report['window_start'] }} to {{ $report['today'] }}
@@ -44,7 +49,7 @@
     <div class="note">
         Every figure is computed from the register. Panels use different windows and each says which:
         application volume and decision outcomes cover the current month, the processing-time,
-        time-in-stage, compliance, inspection and officer figures cover the trailing window, and the
+        department, compliance, inspection and officer figures cover the trailing window, and the
         rankings and permit-expiry counts are as of the date above. Where a figure cannot be derived it
         is left blank with the reason stated, never filled in with a zero.
     </div>
@@ -159,7 +164,13 @@
         recorded complexity.
     </div>
 
-    <h2>Average time-in-stage by department <span class="window">(trailing window)</span></h2>
+    {{--
+        Office days, not days. Time at an office counts only the hours City Hall
+        is open (Monday to Friday, 8:00 to 17:00 Manila), and one office day is
+        those 9 hours — see App\Support\OfficeHours. A bare "days" here would be
+        read as calendar days, beside a tier table that is in working days.
+    --}}
+    <h2>Average processing time by department <span class="window">(trailing window, office days of 9 office hours)</span></h2>
     @if (count($report['stages']['rows']) === 0)
         <div class="empty">No review assignment was completed in this window.</div>
     @else
@@ -167,7 +178,7 @@
             <tr>
                 <th>Department</th>
                 <th class="num">Reviews</th>
-                <th class="num">Mean days</th>
+                <th class="num">Mean office days</th>
             </tr>
             @foreach ($report['stages']['rows'] as $row)
                 <tr>
@@ -178,10 +189,26 @@
             @endforeach
         </table>
         @if ($report['stages']['bottleneck'])
+            @php
+                $bottleneck = $report['stages']['bottleneck'];
+                /*
+                 * Built here rather than inline. Blade only reads `@if` as a
+                 * directive when it does not follow a letter, so the inline
+                 * "per review@if (…)" printed itself — condition, `@endif` and
+                 * all — onto the page.
+                 */
+                $aboveAverage = $bottleneck['above_average_days'] !== null && $bottleneck['above_average_days'] > 0
+                    ? sprintf(
+                        ', %s office days above the %s-office-day all-office average',
+                        number_format($bottleneck['above_average_days'], 1),
+                        number_format((float) $report['stages']['mean_days'], 1),
+                    )
+                    : '';
+            @endphp
             <div class="empty">
-                {{ $report['stages']['bottleneck']['name'] }} is the slowest stage at
-                {{ number_format($report['stages']['bottleneck']['mean_days'], 1) }} days per review@if ($report['stages']['bottleneck']['above_average_days'] > 0), {{ number_format($report['stages']['bottleneck']['above_average_days'], 1) }} days above the {{ number_format($report['stages']['mean_days'], 1) }}-day all-office average@endif,
-                handling {{ number_format($report['stages']['bottleneck']['share_of_reviews'], 1) }}% of
+                {{ $bottleneck['name'] }} is the slowest at
+                {{ number_format($bottleneck['mean_days'], 1) }} office days per review{{ $aboveAverage }},
+                handling {{ number_format($bottleneck['share_of_reviews'], 1) }}% of
                 {{ number_format($report['stages']['reviews']) }} completed reviews.
             </div>
         @endif
@@ -206,7 +233,7 @@
                 </td>
                 <td>
                     @if ($indicator['rate'] === null)
-                        <span class="unavailable">{{ $indicator['unavailable_reason'] ?? 'Nothing in the denominator for this window.' }}</span>
+                        <span class="unavailable">{{ $indicator['unavailable_reason'] ?? 'Cannot be computed: nothing in this window to count it against ('.$indicator['denominator_label'].').' }}</span>
                     @else
                         {{ number_format($indicator['numerator']) }} of
                         {{ number_format($indicator['denominator']) }}
@@ -299,6 +326,12 @@
         @endif
     @endif
 
+    {{--
+        Only for an office that inspects. BPLO issues the Mayor's Permit on the
+        strength of the six clearances, not a visit of its own, so its scope has
+        no inspecting office and the table was a lone "Combined 0 0 0" row.
+    --}}
+    @if (count($report['inspections']['rows']) > 0)
     <h2>Inspections <span class="window">(trailing window; pass rate is passed ÷ completed)</span></h2>
     <table>
         <tr>
@@ -332,6 +365,7 @@
         Inspection type comes from the inspecting office, because the inspection-type field is not
         populated on any record.
     </div>
+    @endif
 
     <h2>Officer activity <span class="window">(trailing window)</span></h2>
     <table>
@@ -341,7 +375,8 @@
                 @if ($report['officer_activity']['mean_response_hours'] === null)
                     <span class="unavailable">No applicant message has been answered in this window</span>
                 @else
-                    {{ number_format($report['officer_activity']['mean_response_hours'], 1) }} hours
+                    {{-- Office hours: a message sent at night starts waiting when City Hall opens. --}}
+                    {{ number_format($report['officer_activity']['mean_response_hours'], 1) }} office hours
                     over {{ number_format($report['officer_activity']['responses']) }} replies
                     (median {{ number_format($report['officer_activity']['median_response_hours'], 1) }})
                 @endif
