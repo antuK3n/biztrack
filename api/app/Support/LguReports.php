@@ -2,7 +2,6 @@
 
 namespace App\Support;
 
-use App\Enums\ApplicationStatus;
 use App\Enums\PaymentStatus;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -474,28 +473,27 @@ final class LguReports
     /** @return list<array<string, mixed>> */
     private static function pendingProcessing(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
     {
-        // Decided in the period, against the filing's own RA 11032 tier.
-        $decided = self::routedTo(DB::table('applications'), $scope)
-            ->whereNull('deleted_at')
-            ->whereNotNull('submitted_at')
-            ->whereNotNull('decided_at')
-            ->where('decided_at', '>=', $from)
-            ->where('decided_at', '<', $to)
-            ->get(['complexity', 'submitted_at', 'decided_at']);
-
+        /*
+         * Decided in the period, against the filing's own RA 11032 tier, timed
+         * the way the dashboard's tier panel times it — FilingClock, one
+         * implementation for both. All offices: submission to decision, less
+         * the stretches the filing sat with its applicant. One office: that
+         * office's own review (BPLO: the time at its desk). This used to time
+         * every routed filing's whole lifetime even on an office's report.
+         */
         $tiers = [];
         foreach (Ra11032::TIERS as $tier => $rule) {
             $tiers[$tier] = ['label' => $rule['label'].' ('.$rule['statutory_working_days'].' working days)', 'decided' => 0, 'days' => 0, 'within' => 0];
         }
         $untiered = 0;
-        foreach ($decided as $row) {
-            $tier = (string) $row->complexity;
+        foreach (FilingClock::decided($from, $to, $scope) as $row) {
+            $tier = (string) $row['tier'];
             if (! isset($tiers[$tier])) {
                 $untiered++;
 
                 continue;
             }
-            $days = ManilaCalendar::workingDaysBetween(CarbonImmutable::parse($row->submitted_at), CarbonImmutable::parse($row->decided_at));
+            $days = $row['working_days'];
             $tiers[$tier]['decided']++;
             $tiers[$tier]['days'] += $days;
             if ($days <= Ra11032::TIERS[$tier]['statutory_working_days']) {
@@ -510,49 +508,32 @@ final class LguReports
             'within_rate' => $row['decided'] === 0 ? null : round($row['within'] / $row['decided'] * 100, 1),
         ], array_values($tiers));
 
-        // Still pending at the end of the period, aged in working days.
+        /*
+         * Still pending at the end of the period, aged in working days. Not
+         * pending: a filing rejected or cancelled by then, and one that was
+         * waiting on its applicant at that moment (to pay, or to resubmit) —
+         * that is the applicant's queue, not the City's. See FilingClock.
+         */
         $buckets = ['within_3' => 3, 'within_7' => 7, 'within_20' => 20];
         $pendingRows = [];
         foreach (self::TYPES as $type => $label) {
             $pendingRows[$type] = ['label' => $label, 'within_3' => 0, 'within_7' => 0, 'within_20' => 0, 'over_20' => 0];
         }
 
-        if ($scope !== null) {
-            // An office's pending work is its own review, from when it was routed.
-            $pending = DB::table('application_assignments')
-                ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
-                ->whereNull('applications.deleted_at')
-                ->where('application_assignments.department_id', $scope['department_id'])
-                ->whereNotNull('application_assignments.assigned_at')
-                ->where('application_assignments.assigned_at', '<', $to)
-                ->where(static fn ($q) => $q->whereNull('application_assignments.completed_at')
-                    ->orWhere('application_assignments.completed_at', '>=', $to))
-                ->get(['application_assignments.assigned_at as since', 'applications.application_type']);
-        } else {
-            // Every office: the filing as a whole, from submission to decision.
-            $pending = DB::table('applications')
-                ->whereNull('deleted_at')
-                ->whereNotNull('submitted_at')
-                ->where('submitted_at', '<', $to)
-                ->whereNotIn('status', [ApplicationStatus::Cancelled->value, ApplicationStatus::Draft->value])
-                ->where(static fn ($q) => $q->whereNull('decided_at')->orWhere('decided_at', '>=', $to))
-                ->get(['submitted_at as since', 'application_type']);
-        }
-
         // The last moment of the period, or now if the period has not ended
         // yet. $to itself is the first moment AFTER the period — on the next
         // Manila date — and ageing to it would add a working day.
-        $asOf = $to->greaterThan(CarbonImmutable::now()) ? CarbonImmutable::now() : $to->subSecond();
-        foreach ($pending as $row) {
-            $age = ManilaCalendar::workingDaysBetween(CarbonImmutable::parse($row->since), $asOf);
+        $current = $to->greaterThan(CarbonImmutable::now());
+        $asOf = $current ? CarbonImmutable::now() : $to->subSecond();
+        foreach (FilingClock::pending($to, $asOf, $scope, $current) as $row) {
             $bucket = 'over_20';
             foreach ($buckets as $key => $limit) {
-                if ($age <= $limit) {
+                if ($row['age'] <= $limit) {
                     $bucket = $key;
                     break;
                 }
             }
-            $pendingRows[self::transaction((string) $row->application_type)][$bucket]++;
+            $pendingRows[self::transaction($row['application_type'])][$bucket]++;
         }
         $pendingRows = array_map(static function (array $row): array {
             $row['total'] = $row['within_3'] + $row['within_7'] + $row['within_20'] + $row['over_20'];
@@ -567,6 +548,13 @@ final class LguReports
         $decidedTotal = array_sum(array_column($tierRows, 'decided'));
         $withinTotal = array_sum(array_column($tierRows, 'within'));
 
+        $bplo = $scope !== null && FilingClock::bplo($scope);
+        $decidedNote = match (true) {
+            $scope === null => 'Working days from submission to decision, leaving out the time a filing waited on its applicant to pay or to resubmit.',
+            $bplo => 'Working days the filings decided in the period spent at BPLO’s desk (For Approval and For Final Approval) — BPLO’s own time, not the other offices’. Filings handled before September 2026, when every office reviewed at once, cannot show BPLO’s own days and are left out.',
+            default => 'This office’s reviews finished in the period: working days from the filing reaching the office to the office finishing it, leaving out time the filing waited on its applicant.',
+        };
+
         return [
             self::table('Decided in the period, against RA 11032', [
                 ['key' => 'label', 'label' => 'Tier (statutory limit)', 'format' => 'text'],
@@ -575,8 +563,8 @@ final class LguReports
                 ['key' => 'within', 'label' => 'Within the limit', 'format' => 'count'],
                 ['key' => 'within_rate', 'label' => 'Within the limit (%)', 'format' => 'percent'],
             ], $tierRows,
-                'Working days from submission to decision, weekends excluded; holidays are not on the register, so figures around them read slightly long.'
-                .($untiered > 0 ? " {$untiered} decided filings have no tier on record and are left out." : ''),
+                $decidedNote.' Weekends are excluded; holidays are not on the register and count as working days, so no figure here is shorter than the real one.'
+                .($untiered > 0 ? " {$untiered} with no tier on record are left out." : ''),
                 [
                     'label' => 'Total', 'decided' => $decidedTotal, 'mean_days' => null, 'within' => $withinTotal,
                     'within_rate' => $decidedTotal === 0 ? null : round($withinTotal / $decidedTotal * 100, 1),
@@ -589,9 +577,11 @@ final class LguReports
                 ['key' => 'over_20', 'label' => 'Over 20', 'format' => 'count'],
                 ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
             ], $pendingRows,
-                $scope === null
-                    ? 'Filings submitted and not yet decided on the last day of the period, aged from submission.'
-                    : 'This office’s reviews not yet completed on the last day of the period, aged from when the filing was routed to it.',
+                match (true) {
+                    $scope === null => 'Filings submitted and not yet decided on the last day of the period, aged from submission. Rejected and cancelled filings are left out, and so are filings waiting on their applicant to pay or to resubmit; that time is also left out of the age.',
+                    $bplo => 'Filings at BPLO’s desk (For Approval or For Final Approval) on the last day of the period, aged by the working days they have spent there.',
+                    default => 'This office’s reviews not yet finished on the last day of the period, aged from when the filing reached the office. Rejected and cancelled filings are left out, and so are filings waiting on their applicant; that time is also left out of the age.',
+                },
                 $pendingTotal),
         ];
     }

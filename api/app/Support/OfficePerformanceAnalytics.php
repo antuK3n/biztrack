@@ -109,9 +109,13 @@ final class OfficePerformanceAnalytics
      * "Never Color Alone" applied to an absence: an unexplained gap is a
      * colour-only signal made of whitespace.
      *
+     * Public because the dashboard and the reports ask the same question —
+     * whose recorded review time is not their own step — and must not keep a
+     * second list (FilingClock::bplo, DashboardAnalytics::stageObservations).
+     *
      * @var array<string, string>
      */
-    private const NOT_COMPARABLE = [
+    public const NOT_COMPARABLE = [
         'BPLO' => 'BPLO is stamped again at final approval, so its recorded time is the whole '
             .'filing rather than BPLO\'s own step. Volume and open caseload are unaffected.',
     ];

@@ -536,6 +536,16 @@ final class DashboardAnalytics
     /**
      * One row per decided filing in the window: its tier and how long it took.
      *
+     * WHOSE TIME (FilingClock, which the Reports tab's processing-time report
+     * reads too, so the two cannot disagree). For every office at once, a
+     * filing is timed from submission to decision, less the stretches it sat
+     * with the applicant — Pending Payment and Returned, read from status
+     * history. For one office, it is that office's own review: its
+     * assignment's span for the five clearance offices, the time at BPLO's
+     * desk for BPLO. Scoped, this used to be every routed filing's whole
+     * lifetime, so CHO was judged on BFP's inspection and the applicant's
+     * payment.
+     *
      * Working days are counted here, in dataset(), because the count depends on
      * the calendar and compute() must stay a pure function of its input. Both
      * measures travel; only the working-day one is compared against the statutory
@@ -557,58 +567,33 @@ final class DashboardAnalytics
      */
     private static function tierObservations(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
     {
-        $rows = self::routedTo(DB::table('applications'), $scope)
-            ->whereNull('deleted_at')
-            ->whereNotNull('complexity')
-            ->whereNotNull('submitted_at')
-            ->whereNotNull('decided_at')
-            ->where('decided_at', '>=', $windowStart)
-            ->where('decided_at', '<=', $now)
-            ->orderBy('id')
-            ->get(['complexity', 'submitted_at', 'decided_at', 'deadline_at']);
-
         $observations = [];
-        foreach ($rows as $row) {
-            $tier = (string) $row->complexity;
+        // Up to and including `now`: the half-open bound is the next second.
+        foreach (FilingClock::decided($windowStart, $now->addSecond(), $scope) as $row) {
+            $tier = (string) $row['tier'];
             if (! isset(self::TIERS[$tier])) {
-                // An unrecognised tier is not silently folded into a real one:
-                // it would move a statutory mean it does not belong to.
+                // No tier, or an unrecognised one: not silently folded into a
+                // real tier, where it would move a statutory mean it does not
+                // belong to.
                 continue;
             }
 
-            $submitted = CarbonImmutable::parse($row->submitted_at);
-            $decided = CarbonImmutable::parse($row->decided_at);
-            $workingDays = self::workingDaysBetween($submitted, $decided);
-
             $observations[] = [
                 'tier' => $tier,
-                'working_days' => $workingDays,
-                'calendar_days' => Rounding::statistic($submitted->diffInHours($decided) / 24),
-                // The statutory test: this filing's own turnaround against the
-                // legal limit for its tier.
-                'within_statutory' => $workingDays <= self::TIERS[$tier]['statutory_working_days'],
-                'within_recorded_deadline' => $row->deadline_at !== null
-                    && $decided->lessThanOrEqualTo(CarbonImmutable::parse($row->deadline_at)),
-                'recorded_deadline_working_days' => $row->deadline_at === null
+                'working_days' => $row['working_days'],
+                'calendar_days' => $row['calendar_days'],
+                // The statutory test: this turnaround against the legal limit
+                // for the filing's tier.
+                'within_statutory' => $row['working_days'] <= self::TIERS[$tier]['statutory_working_days'],
+                'within_recorded_deadline' => $row['deadline_at'] !== null
+                    && $row['end']->lessThanOrEqualTo($row['deadline_at']),
+                'recorded_deadline_working_days' => $row['deadline_at'] === null
                     ? null
-                    : self::workingDaysBetween($submitted, CarbonImmutable::parse($row->deadline_at)),
+                    : ManilaCalendar::workingDaysBetween($row['submitted_at'], $row['deadline_at']),
             ];
         }
 
         return $observations;
-    }
-
-    /**
-     * Whole working days from one instant to another, by their Manila dates.
-     *
-     * The shared count (ManilaCalendar::workingDaysBetween). This class kept
-     * its own copy on the UTC date, so a filing received at 7 am Manila on a
-     * Monday — Sunday night in UTC — was a day older here than on the deadline
-     * stamped on it.
-     */
-    private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
-    {
-        return ManilaCalendar::workingDaysBetween($from, $to);
     }
 
     /* ── facts: time-in-stage per department ───────────────────────────── */
