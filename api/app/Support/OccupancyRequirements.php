@@ -93,6 +93,43 @@ final class OccupancyRequirements
             'note' => 'Three sets, where anything was changed during construction.',
             'carried_from' => null,
         ],
+        /*
+         * ── Two rows from the OTHER paper OBO hands out ──────────────────
+         *
+         * This list is the City Engineering "CHECKLIST OF REQUIREMENTS FOR
+         * THE APPLICATION OF OCCUPANCY PERMIT", and that checklist does not
+         * mention either of these. OBO's own UNIFIED APPLICATION FORM FOR
+         * CERTIFICATE OF OCCUPANCY AND FIRE SAFETY INSPECTION CERTIFICATE
+         * does: its "Requirements submitted" block prints seven boxes, and
+         * the Construction Logbook and the site photographs are two of them
+         * that appear nowhere on the checklist.
+         *
+         * Verified against both papers on 1 October 2026. One office, two
+         * sheets, two different lists — so collecting only the checklist's
+         * left OBO chasing these by hand after the filing arrived.
+         *
+         * NOT blocking, unlike the Certificate of Completion and the
+         * owner's ID. The Unified form prints them as boxes the applicant
+         * TICKS when submitted rather than as conditions of filing, and the
+         * checklist — the sheet actually titled "requirements for the
+         * application" — does not ask for them at all. Refusing a filing
+         * over a document only one of the two papers names would be our
+         * rule rather than the city's; asking for it is not.
+         */
+        [
+            'key' => 'CONSTRUCTION_LOGBOOK',
+            'label' => 'Construction Logbook',
+            'when' => 'always',
+            'note' => 'Signed and sealed by the architect or civil engineer who undertook full-time inspection and supervision.',
+            'carried_from' => null,
+        ],
+        [
+            'key' => 'SITE_PHOTOS',
+            'label' => 'Photographs of the site showing substantial completion',
+            'when' => 'always',
+            'note' => 'Photographs of the project as it stands, showing the work substantially complete.',
+            'carried_from' => null,
+        ],
         [
             'key' => 'RELOCATION_SURVEY',
             'label' => 'Relocation survey by a licensed Geodetic Engineer',
