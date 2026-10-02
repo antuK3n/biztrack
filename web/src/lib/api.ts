@@ -198,6 +198,34 @@ export function toApiError(error: unknown): ApiError {
         errors: {},
       }
     }
+    /*
+     * ── A 5xx message is OURS, and it does not go on the screen ─────────
+     *
+     * An applicant pressing Download PDF was shown "Maximum execution time
+     * of 30 seconds exceeded" under the button (2 October 2026). That is
+     * PHP's fatal, rendered verbatim: it tells a member of the public about
+     * our runtime and its limits, and gives them nothing they can act on.
+     * With APP_DEBUG on it can carry a file path and a stack frame too.
+     *
+     * A 5xx means WE failed. Whatever Laravel put in `message` is a note to
+     * a developer — it belongs in the log, which already has it, and the
+     * status is kept here so a caller that wants to branch on it still can.
+     *
+     * Everything below 500 keeps the server's own sentence, and that is the
+     * point of the split: a 422 or a 403 is the API telling the APPLICANT
+     * something true about their request, which is exactly what they need
+     * to read. The gateway branch above stays ahead of this one because
+     * "try again" really is the right advice for a dropped hop, and this
+     * sentence would be too vague to say so.
+     */
+    if (status >= 500) {
+      return {
+        status,
+        message: 'Something went wrong on our end. Please try again, and tell BPLO if it keeps happening.',
+        errors: {},
+      }
+    }
+
     return {
       status,
       message: data?.message ?? 'Something went wrong on our end. Please try again.',
