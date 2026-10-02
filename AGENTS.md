@@ -91,6 +91,7 @@ If the developer declines, drop it — do not re-ask on the same piece of work.
 |---|---|
 | `main` | **protected on GitHub [V]** — PRs required, force-push and deletion blocked, linear history. Client merges. |
 | `dev` | shared working branch; **what the tunnel deploys from** |
+| `dev2` | the 2 October 2026 merge of `rupert-4`, `mike-2` and `ken/checklist-0927` into `dev`, with AI attribution removed from history; **what biztrack.page runs**. Kept as its own branch so `dev`'s published history was not force-pushed. |
 | `demo` | **pinned**; fast-forwarded from `dev`, never from `main` |
 | `backup/all-work-c50fbb4` | 17 commits, explicit backup — do not delete |
 | `feat/demo-autofill` | PR #50 **closed, not merged** — holds real work |
