@@ -288,10 +288,33 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             : 'Contact the Business Permits and Licensing Office if you think this is a mistake.',
         })
       } else if (apiError.status === 422) {
+        /*
+         * ── The server's own sentence, because 422 is not one thing ──────
+         *
+         * This printed "Check your email and password, then try again" over
+         * every 422, and the LOCKOUT is a 422: five wrong passwords set
+         * `locked_until` fifteen minutes out, and `AuthController::login`
+         * answers "Account temporarily locked. Try again in N minutes."
+         *
+         * So the one person who most needed telling was told the one thing
+         * that could not help them: check a password that was never the
+         * problem, on an account that will refuse every attempt until the
+         * quarter hour is up — and each attempt they make looks identical
+         * to the last. Every other branch on this page prints what the
+         * server said; this was the only one that argued with it.
+         *
+         * The fallback stays for a 422 that arrives with no message, which
+         * is the shape a validation failure takes when the field errors
+         * were handled above.
+         */
+        const locked = /locked/i.test(apiError.message)
         setFormError({
-          variant: 'error',
-          title: "We couldn't sign you in",
-          body: 'Check your email and password, then try again.',
+          variant: locked ? 'warning' : 'error',
+          title: locked ? 'This account is locked for now' : "We couldn't sign you in",
+          body:
+            apiError.message.trim() !== ''
+              ? apiError.message
+              : 'Check your email and password, then try again.',
         })
       } else {
         setFormError({ variant: 'error', title: 'Something went wrong', body: apiError.message })
