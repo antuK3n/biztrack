@@ -5791,7 +5791,32 @@ export function ApplyWizard() {
        */
       const officeCode = officeStepCode(p)
       if (officeCode !== null) {
-        return officeFormMissing(officeCode, officeData[officeCode] ?? {})
+        /*
+         * ── The office's DOCUMENTS gate too, not just its answers ────────
+         *
+         * `officeFormMissing` reads answers and has no business fetching a
+         * document list, so the clearance stage adds the blocking rows to
+         * it separately. This step did not, and so let the applicant walk
+         * past an office sheet with a required attachment missing.
+         *
+         * What that cost: Next was enabled, Review was reached, Submit was
+         * pressed — and `submitClearanceForm` refused the sheet on the
+         * server ("Attach Business permit fee / tax assessment bill from
+         * BPLO before submitting this form"), inside the transaction that
+         * submits the filing. The whole submission rolled back, so the
+         * filing reached no office at all: the same ending as the routing
+         * bug this was found beside, by a different road.
+         *
+         * Which rows gate is the SERVER's call — `blocking` on
+         * `OfficeFormRequirement`, and `WorkflowService::submitClearanceForm`
+         * is what enforces it. This adds no rule, it stops ignoring one.
+         */
+        return [
+          ...officeFormMissing(officeCode, officeData[officeCode] ?? {}),
+          ...(officeReqs[officeCode] ?? [])
+            .filter((row) => row.blocking === true && !row.satisfied)
+            .map((row) => row.label),
+        ]
       }
 
       switch (p) {
@@ -6377,6 +6402,13 @@ export function ApplyWizard() {
        * keystroke of every office sheet, and was the one reader left out.
        */
       officeData,
+      /*
+       * And the documents beside them, for the reason `officeData` is here:
+       * this callback reads it, so it must recompute when it moves. An
+       * attachment that satisfies a blocking row has to reopen the gate it
+       * closed, and uploads land here long after the answers do.
+       */
+      officeReqs,
       applicationType,
       feeLines,
       psic,

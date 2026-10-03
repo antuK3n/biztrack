@@ -137,11 +137,28 @@ it('counts every permit issued in the period by type, business permits by month,
 });
 
 it('accounts for every peso collected in the period across all offices', function () {
-    $from = CarbonImmutable::parse('2024-01-01')->startOfDay();
-    $to = CarbonImmutable::parse('2026-09-30')->endOfDay();
+    /*
+     * Bounded the way the report bounds itself.
+     *
+     * This read `parse('2026-09-30')->endOfDay()`, a UTC instant, while
+     * `LguReports::build` turns the same two dates into MANILA days via
+     * `ManilaCalendar::period` — from the first moment of the 1st to the first
+     * moment after the 30th, every comparison `<`. The two windows differ by
+     * the 16:00–24:00 UTC sliver of the last day, which is 1 October in
+     * Manila and rightly outside a report that ends on 30 September.
+     *
+     * Harmless until a payment landed in that sliver, which the demo seed
+     * eventually does because its dates are struck from `now()` and drift
+     * with the clock. On 4 October 2026 it put a ₱2,610 payment at
+     * 2026-09-30 23:23 UTC and this reconciliation failed by exactly that —
+     * the report counting Manila days, the raw sum counting UTC ones. The
+     * report was right; the yardstick was wrong.
+     */
+    [$from, $to] = ManilaCalendar::period('2024-01-01', '2026-09-30');
 
     $report = reportAs('admin@biztrack.local', 'collections', '?from=2024-01-01&to=2026-09-30');
-    $collected = (float) Payment::where('status', 'completed')->whereBetween('paid_at', [$from, $to])->sum('amount');
+    $collected = (float) Payment::where('status', 'completed')
+        ->where('paid_at', '>=', $from)->where('paid_at', '<', $to)->sum('amount');
 
     // Spread over fee lines and rounded per row, so a few centavos may move.
     expect(abs($report['sections'][2]['total']['amount'] - $collected))->toBeLessThan(1.0)

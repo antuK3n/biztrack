@@ -85,6 +85,28 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
     $app->priorPermits()->sync(collect($prior)->only($codes)->pluck('id')->all());
     $app->permitTypes()->sync(PermitType::whereIn('code', $codes)->pluck('id')->all());
 
+    /*
+     * ── Whether the sheets go in with the submission ────────────────────────
+     *
+     * A renewal carrying no business permit hands every office sheet in as
+     * part of `submit` since 4 October 2026
+     * (`handCarriedClearancesToTheirOffices`), because on such a filing the
+     * sheet is a step of the wizard rather than a later press of Apply. So the
+     * checklists have to be answered BEFORE the submission, not after it: OBO
+     * and CPDD ask for a dozen documents between them and the submit refuses a
+     * sheet missing one, which rolled this whole fixture back.
+     *
+     * A renewal that DOES carry the business permit still goes to BPLO and
+     * still opens a clearance stage, so its sheets go in down in the loop.
+     */
+    $carriesBusinessPermit = in_array(PermitType::OUTCOME_CODE, $codes, true);
+
+    if (! $carriesBusinessPermit) {
+        foreach ($codes as $code) {
+            satisfyChecklist($app, $code);
+        }
+    }
+
     $workflow->submit($app);
     $app->refresh();
 
@@ -105,8 +127,6 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
      * `issuePermitFor` and `grantClearance` and are indifferent to which office
      * approved, so branching the route here preserves the lot.
      */
-    $carriesBusinessPermit = in_array(PermitType::OUTCOME_CODE, $codes, true);
-
     if ($carriesBusinessPermit) {
         classifyAsOfficer($app);
         $workflow->approveMainForm($app->fresh());
@@ -122,11 +142,14 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
         }
 
         $type = PermitType::where('code', $code)->firstOrFail();
-        $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
-        // The checklist is complete before the sheet goes in — the submit
-        // refuses one that is not. See satisfyChecklist() in Pest.php.
-        satisfyChecklist($app->fresh(), $type);
-        $workflow->submitClearanceForm($app->fresh(), $type);
+        if ($carriesBusinessPermit) {
+            $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+            // The checklist is complete before the sheet goes in — the submit
+            // refuses one that is not. See satisfyChecklist() in Pest.php.
+            satisfyChecklist($app->fresh(), $type);
+            $workflow->submitClearanceForm($app->fresh(), $type);
+        }
+
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');
         $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now()->addDay());

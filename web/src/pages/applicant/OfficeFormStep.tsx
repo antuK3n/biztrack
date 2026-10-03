@@ -631,16 +631,32 @@ export function WhatToCorrect({
                   </>
                 ) : (
                   /*
-                    An answer. `set` is the sheet's own setter, so this writes
-                    the same value the field below shows and autosave carries
-                    it like any other keystroke.
+                    An answer, drawn with the SAME control the sheet draws.
+
+                    This was a bare text box for every field. The client
+                    returned a Sanitary Classification — four chips on the
+                    sheet — and was handed a free-text input to retype it in
+                    (4 October 2026): "ALL RETURNED FIELDS SHOULD BE SIMILAR
+                    TO THEIR ORIGINAL COUNTERPARTS, WITH SAME
+                    RULES/VALIDATIONS."
+
+                    That is not only inconsistent, it loses the rule. Four
+                    chips are a closed set the office can act on; a text box
+                    accepts "food est." and "Foods" and sends either back as
+                    the correction, so the office returns it again over a
+                    spelling. The same argument the citizenship select was
+                    added for on the main form's corrections.
+
+                    `set` is still the sheet's own setter either way, so the
+                    value lands in the same place and autosave carries it
+                    like any other keystroke.
                   */
-                  <input
-                    type="text"
+                  <CorrectionAnswer
+                    code={code}
+                    field={item.target}
+                    label={item.label}
                     value={String(data[item.target] ?? '')}
-                    onChange={(e) => set(item.target, e.target.value)}
-                    aria-label={`Correct ${item.label}`}
-                    className="mt-1.5 block w-full rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:border-royal focus:outline-none"
+                    onChange={(v) => set(item.target, v)}
                   />
                 )}
               </div>
@@ -838,6 +854,119 @@ function ChipOption({
  * control — the listener hears "Commercial, radio button" with nothing saying
  * what is being chosen. Optional only because the four older sheets predate it.
  */
+/**
+ * The office-form fields that are NOT a plain text box on their own sheet.
+ *
+ * Keyed `CODE.field`, because two sheets use the same key for different
+ * questions — `application_type` is Occupancy's Full/Partial chips and
+ * Zoning's derived Nature of Application, and a bare field name would have
+ * drawn one over the other.
+ *
+ * Everything absent from here is a text input on the sheet and stays one in
+ * the correction dialog. `building_storeys`, `building_units` and `owner_zip`
+ * carry `inputMode="numeric"` rather than a different control, and that is
+ * reproduced below for the same reason the chips are: a tablet keypad is part
+ * of the field.
+ */
+type CorrectionControl =
+  | { kind: 'chips'; options: string[] }
+  | { kind: 'select'; options: string[] }
+  | { kind: 'date' }
+  | { kind: 'numeric' }
+
+/*
+ * A function rather than a table, because the option lists are declared
+ * further down this file: a `const` map here would read them before they are
+ * initialised. Function declarations hoist and this is only ever called from
+ * render, by which time they exist.
+ */
+function correctionControl(key: string): CorrectionControl | undefined {
+  const controls: Record<string, CorrectionControl> = {
+    'SANITARY.sanitary_classification': { kind: 'chips', options: SANITARY_CLASSIFICATIONS },
+    'SANITARY.water_source': { kind: 'select', options: WATER_SOURCES },
+    'OCCUPANCY.application_type': { kind: 'chips', options: OCCUPANCY_SCOPES },
+    'OCCUPANCY.completion_date': { kind: 'date' },
+    'OCCUPANCY.building_storeys': { kind: 'numeric' },
+    'OCCUPANCY.building_units': { kind: 'numeric' },
+    'OCCUPANCY.owner_zip': { kind: 'numeric' },
+    'ZONING.zoning_industrial_project_type': {
+      kind: 'chips',
+      options: ZONING_INDUSTRIAL_PROJECT_TYPES,
+    },
+    'ZONING.building_storeys': { kind: 'numeric' },
+    'FSIC.building_storeys': { kind: 'numeric' },
+  }
+
+  return controls[key]
+}
+
+/**
+ * One returned answer, drawn the way its own sheet draws it.
+ *
+ * The control carries the rule. A closed set of chips is a closed set here
+ * too, so a correction cannot introduce a spelling the office would have to
+ * return a second time.
+ */
+function CorrectionAnswer({
+  code,
+  field,
+  label,
+  value,
+  onChange,
+}: {
+  code: OfficeFormCode
+  field: string
+  label: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const control = correctionControl(`${code}.${field}`)
+  const box =
+    'mt-1.5 block w-full rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:border-royal focus:outline-none'
+
+  if (control?.kind === 'chips') {
+    return (
+      <div className="mt-2">
+        <ChipRow
+          options={control.options}
+          value={value}
+          onChange={onChange}
+          label={`Correct ${label}`}
+        />
+      </div>
+    )
+  }
+
+  if (control?.kind === 'select') {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`Correct ${label}`}
+        className={box}
+      >
+        <option value="">Select…</option>
+        {control.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <input
+      type={control?.kind === 'date' ? 'date' : 'text'}
+      inputMode={control?.kind === 'numeric' ? 'numeric' : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={`Correct ${label}`}
+      className={box}
+    />
+  )
+}
+
 function ChipRow({
   options,
   value,

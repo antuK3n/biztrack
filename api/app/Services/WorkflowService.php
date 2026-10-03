@@ -847,10 +847,64 @@ class WorkflowService
 
             if ($bploReads) {
                 $this->routeTo($app, $this->bploDepartmentId());
+            } else {
+                $this->handCarriedClearancesToTheirOffices($app);
             }
 
             return $app->fresh();
         });
+    }
+
+    /**
+     * Put a clearance-only renewal in front of the offices that must read it.
+     *
+     * ── The filing reached nobody ───────────────────────────────────────────
+     *
+     * Submitting a Sanitary renewal left BIZ-2026-00013 at `for_approval` with
+     * its SANITARY pivot still `not_started`, no mode, and NO ASSIGNMENT —
+     * so the City Health Office queue never showed it and the applicant was
+     * waiting on an office that had never been told (client, 4 October 2026).
+     *
+     * The remark above this says why: *"Apply for the permit below and its
+     * office will review it."* That is the CLEARANCE STAGE's flow, where the
+     * applicant presses Apply per permit and `startClearance` routes the
+     * office. A clearance-only renewal does not go there — its office sheet is
+     * a STEP OF THE WIZARD, filled in before Submit — so nothing ever called
+     * it and the filing stopped at the transition.
+     *
+     * ── Both calls, in this order ───────────────────────────────────────────
+     *
+     * `startClearance` records the mode and, for a permit that HAS an office
+     * form, deliberately stops there: handing the sheet in is a separate act
+     * (see its note on Apply not being Submit). `submitClearanceForm` is that
+     * act — it stamps `submitted_at`, moves the clearance to ForApproval and
+     * routes the issuing department.
+     *
+     * Safe for a permit with no office form too: `startClearance` submits and
+     * routes that one itself, and `submitClearanceForm` then finds a status
+     * outside NotStarted/Returned/Rejected and returns without doing anything.
+     *
+     * MODE_APPLY and never upload: the applicant filled the office's own form
+     * in the wizard. `startClearance` would refuse upload on a renewal anyway
+     * (client, 3 October 2026).
+     */
+    private function handCarriedClearancesToTheirOffices(Application $app): void
+    {
+        $app->load('permitTypes');
+
+        foreach ($app->permitTypes as $type) {
+            /*
+             * The outcome permit is BPLO's and is not on this filing — but
+             * guarded rather than assumed, because `$bploReads` is computed
+             * from the deferral and a filing could in principle carry one.
+             */
+            if ($type->code === PermitType::OUTCOME_CODE) {
+                continue;
+            }
+
+            $this->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+            $this->submitClearanceForm($app->fresh(), $type);
+        }
     }
 
     // ── BPLO: the first approval ────────────────────────────────────────────
