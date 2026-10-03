@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureDebugPanelOpen;
 use App\Http\Middleware\EnsureEmailConfirmedToFile;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\SecurityHeaders;
@@ -20,6 +21,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => EnsurePermission::class,
             'email.confirmed' => EnsureEmailConfirmedToFile::class,
+            // The Debug page's API: super admin AND the panel open, else 404.
+            'debug.panel' => EnsureDebugPanelOpen::class,
         ]);
         $middleware->append(SecurityHeaders::class);
         /*

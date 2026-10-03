@@ -8,6 +8,7 @@ use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\DebugPanel;
 use App\Support\EmailCodes;
 use App\Support\EmailSwitch;
 use App\Support\LegacyImport\LegacyClaim;
@@ -144,6 +145,14 @@ class AuthController extends Controller
                  * is configured, only what it has to ask the reader for.
                  */
                 'password_change_code_required' => EmailSwitch::on(),
+                /*
+                 * Whether the Debug page is open to this account: the super
+                 * admin, with the panel opened from the server
+                 * (App\Support\DebugPanel). The web app shows the rail entry
+                 * and the route on this alone, so it never learns the rule —
+                 * and every /debug endpoint checks it again regardless.
+                 */
+                'debug_panel' => DebugPanel::allows($user),
                 /*
                  * An owner with no home address on file [checklist 2026-09-28,
                  * Register 2] — anyone who registered before it was asked. The
