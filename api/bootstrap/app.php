@@ -3,10 +3,12 @@
 use App\Http\Middleware\EnsureEmailConfirmedToFile;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\SecurityHeaders;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -93,4 +95,56 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        /*
+         * ── A 404 names no class and no id ───────────────────────
+         *
+         * An applicant opening the renewal dialog was shown
+         * "No query results for model [App\Models\Business] 19" inside the
+         * permit picker (client's screenshot, 3 October 2026). That is
+         * `ModelNotFoundException`'s default, rendered verbatim: it tells a
+         * member of the public our namespace, our class names and a primary
+         * key, and gives them nothing they can act on.
+         *
+         * The same fault as the PHP fatal quoted under Download PDF on
+         * 2 October, and `web/src/lib/api.ts` already refuses to print a 5xx
+         * message for exactly that reason. It deliberately keeps everything
+         * BELOW 500, because a 422 or a 403 is the API telling the applicant
+         * something true about their request — and that split is right. A
+         * route-model-binding 404 is the exception: nobody wrote it for a
+         * reader, Laravel generated it from a class name.
+         *
+         * So it is fixed HERE rather than filtered there. The browser is not
+         * the only caller, a leak is a leak whoever reads it, and a client
+         * pattern-matching on "No query results" would be guessing at the
+         * shape of a framework string.
+         *
+         * Only the FRAMEWORK's own message is replaced. A 404 a controller
+         * raised deliberately — `abort(404, '…')` with a sentence meant for
+         * the applicant — keeps its wording, because that one was written
+         * for them. `getMessage()` is empty on an aborted 404 with no text,
+         * and `ModelNotFoundException` is the only thing that fills it with
+         * a class name.
+         *
+         * The status stays 404. Several endpoints rely on it meaning "not
+         * yours, and therefore not found" rather than 403 — see the scope
+         * note on `DraftController` — and changing it here would turn a
+         * deliberate privacy choice into a permissions error.
+         */
+        $exceptions->render(function (NotFoundHttpException $e, Request $request) {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            $previous = $e->getPrevious();
+            $fromBinding = $previous instanceof ModelNotFoundException;
+
+            if (! $fromBinding) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'We could not find that. It may have been removed, or it may belong to another account.',
+            ], 404);
+        });
     })->create();
