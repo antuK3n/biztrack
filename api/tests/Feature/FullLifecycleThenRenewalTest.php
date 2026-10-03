@@ -122,7 +122,17 @@ function bploAccepts(int $appId, string $remarks): void
  * One clearance, all the way: the applicant applies and fills the sheet, then
  * the office accepts the paperwork, books a visit and passes it.
  */
-function clearanceEndToEnd(int $appId, string $code): void
+/**
+ * Everything the APPLICANT does for one clearance: apply, answer, attach, submit.
+ *
+ * Split out of `clearanceEndToEnd` on 4 October 2026. A clearance-only renewal
+ * never does any of it: `WorkflowService::submit` hands its office sheet in as
+ * part of the submission (`handCarriedClearancesToTheirOffices`), because that
+ * sheet is a step of the renewal wizard rather than a later press of Apply.
+ * Calling `/apply` on such a filing is refused — the clearance is already
+ * started — which is how the renewal case below found this.
+ */
+function clearanceApplicantHalf(int $appId, string $code): void
 {
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
@@ -155,6 +165,11 @@ function clearanceEndToEnd(int $appId, string $code): void
         'submit' => true,
     ])->assertOk();
 
+}
+
+/** Everything the OFFICE does for one clearance: approve, schedule, inspect. */
+function clearanceOfficeHalf(int $appId, string $code): void
+{
     authAs(OFFICER_FOR[$code]);
     $assignment = ApplicationAssignment::where('application_id', $appId)
         ->where('department_id', PermitType::where('code', $code)->value('issuing_department_id'))
@@ -172,6 +187,13 @@ function clearanceEndToEnd(int $appId, string $code): void
         'result' => 'passed',
         'findings' => 'Premises inspected and found compliant.',
     ])->assertOk();
+}
+
+/** Both halves, which is the whole of a NEW filing's clearance stage. */
+function clearanceEndToEnd(int $appId, string $code): void
+{
+    clearanceApplicantHalf($appId, $code);
+    clearanceOfficeHalf($appId, $code);
 }
 
 /** BPLO's last act: every office is done, so issue. */
@@ -351,8 +373,26 @@ it('renews one of the six and issues only that', function () {
      */
     expect(Application::find($appId)->defersPayment())->toBeTrue();
 
-    // No BPLO queue item on a filing BPLO has no say in.
-    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(0);
+    /*
+     * No BPLO queue item on a filing BPLO has no say in.
+     *
+     * Asserted against BPLO specifically rather than against a count of zero.
+     * It was a flat `->count())->toBe(0)` until 4 October 2026, which said
+     * "nobody is routed this" when what it meant was "BPLO is not" — and the
+     * two stopped being the same thing when clearance-only renewals began
+     * reaching the office that issues the permit
+     * (`handCarriedClearancesToTheirOffices`). The client had reported the
+     * opposite failure: a Sanitary renewal that reached no queue at all. So
+     * the broad assertion was pinning the bug, and the narrow one is the
+     * property this test was actually written for.
+     */
+    $bploId = Department::where('code', 'BPLO')->value('id');
+    expect(
+        ApplicationAssignment::where('application_id', $appId)->where('department_id', $bploId)->count()
+    )->toBe(0);
+
+    // And it did reach somebody: the office that issues what is being renewed.
+    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBeGreaterThan(0);
 
     // The stage is already open — there is no payment to wait for.
     authAs('owner@biztrack.local');
@@ -361,8 +401,15 @@ it('renews one of the six and issues only that', function () {
     expect(collect($rows->json('data'))->pluck('permit_type.code')->sort()->values()->all())
         ->toBe($renewCodes);
 
+    /*
+     * Only the OFFICE half. The applicant's half — Apply, answer the sheet,
+     * attach, submit — already happened inside `submit`, because on a
+     * clearance-only renewal the office sheet is a step of the wizard rather
+     * than a later press of Apply. Running `clearanceApplicantHalf` here
+     * would be the applicant applying twice, and `/apply` refuses it.
+     */
     foreach ($renewCodes as $code) {
-        clearanceEndToEnd($appId, $code);
+        clearanceOfficeHalf($appId, $code);
     }
 
     /*

@@ -87,6 +87,25 @@ function renewalOf(array $codes): Application
     $app->priorPermits()->sync(collect($permits)->pluck('id')->all());
     $app->permitTypes()->sync(PermitType::whereIn('code', $codes)->pluck('id')->all());
 
+    /*
+     * The documents each office refuses its sheet without.
+     *
+     * Submitting a clearance-only renewal hands every carried sheet to
+     * its own office (`handCarriedClearancesToTheirOffices`), and
+     * `submitClearanceForm` will not take one whose blocking rows are
+     * empty. Before 4 October submission routed nothing, so a fixture
+     * could skip this and still submit — and the filing reached no
+     * office, which is the bug that changed.
+     *
+     * The wizard gates the same rows on the office step, so an applicant
+     * cannot reach Submit without them either.
+     */
+    foreach ($codes as $code) {
+        if ($code !== PermitType::OUTCOME_CODE) {
+            satisfyChecklist($app, $code);
+        }
+    }
+
     app(WorkflowService::class)->submit($app->fresh());
 
     return $app->fresh();
@@ -155,17 +174,37 @@ it('attaches a ticked permit’s type even when the caller forgot to', function 
     $app->priorPermits()->sync([$permits['SANITARY']->id]);
     // No permitTypes()->sync at all — the caller only named the prior permit.
 
+    /* `attachRequiredPermitTypes` adds SANITARY, so its sheet is handed in too. */
+    satisfyChecklist($app, 'SANITARY');
+
     app(WorkflowService::class)->submit($app->fresh());
 
     expect(codesOn($app->fresh()))->toBe(['SANITARY']);
 });
 
-it('gives every attached row a starting status', function () {
+it('gives every attached row a status, never a null', function () {
+    /*
+     * The claim is that no row is left with a null status — a draft whose
+     * pivot was written before the column existed would leave every
+     * reader of `isOutstanding()` guessing.
+     *
+     * It asserted NotStarted specifically, which stopped being the
+     * answer on 4 October: submitting a clearance-only renewal hands
+     * each carried sheet to its office, so the rows arrive at
+     * ForApproval. The status the fixture lands on is incidental to what
+     * this test is for; that there IS one is the rule.
+     */
     $app = renewalOf(['SANITARY', 'ZONING']);
 
     $app->load('permitTypes');
+    expect($app->permitTypes)->not->toBeEmpty();
     foreach ($app->permitTypes as $type) {
-        expect($type->pivot->status)->toBe(ClearanceStatus::NotStarted);
+        expect($type->pivot->status)->toBeInstanceOf(ClearanceStatus::class);
+    }
+
+    /* And a submitted one is with its office, not sitting unstarted. */
+    foreach ($app->permitTypes as $type) {
+        expect($type->pivot->status)->toBe(ClearanceStatus::ForApproval);
     }
 });
 

@@ -278,7 +278,28 @@ const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits']
  * has answers: search finds it by tracking ID or business name, server-side over
  * the whole queue, and the permit is on the business.
  */
-const INSPECTION_STATUSES = ['awaiting_other_permits'] as const
+/*
+ * ── `for_approval` belongs here too, and its absence hid a whole filing type ─
+ *
+ * A clearance-only renewal never reaches `awaiting_other_permits`. That status
+ * is the BUSINESS PERMIT path — paid, waiting on the five offices. A renewal of
+ * one clearance sits at `for_approval` from submission until it closes, so its
+ * permit could be accepted, move to `for_inspection`, and vanish: the clearance
+ * filter matched and the application filter did not.
+ *
+ * Reported on a Sanitary renewal, 4 October 2026 — approved by CHO and then
+ * "missing" from For Inspection. True of every office, because every one of
+ * these filings sits at that status.
+ *
+ * Safe to widen, because this tab is not narrowed by application status alone.
+ * `clearance_status=for_inspection` runs beside it, joined to the office's OWN
+ * permit type (`whereColumn` in AssignmentController), so a row appears only
+ * when this office's own clearance is out for a visit.
+ *
+ * It does not double up with For Approval either: that tab asks for an OPEN
+ * assignment, and accepting the paperwork completes it.
+ */
+const INSPECTION_STATUSES = ['awaiting_other_permits', 'for_approval'] as const
 
 /** The clearance statuses that put a row in the For Inspection tab. */
 const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'

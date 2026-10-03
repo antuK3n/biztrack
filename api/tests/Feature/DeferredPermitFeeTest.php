@@ -274,6 +274,19 @@ it('bills every clearance on a multi-permit renewal, and stacks what it billed',
     }
     $app->update(['prior_permit_id' => $app->priorPermits()->value('permits.id')]);
 
+    /*
+     * Submitting a clearance-only renewal now hands each office sheet in as
+     * part of the submission (`handCarriedClearancesToTheirOffices`, 4 October
+     * 2026), so the checklists have to be answered first. FSIC's renewal set
+     * carries BPLO's assessment bill as a blocking row, and without it the
+     * submit is refused with a 422 — correctly, which is what
+     * `ClearanceRenewalReachesItsOfficeTest` pins. The wizard holds Next until
+     * the document is attached; this is the fixture doing the same.
+     */
+    foreach (['SANITARY', 'FSIC'] as $code) {
+        satisfyChecklist($app, $code);
+    }
+
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
