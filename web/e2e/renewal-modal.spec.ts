@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { sessionFor } from './helpers'
+import { sessionFor, WIZARD_PAINT_MS } from './helpers'
 
 /*
  * ITEM 110 — "For the renewal, it should ask first (in modal) the permit ID so
@@ -265,13 +265,13 @@ async function openBusinessStep(page: Page) {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: 'Next' }).click()
 
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await completeZoningStep(page)
 
   // Next goes straight to part 3: the zoning answer is inline on the step now,
   // not a dialog on the way out (client, 23 September 2026).
   await page.getByRole('button', { name: /^next$/i }).click()
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 }
 
 /** A renewal draft on the two-permit business, optionally already naming one. */
@@ -312,7 +312,7 @@ test('a renewal is asked which permits before the wizard opens', async ({ page }
    * more page, and `aria-modal` is what stops it reading the wizard behind.
    */
   const modal = dialog(page)
-  await expect(modal).toBeVisible({ timeout: 30_000 })
+  await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await expect(modal).toHaveAttribute('aria-modal', 'true')
 
   /*
@@ -337,12 +337,12 @@ test('two permits of the same type are told apart by number and dates', async ({
    * asking the applicant to choose between two identical rows.
    */
   await page.goto('/apply?type=renewal')
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
 
   const rows = permitRows(page)
-  await expect(rows).toHaveCount(2, { timeout: 20_000 })
+  await expect(rows).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
 
   const texts = await rows.allInnerTexts()
   for (const text of texts) {
@@ -376,13 +376,13 @@ test('a renewal covers every permit ticked, and the first tick is the primary', 
    * the lowest id, this would pass while meaning nothing.
    */
   await page.goto('/apply?type=renewal')
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
   expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
 
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
-  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
 
   const second = permitRows(page).filter({ hasText: permits[1].permit_number })
   const first = permitRows(page).filter({ hasText: permits[0].permit_number })
@@ -394,7 +394,7 @@ test('a renewal covers every permit ticked, and the first tick is the primary', 
   await expect(tickOf(first)).toBeChecked()
 
   await dialog(page).getByRole('button', { name: /continue/i }).click()
-  await expect(dialog(page)).toBeHidden({ timeout: 20_000 })
+  await expect(dialog(page)).toBeHidden({ timeout: WIZARD_PAINT_MS })
 
   // The primary is what Business Information prints back, and it is the permit
   // ticked first — not the first row, which is the other one.
@@ -417,10 +417,10 @@ test('the picker says the ticked permits are one payment, not one per permit', a
    * money and nothing else in the suite would notice it going missing.
    */
   await page.goto('/apply?type=renewal')
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
-  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
 
   const line = dialog(page).getByText(/single Tax Order of Payment/i)
   await expect(line).toBeVisible()
@@ -446,7 +446,7 @@ test('Continue is never disabled — it says what is still missing', async ({ pa
    */
   await page.goto('/apply?type=renewal')
   const modal = dialog(page)
-  await expect(modal).toBeVisible({ timeout: 30_000 })
+  await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const proceed = modal.getByRole('button', { name: /continue/i })
   await expect(proceed).toBeEnabled()
@@ -470,7 +470,7 @@ test('Continue is never disabled — it says what is still missing', async ({ pa
   // EVERY one this filing covers, because one tick is no longer the whole
   // answer. Both ways out are named, because both are answers.
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
-  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
   const second = await proceed.getAttribute('aria-describedby')
   expect(second).toBeTruthy()
   await expect(page.locator(`[id="${second}"]`)).toHaveText(
@@ -504,13 +504,13 @@ test('a business whose permits are on paper is not trapped, but must say so', as
    */
   await page.goto('/apply?type=renewal')
   const modal = dialog(page)
-  await expect(modal).toBeVisible({ timeout: 30_000 })
+  await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const paperOnly = await businessWithoutPermits(page)
   await businessSelect(page).selectOption({ value: paperOnly })
 
   const escape = paperPermitRow(page)
-  await expect(escape).toHaveCount(1, { timeout: 20_000 })
+  await expect(escape).toHaveCount(1, { timeout: WIZARD_PAINT_MS })
   await expect(escape).toHaveText(/no permit issued through biztrack/i)
   // The way through is stated, not merely implied by the absence of a list.
   await expect(escape).toHaveText(/upload your paper permit under documentary requirements/i)
@@ -531,7 +531,7 @@ test('a business whose permits are on paper is not trapped, but must say so', as
   await proceed.click()
 
   // The wizard opens with the dialog gone — that is the escape working.
-  await expect(modal).toBeHidden({ timeout: 20_000 })
+  await expect(modal).toBeHidden({ timeout: WIZARD_PAINT_MS })
   await expect(page.getByText(/part 1 of/i).first()).toBeVisible()
 })
 
@@ -546,10 +546,10 @@ test('naming permits and declaring there are none are exclusive', async ({ page 
    * winning, so a row can never assert both and slip the gate.
    */
   await page.goto('/apply?type=renewal')
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
-  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
 
   // Two permits at once, which is the state the escape has to clear.
   await tickOf(permitRows(page).nth(0)).check()
@@ -573,14 +573,14 @@ test('a reopened draft that already names its permit is not asked again', async 
    * into their own draft.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
   expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
   const draftId = await seedDraft(page, permits[0].id)
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   /*
    * Not a race with the dialog's own mount: the reopen waits for the
    * prior-permit read before it paints, and that read is what decides. If this
@@ -609,7 +609,7 @@ test('a reopened draft covering several permits keeps the whole set', async ({ p
    * it, which is the same rule the dialog's tick order encodes.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
   expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
@@ -618,7 +618,7 @@ test('a reopened draft covering several permits keeps the whole set', async ({ p
   })
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await expect(dialog(page)).toHaveCount(0)
 
   await openBusinessStep(page)
@@ -640,14 +640,14 @@ test('a draft that never named a permit, and could have, is asked again', async 
    * silently declines to save and never says why.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const draftId = await seedDraft(page)
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
   // Opened on the business it already knows, so only the missing half is asked.
-  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
 })
 
 test('a draft on a business with no permits is asked too', async ({ page }) => {
@@ -659,14 +659,14 @@ test('a draft on a business with no permits is asked too', async ({ page }) => {
    * the question is asked; it is not a reason to skip it.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const paperOnly = Number(await businessWithoutPermitsById(page))
   const draftId = await seedDraftOn(page, paperOnly)
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
-  await expect(paperPermitRow(page)).toHaveCount(1, { timeout: 20_000 })
+  await expect(dialog(page)).toBeVisible({ timeout: WIZARD_PAINT_MS })
+  await expect(paperPermitRow(page)).toHaveCount(1, { timeout: WIZARD_PAINT_MS })
 })
 
 test('a draft that already declared it has no BizTrack permit is not asked again', async ({
@@ -680,13 +680,13 @@ test('a draft that already declared it has no BizTrack permit is not asked again
    * than collapsing back into an ordinary null on the way to the server.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const paperOnly = Number(await businessWithoutPermitsById(page))
   const draftId = await seedDraftOn(page, paperOnly, { prior_permit_declared_none: true })
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await expect(dialog(page)).toHaveCount(0)
 
   // And it says so where the answer lives, rather than leaving a blank the
@@ -708,14 +708,14 @@ test('a wrong permit can be corrected, and backing out keeps the old answer', as
    * one is how you say it was wrong.
    */
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
   expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
   const draftId = await seedDraft(page, permits[0].id)
 
   await page.goto(`/apply?draft=${draftId}`)
-  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await openBusinessStep(page)
   await expect(page.getByText(permits[0].permit_number)).toBeVisible()
 
@@ -740,7 +740,7 @@ test('a wrong permit can be corrected, and backing out keeps the old answer', as
   await tickOf(wrong()).uncheck()
   await tickOf(right()).check()
   await dialog(page).getByRole('button', { name: /continue/i }).click()
-  await expect(dialog(page)).toBeHidden({ timeout: 20_000 })
+  await expect(dialog(page)).toBeHidden({ timeout: WIZARD_PAINT_MS })
   await expect(page.getByText(permits[1].permit_number)).toBeVisible()
 })
 

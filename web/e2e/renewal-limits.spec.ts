@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { sessionFor } from './helpers'
+import { sessionFor, WIZARD_PAINT_MS } from './helpers'
 
 /*
  * The two renewal rules, as the applicant meets them on screen.
@@ -83,7 +83,7 @@ test.describe('renewal limits, as the applicant sees them', () => {
     await page.goto('/apply?type=renewal')
 
     const modal = page.getByRole('dialog', { name: /which permits? are you renewing/i })
-    await expect(modal).toBeVisible({ timeout: 30_000 })
+    await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
     // Business 1 is the seeded owner's shop, and the one the fixture
     // attached the long-lapsed sanitary permit to.
@@ -92,7 +92,7 @@ test.describe('renewal limits, as the applicant sees them', () => {
       .selectOption({ value: '1' })
 
     const blocked = modal.getByText(/can no longer be renewed/i).first()
-    await expect(blocked).toBeVisible({ timeout: 20_000 })
+    await expect(blocked).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
     /*
      * The sentence has to tell them what to do instead. "Outside the renewal
