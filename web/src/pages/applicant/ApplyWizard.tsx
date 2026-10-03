@@ -3333,6 +3333,22 @@ export function ApplyWizard() {
   const [needsEmailCode, setNeedsEmailCode] = useState(false)
   /* Autosave bookkeeping — see the autosave effect below. */
   const [dirty, setDirty] = useState(false)
+  /**
+   * The snapshot the SCRATCH draft on the server currently holds.
+   *
+   * `dirty` above only ever knew about the real `applications` draft, so the
+   * indicator spoke only for that one. Before a real draft exists the wizard
+   * still saves everything to a `wizardDrafts` row — it is how the filing
+   * reaches the Drafts list — and the applicant was told "Not saved yet"
+   * while their answers sat safely on the server and visibly in that list
+   * (client, 4 October 2026: *"this part seems misleading"*).
+   *
+   * Null until the first scratch write lands. Compared against `snapshot`
+   * rather than kept as a boolean, because "there is a row" and "that row has
+   * what is on screen" are different claims and only the second one may say
+   * All Changes Saved.
+   */
+  const [scratchSavedSnapshot, setScratchSavedSnapshot] = useState<string | null>(null)
   const [autosaveNonce, setAutosaveNonce] = useState(0)
   const savedSnapshotRef = useRef<string | null>(null)
 
@@ -3687,7 +3703,11 @@ export function ApplyWizard() {
   })
   const toggleSection = (name: ReviewSectionName) =>
     setSectionOpen((s) => ({ ...s, [name]: !s[name] }))
-  const allSectionsOpen = REVIEW_SECTIONS.every((name) => sectionOpen[name])
+  /*
+   * `allSectionsOpen` stood here and asked all four, which is the wrong
+   * question for a filing that draws fewer — see `allReviewSectionsOpen`,
+   * declared once `sequence` is known.
+   */
   const setAllSections = (open: boolean) =>
     setSectionOpen({
       address: open,
@@ -4890,6 +4910,25 @@ export function ApplyWizard() {
   }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit, returnedPhases])
 
   const totalParts = sequence.length
+
+  /**
+   * The sections this filing's Review actually draws.
+   *
+   * `REVIEW_SECTIONS` is the full set a NEW application has. A section that is
+   * not in this filing's sequence is not drawn on its Review either — see
+   * `inSequence` on `WizardSection` — so for a clearance-only renewal, whose
+   * sequence is Privacy, the office sheet and Review, the answer is none of
+   * them.
+   *
+   * Which is how "Collapse all" came to do nothing at all: it toggled four
+   * sections that were not on the screen (client, 4 October 2026). The office
+   * sheet is NOT among them — it renders only while it is the current step,
+   * never on Review — so there was genuinely nothing to collapse.
+   */
+  const reviewSections = REVIEW_SECTIONS.filter((name) => sequence.includes(name))
+  const reviewHasSections = reviewSections.length > 0
+  /* Asked of the sections on screen, not of all four. */
+  const allReviewSectionsOpen = reviewSections.every((name) => sectionOpen[name])
   const stepIndex = Math.min(step, sequence.length - 1)
   const phase: Phase = sequence[stepIndex]
 
@@ -8453,6 +8492,16 @@ export function ApplyWizard() {
           } else {
             await wizardDrafts.save(id, body)
           }
+
+          /*
+           * The server now holds exactly what `snapshot` described when this
+           * timer was set. That is what lets the indicator stop saying "Not
+           * saved yet" over answers that are demonstrably saved — and why it
+           * records the snapshot rather than a flag: by the time this
+           * resolves the applicant may have typed more, and those keystrokes
+           * are genuinely not saved.
+           */
+          setScratchSavedSnapshot(snapshot)
         } catch {
           /*
            * Swallowed on purpose. The tab copy has already landed, the
@@ -9308,6 +9357,21 @@ export function ApplyWizard() {
 
   const part = stepIndex + 1
 
+  /*
+   * What the save indicator is allowed to claim.
+   *
+   * Two places hold this filing: the real `applications` draft once one
+   * exists, and the `wizardDrafts` scratch row before that. The indicator
+   * knew only about the first, so it spoke for half the filing's life.
+   *
+   * The scratch row is only consulted while there is no real draft — after
+   * that it is discarded, and `dirty` is the one true answer.
+   */
+  const scratchUpToDate = applicationId === null && scratchSavedSnapshot === snapshot
+  const savedOnServer = (applicationId !== null && !dirty) || scratchUpToDate
+  /* Only before anything at all has reached the server. */
+  const neverSaved = applicationId === null && scratchSavedSnapshot === null
+
   return (
     <div className="mx-auto max-w-5xl pb-4">
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
@@ -9342,16 +9406,32 @@ export function ApplyWizard() {
           />
         </label>
         <span className="flex shrink-0 items-center gap-2">
+          {/*
+            ── Three states, and "Not saved yet" is the rarest ───────────────
+            *
+            * It used to be the default, and was wrong for most of the time it
+            * showed. The condition only ever asked about the real
+            * `applications` draft, so everything saved to the scratch row —
+            * which is every keystroke before a business exists, and the whole
+            * of a filing that reaches the Drafts list — was reported as not
+            * saved. The applicant could see the draft in their own list while
+            * this called it unsaved.
+            *
+            * `scratchUpToDate` is ignored once there is a real draft: from
+            * that point the scratch row is discarded and `dirty` is the only
+            * honest answer. Without that guard a stale scratch snapshot could
+            * claim All Changes Saved over an application draft that is behind.
+            */}
           {saving ? (
             <span className="text-xs italic text-ink-muted">Saving…</span>
-          ) : applicationId && !dirty ? (
+          ) : savedOnServer ? (
             <>
               <CloudSavedIcon />
               <span className="text-xs italic text-ink-muted">All Changes Saved</span>
             </>
           ) : (
             <span className="text-xs italic text-ink-muted">
-              {dirty && (applicationId || canCreateDraft) ? 'Unsaved changes' : 'Not saved yet'}
+              {neverSaved ? 'Not saved yet' : 'Unsaved changes'}
             </span>
           )}
         </span>
@@ -9473,10 +9553,26 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">Review &amp; Submit</h1>
           <div className="mb-3 h-px bg-ink/40" />
-          <p className="text-sm text-ink">
-            Here is everything you entered. Read it over, and press{' '}
-            <span className="font-semibold">Change</span> on any answer you need to correct.
-          </p>
+          {/*
+            Only when there is something to read over.
+            *
+            * On a clearance-only renewal this promised "everything you
+            * entered" above an empty screen: that filing's sequence carries
+            * none of the four review sections, and the office sheet draws
+            * only while it is the current step. The sentence named a thing
+            * the page did not contain.
+            */}
+          {reviewHasSections ? (
+            <p className="text-sm text-ink">
+              Here is everything you entered. Read it over, and press{' '}
+              <span className="font-semibold">Change</span> on any answer you need to correct.
+            </p>
+          ) : (
+            <p className="text-sm text-ink">
+              Check the details below, then submit. Press{' '}
+              <span className="font-semibold">Back</span> to change any answer.
+            </p>
+          )}
           {/*
             ── One control for all four, and what it is NOT ──────────────────
 
@@ -9491,21 +9587,28 @@ export function ApplyWizard() {
             asked for and planted the idea that something might have been lost.
             It says what the button does instead.
           */}
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setAllSections(!allSectionsOpen)}
-              aria-expanded={allSectionsOpen}
-              className="rounded-md border border-royal bg-royal-tint px-4 py-2 text-sm font-semibold text-royal transition-colors hover:bg-royal/10"
-            >
-              {allSectionsOpen ? 'Collapse all' : 'Expand all'}
-            </button>
-            <p className="text-xs text-ink-muted">
-              {allSectionsOpen
-                ? 'Collapse them to bring the Submit button within reach.'
-                : 'Expand them to read your answers again.'}
-            </p>
-          </div>
+          {/*
+            Hidden when this Review draws no sections, because a control that
+            cannot do anything is worse than no control: it is read as broken,
+            which is exactly how it was reported.
+          */}
+          {reviewHasSections && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAllSections(!allReviewSectionsOpen)}
+                aria-expanded={allReviewSectionsOpen}
+                className="rounded-md border border-royal bg-royal-tint px-4 py-2 text-sm font-semibold text-royal transition-colors hover:bg-royal/10"
+              >
+                {allReviewSectionsOpen ? 'Collapse all' : 'Expand all'}
+              </button>
+              <p className="text-xs text-ink-muted">
+                {allReviewSectionsOpen
+                  ? 'Collapse them to bring the Submit button within reach.'
+                  : 'Expand them to read your answers again.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
