@@ -31,15 +31,37 @@ use Carbon\CarbonImmutable;
  * number and this is the part that takes thought: which permits it binds,
  * where it is enforced, and what the applicant is told.
  *
- * ── It never binds the business permit ─────────────────────────────────────
+ * ── The business permit has its OWN window: January ────────────────────────
  *
- * The Mayor's Permit is anchored to 20 January by `RenewalSeason` and the
- * client was explicit that it carries NO filing lock: *"don't add a lock in
- * our system yet for this."* A renewal filed in June is accepted and runs to
- * the next 20 January. So this class governs the five clearances, whose terms
- * are their own rolling year, and leaves the business permit alone. Putting
- * both under one window would quietly reverse a decision that was made on
- * purpose.
+ * It had none. The Mayor's Permit is anchored to 20 January by
+ * `RenewalSeason`, and the client was explicit on 1 October 2026 that this
+ * carried no filing lock — *"don't add a lock in our system yet for this"* —
+ * so a renewal filed in June was accepted and ran to the next 20 January.
+ *
+ * They reversed that on 3 October: *"make the Mayor's Permit renewable for
+ * JANUARY ONLY. Make it January 1 to 20 and 21 onwards will cause an
+ * additional charge to the payment."*
+ *
+ * So the business permit is bounded here too, by a DATE rather than by a
+ * count of days: renewal opens on 1 January of the year the term ends, and
+ * a filing before that is refused and told when to come back. The five
+ * clearances keep the rolling day-count window above, because their terms
+ * are their own year and not the city's season.
+ *
+ * ── The 21 January charge needs nothing here ───────────────────────────────
+ *
+ * It already works, and it is worth saying where so nobody adds it twice.
+ * `WorkflowService::latePenaltyFor` compares the filing date with the prior
+ * permit's `valid_until`, which for a Mayor's Permit IS 20 January, and
+ * hands the difference to `FeeCalculator::latePenalty`: 25% once under Sec.
+ * 8A.04, plus 2% a month under 8A.05, capped at 36 months. A filing on 21
+ * January is one month late by Sec. 8A.05's "month or fraction thereof" and
+ * is charged accordingly.
+ *
+ * This class therefore sets the FLOOR only. The ceiling stays
+ * `closes_months_after`, so a lapsed business permit is still renewable —
+ * with the surcharge — for 36 months, which is where the interest cap makes
+ * renewal stop deterring anything.
  */
 final class RenewalWindow
 {
@@ -84,11 +106,6 @@ final class RenewalWindow
      */
     public static function refusalFor(Permit $prior, ?CarbonImmutable $filedAt = null): ?string
     {
-        // The business permit is governed by the season, not by a window.
-        if ($prior->permitType?->code === PermitType::OUTCOME_CODE) {
-            return null;
-        }
-
         if ($prior->valid_until === null) {
             return null;
         }
@@ -96,16 +113,42 @@ final class RenewalWindow
         $filed = ($filedAt ?? CarbonImmutable::now())->startOfDay();
         $expires = CarbonImmutable::parse($prior->valid_until)->endOfDay();
 
+        /*
+         * ── The business permit's season ────────────────────────────────
+         *
+         * Its term always ends on 20 January (`RenewalSeason`), so the
+         * January it belongs to is the January of `valid_until` — derived
+         * from the permit rather than from today, which is what makes this
+         * answer the same whoever asks and whenever.
+         *
+         * Only the floor. Past 20 January the filing is accepted and
+         * surcharged by `WorkflowService::latePenaltyFor`; the ceiling is
+         * `closes_months_after` below, which this falls through to.
+         */
+        if ($prior->permitType?->code === PermitType::OUTCOME_CODE) {
+            $opensOn = CarbonImmutable::create($expires->year, 1, 1)->startOfDay();
+
+            if ($filed->lessThan($opensOn)) {
+                return sprintf('Renewable from %s.', $opensOn->format('j F Y'));
+            }
+
+            $closes = self::closesMonthsAfter();
+            if ($closes !== null && $filed->greaterThan($expires->addMonths($closes)->endOfDay())) {
+                return sprintf(
+                    'Expired %s, over %d months ago. File a New Application.',
+                    $expires->format('j F Y'),
+                    $closes,
+                );
+            }
+
+            return null;
+        }
+
         $opens = self::opensDaysBefore();
         if ($opens !== null) {
             $opensOn = $expires->subDays($opens)->startOfDay();
             if ($filed->lessThan($opensOn)) {
-                return sprintf(
-                    'This %s runs to %s and can be renewed from %s. Come back then.',
-                    $prior->permitType?->name ?? 'permit',
-                    $expires->format('j F Y'),
-                    $opensOn->format('j F Y'),
-                );
+                return sprintf('Renewable from %s.', $opensOn->format('j F Y'));
             }
         }
 
@@ -114,8 +157,7 @@ final class RenewalWindow
             $closesOn = $expires->addMonths($closes)->endOfDay();
             if ($filed->greaterThan($closesOn)) {
                 return sprintf(
-                    'This %s expired on %s, more than %d months ago, so it can no longer be renewed. File a New Application instead.',
-                    $prior->permitType?->name ?? 'permit',
+                    'Expired %s, over %d months ago. File a New Application.',
                     $expires->format('j F Y'),
                     $closes,
                 );
