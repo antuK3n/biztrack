@@ -2,13 +2,13 @@
 
 namespace Database\Seeders;
 
-use App\Support\SheetRequirements;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\OfficeSignatory;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Support\SheetRequirements;
 use App\Support\TaxClassification;
 use Illuminate\Database\Seeder;
 
@@ -673,6 +673,11 @@ class ReferenceSeeder extends Seeder
         $signatory('CENRO', [
             ['Evaluator', 'Elizabeth E. Gutierrez'],
             ['Chief-CENRO', 'Mark Lloyd A. Mesina'],
+        ]);
+        // The City Mayor signs every certificate (App\Support\PermitFace::mayorName).
+        // Named by the client for the certificate on 1 October 2026.
+        $signatory('BPLO', [
+            ['City Mayor', 'Hon. Jeannie Sandoval'],
         ]);
     }
 }
