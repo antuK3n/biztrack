@@ -45,6 +45,7 @@ import { RecordsPage } from './pages/admin/RecordsPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
 import { BusinessMapPage } from './pages/admin/BusinessMapPage'
 import { ImportPage } from './pages/admin/ImportPage'
+import { DebugPage, RequireDebugAccess } from './pages/admin/debug/DebugPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -666,6 +667,15 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/* The Debug page's staff-tree twin; see the admin route below. */}
+          <Route
+            path="/staff/admin/debug"
+            element={
+              <RequireDebugAccess>
+                <DebugPage />
+              </RequireDebugAccess>
+            }
+          />
         </Route>
 
         {/*
@@ -870,6 +880,21 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/*
+            Debug: the super admin's on-the-fly controls for the defense
+            [Ken, 2026-10-04]. Its own guard rather than RequirePermission,
+            because no permission says it: the server opens it to the super
+            admin for a few hours at a time, and pages/admin/debug/access.ts
+            reads that verdict for this route and the rail entry alike.
+          */}
+          <Route
+            path="/admin/debug"
+            element={
+              <RequireDebugAccess>
+                <DebugPage />
+              </RequireDebugAccess>
+            }
+          />
         </Route>
 
         {/*
@@ -888,6 +913,12 @@ export default function App() {
         <Route path="/inspections" element={<MovedToStaff path="/inspections" />} />
         <Route path="/inspections/:id" element={<MovedToStaff path="/inspections" />} />
         <Route path="/analytics/*" element={<MovedAnalytics />} />
+        {/*
+          The address Ken asked for. Bare paths are the owners' site, which the
+          super admin is never signed into, so this hands the address to the
+          admin site instead of to the citizen sign-in page.
+        */}
+        <Route path="/debug" element={<Navigate to="/admin/debug" replace />} />
 
         <Route path="*" element={<NotFoundRedirect />} />
       </Routes>

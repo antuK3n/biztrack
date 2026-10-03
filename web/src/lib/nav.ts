@@ -9,6 +9,7 @@ import {
   InboxIcon,
   MailIcon,
   MapPinIcon,
+  PaymentsIcon,
   ShieldCheckIcon,
   TrackIcon,
   UploadIcon,
@@ -17,6 +18,7 @@ import {
 import { portalPath } from './api'
 import type { Portal } from './api'
 import type { User } from './types'
+import { canUseDebug } from '../pages/admin/debug/access'
 
 export interface NavItem {
   label: string
@@ -59,6 +61,13 @@ export interface NavItem {
    * First match wins, in the order the keys are listed here.
    */
   toByPermission?: Record<string, string>
+  /**
+   * Show when this says so, for an entry whose rule is not a permission at
+   * all. The Debug page is the case: who may open it lives in one function
+   * (pages/admin/debug/access.ts) that the route asks too, so the rail and the
+   * route cannot drift apart. Checked before `permission`/`anyPermission`.
+   */
+  visibleWhen?: (user: User) => boolean
   /** Include in the mobile bottom tab bar (max 5 survive the filter). */
   mobile?: boolean
 }
@@ -304,6 +313,15 @@ const NAV_ITEMS: NavItem[] = [
    * route in App.tsx carries the same claim.
    */
   { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
+  /*
+   * Debug — the super admin's on-the-fly controls for the defense: which way
+   * owners pay, and whether KwikPay collects ₱1 or the full bill [Ken,
+   * 2026-10-04]. Last on the rail, because it is for the presentation and not
+   * for the day's work. Shown only while the server says the panel is open to
+   * this account (pages/admin/debug/access.ts), which is never outside the
+   * hours somebody opened it for from the server.
+   */
+  { label: 'Debug', icon: PaymentsIcon, to: '/admin/debug', visibleWhen: canUseDebug },
 ]
 
 /**
@@ -321,8 +339,9 @@ export function navItemsFor(user: User, portal: Portal): NavItem[] {
   })
 }
 
-/** No permission stated = everyone. Otherwise the single claim, else any of them. */
+/** No rule stated = everyone. Otherwise its own rule, the single claim, else any of them. */
 function visibleTo(user: User, item: NavItem): boolean {
+  if (item.visibleWhen) return item.visibleWhen(user)
   if (item.permission) return user.permissions.includes(item.permission)
   if (item.anyPermission) return item.anyPermission.some((p) => user.permissions.includes(p))
   return true
