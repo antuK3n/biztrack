@@ -4829,6 +4829,25 @@ export function ApplyWizard() {
     [applicationType, permitTypes, form.permit_type_ids],
   )
 
+  /**
+   * A renewal of the other permits alone — no Mayor's Permit on it.
+   *
+   * Its Review screen was written for a NEW business permit application and
+   * said so in every line: BPLO reviewing the form, a Tax Order of Payment
+   * to settle, five clearances opening after it, a Business Permit released
+   * at the end. None of that happens here — BPLO is never routed
+   * (`WorkflowService::submit`), nothing is billed because the fee joins the
+   * next January renewal (`Application::defersPayment`), and the one permit
+   * on the filing is issued by its own office.
+   *
+   * The client read the whole panel on a Sanitary renewal, 4 October 2026.
+   * The only true line on it was the permit number at the foot.
+   *
+   * Keyed on carrying no business permit rather than on `officeSteps`,
+   * which is also empty for a permit that happens to have no office sheet.
+   */
+  const clearanceOnlyRenewal = applicationType === 'renewal' && !renewsBusinessPermit
+
   const sequence: Phase[] = useMemo(() => {
     /*
      * ── A returned filing shows only what it was returned about ───────
@@ -5248,6 +5267,23 @@ export function ApplyWizard() {
     () => renewablePermits.find((p) => p.id === priorPermitId) ?? null,
     [renewablePermits, priorPermitId],
   )
+
+  /**
+   * The office that issues the permit being renewed, named from the register.
+   *
+   * Read off `permit_types.department` rather than from a code-to-office table
+   * written here: the pairing is a fact the API already holds, and a second
+   * copy of it in the browser is one that can fall out of step with the first.
+   *
+   * Null until the permit is known, and the sentence that uses it falls back
+   * to "The issuing office" — true, and better than naming the wrong one.
+   */
+  const renewingOffice: string | null = useMemo(() => {
+    const code = priorPermitChoice?.permit_type?.code
+    if (code === undefined) return null
+
+    return permitTypes.find((pt) => pt.code === code)?.department?.name ?? null
+  }, [priorPermitChoice, permitTypes])
 
   /*
    * Item 110 — the two lines the Business Information summary prints back.
@@ -12753,7 +12789,9 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
             <p className="text-lg font-medium text-royal">
-              Your Business Permit application is ready to submit
+              {clearanceOnlyRenewal
+                ? `Your ${priorPermitChoice?.permit_type?.name ?? 'permit'} renewal is ready to submit`
+                : 'Your Business Permit application is ready to submit'}
             </p>
             {/*
               What happens next, said here rather than discovered later.
@@ -12772,9 +12810,13 @@ export function ApplyWizard() {
               prevent.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              BPLO reviews this form first. If they accept it, we raise your Tax Order of Payment
-              and you pay — and once that is settled, your five LGU clearances open. Your Business
-              Permit is released after all of them are approved.
+              {clearanceOnlyRenewal
+                ? `${renewingOffice ?? 'The issuing office'} reviews this and inspects your ` +
+                  'premises. Nothing to pay now — the fee joins your next business permit ' +
+                  'renewal in January.'
+                : 'BPLO reviews this form first. If they accept it, we raise your Tax Order of '
+                  + 'Payment and you pay — and once that is settled, your five LGU clearances '
+                  + 'open. Your Business Permit is released after all of them are approved.'}
             </p>
             {/*
               ── The summary of payment, on the step that asks for a decision ──
@@ -12791,6 +12833,33 @@ export function ApplyWizard() {
               accepts the form, so a total here that read as a bill would
               promise a debt nobody has incurred.
             */}
+            {/*
+              ── A clearance-only renewal is not billed, so it gets no estimate ──
+
+              The panel below quotes a figure, explains that BPLO will assess
+              the real one, and tells the applicant to fill in a tax
+              classification and gross sales "above". None of the three is true
+              here: this filing is never billed at submission — its fee joins
+              the next January business permit renewal
+              (`Application::defersPayment`) — BPLO never sees it, and the step
+              that asks for gross sales is not in this sequence at all.
+
+              So it is replaced rather than left to print an estimate of
+              nothing. The one fact worth carrying over is WHEN the money is
+              due, which is the half an applicant would otherwise be surprised
+              by in January.
+            */}
+            {clearanceOnlyRenewal ? (
+              <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
+                <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
+                  Nothing to pay now
+                </h2>
+                <p className="mt-2 text-sm text-ink-secondary">
+                  This permit&rsquo;s fee is added to your next business permit renewal in
+                  January. You will see it on that Tax Order of Payment.
+                </p>
+              </div>
+            ) : (
             <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
@@ -12849,6 +12918,7 @@ export function ApplyWizard() {
                 Payment after it approves this form.
               </p>
             </div>
+            )}
             {/*
               Named as well as numbered. This said "Renewing MCB-2026-000003"
               and nothing else — the one line on the confirmation page that
