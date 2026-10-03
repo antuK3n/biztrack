@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
+use App\Models\BusinessAddress;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
@@ -192,6 +193,37 @@ class SeedExpiringDemoBusinesses extends Command
             ]);
 
             /*
+             * The address row, which the first version of this command did
+             * not write — and `business.address` is a `hasOne`, so it was
+             * null. The renewal wizard reads a dozen fields straight through
+             * it when a business is chosen, so pressing Continue threw inside
+             * a state updater and unmounted the whole page: a blank screen,
+             * no message, no nav (client, 4 October 2026).
+             *
+             * The wizard is guarded now and treats a missing address as empty
+             * boxes. This still writes one, for the same reason every business
+             * here holds all six permits: demo data that cannot exist in the
+             * register is testing a state the product never has to handle.
+             * A real business always has an address — `BusinessController`
+             * requires it at registration.
+             */
+            BusinessAddress::create([
+                'business_id' => $business->id,
+                'house_bldg_no' => '12',
+                'street' => 'Demo Street',
+                'line1' => '12 Demo Street',
+                'barangay_id' => $barangayId,
+                'city' => 'Malabon',
+                'province' => 'Metro Manila',
+                'telephone' => '8281 4999',
+                'mobile_number' => '+639171234567',
+                'email' => $owner->email,
+                /* Malabon City Hall, so the map pin lands in the city. */
+                'latitude' => 14.6570,
+                'longitude' => 120.9567,
+            ]);
+
+            /*
              * `permits.application_id` is NOT NULL — every certificate the
              * register holds was issued by some filing — so each business
              * needs the approved application its permits came from, even
@@ -302,6 +334,7 @@ class SeedExpiringDemoBusinesses extends Command
             $permits += $business->permits()->count();
             $applicationIds = $business->applications()->pluck('id');
 
+            $business->address()->delete();
             $business->permits()->delete();
             Application::whereIn('id', $applicationIds)->delete();
             $business->delete();
