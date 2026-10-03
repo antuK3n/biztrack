@@ -6,8 +6,10 @@ use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessAddress;
+use App\Models\BusinessLine;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
@@ -186,7 +188,15 @@ class SeedExpiringDemoBusinesses extends Command
             $business = Business::create([
                 'owner_user_id' => $owner->id,
                 'name' => $name,
-                'registration_type' => 'DTI',
+                'registration_type' => 'sole_proprietorship',
+                /*
+                 * A registration number and a TIN, because a real one has
+                 * both — `BusinessController` asks for them at registration.
+                 * Left null, the wizard's own draft gate refused to create a
+                 * draft and Submit then did nothing at all.
+                 */
+                'registration_number' => 'DTI-2026-'.random_int(100000, 999999),
+                'tin' => '123-456-789-000',
                 'barangay_id' => $barangayId,
                 'address_line' => 'Demo address, Malabon',
                 'status' => 'active',
@@ -222,6 +232,25 @@ class SeedExpiringDemoBusinesses extends Command
                 'latitude' => 14.6570,
                 'longitude' => 120.9567,
             ]);
+
+            /*
+             * A line of business, because every real one has at least one —
+             * it is what the permit is FOR, and what the fee is assessed on.
+             * A business with none is a shape the register cannot produce
+             * through its own forms, which is the same fault the missing
+             * address and the missing permits were.
+             */
+            $psic = PsicCode::query()->orderBy('id')->first();
+            if ($psic !== null) {
+                BusinessLine::create([
+                    'business_id' => $business->id,
+                    'psic_code_id' => $psic->id,
+                    'line_of_business' => $psic->description ?? 'General merchandise',
+                    'products_services' => 'Everyday goods sold over the counter',
+                    'capitalization' => 250000,
+                    'gross_sales' => 1200000,
+                ]);
+            }
 
             /*
              * `permits.application_id` is NOT NULL — every certificate the
@@ -335,6 +364,7 @@ class SeedExpiringDemoBusinesses extends Command
             $applicationIds = $business->applications()->pluck('id');
 
             $business->address()->delete();
+            $business->lines()->delete();
             $business->permits()->delete();
             Application::whereIn('id', $applicationIds)->delete();
             $business->delete();

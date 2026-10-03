@@ -3521,9 +3521,24 @@ export function ApplyWizard() {
    * "has one arrived since?" from in there.
    */
   const applicationIdRef = useRef<number | null>(null)
-  useEffect(() => {
-    applicationIdRef.current = applicationId
-  }, [applicationId])
+  /**
+   * Set the id and the ref together, synchronously.
+   *
+   * The ref was kept in step by a `useEffect`, which runs AFTER the render
+   * that set the state — so between `setApplicationId` and that effect the
+   * ref still read null. A scratch create resolving inside that window read
+   * the stale null, concluded no real draft existed, and stored its id; the
+   * discard effect had already run and found nothing. The duplicate card
+   * this was written to stop came straight back, on amendments.
+   *
+   * A ref exists precisely so a value can be read without waiting for a
+   * render. Updating it through an effect gave away the one property that
+   * made it the right tool.
+   */
+  const rememberApplicationId = (id: number) => {
+    applicationIdRef.current = id
+    setApplicationId(id)
+  }
   /**
    * The wizard steps a returned filing is allowed to show.
    *
@@ -7084,9 +7099,28 @@ export function ApplyWizard() {
     let bid = businessId ?? prefillBusinessId
     if (!bid) {
       bid = (await businesses.create(businessPayload())).id
-    } else {
+    } else if (!clearanceOnlyRenewal) {
       await businesses.update(bid, businessPayload())
     }
+    /*
+     * ── A clearance-only renewal does not rewrite the business ────────────
+     *
+     * It never asks about it. That filing's sequence is Privacy, the office
+     * sheet and Review — no Business Information, no Location & Zoning, no
+     * Business & Tax Profile — so `businessPayload()` here is built entirely
+     * from a prefill, and pushing it back can only ever overwrite the
+     * register with a copy of itself or with something thinner.
+     *
+     * Thinner is what happened. The update answered 422 (the endpoint
+     * requires a complete `address`, among other things), `createDraft`
+     * threw, no application draft was ever created, and Submit then had
+     * nothing to send — which is the "clicking Submit does not work" the
+     * client reported. The press is honest about it now, but the save
+     * should not have been failing in the first place.
+     *
+     * A NEW filing and an AMENDMENT both still update: the first is where
+     * the business is described, and the second exists to change it.
+     */
     setBusinessId(bid)
     const app = await applications.create({
       business_id: bid,
@@ -7099,7 +7133,7 @@ export function ApplyWizard() {
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
       ...amendmentPayload(),
     })
-    setApplicationId(app.id)
+    rememberApplicationId(app.id)
     setFiledAt(app.submitted_at ?? app.created_at)
 
     return app.id
@@ -7882,8 +7916,32 @@ export function ApplyWizard() {
     return rows
   }
 
-  const canCreateDraft =
-    form.permit_type_ids.length > 0 &&
+  /*
+   * ── A clearance-only renewal is gated on what it actually asks ────────
+   *
+   * The chain below is the NEW application's bar: a registration number, a
+   * TIN that parses, at least one line of business, a street, a barangay,
+   * lessor details. Every one of those is collected on Business Information,
+   * Location & Zoning or Business & Tax Profile — and a clearance-only
+   * renewal's sequence is Privacy, the office sheet, Review. It shows none
+   * of those steps.
+   *
+   * So for any business whose registry record is thin in one of those
+   * fields, the gate never opened, no draft was ever created, and
+   * `submit()` returned on `!applicationId` without a word. The applicant
+   * pressed "Yes, submit" and nothing happened, with no step they could
+   * visit to supply what was missing — the form never asks (client,
+   * 4 October 2026).
+   *
+   * What this filing really needs is the business it is against and the
+   * permit it renews, both settled in the entry dialog before the wizard
+   * opens. The API agrees: `fee_profile` is nullable throughout and
+   * `ApplicationController::store` asks only for the business and the
+   * permits, so nothing below was ever a server requirement.
+   */
+  const canCreateDraft = clearanceOnlyRenewal
+    ? prefillBusinessId !== null && form.permit_type_ids.length > 0 && priorPermitAnswered
+    : form.permit_type_ids.length > 0 &&
     form.name.trim() !== '' &&
     /*
      * Item 94: `!== ''` was not enough. A renewal prefilled from a pre-item-94
@@ -7955,7 +8013,13 @@ export function ApplyWizard() {
         capitalInvestment: form.capital_investment,
       })
       if (hadDraft) {
-        const bid = businessId ?? prefillBusinessId
+        /*
+         * Not on a clearance-only renewal, for the reason `createDraft`
+         * gives: that filing never asks about the business, so this would
+         * push a prefill-derived copy back over the register on every save.
+         * It answered 422 there and failed the autosave with it.
+         */
+        const bid = clearanceOnlyRenewal ? null : businessId ?? prefillBusinessId
         if (bid) await businesses.update(bid, businessPayload())
         /*
          * `permit_type_ids` is deliberately NOT sent here.
@@ -8815,7 +8879,29 @@ export function ApplyWizard() {
    * Payment is `PayPage`'s again, reached from the filing once BPLO approves.
    */
   async function submit() {
-    if (!applicationId) return
+    /*
+     * ── Never a silent no-op ──────────────────────────────────────────
+     *
+     * This was a bare `return`. With no draft on the server there is
+     * nothing to submit, which is true — but the applicant had pressed
+     * "Yes, submit" on a confirmation dialog and got no page change, no
+     * error and no explanation (client, 4 October 2026). A button that
+     * does nothing and says nothing is indistinguishable from a broken one,
+     * and they reported it as exactly that.
+     *
+     * The draft is created by `autosave`, which only runs once
+     * `canCreateDraft` is satisfied. So reaching here means a save has not
+     * landed — a failed request, or answers the gate still wants — and
+     * either way the applicant needs telling rather than ignoring.
+     */
+    if (!applicationId) {
+      setSubmitError(
+        'This application has not been saved yet, so there is nothing to submit. ' +
+          'Check your connection and try again — if it keeps happening, tell BPLO.',
+      )
+
+      return
+    }
     setSaving(true)
     setSubmitError(null)
     setNeedsEmailCode(false)
@@ -8888,7 +8974,7 @@ export function ApplyWizard() {
         const b = app.business
         const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
         setApplicationType(app.application_type)
-        setApplicationId(app.id)
+        rememberApplicationId(app.id)
         setFiledAt(app.submitted_at ?? app.created_at)
         /*
          * ── Which sections BPLO ticked, when it returned this ───────────
