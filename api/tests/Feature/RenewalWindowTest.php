@@ -49,19 +49,34 @@ function windowPermit(string $code, string $validUntil): Permit
     return $permit->load('permitType');
 }
 
-it('ships with no early bound and a 36-month late bound', function () {
+it('ships with a 30-day early bound and a 36-month late bound', function () {
     /*
      * The shipped defaults, asserted against config rather than against the
      * class, so an env override in a deployment cannot silently move the
      * rule the tests below are written about.
      *
-     * No early bound: a 30-day one was tried and taken out the same day
-     * because it refused a staggered subset renewal the system is built to
-     * accept. 36 months is the Sec. 8A.05 interest cap — see
-     * config/biztrack.php for both decisions and why the obvious "one lapsed
-     * term" answer was rejected once it turned out renewals are inspected.
+     * The early bound was null until 3 October 2026. A 30-day one had been
+     * tried on 1 October and taken out the same day, because it refused a
+     * staggered SUBSET renewal — six clearances with six expiry dates filed
+     * as one application — which the system was then built to accept.
+     *
+     * That shape no longer exists. The client ruled on 3 October that a
+     * renewal carries the business permit or ONE other permit
+     * (`App\Support\RenewalScope`), so those six are six filings whatever
+     * this value is and the window costs nothing it was not already
+     * costing. What it buys is the picker telling the truth: *"valid
+     * permits should NOT BE RENEWED until their renewal time window is
+     * open."*
+     *
+     * 30 rather than any other number because `ScanPermits::THRESHOLDS`
+     * sends its first reminder at 30 days, so the day the applicant is told
+     * to renew is the day they first can.
+     *
+     * 36 months is unchanged and is the Sec. 8A.05 interest cap — see
+     * config/biztrack.php for why the obvious "one lapsed term" answer was
+     * rejected once it turned out renewals are inspected.
      */
-    expect(config('biztrack.renewal_window.opens_days_before'))->toBeNull()
+    expect(config('biztrack.renewal_window.opens_days_before'))->toBe(30)
         ->and(config('biztrack.renewal_window.closes_months_after'))->toBe(36);
 });
 
@@ -95,8 +110,14 @@ it('refuses a renewal filed before the window opens, and names the date', functi
     /*
      * The date is in the message on purpose. "Outside the renewal window" is
      * a refusal the applicant cannot act on; a date is one they can diarise.
+     *
+     * The sentence around it was cut on 3 October 2026 — it named the permit
+     * and restated its expiry, both of which the picker row already prints,
+     * and the client was reading five of them stacked: *"so much texts
+     * appear."* The DATE is what is asserted here, because the date is the
+     * part that was never decoration.
      */
-    expect($refusal)->toContain('can be renewed from')
+    expect($refusal)->toContain('Renewable from')
         ->and($refusal)->toContain(
             CarbonImmutable::parse($tooEarly->valid_until)->subDays(30)->format('j F Y')
         )
@@ -115,7 +136,7 @@ it('refuses a permit lapsed past the cutoff, and sends them to a new application
      * "outside the window" would leave both applicants guessing which.
      */
     expect(RenewalWindow::refusalFor($justLapsed))->toBeNull()
-        ->and(RenewalWindow::refusalFor($longDead))->toContain('File a New Application instead');
+        ->and(RenewalWindow::refusalFor($longDead))->toContain('File a New Application');
 });
 
 it('still allows a late renewal inside the cutoff, so the surcharge can bite', function () {
@@ -132,19 +153,47 @@ it('still allows a late renewal inside the cutoff, so the surcharge can bite', f
     expect(RenewalWindow::refusalFor($late))->toBeNull();
 });
 
-it('never binds the business permit, whatever the window is set to', function () {
+it('binds the business permit by its January season, not by the day count', function () {
     /*
+     * This asserted the opposite until 3 October 2026, and said why:
      * `RenewalSeason` anchors every business permit to 20 January and the
-     * client was explicit that no filing lock goes with it. A renewal filed in
-     * June is accepted and runs to the next 20 January. If this ever starts
-     * refusing, a decision made on purpose has been reversed by accident.
+     * client was explicit on 1 October that no filing lock went with it —
+     * *"don't add a lock in our system yet for this."*
+     *
+     * They reversed it: *"make the Mayor's Permit renewable for JANUARY
+     * ONLY. Make it January 1 to 20 and 21 onwards will cause an additional
+     * charge to the payment."* So the business permit is bound now — but by
+     * a DATE and not by the day count the clearances use, which is the
+     * distinction this test exists to hold.
+     *
+     * `opens_days_before` is set to something absurd here on purpose. If the
+     * business permit ever starts reading it, a filing in its own January
+     * would be refused for being 300 days early — which is the accident
+     * this guards against, and the mirror of the one the old version did.
      */
-    config(['biztrack.renewal_window.opens_days_before' => 30]);
-    config(['biztrack.renewal_window.closes_months_after' => 1]);
+    config(['biztrack.renewal_window.opens_days_before' => 300]);
+    config(['biztrack.renewal_window.closes_months_after' => 36]);
 
-    $earlyBusiness = windowPermit('BUSINESS', now()->addMonths(10)->toDateString());
-    $lapsedBusiness = windowPermit('BUSINESS', now()->subYears(2)->toDateString());
+    /* A term ending on the next 20 January, which is the only shape one has. */
+    $season = CarbonImmutable::create(CarbonImmutable::now()->year + 1, 1, 20);
+    $business = windowPermit('BUSINESS', $season->toDateString());
 
-    expect(RenewalWindow::refusalFor($earlyBusiness))->toBeNull()
-        ->and(RenewalWindow::refusalFor($lapsedBusiness))->toBeNull();
+    /* Inside its January: open, and the 300-day count is not consulted. */
+    expect(RenewalWindow::refusalFor($business, $season->startOfMonth()))->toBeNull()
+        ->and(RenewalWindow::refusalFor($business, $season))->toBeNull();
+
+    /*
+     * Before it: refused, and told the date rather than a number of days.
+     *
+     * 31 December, not the 19th. The first draft of this used
+     * `$season->subDay()` and failed — the day before the 20th is the
+     * 19th, which is INSIDE the season and rightly allowed. The window
+     * opens on the 1st, so the last refused day is the 31st of December
+     * before it.
+     */
+    expect(RenewalWindow::refusalFor($business, $season->startOfMonth()->subDay()))
+        ->toContain('1 January');
+
+    /* After it: still open, because 21 January is a charge and not a bar. */
+    expect(RenewalWindow::refusalFor($business, $season->addDay()))->toBeNull();
 });
