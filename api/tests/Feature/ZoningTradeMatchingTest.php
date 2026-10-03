@@ -377,3 +377,27 @@ it('reads a two-family building as semi-detached, a one-family house as single-d
     // The lessor is asked what it leases on the finding that turns on it.
     expect(ztmRead(ztmCheck('Potrero', '68100', [], 'R-1', 'Pay parking lot'))[2])->toContain('leases_what');
 });
+
+it('lets a word infer only a vehicle use that belongs to the trade, and asks the rest', function () {
+    // A trucking company "with parking lot" is a trucking garage with a car
+    // park, never a pay parking lot: words may infer only the trade's own kind.
+    [$status, $reason] = ztmRead(ztmCheck('Tonsuya', '49230', [], 'R-2-MAX', 'Trucking company with parking lot'));
+    expect($status)->not->toBe('met')->and($reason)->not->toContain('rentable parking');
+    expect(ztmRead(ztmCheck('Tonsuya', '49230', [], 'R-2-MAX', 'Trucking with taxi units'))[1])->not->toContain('taxi cab');
+
+    // A rent-a-car or a passenger operator is asked what its vehicles are for.
+    foreach (['77100' => 'Rent-a-car with parking lot', '49221' => 'Jeepney operator with parking lot'] as $code => $words) {
+        [$status, $reason, $asks] = ztmRead(ztmCheck('Tonsuya', $code, [], 'R-2-MAX', $words));
+        expect($status)->not->toBe('met', $code)->and($reason)->not->toContain('rentable parking')->and($asks)->toContain('vehicle_use');
+    }
+
+    // Transport support and "Other" still read a pay parking lot from their words.
+    expect(ztmRead(ztmCheck('Tonsuya', '52290', [], 'R-2-MAX', 'Pay parking lot'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Tonsuya', '00000', [], 'R-2-MAX', 'Pay parking lot'))[0])->toBe('met');
+});
+
+it('tells a lessor its use depends on what it leases before it says', function () {
+    [$status, $reason, $asks] = ztmRead(ztmCheck('Tonsuya', '68100', [], 'R-2-MAX', 'Pay parking lot'));
+    expect($status)->toBe('review')->and($reason)->not->toContain('Apartments')
+        ->and($reason)->toContain('depends on what it leases')->and($asks)->toContain('leases_what');
+});

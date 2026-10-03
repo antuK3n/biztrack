@@ -451,6 +451,24 @@ final class Ordinance
      */
     public const VEHICLE_TRADES = ['49221', '49230', '52290', '77100', '00000'];
 
+    /**
+     * The vehicle uses a trade's description may infer: only one that is the
+     * trade's own. A trucking company "with parking lot" is a trucking garage
+     * with a car park, not a pay parking lot. A passenger operator and a
+     * rent-a-car could be several things (a terminal, a garage, a pay lot),
+     * so they are asked, never inferred. "Other (not listed)" has no trade but
+     * its description, so its words may say any of them.
+     *
+     * @var array<string, list<string>>
+     */
+    public const VEHICLE_INFERENCES = [
+        '49230' => ['trucking_garage'],
+        '52290' => ['parking_building', 'parking_lot', 'trucking_garage'],
+        '49221' => [],
+        '77100' => [],
+        '00000' => ['parking_building', 'parking_lot', 'taxi_garage', 'ride_hailing_garage', 'tricycle_terminal', 'trucking_garage'],
+    ];
+
     /** Is this PSIC code one of `$trade`'s? */
     public static function is(string $trade, string $psic): bool
     {
