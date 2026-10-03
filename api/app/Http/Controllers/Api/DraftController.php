@@ -75,11 +75,83 @@ class DraftController extends Controller
         $draft = WizardDraft::create([
             'user_id' => $request->user()->id,
             'application_type' => $data['application_type'],
-            'title' => $data['title'] ?? null,
+            'title' => self::freeTitle($request->user()->id, $data['title'] ?? null),
             'payload' => $data['payload'],
         ]);
 
         return response()->json(['data' => $this->summary($draft)], 201);
+    }
+
+    /**
+     * "New Business Permit", then "New Business Permit (2)", and so on.
+     *
+     * ── Why the number is STORED and not computed when the list draws ────
+     *
+     * The Drafts page used to count repeats at render time. That kept the
+     * numbers tidy and made the wizard disagree with the list: the title
+     * box held "New Business Permit" while the card beside it said
+     * "New Business Permit (8)", and the applicant had no way to tell
+     * which name was really theirs (client, 2 October 2026).
+     *
+     * Storing it settles that, and the client named the model: Google
+     * Drive. A name given at creation is the file's own from then on. It
+     * is searchable, the office sees the same words the applicant does,
+     * and it follows the filing into the record — none of which is true of
+     * a number that exists only while one screen is open.
+     *
+     * The accepted cost, stated because it will be noticed: numbers do not
+     * close up. Delete (3) and the list runs 1, 2, 4 — exactly as every
+     * file manager behaves, and the alternative is renaming a draft
+     * somebody has been calling (8) while they are looking at it.
+     *
+     * ── Why the SERVER picks it ──────────────────────────────────────────
+     *
+     * Only it can. The browser would have to fetch every sibling name to
+     * choose, and two tabs opened together would still both read "(8)" as
+     * free and both take it. Here the names are one query away and the
+     * choice is made in the same request that writes the row.
+     *
+     * Scoped to the one owner: two businesses may each hold a draft called
+     * "New Business Permit" and neither is a repeat of the other.
+     */
+    private static function freeTitle(int $userId, ?string $wanted): ?string
+    {
+        $base = trim((string) $wanted);
+
+        // No name offered is not a clash to resolve — the row keeps its
+        // null and the card falls back to its own wording.
+        if ($base === '') {
+            return null;
+        }
+
+        $taken = WizardDraft::where('user_id', $userId)
+            ->whereNotNull('title')
+            ->pluck('title')
+            ->map(fn ($t) => trim((string) $t))
+            ->all();
+
+        if (! in_array($base, $taken, true)) {
+            return $base;
+        }
+
+        /*
+         * From (2), because the FIRST keeps the bare name. That is the
+         * convention the Drafts page already followed and the one a reader
+         * expects: a person with a single draft never sees a number at all.
+         *
+         * Bounded rather than `while (true)`: a loop over a list this
+         * caller controls should not be the thing that hangs a request. At
+         * the ceiling it falls through to the bare name and lets the two
+         * sit together, which is untidy and not wrong.
+         */
+        for ($n = 2; $n <= 999; $n++) {
+            $candidate = $base.' ('.$n.')';
+            if (! in_array($candidate, $taken, true)) {
+                return $candidate;
+            }
+        }
+
+        return $base;
     }
 
     /** One unfinished filing, with its answers. */
