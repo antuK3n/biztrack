@@ -391,6 +391,53 @@ final class Ordinance
         'laundry' => ['96200'],
     ];
 
+    /**
+     * Art. V §2.1's home occupation names its trades: "the practice of one's
+     * profession such as offices of physicians, surgeons, dentists,
+     * architects, engineers, lawyers, and other professionals", and "home
+     * business such as dressmaking, tailoring, baking, running a sari-sari
+     * store/neighbourhood convenience store and the like".
+     *
+     * `is`: codes that are those trades. `like_divisions`: PSIC divisions of
+     * the small trades "and the like" reaches (retail, repair, personal
+     * services, food service, offices), which CPDO judges case by case.
+     */
+    public const HOME_OCCUPATION = [
+        'is' => ['69100', '69200', '70200', '71100', '75000', '86201', '14100', '10711', '47111', '47112'],
+        'like_divisions' => ['47', '56', '62', '73', '74', '82', '85', '95', '96'],
+    ];
+
+    /**
+     * What vehicles kept on a lot are for, as the applicant answers it
+     * (`vehicle_use`), and the use-list lines each is. The register has no
+     * PSIC code for a pay parking lot or a taxi garage, and the residential
+     * zones give each a different limit (Art. V §2.3, §2.4): a rentable lot
+     * has none on numbers, a ride-hailing garage two units, a taxi garage one,
+     * parking for one's own business two vans in Maximum R-2 and one in
+     * Basic R-3.
+     *
+     * @var array<string, array{label: string, phrases: list<string>}>
+     */
+    public const VEHICLE_USES = [
+        'parking_lot' => ['label' => 'A pay parking lot',
+            'phrases' => ['rentable parking lots/parking buildings', '=parking lots/garage facilities', '=parking lots, garage facilities', 'parking structures/facilities']],
+        'parking_building' => ['label' => 'A pay parking building',
+            'phrases' => ['rentable parking lots/parking buildings', 'parking buildings (above', '=parking buildings', 'parking structures/facilities']],
+        'ride_hailing_garage' => ['label' => 'A garage for ride-hailing cars',
+            'phrases' => ['garage for uber and grab', 'transportation terminals/garage']],
+        'taxi_garage' => ['label' => 'A taxi garage',
+            'phrases' => ['garage for one (1) unit taxi', 'transportation terminals/garage']],
+        'business_parking' => ['label' => 'Parking for your own business’s vans or trucks',
+            'phrases' => ['parking lot in support to existing business', '=parking lots/garage facilities', '=parking lots, garage facilities']],
+        'tricycle_terminal' => ['label' => 'A tricycle or pedicab terminal',
+            'phrases' => ['tricycle/pedicab terminals', 'transportation terminals/garage', 'other types of transportation complexes']],
+        'terminal' => ['label' => 'A jeepney, UV Express or bus terminal',
+            'phrases' => ['transportation terminals/garage', 'bus terminals', 'bus and railway depots', 'other types of transportation complexes']],
+        'trucking_garage' => ['label' => 'A trucking or hauling garage',
+            'phrases' => ['hauling services and garage terminals', 'trucking garage']],
+        'other' => ['label' => 'Something else', 'phrases' => []],
+    ];
+
     /** Is this PSIC code one of `$trade`'s? */
     public static function is(string $trade, string $psic): bool
     {

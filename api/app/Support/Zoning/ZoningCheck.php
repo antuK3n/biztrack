@@ -99,6 +99,7 @@ final class ZoningCheck
         $this->zones();
         $this->uses();
         $this->homeBusiness();
+        $this->definitions();
         $this->provisos();
         $this->specialUses();
         $this->overlaysGroup();
@@ -180,6 +181,29 @@ final class ZoningCheck
                 ['group' => 'where', 'question' => 'C20', 'audience' => 'officer']);
         }
 
+        $key = Ordinance::key($barangay->name);
+        if ($key === 'muzon') {
+            $this->add(['IV-5', 'V-2.16'], 'review',
+                'Art. IV §5 places Maximum Residential-2 in Muzon "excluding areas occupied by existing fishponds" and puts no other zone on those fishponds; the map sheet draws a Fishpond zone there. A lot on Muzon’s fishponds has no zone in the text, and the Fishpond Zone lists no uses in any case. The City has been asked; CPDO decides.',
+                ['group' => 'where', 'question' => 'C17', 'title' => 'Muzon’s fishponds have no zone in the text']);
+        }
+        $facilities = array_values(array_intersect(array_column($this->zones, 'code'), ['PARKS', 'UTILITIES']));
+        if ($facilities !== []) {
+            $this->add('IV-5-PR-UTS', 'review',
+                'Art. IV §5 places '.$this->names($facilities).' on "all area occupied by existing" facilities, with "Follow Base Zone" in its overlay column. This check treats a park or utility the sheet draws as its own zone; whether a lot there takes the surrounding base zone instead has been asked of the City. CPDO decides.',
+                ['group' => 'where', 'audience' => 'officer', 'question' => 'C34', 'title' => 'Parks and utilities: own zone or base zone']);
+        }
+        if ($key === 'panghulo' && in_array('C-1', $this->governing, true) && in_array('C-2', $this->governing, true)) {
+            $this->add('IV-5', 'review',
+                'Two §5 rows overlap in Panghulo: Commercial-1’s area bounded by Rodriguez St., Narra St., M.H. del Pilar St. and Panghulo Road, and Commercial-2’s Panghulo Market bounded by Rodriguez, M.H. del Pilar and Narra Streets. A lot in that block may be either; Commercial-2 allows more. The City has been asked; CPDO decides.',
+                ['group' => 'where', 'audience' => 'officer', 'question' => 'C37', 'title' => 'Overlapping commercial rows in Panghulo']);
+        }
+        if ($key === 'santulan' && in_array('C-1', $this->governing, true)) {
+            $this->add('IV-5', 'review',
+                'One Santulan Commercial-1 row reads "One lot deep commercial strip (right side from Aurora St. to Javier St." with the street it runs along left out, and the Luis S./M.H. del Pilar/Rodriguez/Narra block is listed twice. Where that strip lies is for CPDO; the City has been asked.',
+                ['group' => 'where', 'audience' => 'officer', 'question' => 'C37', 'title' => 'An incomplete Commercial-1 row in Santulan']);
+        }
+
         // CPDO's own determination of the lot's zone (Art. IV §6).
         if ($this->lotZone === null) {
             $this->add(['IV-6-a', 'IV-6-b', 'IV-6-c', 'IV-6-d', 'IV-6-i', 'IV-6-j'], 'review',
@@ -228,39 +252,71 @@ final class ZoningCheck
         }
 
         $codes = $this->lotZone !== null ? [$this->lotZone] : $this->governing;
-        $hits = $this->hits($principal['psic'], $codes);
         $this->principal = $principal;
-        $this->listedIn = array_keys($hits);
-        $this->principalListed = $hits !== [];
         $title = $principal['psic']->title;
 
-        if ($hits !== []) {
-            $za = array_filter($hits, fn ($h) => $h['via'] === 'V-2.3-INH'
+        // What the business IS, when the applicant's answer says more than
+        // the PSIC code can: a pay parking lot or a taxi garage has no code
+        // of its own on the register.
+        $vehicle = $this->vehicleUse();
+        $phrases = $vehicle !== null ? (Ordinance::VEHICLE_USES[$vehicle]['phrases'] ?? []) : [];
+        if ($phrases !== []) {
+            $hits = [];
+            foreach ($codes as $code) {
+                $hit = ZoningConformance::lookupPhrases($code, $phrases);
+                if ($hit !== null) {
+                    $hits[$code] = $hit;
+                }
+            }
+            $title = Ordinance::VEHICLE_USES[$vehicle]['label'];
+        } else {
+            $hits = $this->hits($principal['psic'], $codes);
+        }
+        $hits = $this->withHomeAllowance($principal['psic'], $codes, $hits);
+
+        $certain = array_filter($hits, fn ($h) => $h['certain']);
+        $possible = array_diff_key($hits, $certain);
+        $this->listedIn = array_keys($certain);
+        $this->principalListed = $certain !== [];
+
+        if ($certain !== []) {
+            $za = array_filter($certain, fn ($h) => $h['via'] === 'V-2.3-INH'
                 || str_contains(mb_strtolower($h['use']), 'conditions deemed appropriate by the zoning administrator'));
-            $unconditional = array_diff_key($hits, $za);
-            $first = reset($hits);
-            $rules = ['V-2', 'III-2-a'];
-            foreach (array_keys($hits) as $code) {
+            $unconditional = array_diff_key($certain, $za);
+            $first = reset($certain);
+            $rules = ['V-2'];
+            foreach (array_keys($certain) as $code) {
                 $rules[] = 'V-'.Ordinance::SECTION_FOR_CODE[$code].'-USES';
-                $via = $hits[$code]['via'];
+                $via = $certain[$code]['via'];
                 if ($via !== null) {
                     $rules[] = $via;
                 }
             }
-            $where = $this->names(array_keys($hits));
-            $reason = "{$title} is allowed in {$where}: “".$this->clause($first['use']).'”.';
+            $home = array_filter($certain, fn ($h) => $h['basis'] === 'home') !== [];
+            if ($home) {
+                $rules[] = 'V-2.1-HO';
+            }
+            $where = $this->names(array_keys($certain));
+            $reason = $home && count(array_filter($certain, fn ($h) => $h['basis'] !== 'home')) === 0
+                ? "{$title} is allowed in {$where} as a business run from a home, on the conditions below."
+                : "{$title} is allowed in {$where}: “".$this->clause($first['use']).'”.';
             $status = $unconditional !== [] ? 'met' : 'review';
             if ($unconditional === []) {
                 $rules[] = array_filter($za, fn ($h) => $h['via'] === 'V-2.3-INH') !== []
                     ? 'V-2.3-INH' : 'V-2.3-RETAIL-ZA';
                 $reason .= ' In Maximum Residential-2 it is allowed on conditions the Zoning Administrator sets.';
             }
-            $others = array_values(array_diff($codes, array_keys($hits)));
+            $reason .= $this->definitionNote($first['definition'] ?? null, $rules);
+            $textOnly = $this->textOnlyNote(array_keys($certain), $rules);
+            $reason .= $textOnly;
+            $others = array_values(array_diff($codes, array_keys($certain)));
             if ($others !== [] && $this->lotZone === null) {
                 $reason .= ' It is not on the list for '.$this->names($others).', so it matters which of these your lot is in.';
             }
             $this->add(array_values(array_unique($rules)), $status, $reason,
-                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses']);
+                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'question' => $textOnly !== '' ? 'C11' : null]);
+        } elseif ($possible !== []) {
+            $this->possiblyListed($title, $possible, $codes);
         } else {
             $this->notListed($principal['psic'], $codes);
         }
@@ -271,8 +327,8 @@ final class ZoningCheck
                 if ($line['psic']->id === $principal['psic']->id) {
                     continue;
                 }
-                $h = $this->hits($line['psic'], $codes);
-                $others[] = $line['psic']->title.($h === [] ? ' (not on the list)' : ' (listed in '.$this->names(array_keys($h)).')');
+                $h = array_filter($this->hits($line['psic'], $codes), fn ($hit) => $hit['certain']);
+                $others[] = $line['psic']->title.($h === [] ? ' (not plainly on the list)' : ' (listed in '.$this->names(array_keys($h)).')');
             }
             $how = $basis !== null
                 ? "Your principal line, by {$basis}, is {$title} (Art. IV §7 b.1)."
@@ -299,6 +355,136 @@ final class ZoningCheck
                 'Only mangrove planting is allowed in the Mangrove Zone, and no permanent building or structure. A business cannot operate there.',
                 ['group' => 'uses', 'applies_in' => ['MANGROVE']]);
         }
+    }
+
+    /**
+     * The trade may be on a zone's list but the list does not name it: a
+     * "like:" list's example of a similar trade, a line that is this trade
+     * only at some scale, or a code nobody has read against the lists yet.
+     *
+     * Never Met. Art. III §2(a) takes "and the like" to include similar uses,
+     * and how similar is CPDO's call; Art. III §1 gives a term the ordinance
+     * does not define its meaning in the national codes, and Annex A 89 sends
+     * an undefined business type to the laws that define it. So the finding
+     * names the line, says why it is only possible, and leaves it to CPDO.
+     *
+     * @param  array<string, array<string, mixed>>  $possible
+     */
+    private function possiblyListed(string $title, array $possible, array $codes): void
+    {
+        $first = reset($possible);
+        $rules = ['V-2', 'III-2-a', 'III-1', 'A-89'];
+        foreach (array_keys($possible) as $code) {
+            $rules[] = 'V-'.Ordinance::SECTION_FOR_CODE[$code].'-USES';
+        }
+        $why = $first['basis'] === 'unvetted'
+            ? 'This trade has not been read against the lists yet, so the nearest wording is offered rather than a match.'
+            : 'It may be the same trade, or may not — at a different scale, or for different goods.';
+        $reason = "{$title} may fall under “".$this->clause($first['use']).'”, which '.$this->names(array_keys($possible))
+            .(count($possible) > 1 ? ' list' : ' lists').". {$why} The lists take in similar uses (Art. III §2), and a term the ordinance does not define carries its meaning in the national codes (Art. III §1); CPDO decides whether this is one.";
+        $reason .= $this->definitionNote($first['definition'] ?? null, $rules);
+        $textOnly = $this->textOnlyNote(array_keys($possible), $rules);
+        $reason .= $textOnly;
+        $others = array_values(array_diff($codes, array_keys($possible)));
+        if ($others !== [] && $this->lotZone === null) {
+            $reason .= ' '.$this->names($others).' '.(count($others) > 1 ? 'do' : 'does').' not list anything like it.';
+        }
+        $this->add(array_values(array_unique($rules)), 'review', $reason,
+            ['group' => 'uses', 'title' => 'Possibly on the zones’ lists', 'question' => $textOnly !== '' ? 'C11' : null]);
+    }
+
+    /**
+     * The definition that decided how a trade was read, quoted for the
+     * officer; its rule id is cited with the finding.
+     *
+     * @param  list<string>  $rules
+     */
+    private function definitionNote(?string $definition, array &$rules): string
+    {
+        if ($definition === null || ! isset(TradeUses::DEFINITIONS[$definition])) {
+            return '';
+        }
+        $rules[] = $definition;
+
+        return ' '.TradeUses::DEFINITIONS[$definition];
+    }
+
+    /**
+     * Zones the text places in the barangay that the map sheet does not draw,
+     * named on the finding that relies on them (Art. IV §6: the text
+     * prevails), so the difference is never silent where it decides.
+     *
+     * @param  list<string>  $codes
+     * @param  list<string>  $rules
+     */
+    private function textOnlyNote(array $codes, array &$rules): string
+    {
+        $textOnly = array_values(array_filter($codes, function (string $code): bool {
+            foreach ($this->zones as $zone) {
+                if ($zone['code'] === $code) {
+                    return $zone['source'] === 'text';
+                }
+            }
+
+            return false;
+        }));
+        if ($textOnly === []) {
+            return '';
+        }
+        $rules[] = 'IV-6-g';
+
+        return ' The map sheet does not draw '.$this->names($textOnly).' in '.$this->ctx->barangay->name
+            .'; Art. IV §5’s text places it here, and the text prevails (the City has been asked about the difference).';
+    }
+
+    /**
+     * Art. V §2.1 allows a home occupation (a professional's office; a
+     * dressmaker, tailor, baker or sari-sari store "and the like") and a home
+     * industry (a cottage industry) in Residential-1 and every zone that takes
+     * in its uses — as a business run from a home, on conditions.
+     *
+     * Those clauses are not matched as list lines (ZoningConformance::
+     * matchable leaves them out); they are added here when the applicant says
+     * the business is run from a house someone lives in, so the conditions
+     * in homeBusiness() are what decide it.
+     *
+     * @param  array<string, array<string, mixed>>  $hits
+     * @return array<string, array<string, mixed>>
+     */
+    private function withHomeAllowance(PsicCode $psic, array $codes, array $hits): array
+    {
+        if ($this->ctx->fact('home_based') !== true) {
+            return $hits;
+        }
+        $code = (string) $psic->code;
+        $kind = match (true) {
+            in_array($code, Ordinance::HOME_OCCUPATION['is'], true) => 'is',
+            Ordinance::isManufacturing($code) => 'industry',
+            in_array(substr($code, 0, 2), Ordinance::HOME_OCCUPATION['like_divisions'], true) => 'like',
+            default => null,
+        };
+        if ($kind === null) {
+            return $hits;
+        }
+        $line = $kind === 'industry' ? 'Home Industry classified as cottage industry' : 'Home occupation for the practice of one\'s profession';
+        foreach ($codes as $zone) {
+            if (! in_array('R-1', Ordinance::closure($zone), true) || ($hits[$zone]['certain'] ?? false)) {
+                continue;
+            }
+            $hits[$zone] = [
+                'use' => $line,
+                'from' => 'R-1',
+                'via' => Ordinance::inheritanceRule($zone, 'R-1'),
+                // A professional's office or one of the named home businesses
+                // is the clause itself; another small trade is "and the
+                // like", which is CPDO's to judge.
+                'certain' => $kind !== 'like',
+                'basis' => $kind === 'like' ? 'similar' : 'home',
+                'definition' => null,
+            ];
+        }
+
+        return $hits;
     }
 
     /**
@@ -330,7 +516,7 @@ final class ZoningCheck
         // zone except Basic R-3, so a use listed only there is reachable from
         // nowhere that inherits.
         $skipping = array_values(array_filter($codes, fn ($c) => in_array($c, ['R-3-MAX', 'C-1', 'C-2', 'C-3', 'CBD'], true)));
-        if ($skipping !== [] && ZoningConformance::matchUse($psic, ZoningConformance::ownUses('R-3-BASIC')) !== null) {
+        if ($skipping !== [] && ZoningConformance::matchUse($psic, ZoningConformance::matchable('R-3-BASIC'), $this->ctx->facts) !== null) {
             $this->add(array_merge($rules, ['V-2.5-INH', 'V-2.7-INH']), 'review',
                 "{$title} is listed for Basic Residential-3, but ".$this->names($skipping).' inherit every residential zone except Basic Residential-3. Whether that gap was meant is for the City to say; CPDO decides meanwhile.',
                 ['group' => 'uses', 'question' => 'C18']);
@@ -498,6 +684,117 @@ final class ZoningCheck
     }
 
     // ────────────────────────────────────────────────────────────────────
+    //  Definitions that carry a rule (Art. III §1; Annex A)
+    // ────────────────────────────────────────────────────────────────────
+
+    /**
+     * Most of the ordinance's definitions only say what a word means. These
+     * say what a thing may not be or do, and each decides a filing:
+     *
+     *  - Art. III §1, apartment building: three or more families. A lessor of
+     *    a duplex is in Residential-1's list; of an apartment building, not.
+     *  - Annex A 28 with Industrial-2's list: dry cleaning with flammable
+     *    solvents is a dry-cleaning plant, which only Industrial-2 lists.
+     *  - Annex A 38: a funeral chapel at a cemetery shows or sells no coffins
+     *    or wreaths.
+     *  - Annex A 44: a hotel has no cooking in its rooms; with it, it is a
+     *    hotel apartment (item 45).
+     *  - Annex A 64: an office building holds no retail merchandising.
+     *  - Art. V §2.1: a pet house is at most 4.00 sq. m., and like every
+     *    accessory use it is never used for gain.
+     *  - Art. V §2.20: research facilities, except nuclear, radioactive,
+     *    chemical and biological warfare facilities.
+     *
+     * Annex A 72 (no vulcanizing or repair in a parking building) is with the
+     * parking rules, in rentableParking().
+     */
+    private function definitions(): void
+    {
+        $codes = $this->ctx->psicCodes();
+        $titles = $this->ctx->titles();
+
+        if (in_array('68100', $codes, true)) {
+            $what = $this->ctx->fact('leases_what');
+            $families = $this->ctx->fact('families_in_building');
+            [$status, $reason, $asks] = match (true) {
+                $what === null => ['review', 'Say what you lease out: an apartment building is one for three or more families (Art. III §1), and the zones list houses, duplexes and apartments differently.', ['leases_what']],
+                $what === 'commercial' => ['review', 'Leasing stalls or commercial space: no zone lists it as such. CPDO judges it by what the tenants do there.', ['leases_what']],
+                ! is_numeric($families) => ['review', 'Say how many families can live in the building: three or more make it an apartment building (Art. III §1).', ['leases_what', 'families_in_building']],
+                (float) $families >= 3 => ['met', sprintf('%d families: an apartment building (Art. III §1), which Basic Residential-2 and the zones above it list.', $families), ['leases_what', 'families_in_building']],
+                default => ['met', sprintf('%d %s: a single-detached or duplex house (Art. III §1), which Residential-1 lists.', $families, (float) $families === 1.0 ? 'family' : 'families'), ['leases_what', 'families_in_building']],
+            };
+            $this->add('III-1-APT', $status, $reason, ['group' => 'uses', 'asks' => $asks]);
+        }
+
+        if (array_filter($codes, fn ($c) => Ordinance::is('laundry', $c)) !== []) {
+            $solvents = $this->ctx->fact('flammable_solvents');
+            $industrial2 = in_array('I-2', $this->candidates(), true);
+            [$status, $reason] = match (true) {
+                $solvents === null => ['review', 'Say whether dry cleaning will use flammable solvents: a dry-cleaning plant using them belongs in Industrial-2.'],
+                $solvents === false => ['met', 'No flammable solvents: a laundry, which the commercial zones and Maximum R-2 list.'],
+                $industrial2 => ['review', 'Dry cleaning with flammable solvents is a "dry cleaning plant using flammable liquids" (Annex A 28; Art. V §2.13), which only Industrial-2 lists. CPDO checks the lot is in Industrial-2.'],
+                default => ['not_met', 'Dry cleaning with flammable solvents is a "dry cleaning plant using flammable liquids" (Annex A 28; Art. V §2.13), which only Industrial-2 lists, and no zone here is Industrial-2.'],
+            };
+            $this->add('A-28', $status, $reason, ['group' => 'uses', 'asks' => ['flammable_solvents']]);
+        }
+
+        if (array_filter($codes, fn ($c) => Ordinance::is('funeral', $c)) !== []) {
+            $this->add('A-38', ...$this->yesNo($this->ctx->fact('sells_coffins'),
+                'A funeral chapel at a cemetery is a fraternal chapel (Annex A 38): coffins and flower wreaths are not displayed or sold there, though dedicated wreaths may be.',
+                'No coffins or wreaths shown or sold at the chapel.',
+                'Say whether coffins or flower wreaths will be displayed or sold at the chapel.'),
+                ...[['group' => 'uses', 'asks' => ['sells_coffins'], 'applies_in' => ['CEMETERY']]]);
+        }
+
+        if (in_array('55101', $codes, true)) {
+            $kitchens = $this->ctx->fact('rooms_have_kitchens');
+            [$status, $reason] = match ($kitchens) {
+                null => ['review', 'Say whether the rooms have their own kitchens: a hotel has none (Annex A 44), and one whose rooms do is a hotel apartment.'],
+                true => ['info', 'Rooms with their own cooking make this a hotel apartment or apartel (Annex A 44-45), and the use finding reads it as one. The zones that list hotels list those too.'],
+                default => ['met', 'No cooking in the rooms: a hotel as Annex A 44 defines it.'],
+            };
+            $this->add('A-44', $status, $reason, ['group' => 'uses', 'asks' => ['rooms_have_kitchens']]);
+        }
+
+        // Retail merchandising (PSIC 47, not online or door-to-door).
+        $retail = array_filter($codes, fn ($c) => str_starts_with($c, '47') && ! in_array($c, ['47912', '47990'], true)) !== [];
+        if ($retail) {
+            $this->add('A-64', ...$this->yesNo($this->ctx->fact('in_office_building'),
+                'An office building, as Annex A 64 defines it, houses offices and professional services, not retail merchandising. A shop belongs in a commercial building.',
+                'Not in an office building.',
+                'Say whether the shop is inside an office building: Annex A 64 keeps retail out of one.'),
+                ...[['group' => 'uses', 'asks' => ['in_office_building']]]);
+        }
+
+        // Pet houses (Art. V §2.1): for a pet business run from a home.
+        $pets = array_filter($codes, fn ($c) => in_array($c, ['47760', '75000'], true)) !== []
+            || preg_grep('/\b(?:pet|pets|kennel|grooming|boarding\s+for\s+(?:dogs|cats))\b/i', $titles) !== [];
+        if ($pets && $this->ctx->fact('home_based') === true) {
+            $area = $this->ctx->fact('pet_house_area_sqm');
+            $residential = array_values(array_intersect($this->candidates(), ['R-1', 'R-2-BASIC', 'R-2-MAX', 'R-3-BASIC', 'R-3-MAX']));
+            [$status, $reason] = match (true) {
+                ! is_numeric($area) => ['review', 'Give the floor area of any pet house or kennel on the lot (0 if none): Residential-1 allows pet houses of at most 4.00 sq. m.'],
+                (float) $area > 4.0 => ['not_met', sprintf('A %s sq. m. pet house is larger than the 4.00 sq. m. Residential-1 allows, and an accessory structure may not be used for the business.', rtrim(rtrim(number_format((float) $area, 2), '0'), '.'))],
+                (float) $area > 0 => ['review', 'Within 4.00 sq. m. A pet house is an accessory use, kept for the household’s own pets: it may not house animals for the business.'],
+                default => ['met', 'No pet house on the lot.'],
+            };
+            $this->add(['V-2.1-PET', 'V-2.1-ACC'], $status, $reason,
+                ['group' => 'home', 'asks' => ['pet_house_area_sqm'], 'applies_in' => $residential]);
+        }
+
+        // Research facilities (Art. V §2.20).
+        $research = array_filter($codes, fn ($c) => str_starts_with($c, '72')) !== []
+            || preg_grep('/\bresearch\b/i', $titles) !== [];
+        if ($research) {
+            $this->add('V-2.20-RESEARCH', ...$this->yesNo($this->ctx->fact('warfare_research'),
+                'The Institutional zone allows research facilities "except nuclear, radioactive, chemical and biological warfare facilities".',
+                'Not a nuclear, radioactive, chemical or biological warfare facility.',
+                'Say whether the facility will work with nuclear, radioactive, chemical or biological warfare materials.'),
+                ...[['group' => 'uses', 'asks' => ['warfare_research'], 'applies_in' => ['INSTITUTIONAL']]]);
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     //  The "provided that" conditions on particular uses (Art. V §2.3-2.12)
     // ────────────────────────────────────────────────────────────────────
 
@@ -531,9 +828,14 @@ final class ZoningCheck
                 ...[['R-2-MAX', 'R-3-MAX'], [], ['delivery_parking']]);
         }
 
-        $vehicles = $has('passenger_terminal') || $has('trucking') || $has('vehicle_rental');
+        // Vehicles kept on the lot: a trade that is about vehicles, a line
+        // the applicant describes as parking or a garage, or an answer
+        // already given. The register has no code for a pay parking lot.
+        $vehicles = $has('passenger_terminal') || $has('trucking') || $has('vehicle_rental')
+            || $clause('/\bpay\s*parking\b|\bparking\s*(?:lot|building)s?\b|\bgarage\b|\btaxi\b|\btnvs\b|\bgrab\b|\buber\b/i')
+            || $this->vehicleUse() !== null;
         if ($vehicles) {
-            $this->vehicleRules($has('passenger_terminal'));
+            $this->vehicleRules($has('passenger_terminal'), $has('trucking'));
         }
 
         if ($has('recreation') || $clause('/\b(?:swimming pool|basketball|badminton|resort)\b/i')) {
@@ -541,8 +843,8 @@ final class ZoningCheck
             // recreation business it does NOT list is its conditional use.
             $flat = false;
             foreach ($this->ctx->lines as $line) {
-                $hit = ZoningConformance::lookup('R-2-MAX', $line['psic']);
-                $flat = $flat || ($hit !== null && ! str_contains($hit['use'], 'operated for business purposes'));
+                $hit = ZoningConformance::lookup('R-2-MAX', $line['psic'], $this->ctx->facts);
+                $flat = $flat || ($hit !== null && $hit['certain'] && ! str_contains($hit['use'], 'operated for business purposes'));
             }
             $nuisance = $this->ctx->fact('nuisance_equipment');
             $street = $this->ctx->fact('parking_on_street');
@@ -553,7 +855,7 @@ final class ZoningCheck
                     .($street === true ? ' Parking on the street does not meet the parking condition.' : ''),
                     ['R-2-MAX', 'R-3-MAX'], [], ['nuisance_equipment', 'parking_on_street']);
             }
-            $this->proviso('V-2.7-REC', ...$this->parkingNbc(), ...[['C-1'], [], ['parking_on_street']]);
+            $this->proviso('V-2.7-REC', ...$this->parkingNbc(), ...[['C-1'], [], ['parking_on_street'], null, ['GENERAL-COMMERCIAL']]);
         }
 
         if ($has('warehouse') || $clause('/\bwarehous/i')) {
@@ -561,7 +863,7 @@ final class ZoningCheck
         }
 
         if ($has('restaurant')) {
-            $this->proviso('V-2.7-RESTO', ...$this->parkingNbc(), ...[['C-1', 'C-2', 'C-3'], ['CBD'], ['parking_on_street']]);
+            $this->proviso('V-2.7-RESTO', ...$this->parkingNbc(), ...[['C-1', 'C-2', 'C-3'], ['CBD'], ['parking_on_street'], null, ['GENERAL-COMMERCIAL']]);
         }
         if ($clause('/\bfood\s*parks?\b/i')) {
             $this->proviso('V-2.7-FOODPARK', ...$this->parkingNbc(), ...[['C-1', 'C-2', 'C-3'], ['CBD'], ['parking_on_street']]);
@@ -569,7 +871,7 @@ final class ZoningCheck
 
         if ($has('betting')) {
             [$status, $reason] = $this->distance('distance_to_institution_m', 200, 'the nearest school, church, hospital or other institution');
-            $this->proviso('V-2.7-LOTTO', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['distance_to_institution_m']);
+            $this->proviso('V-2.7-LOTTO', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['distance_to_institution_m'], null, ['GENERAL-COMMERCIAL']);
         }
 
         if ($has('auto_repair') || $clause('/\bcar\s*wash/i')) {
@@ -583,7 +885,7 @@ final class ZoningCheck
                 $street === null || $facade === null || $trap === null => ['review', 'Answer the parking, façade and grease-trap questions.'],
                 default => ['met', 'Off-street parking, a proper façade and a grease trap. CPDO also judges whether the street can take the traffic, and may set other conditions.'],
             };
-            $this->proviso(['V-2.7-AUTO', 'V-2.7-CARWASH'], $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['parking_on_street', 'makeshift_facade', 'grease_trap']);
+            $this->proviso(['V-2.7-AUTO', 'V-2.7-CARWASH'], $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['parking_on_street', 'makeshift_facade', 'grease_trap'], null, ['GENERAL-COMMERCIAL']);
         }
 
         if ($has('fuel')) {
@@ -616,7 +918,7 @@ final class ZoningCheck
                 'The hauling business operates within Malabon.',
                 'In General Commercial, hauling services are allowed only for a business operating within Malabon.',
                 'Say whether the hauling business operates within Malabon.', invert: true),
-                ...[['GENERAL-COMMERCIAL'], ['CBD'], ['operates_within_malabon']]);
+                ...[['GENERAL-COMMERCIAL'], ['CBD'], ['operates_within_malabon'], null, ['C-2', 'C-3']]);
 
             $lot = $this->ctx->lotArea;
             $existing = $this->ctx->fact('existing_malabon_business');
@@ -641,6 +943,26 @@ final class ZoningCheck
             $this->proviso('V-2.12-CONT', $status, $reason, ['I-1'], [], ['container_layers']);
         }
 
+        // The same activity listed as commerce and as industry (C-14): the
+        // class that governs turns on scale and process, which the
+        // ordinance never defines.
+        $dual = array_values(array_filter([
+            in_array('31001', $codes, true) || $clause('/\bmattress|\bbox\s*beds?\b/i')
+                ? 'wood and rattan furniture and box beds are Commercial-2 and General Commercial uses, and Industrial-2 pollutive, hazardous ones' : null,
+            in_array('10711', $codes, true) || $clause('/\bbiscuit|\bdoughnut|\bhopia\b/i')
+                ? 'biscuit, doughnut, hopia and other bakery factories are Commercial-2 and General Commercial uses, and Industrial-1 ones' : null,
+            in_array('10799', $codes, true) || $clause('/\bice\s*plant|\bcold\s*storage|\bdry\s*ice\b/i')
+                ? 'ice plants and cold storage are Industrial-1 (non-pollutive) and Industrial-2 (pollutive) uses, ice-making is Commercial-2, and dry ice, which Commercial-2 excludes, is Industrial-1' : null,
+            $clause('/\binsignia|\bbadges?\b/i')
+                ? 'insignia and badges are Commercial-1 and General Commercial uses, and Industrial-1 ones' : null,
+        ]));
+        if ($dual !== []) {
+            $this->add(['V-2.8-USES', 'V-2.10-USES', 'V-2.12-USES', 'V-2.13-USES'], 'review',
+                'The ordinance lists the same activity in more than one class: '.implode('; ', $dual).'. Which governs turns on scale and process, which the ordinance does not define; the City has been asked, and CPDO decides.',
+                ['group' => 'conflict', 'question' => 'C32', 'title' => 'Listed both as commerce and as industry',
+                    'applies_in' => ['C-1', 'C-2', 'C-3', 'GENERAL-COMMERCIAL', 'CBD', 'I-1', 'I-2']]);
+        }
+
         // I-1 takes non-pollutive industry only; I-2 takes pollutive.
         $industrial = array_filter($codes, fn ($c) => Ordinance::isManufacturing($c) || Ordinance::is('warehouse', $c)) !== [];
         if ($industrial && array_intersect($this->candidates(), ['I-1', 'I-2']) !== []) {
@@ -654,8 +976,106 @@ final class ZoningCheck
         }
     }
 
-    /** Terminals and garages: residential provisos (§2.3, §2.4), the CBD bus rule (§2.11). */
-    private function vehicleRules(bool $terminal): void
+    /** The applicant's answer to what vehicles on the lot are for, or null. */
+    private function vehicleUse(): ?string
+    {
+        $answer = $this->ctx->fact('vehicle_use');
+
+        return is_string($answer) && isset(Ordinance::VEHICLE_USES[$answer]) ? $answer : null;
+    }
+
+    /**
+     * Terminals, garages and parking: the residential provisos (§2.3, §2.4)
+     * and the CBD bus rule (§2.11), each by what the vehicles are for.
+     *
+     * These used to share one cap of two vehicles. The ordinance gives each
+     * kind its own: a rentable parking lot has no cap on numbers (light
+     * vehicles only, no motor pool); a garage keeps two ride-hailing units or
+     * one taxi; parking for one's own business keeps two delivery vans or
+     * trucks in Maximum R-2 and ONE four-wheeler or 2-ton van in Basic R-3.
+     */
+    private function vehicleRules(bool $terminalTrade, bool $trucking): void
+    {
+        $kind = $this->vehicleUse();
+        if ($kind === null && $trucking) {
+            return; // a trucking garage: V-2.10-HAUL and V-2.12-TRUCK, in provisos()
+        }
+        if ($kind === null && ! $terminalTrade) {
+            $this->add(['V-2.3-PARK', 'V-2.3-GAR', 'V-2.4-PARK', 'V-2.4-GAR'], 'review',
+                'Say what the vehicles kept on the lot are for. In a residential zone a pay parking lot, a garage for ride-hailing cars or a taxi, and parking for your own business each have their own limits.',
+                ['group' => 'conditions', 'asks' => ['vehicle_use'], 'applies_in' => ['R-2-MAX', 'R-3-MAX', 'R-3-BASIC'],
+                    'title' => 'What the vehicles are for']);
+
+            return;
+        }
+
+        match ($kind ?? 'terminal') {
+            'parking_lot', 'parking_building' => $this->rentableParking($kind),
+            'ride_hailing_garage', 'taxi_garage' => $this->residentialGarage($kind),
+            'business_parking' => $this->businessParking(),
+            'tricycle_terminal', 'terminal' => $this->terminalRules($kind),
+            default => null,
+        };
+    }
+
+    /** Rentable parking: §2.3 and §2.4, and Annex A 72 for a parking building. */
+    private function rentableParking(string $kind): void
+    {
+        $heavy = $this->ctx->fact('heavy_vehicles');
+        $pool = $this->ctx->fact('motor_pool');
+        $turn = $this->ctx->fact('onsite_maneuvering');
+
+        $fails = array_values(array_filter([
+            $heavy === true ? 'it may take light vehicles only' : null,
+            $pool === true ? 'a motor pool is not allowed' : null,
+        ]));
+        [$status, $reason] = match (true) {
+            $fails !== [] => ['not_met', 'A pay parking lot or building in Maximum Residential-2: '.implode('; ', $fails).'.'],
+            $heavy === null || $pool === null => ['review', 'Say whether heavy vehicles will park there and whether it will be a motor pool.'],
+            default => ['met', 'Light vehicles only, no motor pool. There is no limit on the number; CPDO judges whether the traffic is more than the area normally carries.'],
+        };
+        $this->proviso('V-2.3-PARK', $status, $reason, ['R-2-MAX', 'R-3-MAX'], [], ['vehicle_use', 'heavy_vehicles', 'motor_pool']);
+
+        $fails[] = $turn === false ? 'vehicles must come and go without backing onto the road' : null;
+        $fails = array_values(array_filter($fails));
+        [$status, $reason] = match (true) {
+            $fails !== [] => ['not_met', 'A pay parking lot or building in Basic Residential-3: '.implode('; ', $fails).'.'],
+            $heavy === null || $pool === null || $turn === null => ['review', 'Say whether heavy vehicles will park there, whether it will be a motor pool, and whether vehicles can turn inside without backing onto the road.'],
+            default => ['met', 'Light vehicles only, no motor pool, no backing onto the road. CPDO judges the traffic.'],
+        };
+        $this->proviso('V-2.4-PARK', $status, $reason, ['R-3-BASIC'], [], ['vehicle_use', 'heavy_vehicles', 'motor_pool', 'onsite_maneuvering']);
+
+        if ($kind === 'parking_building') {
+            $this->add('A-72', ...$this->yesNo($this->ctx->fact('parking_repair_services'),
+                'Annex A 72 defines a parking building as one that may offer fuel, washing, greasing and cleaning, "except vulcanizing of tires and repair of vehicles". Those belong in an auto-repair or vulcanizing shop.',
+                'No tire vulcanizing or vehicle repair, as Annex A 72 requires of a parking building.',
+                'Say whether the parking building will also offer tire vulcanizing or vehicle repair.'),
+                ...[['group' => 'conditions', 'asks' => ['parking_repair_services']]]);
+        }
+    }
+
+    /** A residential garage for ride-hailing units (two) or a taxi (one). */
+    private function residentialGarage(string $kind): void
+    {
+        $cap = $kind === 'taxi_garage' ? 1 : 2;
+        $what = $kind === 'taxi_garage' ? 'one taxi' : 'two ride-hailing units';
+        $count = $this->ctx->fact('garage_vehicle_count');
+        [$status, $reason] = match (true) {
+            $count === null => ['review', "Say how many vehicles the garage will keep; a residential garage may keep {$what}."],
+            $count > $cap => ['not_met', sprintf('%d vehicles; a residential garage may keep %s.', $count, $what)],
+            default => ['met', sprintf('%d, within the %s a residential garage may keep.', $count, $what)],
+        };
+        $this->proviso('V-2.3-GAR', $status, $reason, ['R-2-MAX', 'R-3-MAX'], [], ['vehicle_use', 'garage_vehicle_count']);
+        $this->proviso('V-2.4-GAR', $status, $reason, ['R-3-BASIC'], [], ['vehicle_use', 'garage_vehicle_count']);
+    }
+
+    /**
+     * Parking for one's own business: an existing Malabon business, the lot
+     * owner also its owner, motor pooling not allowed — and two delivery
+     * vans or trucks in Maximum R-2 with a two-way street and no backing,
+     * against one four-wheeler or 2-ton van in Basic R-3.
+     */
+    private function businessParking(): void
     {
         $count = $this->ctx->fact('garage_vehicle_count');
         $heavy = $this->ctx->fact('heavy_vehicles');
@@ -663,59 +1083,58 @@ final class ZoningCheck
         $twoWay = $this->ctx->fact('two_way_street');
         $turn = $this->ctx->fact('onsite_maneuvering');
         $existing = $this->ctx->fact('existing_malabon_business');
-        $rented = $this->ctx->isRented;
+        $owner = $this->ctx->fact('lot_owner_is_business_owner');
 
-        $fails = [];
-        if ($heavy === true) {
-            $fails[] = 'container vans, tractor heads and trailer trucks are not allowed';
-        }
-        if ($pool === true) {
-            $fails[] = 'a motor pool is not allowed';
-        }
-        if (is_numeric($count) && $count > 2) {
-            $fails[] = sprintf('%d vehicles is more than a residential garage may keep (two ride-hailing units, one taxi, or two delivery vans)', $count);
-        }
-        if ($twoWay === false) {
-            $fails[] = 'the street must take two-way traffic';
-        }
-        if ($turn === false) {
-            $fails[] = 'vehicles must turn inside the lot without backing onto the road';
-        }
-        if ($rented === true) {
-            $fails[] = 'a parking lot for an existing business must be on the business owner’s own lot';
-        }
-        $unanswered = $count === null || $heavy === null || $pool === null || $twoWay === null || $turn === null;
-        [$status, $reason] = match (true) {
-            $fails !== [] => ['not_met', ucfirst(implode('; ', $fails)).'.'],
-            $unanswered => ['review', 'Answer the vehicle questions to check the residential garage limits.'],
-            $existing === false => ['review', 'A parking lot here is allowed only in support of a business already operating in Malabon; CPDO decides whether this garage fits another allowance.'],
-            default => ['met', 'Within the residential garage limits.'],
-        };
-        $asks = ['garage_vehicle_count', 'heavy_vehicles', 'motor_pool', 'two_way_street', 'onsite_maneuvering', 'existing_malabon_business'];
-        $this->proviso(['V-2.3-GAR', 'V-2.3-PARK'], $status, $reason, ['R-2-MAX', 'R-3-MAX'], [], $asks);
-
-        $fails = array_values(array_filter([
-            $heavy === true ? 'only one four-wheeler or 2-ton van is allowed' : null,
+        $common = array_values(array_filter([
+            $existing === false ? 'it must serve a business already operating in Malabon' : null,
+            $owner === false ? 'the owner of the lot must also own the business it serves' : null,
             $pool === true ? 'motor pooling is not allowed' : null,
-            is_numeric($count) && $count > 2 ? sprintf('%d vehicles is more than a residential garage may keep', $count) : null,
-            $turn === false ? 'vehicles must turn inside the lot without backing onto the road' : null,
-            $rented === true ? 'a parking lot for an existing business must be on the business owner’s own lot' : null,
         ]));
+
+        $fails = array_merge($common, array_values(array_filter([
+            is_numeric($count) && $count > 2 ? sprintf('%d vehicles is more than the two delivery vans or trucks allowed', $count) : null,
+            $heavy === true ? 'container vans, tractor heads and trailer trucks are not allowed' : null,
+            $twoWay === false ? 'the street to it must take two-way traffic' : null,
+            $turn === false ? 'vehicles must come and go without backing onto the road' : null,
+        ])));
+        $asks = ['vehicle_use', 'existing_malabon_business', 'lot_owner_is_business_owner', 'garage_vehicle_count', 'heavy_vehicles', 'motor_pool', 'two_way_street', 'onsite_maneuvering'];
+        $missing = array_filter($asks, fn ($k) => $this->ctx->fact($k) === null) !== [];
         [$status, $reason] = match (true) {
             $fails !== [] => ['not_met', ucfirst(implode('; ', $fails)).'.'],
-            $count === null || $heavy === null || $pool === null || $turn === null => ['review', 'Answer the vehicle questions to check the Basic Residential-3 limits.'],
-            default => ['met', 'Within the Basic Residential-3 garage limits.'],
+            $missing => ['review', 'Answer the questions about the business, the lot’s owner, the vehicles and the street to check the Maximum Residential-2 conditions.'],
+            default => ['met', 'An existing Malabon business on its owner’s lot, two vans or trucks at most, no motor pool, a two-way street and no backing onto it.'],
         };
-        $this->proviso(['V-2.4-GAR', 'V-2.4-PARK'], $status, $reason, ['R-3-BASIC'], [], ['garage_vehicle_count', 'heavy_vehicles', 'motor_pool', 'onsite_maneuvering']);
+        $this->proviso('V-2.3-GAR', $status, $reason, ['R-2-MAX', 'R-3-MAX'], [], $asks);
 
-        if ($terminal) {
-            [$status, $reason] = $this->yesNo($turn,
-                'Vehicles turn inside the terminal without backing onto the road.',
-                'Vehicles would have to back onto the road; a terminal must let them manoeuvre inside.',
-                'Say whether vehicles can turn inside the lot.', invert: true);
+        $fails = array_merge($common, array_values(array_filter([
+            is_numeric($count) && $count > 1 ? sprintf('%d vehicles; Basic Residential-3 allows one four-wheeler or 2-ton van', $count) : null,
+            $heavy === true ? 'only a four-wheeler or a 2-ton delivery, closed or refrigerated van is allowed' : null,
+        ])));
+        $asks = ['vehicle_use', 'existing_malabon_business', 'lot_owner_is_business_owner', 'garage_vehicle_count', 'heavy_vehicles', 'motor_pool'];
+        $missing = array_filter($asks, fn ($k) => $this->ctx->fact($k) === null) !== [];
+        [$status, $reason] = match (true) {
+            $fails !== [] => ['not_met', ucfirst(implode('; ', $fails)).'.'],
+            $missing => ['review', 'Answer the questions about the business, the lot’s owner and the vehicles to check the Basic Residential-3 conditions.'],
+            default => ['met', 'An existing Malabon business on its owner’s lot, one four-wheeler or 2-ton van, no motor pool.'],
+        };
+        $this->proviso('V-2.4-GAR', $status, $reason, ['R-3-BASIC'], [], $asks);
+    }
+
+    /** Tricycle terminals in Maximum R-2 (§2.3); bus terminals in the CBD (§2.11). */
+    private function terminalRules(?string $kind): void
+    {
+        $turn = $this->ctx->fact('onsite_maneuvering');
+        $pool = $this->ctx->fact('motor_pool');
+        [$status, $reason] = $this->yesNo($turn,
+            'Vehicles turn inside the terminal without backing onto the road.',
+            'Vehicles would have to back onto the road; a terminal must let them manoeuvre inside.',
+            'Say whether vehicles can turn inside the lot.', invert: true);
+        if ($kind !== 'terminal') {
             $this->proviso(['V-2.3-TRI'], $pool === true ? 'not_met' : $status,
                 $pool === true ? 'A motor pool is not allowed at a tricycle or pedicab terminal.' : $reason.' CPDO judges whether the traffic suits the area.',
                 ['R-2-MAX', 'R-3-MAX'], [], ['onsite_maneuvering', 'motor_pool']);
+        }
+        if ($kind !== 'tricycle_terminal') {
             $this->proviso('V-2.11-BUS', $status, $reason, ['CBD'], [], ['onsite_maneuvering']);
         }
     }
@@ -747,7 +1166,13 @@ final class ZoningCheck
             default => ['met', sprintf('%s sq. m. of safe finished goods for an existing Malabon business, parked off the street. CPDO checks the loading space against the NBC.', number_format($floor))],
         };
         $this->proviso('V-2.7-WH', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'],
-            ['industry_pollutive', 'industry_hazardous', 'existing_malabon_business', 'parking_on_street']);
+            ['industry_pollutive', 'industry_hazardous', 'existing_malabon_business', 'parking_on_street'], null, ['GENERAL-COMMERCIAL']);
+
+        if (in_array('I-2', $this->candidates(), true)) {
+            $this->add(['V-2.13-USES', 'V-2.7-WH'], 'review',
+                'Industrial-2’s pollutive, non-hazardous heading ends with a warehouse "for non-pollutive/non-hazardous industries" — Industrial-1’s line, repeated — and no line names a warehouse for pollutive, non-hazardous goods. The City has been asked whether one was meant; CPDO decides which line a warehouse here falls under.',
+                ['group' => 'conflict', 'applies_in' => ['I-2'], 'question' => 'C33', 'title' => 'Industrial-2’s warehouse lines']);
+        }
 
         if ($this->ctx->fact('open_storage') === null) {
             $this->add('A-70', 'review', 'Say whether goods will be kept under a roof with no walls (open storage), which has its own siting rule.',
@@ -767,7 +1192,7 @@ final class ZoningCheck
         }
 
         [$status, $reason] = $this->distance('distance_to_fuel_station_m', 1000, 'the nearest existing gasoline or LPG station');
-        $this->proviso('V-2.7-GAS-1KM', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['distance_to_fuel_station_m'], 'C13');
+        $this->proviso('V-2.7-GAS-1KM', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['distance_to_fuel_station_m'], 'C13', ['GENERAL-COMMERCIAL']);
 
         $ecc = $this->ctx->fact('has_ecc');
         $this->proviso('V-2.7-GAS-ECC', ...$this->yesNo($ecc,
@@ -779,6 +1204,12 @@ final class ZoningCheck
         $this->proviso(['V-2.7-GAS-DOE', 'V-2.7-GAS-SAFE', 'V-ZONE-AGENCY-GUIDELINES'], 'review',
             'It must meet Department of Energy standards, pose no hazard to a residential community, and have a buffer strip and firefighting equipment. CPDO checks these.',
             ['C-1', 'C-2', 'C-3'], ['CBD'], []);
+
+        if ($residential !== []) {
+            $this->add(['V-2.7-GAS-RES', 'V-2.10-USES'], 'review',
+                '§2.7 lets a filling station into a residential zone with the written conformity of the homeowners’ association or barangay and the fire department, yet no residential zone lists filling stations; and General Commercial lists them with no condition at all. The City has been asked how these fit; CPDO decides meanwhile.',
+                ['group' => 'conflict', 'applies_in' => $residential, 'question' => 'C13', 'title' => 'A residential clause for a use no residential zone lists']);
+        }
 
         $this->add('V-3-C-CONFLICT', 'review',
             'The ordinance gives filling stations two siting rules: §2.7 says DOE standards and 1 km from any existing station; §3.C says Energy Regulatory Board standards and 200 m from schools, churches and hospitals. Both are checked here; the City has been asked which governs.',
@@ -808,7 +1239,9 @@ final class ZoningCheck
             $missing => ['review', 'Answer the parking, firewall and barangay-hours questions.'],
             default => ['met', 'Off-street parking, firewalls and agreed hours. CPDO judges the traffic and may set other conditions.'],
         };
-        $this->proviso($rule, $status, $reason, ['C-2', 'C-3'], ['CBD'], $asks);
+        $this->proviso($rule, $status, $reason.($rule === 'V-2.8-MACH'
+            ? ' (The clause reads "the facade be not made of makeshift materials with firewalls"; it is read as requiring firewalls, as the junk-shop clause says outright. The City has been asked to confirm.)'
+            : ''), ['C-2', 'C-3'], ['CBD'], $asks, $rule === 'V-2.8-MACH' ? 'C40' : null, ['GENERAL-COMMERCIAL']);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -874,13 +1307,15 @@ final class ZoningCheck
             'open_storage' => ['V-3-D-2'],
             'slaughterhouse' => ['V-3-E-0', 'V-3-E-2', 'V-3-E-7', 'V-3-E-9-11', 'V-2.13-SLAUGHTER'],
             'cockpit' => ['V-3-F-2-4'],
-            'mrf' => ['V-3-H-2-5'],
+            'mrf' => ['V-3-H-2-5', 'VI-1-IRR'],
             'billboard' => ['V-3-I-2a', 'V-3-I-2b', 'V-3-I-2d-i', 'V-3-I-2k-l', 'V-3-I-2o-q', 'V-3-I-3-5'],
             'terminal' => ['V-3-J-2', 'V-3-J-3', 'V-3-J-5-7'],
         ][$use] ?? [];
         if ($extras !== []) {
-            $this->add($extras, 'review', 'Further conditions CPDO checks for this special use.',
-                ['group' => 'special', 'audience' => 'officer']);
+            $this->add($extras, 'review', $use === 'mrf'
+                ? 'Further conditions CPDO checks for this special use. Further safeguards are to be "recommended by the Local Zoning Committee subject to the Implementing Rules and Regulations", neither of which the ordinance creates or attaches; the City has been asked.'
+                : 'Further conditions CPDO checks for this special use.',
+                ['group' => 'special', 'audience' => 'officer', 'question' => $use === 'mrf' ? 'C24' : null]);
         }
     }
 
@@ -934,6 +1369,9 @@ final class ZoningCheck
             default => ['met', 'In a Parks and Recreation zone, at least 200 m from homes and institutions.'],
         };
         $this->add('V-3-F-1', $status, $reason, $opts(['distance_to_residence_m', 'distance_to_institution_m']));
+        $this->add(['V-3-F-1', 'V-2.17-USES', 'IV-5-PR-UTS'], 'review',
+            'Art. V §3.F puts cockpits in Parks and Recreation zones, but that zone’s own list (§2.17) does not name cockpits, and §5 maps no Parks zone of its own — only existing parks, marked "follow base zone". The City has been asked where a cockpit may go; CPDO decides meanwhile.',
+            ['group' => 'conflict', 'question' => 'C31', 'title' => 'Cockpits belong in a zone that does not list them']);
     }
 
     private function billboard(callable $opts): void
@@ -943,6 +1381,9 @@ final class ZoningCheck
             'Billboards may stand only on lots fronting the National Road.',
             'Say whether the lot fronts the National Road.', invert: true), ...[$opts(['fronts_national_road'])]);
         $this->add('V-3-I-2c', ...$this->distance('distance_to_billboard_m', 100, 'the nearest other billboard'), ...[$opts(['distance_to_billboard_m'])]);
+        $this->add(['V-3-I-1', 'V-3-I-2m-n', 'V-3-I-2b', 'VII-13-LC'], 'review',
+            '§3.I.1 allows billboards only on lots fronting the National Road, while §3.I(m) bars signs along road rights-of-way "whether it be National Road", and Art. VII §13 allows a billboard in any zone with a locational clearance. The setback table also skips roads 29-30, 24-25 and 19-20 m wide. The City has been asked; CPDO decides meanwhile.',
+            ['group' => 'conflict', 'question' => 'C21', 'title' => 'Where a billboard may stand']);
     }
 
     private function terminal(callable $opts): void
@@ -974,6 +1415,11 @@ final class ZoningCheck
             $this->add(['V-4.1-USES', 'V-4.1-FP', 'V-4', 'IV-3', 'ANNEX-C'], 'info',
                 "{$name} is in the Flood Overlay Zone. It changes no allowed use; a new building must be flood-proofed — ground floor above 0.5 m (low susceptibility), 1.0 m (moderate), 2.0 m (high) or 3.0 m (very high) per the CLUP 2018-2027 assessment.",
                 ['group' => 'overlay']);
+            if ($this->ctx->fact('new_construction') === true) {
+                $this->add(['V-4.1-FP', 'III-1-BFE'], 'review',
+                    'The ground-floor height is set from the base flood elevation, which Art. III defines as the DPWH regional office’s calculation while §4.1 takes it from the CLUP 2018-2027 assessment unless the DRRMO updates it; and the table’s classes share their edges (0.5, 1.0 and 2.0 m each fall in two classes). CPDO reads the site’s class off Annex C’s flood map. The City has been asked which source and which class edges govern.',
+                    ['group' => 'conflict', 'question' => 'C27', 'title' => 'Which base flood elevation']);
+            }
         }
 
         // Heritage: Annex C maps it in five barangays; Art. IV §5 marks it in
@@ -1025,12 +1471,26 @@ final class ZoningCheck
             return;
         }
         if ($this->ctx->fact('new_construction') === true) {
-            $r1 = $this->principal !== null && ZoningConformance::lookup('R-1', $this->principal['psic']) !== null;
+            $r1hit = $this->principal !== null ? ZoningConformance::lookup('R-1', $this->principal['psic'], $this->ctx->facts) : null;
+            $r1 = $r1hit !== null && $r1hit['certain'];
             $this->add('V-4.3-NEWUSES', $r1 ? 'met' : 'review',
                 $r1
                     ? 'New construction in the heritage overlay takes R-1 uses, and the trade is one.'
                     : 'New construction in the heritage overlay is limited to R-1 uses, even where the base zone is commercial, and the trade is not an R-1 use. Read literally this overrides the base zone; the City has been asked whether it means to.',
                 ['group' => 'overlay', 'asks' => ['new_construction'], 'question' => 'C25']);
+
+            // The buffer around a declared house: no higher than its roof
+            // apex (NHCP 2012), and designed like it.
+            $this->add('V-4.3-BHL', ...$this->yesNo($this->ctx->fact('above_heritage_apex'),
+                'The new building would rise above the roof apex of the declared heritage house; buildings around it may not (Art. V §4.3, after NHCP’s 2012 standards).',
+                'No higher than the roof apex of the declared heritage house.',
+                'Say whether the new building will rise above the roof apex of the nearest declared heritage house.'),
+                ...[['group' => 'overlay', 'asks' => ['above_heritage_apex']]]);
+            $this->add('V-4.3-NEWDESIGN', ...$this->yesNo($this->ctx->fact('period_design'),
+                'The building and its landscaping follow the period design of the declared heritage houses.',
+                'New building and landscape designs in the heritage overlay must be made similar to the period design of the declared heritage houses.',
+                'Say whether the new building’s design, landscaping included, will follow the period design of the heritage houses.', invert: true),
+                ...[['group' => 'overlay', 'asks' => ['period_design']]]);
         }
     }
 
@@ -1094,9 +1554,10 @@ final class ZoningCheck
         [$status, $reason] = match (true) {
             $floor === null || $lot === null || $lot <= 0 => ['review', 'Give the floor area your business uses and the lot area to check the 30% limit.'],
             $floor > 0.3 * $lot => ['not_met', sprintf('The business would use %.0f%% of the lot; at most 30%% is allowed.', $floor / $lot * 100)],
-            default => ['met', sprintf('The business uses %.0f%% of the lot (limit 30%%, a tenth of it on land for parking and toilets).', $floor / $lot * 100)],
+            default => ['met', sprintf('The business uses %.0f%% of the lot (limit 30%%).', $floor / $lot * 100)],
         };
-        $this->add('V-4.2-AREA', $status, $reason, ['group' => 'overlay']);
+        $this->add('V-4.2-AREA', $status, $reason.' Of the 30%, "10% of 30%" may be on land for parking and toilets — 3% of the lot, or 10% of it; the City has been asked which, and CPDO decides.',
+            ['group' => 'overlay', 'question' => 'C38']);
 
         $storeys = $this->ctx->storeys;
         [$status, $reason] = match (true) {
@@ -1129,6 +1590,12 @@ final class ZoningCheck
             $this->add($rules, 'met', 'Not beside a waterway, so the easement does not touch the lot.', ['group' => 'site', 'asks' => ['beside_waterway']]);
 
             return;
+        }
+
+        if (in_array('MANGROVE', $this->governing, true)) {
+            $this->add(['V-2.15-USES', 'V-2.14-USES', 'IV-5'], 'review',
+                'The Mangrove Zone here is written as "areas along easement of Malabon–Navotas, Chungkang, Batasan, Muzon Rivers" — the same banks the Easement Zone keeps a 3 m easement on. On those banks a lot may be Mangrove, where nothing may be built at all, rather than only clear of the easement. The City has been asked which governs; CPDO decides.',
+                ['group' => 'conflict', 'question' => 'C35', 'title' => 'Riverbank: easement or Mangrove Zone']);
         }
 
         $name = $this->ctx->fact('waterway_name');
@@ -1221,6 +1688,17 @@ final class ZoningCheck
         foreach (Ordinance::streetKeys($this->ctx->street) as $key) {
             if (isset(Ordinance::ROAD_WIDENING[$key])) {
                 $m = Ordinance::ROAD_WIDENING[$key];
+                if ($key === 'sanciangco') {
+                    // "three (3) meters both sides of Gov. W. Pascual Avenue. and
+                    // Sanciangco St., Gen. Borromeo Street, … would require
+                    // setback of one (1) meter": the stray full stop puts
+                    // Sanciangco in either group.
+                    $this->add('VI-8-ROAD', 'review',
+                        'Sanciangco St. is set aside for widening, but the sentence can be read to give it the 3 m setback of Gov. Pascual Ave. or the 1 m of the roads after it. CPDO checks the building line; the City has been asked which.',
+                        ['group' => 'site', 'question' => 'C39']);
+
+                    continue;
+                }
                 $this->add('VI-8-ROAD', 'review',
                     sprintf('%s is set aside for widening: a locational clearance there requires a %s m setback on both sides. CPDO checks the building line.', Ordinance::STREETS[$key]['label'], rtrim(rtrim(number_format($m, 1), '0'), '.')),
                     ['group' => 'site']);
@@ -1271,9 +1749,19 @@ final class ZoningCheck
                     $limits[] = $this->zoneName($code).' '.Ordinance::HEIGHT_LIMITS[$code].' m';
                 }
             }
-            $this->add(['VII-1-4', 'VII-1-1-3'], 'info',
-                'Height limits: '.implode('; ', $limits).'. Lower where a commercial or industrial lot adjoins a residential zone without a street between.',
+            $this->add(['VII-1-4', 'VII-1-1-3', 'VII-3', 'VII-6', 'VII-9'], 'info',
+                'Height limits: '.implode('; ', $limits).'. Lower where a commercial or industrial lot adjoins a residential zone without a street between. Yards and parking: one building’s required yard or parking may not count for another; several principal buildings on one lot each meet the yards as if alone; a lot on a zone boundary takes the stricter zone’s yards.',
                 ['group' => 'site', 'audience' => 'officer']);
+
+            // Art. VII §1(1) and §1(2) give a Commercial-2 building beside
+            // Residential-1 two different caps for the same narrow gap.
+            $commercial = array_values(array_intersect($this->candidates(), ['C-2', 'C-3']));
+            if ($commercial !== [] && array_intersect($this->governing, ['R-1', 'R-2-BASIC', 'R-2-MAX']) !== []) {
+                $this->add('VII-1-1-3', 'review',
+                    'Where a Commercial-2 lot adjoins Residential-1 with no street or open space between, Art. VII §1(1) caps the building facing it at 12 m or four storeys (when the gap is not over 6 m) and §1(2) at 9 m or three storeys (when it is not over 4 m). A gap of 4 m or less meets both, with different limits. The City has been asked which governs; CPDO decides meanwhile.',
+                    ['group' => 'conflict', 'applies_in' => $commercial, 'question' => 'C29',
+                        'title' => 'Two height caps beside Residential-1']);
+            }
         }
 
         // Geological hazard by barangay soil (Art. VI §7).
@@ -1289,7 +1777,18 @@ final class ZoningCheck
                 $storeys > $hazard['analysis_above'] => ['review', "{$advice}. The building has {$storeys} storeys, so geotechnical and structural engineering analysis and design are required."],
                 default => ['met', "{$advice}. The building has {$storeys}."],
             };
-            $this->add('VI-7', $status, $reason, ['group' => 'site', 'audience' => $new === true ? 'both' : 'officer']);
+            // "Recommended" is not "shall" (Art. III §2(f)): advice reads as
+            // information, and only the "REQUIRED" analysis can be wanting.
+            $this->add(['VI-7', 'III-2-f'], $status, $reason, ['group' => 'site', 'audience' => $new === true ? 'both' : 'officer']);
+
+            // The soil advice and the zone's height limit, side by side where
+            // they are furthest apart: 1-4 or 1-2 storeys against 180 m.
+            $tall = array_values(array_intersect($this->candidates(), ['C-3', 'CBD']));
+            if ($new === true && $tall !== []) {
+                $this->add(['VI-7', 'VII-1-4'], 'review',
+                    "Art. VI §7 recommends {$hazard['storeys']} storey(s) on {$soil} here, while ".$this->names($tall).' allow buildings up to 180 m (Art. VII §1.4). The ordinance does not say how the two fit; the City has been asked, and CPDO decides with the geotechnical analysis.',
+                    ['group' => 'conflict', 'applies_in' => $tall, 'question' => 'C30', 'title' => 'Soil advice against a 180 m height limit']);
+            }
         }
 
         // The 4 m buffer between conflicting zones (Art. VII §11).
@@ -1310,15 +1809,20 @@ final class ZoningCheck
                 ['group' => 'site', 'audience' => 'officer', 'officer_asks' => ['adjoins_conflicting_zone', 'buffer_provided']]);
         }
 
-        // Parking lots of 20+ slots (Art. VI §4.4).
-        if (preg_grep('/\bparking\s*(?:lot|building|area)/i', $this->ctx->titles()) !== []) {
+        // Parking lots of 20+ slots (Art. VI §4.4): trees and permeable paving.
+        $parkingTrade = in_array($this->vehicleUse(), ['parking_lot', 'parking_building'], true)
+            || preg_grep('/\bparking\s*(?:lot|building|area)/i', $this->ctx->titles()) !== [];
+        if ($parkingTrade) {
             $slots = $this->ctx->fact('parking_slots');
+            $green = $this->ctx->fact('parking_landscaped');
             [$status, $reason] = match (true) {
-                $slots === null => ['review', 'Say how many parking slots there will be.'],
-                $slots >= 20 => ['review', sprintf('%d slots: a lot of 20 or more must be planted with trees at least 1.8 m tall at occupancy and be half paved with permeable material.', $slots)],
-                default => ['met', 'Fewer than 20 slots.'],
+                $slots === null => ['review', 'Say how many parking slots there will be: a lot of 20 or more must be planted and half permeable.'],
+                $slots < 20 => ['met', 'Fewer than 20 slots.'],
+                $green === null => ['review', sprintf('%d slots: say whether the lot will have trees at least 1.8 m tall by occupancy and half its paving permeable.', $slots)],
+                $green === false => ['not_met', sprintf('%d slots: a parking lot of 20 or more must have trees at least 1.8 m tall when the occupancy permit is issued, and at least half its paving permeable.', $slots)],
+                default => ['met', sprintf('%d slots, planted with trees and half permeable.', $slots)],
             };
-            $this->add('VI-4-4', $status, $reason, ['group' => 'site', 'asks' => ['parking_slots']]);
+            $this->add('VI-4-4', $status, $reason, ['group' => 'site', 'asks' => ['parking_slots', 'parking_landscaped']]);
         }
     }
 
@@ -1336,6 +1840,11 @@ final class ZoningCheck
             $this->add(['VI-1', 'VI-2-0'], 'review',
                 'Industry must meet the ordinance’s performance standards. Say whether the work is pollutive or hazardous.',
                 ['group' => 'performance', 'asks' => ['industry_pollutive', 'industry_hazardous']]);
+        }
+        if ($industrial || $this->ctx->fact('nuisance_equipment') === true || $this->pollutive() === true) {
+            $this->add('VI-1-IRR', 'review',
+                'Art. VI §1 says the performance standards "shall be enforced through the Implementing Guidelines that is made part of this Zoning Ordinance". No guidelines are attached to it; the City has been asked for them. CPDO applies the standards as written meanwhile.',
+                ['group' => 'performance', 'audience' => 'officer', 'question' => 'C26']);
         }
         if ($manufacturing) {
             $this->add(['VI-2-13', 'VI-8-WASTE', 'VI-1', 'VI-2-0'], 'review',
@@ -1367,9 +1876,9 @@ final class ZoningCheck
                 ['group' => 'performance', 'audience' => 'officer']);
         }
         if ($food || $manufacturing || array_filter($codes, fn ($c) => Ordinance::is('laundry', $c) || Ordinance::is('auto_repair', $c)) !== []) {
-            $this->add('VI-8-SEWER', 'info',
-                'Nothing dangerous into drains or waterways; wastewater between pH 6.5 and 8.5, grease and oil within 300 ppm (10 ppm daily average).',
-                ['group' => 'performance', 'audience' => 'officer']);
+            $this->add('VI-8-SEWER', 'review',
+                'Nothing dangerous into drains or waterways; wastewater between pH 6.5 and 8.5. For grease and oil the sentence gives two limits — "in excess of 300 PPM or exceed daily average of 10 PPM" — which cannot both be the limit; the City has been asked which, and CPDO applies DENR’s effluent standards meanwhile.',
+                ['group' => 'performance', 'audience' => 'officer', 'question' => 'C36']);
         }
 
         $water = $manufacturing || array_filter($codes, fn ($c) => Ordinance::is('water_refilling', $c)
@@ -1456,7 +1965,7 @@ final class ZoningCheck
         $since = $this->ctx->fact('operating_since_year');
         [$status, $reason] = match (true) {
             $since === null => ['review', 'The trade is not on the list for the zones here. If the business was already operating here when the ordinance was approved (26 November 2018), it may continue as a non-conforming use. Say when it started.'],
-            $since <= 2018 => ['review', sprintf('Operating since %d, before the ordinance: it may continue as a non-conforming use. CPDO issues a Notice of Non-Conformance citing what it does not conform to, and a Certificate of Non-Conformance valid one year and renewed yearly.', $since)],
+            $since <= 2018 => ['review', sprintf('Operating since %d, before the ordinance: it may continue as a non-conforming use. CPDO issues a Notice of Non-Conformance citing what it does not conform to, and a Certificate of Non-Conformance valid one year and renewed yearly "for a period specified under the amended Zoning Ordinance" — a period it never specifies (asked of the City).', $since)],
             default => ['review', sprintf('Started in %d, after the ordinance, in a zone that does not list the trade: the non-conforming rules do not cover it. CPDO decides whether it fits a listed use or needed an exception.', $since)],
         };
         $this->add(['IX-12-0', 'IX-11-NOTICE', 'IX-11-VALID', 'IX-10.2-D', 'III-1-NCU', 'III-1-CNC', 'III-1-NNC', 'IX-14-1b', 'IX-28', 'PREAMBLE'], $status, $reason,
@@ -1493,8 +2002,8 @@ final class ZoningCheck
                 ['group' => 'nonconforming', 'asks' => ['nonconforming_expanded', 'nonconforming_ceased']]);
         }
         if ($this->ctx->fact('lzeac_allowed') === true) {
-            $this->add('IX-12-10', 'info', 'Allowed by the old LZEAC: it is treated as a non-conforming use and may operate until it ceases.',
-                ['group' => 'nonconforming', 'asks' => ['lzeac_allowed']]);
+            $this->add('IX-12-10', 'info', 'Allowed by a variance, exception or deviation under the old ordinance: it is treated as a non-conforming use and may operate until it ceases. (The ordinance calls the body that granted it the "LZEAC", which it does not define; read here as the old zoning board.)',
+                ['group' => 'nonconforming', 'asks' => ['lzeac_allowed'], 'question' => 'C16']);
         }
         $this->add(['IX-11-CONTINUE', 'IX-12-9', 'IX-29'], 'review',
             'The ordinance says two things about how long a non-conforming use lasts: §11 lets it continue until it ceases operation; §12.9 tells the owner to phase it out and relocate within ten years of the ordinance taking effect — a date the City has not given us. Both are shown; the City has been asked which governs.',
@@ -1653,17 +2162,35 @@ final class ZoningCheck
      * unconditioned one — where the condition is sent to CPDO rather than
      * imposed or dropped (V-2.10-FLAT).
      *
+     * `$flat` are zones that list the same use with no such condition at all
+     * — General Commercial restating C-1 and C-2's uses without their
+     * provisos, or C-2 taking trucks, tow trucks and buses with none of
+     * General Commercial's hauling condition. For a lot that may be in one of
+     * them the condition is not imposed, and the difference is named to CPDO
+     * with the question put to the City (C28), so a General Commercial lot is
+     * never told silently that the condition is gone.
+     *
      * @param  string|list<string>  $rules
+     * @param  list<string>  $flat
      */
-    private function proviso(string|array $rules, string $status, string $reason, array $binds, array $mixed, array $asks, ?string $question = null): void
+    private function proviso(string|array $rules, string $status, string $reason, array $binds, array $mixed, array $asks, ?string $question = null, array $flat = []): void
     {
         $candidates = $this->candidates();
         $inBinds = array_intersect($binds, $candidates);
         $inMixed = array_values(array_intersect($mixed, $candidates));
+        $inFlat = array_values(array_diff(array_intersect($flat, $candidates), $binds, $mixed));
+        $rules = (array) $rules;
+
+        if ($inFlat !== []) {
+            $title = Rulebook::get($rules[0])['title'] ?? $rules[0];
+            $this->add(array_merge(['V-2.10-FLAT'], $rules), 'review',
+                $this->names($inFlat).' '.(count($inFlat) > 1 ? 'list' : 'lists').' this use without the condition another zone attaches to it ('.$title.'). Whether that was meant has been asked of the City; CPDO decides whether to apply it to a lot there.',
+                ['group' => 'conflict', 'applies_in' => $inFlat, 'question' => 'C28',
+                    'title' => 'Listed elsewhere without this condition']);
+        }
         if ($inBinds === [] && $inMixed === []) {
             return;
         }
-        $rules = (array) $rules;
         if ($inBinds === []) {
             $this->add(array_merge($rules, ['V-2.10-FLAT']), 'review',
                 $reason.' Here '.$this->names($inMixed).' takes in this use both with these conditions and without them (General Commercial lists it flat), so CPDO decides whether they apply.',
@@ -1681,12 +2208,12 @@ final class ZoningCheck
         return $this->lotZone !== null ? [$this->lotZone] : $this->governing;
     }
 
-    /** @return array<string, array{use: string, from: string, via: ?string}> zone => hit */
+    /** @return array<string, array{use: string, from: string, via: ?string, certain: bool, basis: string, definition: ?string}> zone => hit */
     private function hits(PsicCode $psic, array $codes): array
     {
         $out = [];
         foreach ($codes as $code) {
-            $hit = ZoningConformance::lookup($code, $psic);
+            $hit = ZoningConformance::lookup($code, $psic, $this->ctx->facts);
             if ($hit !== null) {
                 $out[$code] = $hit;
             }

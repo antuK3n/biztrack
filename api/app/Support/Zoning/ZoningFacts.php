@@ -8,7 +8,7 @@ namespace App\Support\Zoning;
  *
  * ── Asked only when a rule needs it ────────────────────────────────────────
  *
- * Sixty-odd questions would be a form nobody finishes. None of these is asked
+ * Seventy-odd questions would be a form nobody finishes. None of these is asked
  * up front: the check runs, each finding names the facts it read, and the
  * screen asks only the ones a finding is waiting on. A sari-sari store in
  * Longos meets perhaps five of them; a filling station meets its own set.
@@ -76,6 +76,21 @@ final class ZoningFacts
         'onsite_maneuvering' => ['label' => 'Can vehicles turn and park inside the lot without backing onto the road?', 'type' => 'bool', 'who' => 'applicant'],
         'terminal_units' => ['label' => 'Most vehicles at the terminal at one time', 'type' => 'number', 'who' => 'applicant', 'unit' => 'vehicles'],
         'parking_slots' => ['label' => 'How many car parking slots?', 'type' => 'number', 'who' => 'applicant', 'unit' => 'slots'],
+        'vehicle_use' => ['label' => 'What are the vehicles kept on the lot for?', 'type' => 'choice', 'who' => 'applicant',
+            'options' => [
+                'parking_lot' => 'A pay parking lot for the public',
+                'parking_building' => 'A pay parking building for the public',
+                'ride_hailing_garage' => 'A garage for Grab or other ride-hailing cars',
+                'taxi_garage' => 'A garage for a taxi',
+                'business_parking' => 'Parking for my own business’s delivery vans or trucks',
+                'tricycle_terminal' => 'A tricycle or pedicab terminal',
+                'terminal' => 'A jeepney, UV Express or bus terminal',
+                'trucking_garage' => 'A trucking or hauling garage',
+                'other' => 'Something else',
+            ]],
+        'lot_owner_is_business_owner' => ['label' => 'Does the owner of the parking lot also own the business it serves?', 'type' => 'bool', 'who' => 'applicant'],
+        'parking_repair_services' => ['label' => 'Will the parking building also offer tire vulcanizing or vehicle repair?', 'type' => 'bool', 'who' => 'applicant'],
+        'parking_landscaped' => ['label' => 'Will the parking lot have trees at least 1.8 m tall, and at least half its paving permeable?', 'type' => 'bool', 'who' => 'applicant'],
 
         // ── Distances (metres, straight line) ──────────────────────────────
         'distance_to_institution_m' => ['label' => 'Distance to the nearest school, church, hospital or government office', 'type' => 'number', 'who' => 'applicant', 'unit' => 'm'],
@@ -95,6 +110,8 @@ final class ZoningFacts
         'business_floor' => ['label' => 'Which floor is the business on?', 'type' => 'choice', 'who' => 'applicant',
             'options' => ['ground' => 'Ground floor', 'upper' => 'An upper floor']],
         'new_construction' => ['label' => 'Will you build a new structure for this business?', 'type' => 'bool', 'who' => 'applicant'],
+        'above_heritage_apex' => ['label' => 'Will the new building rise above the roof apex of the nearest declared heritage house?', 'type' => 'bool', 'who' => 'applicant'],
+        'period_design' => ['label' => 'Will the new building’s design, landscaping included, follow the period design of the heritage houses?', 'type' => 'bool', 'who' => 'applicant'],
         'abuts_neighbour' => ['label' => 'Will the new structure be built right against a neighbour’s property line?', 'type' => 'bool', 'who' => 'applicant'],
         'neighbour_consent' => ['label' => 'Do you have that neighbour’s written consent?', 'type' => 'bool', 'who' => 'applicant'],
         'open_storage' => ['label' => 'Will goods be stored under a roof with no walls, or in the open?', 'type' => 'bool', 'who' => 'applicant'],
@@ -111,6 +128,15 @@ final class ZoningFacts
             'options' => ['I' => 'Category I', 'II' => 'Category II', 'III' => 'Category III']],
         'cenro_recommended' => ['label' => 'Has CENRO recommended the site?', 'type' => 'bool', 'who' => 'applicant'],
         'neighbour_statements' => ['label' => 'Do you have sworn statements from the owners of the land right next to the site?', 'type' => 'bool', 'who' => 'applicant'],
+        'sells_coffins' => ['label' => 'Will coffins or flower wreaths be displayed or sold at the chapel?', 'type' => 'bool', 'who' => 'applicant'],
+        'rooms_have_kitchens' => ['label' => 'Do the guest rooms have their own kitchens or cooking facilities?', 'type' => 'bool', 'who' => 'applicant'],
+        'flammable_solvents' => ['label' => 'Will dry cleaning use flammable solvents?', 'type' => 'bool', 'who' => 'applicant'],
+        'leases_what' => ['label' => 'What do you lease out?', 'type' => 'choice', 'who' => 'applicant',
+            'options' => ['dwellings' => 'Houses, apartments or rooms to live in', 'commercial' => 'Stalls or commercial space']],
+        'families_in_building' => ['label' => 'How many families or households can live in the building?', 'type' => 'number', 'who' => 'applicant', 'unit' => 'families'],
+        'in_office_building' => ['label' => 'Is the shop inside an office building?', 'type' => 'bool', 'who' => 'applicant'],
+        'pet_house_area_sqm' => ['label' => 'Floor area of any pet house or kennel on the lot (0 if none)', 'type' => 'number', 'who' => 'applicant', 'unit' => 'sq. m.'],
+        'warfare_research' => ['label' => 'Will the facility work with nuclear, radioactive, chemical or biological warfare materials?', 'type' => 'bool', 'who' => 'applicant'],
 
         // ── A clearance already held (Art. IX §9, §10.2.C) ────────────────
         'held_lc' => ['label' => 'Do you already hold a locational clearance for this business at this address?', 'type' => 'bool', 'who' => 'applicant'],
