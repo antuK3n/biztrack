@@ -197,7 +197,7 @@ it('opens a clearance’s renewal window by the pretend date', function () {
     config(['biztrack.renewal_window.opens_days_before' => 30]);
     $prior = pretendPrior('SANITARY', now()->addDays(90)->toDateString())->load('permitType');
 
-    expect(RenewalWindow::refusalFor($prior))->toContain('can be renewed from');
+    expect(RenewalWindow::refusalFor($prior))->toContain('Renewable from');
 
     flip('pretend_date', CarbonImmutable::parse($prior->valid_until)->subDays(10)->toDateString())->assertOk();
     expect(RenewalWindow::refusalFor($prior))->toBeNull();

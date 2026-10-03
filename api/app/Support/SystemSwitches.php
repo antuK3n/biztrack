@@ -43,6 +43,9 @@ use Illuminate\Database\QueryException;
  */
 class SystemSwitches
 {
+    /** The container key of the per-request memo of stored switches; see stored(). */
+    public const MEMO = 'biztrack.system-switches';
+
     public const SIGN_IN_CODES = 'sign_in_codes';
 
     public const CAPTCHA = 'captcha';
@@ -156,6 +159,7 @@ class SystemSwitches
         };
 
         Setting::write('switch.'.$name, $stored);
+        unset(app(self::MEMO)[$name]);
 
         return ['before' => $before, 'after' => self::state()[$name]];
     }
@@ -217,8 +221,20 @@ class SystemSwitches
      */
     private static function stored(string $name): ?string
     {
+        /*
+         * Read once per request, not once per call. The pretend date is asked
+         * for by every permit row's "days left", so a 200-row register read the
+         * same settings row 200 times. The memo is a scoped binding: a new
+         * request, queue job or test starts empty, and set() forgets the switch
+         * it writes, so a flip is seen at once.
+         */
+        $memo = app(self::MEMO);
+        if ($memo->offsetExists($name)) {
+            return $memo[$name];
+        }
+
         try {
-            return Setting::read('switch.'.$name);
+            return $memo[$name] = Setting::read('switch.'.$name);
         } catch (QueryException) {
             return null;
         }
