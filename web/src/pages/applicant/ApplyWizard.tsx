@@ -3852,6 +3852,28 @@ export function ApplyWizard() {
         preloaded ??
         (await businesses.prefill(selectedId, applicationType as 'renewal' | 'amendment'))
       const b = result.business
+      /*
+       * ── The address may not be there, and a blank page is not the answer ─
+       *
+       * `business.address` is a `hasOne`, so it is null for any business
+       * whose address row was never written ─ and twelve fields below read
+       * straight through it. The first, `b.address.telephone`, threw inside
+       * this very updater, which React runs while reducing the queued state:
+       * the whole wizard unmounted and the applicant was left on a blank
+       * screen with no message, no nav and nothing to go back to (client's
+       * screenshot, 4 October 2026, pressing Continue in the renewal dialog).
+       *
+       * A missing address is a thin record, not a broken one. Every field
+       * below already falls back to '' for a null VALUE; this makes a null
+       * ADDRESS mean the same thing, so the applicant gets the form with
+       * those boxes empty and fills them in — which is what the wizard is
+       * for.
+       *
+       * Read once into a local rather than sprinkling `?.` twelve times:
+       * one name says the thing is optional, and a thirteenth field added
+       * later cannot forget the question mark.
+       */
+      const addr = b.address ?? null
       setForm((f) => ({
         name: b.name,
         trade_name: b.trade_name ?? '',
@@ -3861,25 +3883,25 @@ export function ApplyWizard() {
         registration_type: normalizeRegistrationType(b.registration_type),
         registration_number: b.registration_number ?? '',
         tin: b.tin ?? '',
-        telephone: b.address.telephone ?? '',
-        website: b.address.website ?? '',
-        mobile_number: b.address.mobile_number || account?.mobile_number || '',
-        email: b.address.email || account?.email || '',
+        telephone: addr?.telephone ?? '',
+        website: addr?.website ?? '',
+        mobile_number: addr?.mobile_number || account?.mobile_number || '',
+        email: addr?.email || account?.email || '',
         owner_surname: b.owner?.surname || account?.last_name || '',
         owner_given_name: b.owner?.given_name || account?.first_name || '',
         owner_middle_name: b.owner?.middle_name || account?.middle_name || '',
         owner_suffix: b.owner?.suffix || account?.suffix || '',
         owner_gender: b.owner?.gender || account?.gender || '',
-        house_bldg_no: b.address.house_bldg_no ?? '',
+        house_bldg_no: addr?.house_bldg_no ?? '',
         // Falls back to the whole line for a business saved before the split,
         // so its street is editable rather than silently empty.
-        street: b.address.street ?? b.address.line1 ?? '',
-        block: b.address.block ?? '',
-        lot: b.address.lot ?? '',
-        lot_area_sqm: b.address.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
-        line1: b.address.line1 ?? '',
-        line2: b.address.line2 ?? '',
-        barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
+        street: addr?.street ?? addr?.line1 ?? '',
+        block: addr?.block ?? '',
+        lot: addr?.lot ?? '',
+        lot_area_sqm: addr?.lot_area_sqm != null ? String(addr.lot_area_sqm) : '',
+        line1: addr?.line1 ?? '',
+        line2: addr?.line2 ?? '',
+        barangay_id: addr?.barangay ? String(addr.barangay.id) : '',
         is_rented: b.is_rented ?? false,
         lessor_name: b.lessor_name ?? '',
         lessor_address: b.lessor_address ?? '',
@@ -3894,8 +3916,8 @@ export function ApplyWizard() {
         capital_participation_filipino: percentToInput(b.capital_participation_filipino),
         capital_investment: formatAmountInput(String(b.capital_investment ?? '')),
         has_tax_incentives: b.has_tax_incentives ?? false,
-        latitude: b.address.latitude ?? null,
-        longitude: b.address.longitude ?? null,
+        latitude: addr?.latitude ?? null,
+        longitude: addr?.longitude ?? null,
         /*
          * `l.capitalization` is deliberately not read. A renewal is assessed on
          * gross sales, not capital, so this wizard never asks the business's
