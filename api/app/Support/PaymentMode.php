@@ -33,6 +33,31 @@ use Illuminate\Database\QueryException;
  * payment made in that state would fail at KwikPay, and the owner would be the
  * one to find out. Callers turn the refusal into a 422 (API) or a non-zero exit
  * (artisan).
+ *
+ * ── What KwikPay collects: a test charge or the full bill ───────────────────
+ *
+ * A second switch, beside the first and stored the same way (`kwikpay_charge`
+ * in `settings`). `test` asks KwikPay for a token amount; `full` asks for the
+ * bill. Either way the bill, the payment record and the receipt keep the real
+ * assessed amount: only the figure sent to /api/transfer changes, and it is
+ * kept in `payments.gateway_amount` so the confirmation is checked against it.
+ *
+ * It has to be switchable on a running server for the same reason the mode
+ * is. The thesis defense takes real payments through KwikPay at ₱1; if a
+ * panelist asks to see the actual amount, the super admin flips it to the
+ * full bill from the Online Payments screen, and flips it back after [Ken,
+ * 2026-10-04]. KWIKPAY_CHARGE_OVERRIDE could only do that with an env edit
+ * and a restart.
+ *
+ * Until somebody sets the row, the env decides, exactly as it did before the
+ * row existed: a positive KWIKPAY_CHARGE_OVERRIDE means `test`, anything else
+ * `full`. The test amount is that override when it is a positive number, and
+ * ₱1.00 when it is not — so switching to `test` on a server with no override
+ * still collects a token amount rather than nothing.
+ *
+ * Like the mode, it decides only what NEW payments ask for. A payment opened
+ * before a switch keeps its `gateway_amount`, and its confirmation is checked
+ * against that (KwikPayGateway::requestedAmount), in either direction.
  */
 class PaymentMode
 {
@@ -43,6 +68,19 @@ class PaymentMode
     public const MODES = [self::SIMULATED, self::KWIKPAY];
 
     private const KEY = 'payment_gateway';
+
+    /** KwikPay collects the test amount; the records keep the bill. */
+    public const CHARGE_TEST = 'test';
+
+    /** KwikPay collects the bill. */
+    public const CHARGE_FULL = 'full';
+
+    public const CHARGES = [self::CHARGE_TEST, self::CHARGE_FULL];
+
+    /** What `test` collects when KWIKPAY_CHARGE_OVERRIDE names no amount. */
+    public const DEFAULT_TEST_AMOUNT = 1.00;
+
+    private const CHARGE_KEY = 'kwikpay_charge';
 
     public static function current(): string
     {
@@ -127,6 +165,86 @@ class PaymentMode
         return ['from' => $before, 'to' => $mode];
     }
 
+    /** `test` or `full`: what KwikPay is asked to collect for a NEW payment. */
+    public static function charge(): string
+    {
+        $stored = self::stored(self::CHARGE_KEY);
+        if ($stored !== null && in_array($stored, self::CHARGES, true)) {
+            return $stored;
+        }
+
+        return self::defaultCharge();
+    }
+
+    /**
+     * What the charge is until somebody switches it: the env's behaviour from
+     * before the switch existed. A positive KWIKPAY_CHARGE_OVERRIDE was a test
+     * charge; no override, or a nonsense one, was the full bill.
+     */
+    public static function defaultCharge(): string
+    {
+        return self::envTestAmount() !== null ? self::CHARGE_TEST : self::CHARGE_FULL;
+    }
+
+    public static function isTestCharge(): bool
+    {
+        return self::charge() === self::CHARGE_TEST;
+    }
+
+    /** What `test` collects: KWIKPAY_CHARGE_OVERRIDE when it is a positive number, else ₱1.00. */
+    public static function testAmount(): float
+    {
+        return self::envTestAmount() ?? self::DEFAULT_TEST_AMOUNT;
+    }
+
+    /**
+     * The amount to ask KwikPay for, for a bill of `$amount`. Read once, when
+     * the payment is opened; the answer is stored on the payment and never
+     * recomputed.
+     */
+    public static function chargeFor(float $amount): float
+    {
+        return self::isTestCharge() ? self::testAmount() : $amount;
+    }
+
+    /**
+     * Change what KwikPay collects and write it to the audit log, the same way
+     * switchTo() does for the mode. The test amount is recorded with it, so the
+     * trail says "₱1.00", not merely "test".
+     *
+     * @return array{from: string, to: string}
+     *
+     * @throws \InvalidArgumentException when the charge is unknown
+     */
+    public static function switchCharge(string $charge, string $via, ?int $actorId = null): array
+    {
+        if (! in_array($charge, self::CHARGES, true)) {
+            throw new \InvalidArgumentException("Unknown charge: {$charge}. Use test or full.");
+        }
+
+        $before = self::charge();
+        Setting::write(self::CHARGE_KEY, $charge);
+        Audit::log('payment_gateway.charge_switched', null, [
+            'from' => $before,
+            'to' => $charge,
+            'via' => $via,
+            'test_amount' => self::money(self::testAmount()),
+        ], actorId: $actorId);
+
+        return ['from' => $before, 'to' => $charge];
+    }
+
+    /**
+     * What the owner's pay screen is told about the charge: the amount KwikPay
+     * will collect when that is a test charge on online payments, and null
+     * otherwise. Null in simulated mode as well, because nothing is collected
+     * there and a "₱1.00" line would be a claim about money that never moves.
+     */
+    public static function ownerTestCharge(): ?string
+    {
+        return self::isKwikPay() && self::isTestCharge() ? self::money(self::testAmount()) : null;
+    }
+
     /**
      * Everything the switch's screen and `status` command show. Names of
      * missing settings, never values; the merchant id is shown because it is
@@ -142,6 +260,11 @@ class PaymentMode
         return [
             'mode' => self::current(),
             'default_mode' => (string) config('payments.default', self::SIMULATED),
+            // What KwikPay collects for a new payment, what it would be with no
+            // switch set (the env's say), and the amount `test` means.
+            'charge' => self::charge(),
+            'default_charge' => self::defaultCharge(),
+            'test_amount' => self::money(self::testAmount()),
             'kwikpay' => [
                 'configured' => self::kwikPayConfigured(),
                 'missing' => self::missingCredentials(),
@@ -171,15 +294,29 @@ class PaymentMode
         ];
     }
 
+    /** KWIKPAY_CHARGE_OVERRIDE as an amount, or null when it is not a positive number. */
+    private static function envTestAmount(): ?float
+    {
+        $override = config('payments.kwikpay.charge_override');
+
+        return is_numeric($override) && (float) $override > 0 ? round((float) $override, 2) : null;
+    }
+
+    /** "1.00": two decimals, no separator, the way amounts travel in this API. */
+    private static function money(float $amount): string
+    {
+        return number_format($amount, 2, '.', '');
+    }
+
     /*
      * Null before the migration has run, rather than a crash: this is read on
      * the pay screen, and a server a migration behind should still take a
      * simulated payment the way it always has.
      */
-    private static function stored(): ?string
+    private static function stored(string $key = self::KEY): ?string
     {
         try {
-            return Setting::read(self::KEY);
+            return Setting::read($key);
         } catch (QueryException) {
             return null;
         }
