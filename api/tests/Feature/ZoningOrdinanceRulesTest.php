@@ -89,6 +89,12 @@ function zoStatus(array $result, string $rule): ?string
     return zoFinding($result, $rule)['status'] ?? null;
 }
 
+/** The finding that puts question `$id` to the City, e.g. a contradiction. */
+function zoAsked(array $result, string $id): ?array
+{
+    return collect($result['findings'])->firstWhere('question', $id);
+}
+
 // ── Where: the zones in the barangay ─────────────────────────────────────
 
 it('names the zones Art. IV §5 places in the barangay', function () {
@@ -118,6 +124,7 @@ it('uses the written zone list over the map and names every difference', functio
 });
 
 it('counts parks and utilities zones only where the sheet draws them', function () {
+    expect(zoFinding(zoCheck('Catmon', []), 'IV-5-PR-UTS'))->not->toBeNull();
     $catmon = collect(zoCheck('Catmon', [])['zones']);
     expect($catmon->firstWhere('code', 'PARKS')['governing'])->toBeTrue()
         ->and($catmon->firstWhere('code', 'UTILITIES')['governing'])->toBeTrue();
@@ -133,6 +140,8 @@ it('maps every base zone to the section that lists its uses', function () {
         expect($sections)->toHaveKey($section);
         expect(Ordinance::ZONE_NAMES)->toHaveKey($code);
     }
+    // The zones finding cites the article that names the twenty base zones.
+    expect(zoFinding(zoCheck('Potrero', []), 'IV-5')['rules'])->toContain('IV-2');
 });
 
 it('recognises a lot on a commercial strip street named in Art. IV §5', function () {
@@ -186,6 +195,25 @@ it('finds a trade among the uses the barangay’s zones allow, with inheritance'
     }
 });
 
+it('cites the lot’s own zone list on the use finding, for every zone with a list', function () {
+    foreach ([
+        ['Potrero', 'R-1', '85100', 'V-2.1-USES'], ['Potrero', 'R-2-BASIC', '55900', 'V-2.2-USES'],
+        ['Muzon', 'R-2-MAX', '47111', 'V-2.3-USES'], ['Dampalit', 'R-3-BASIC', '55101', 'V-2.4-USES'],
+        ['Acacia', 'R-3-MAX', '55101', 'V-2.5-USES'], ['Niugan', 'C-1', '47721', 'V-2.7-USES'],
+        ['Acacia', 'C-2', '56302', 'V-2.8-USES'], ['Potrero', 'C-3', '47190', 'V-2.9-USES'],
+        ['Catmon', 'GENERAL-COMMERCIAL', '47111', 'V-2.10-USES'], ['Longos', 'CBD', '47721', 'V-2.11-USES'],
+        ['Dampalit', 'I-1', '10740', 'V-2.12-USES'], ['Acacia', 'I-2', '10611', 'V-2.13-USES'],
+        ['Catmon', 'PARKS', '93110', 'V-2.17-USES'], ['Tugatog', 'CEMETERY', '96990', 'V-2.18-USES'],
+        ['Catmon', 'UTILITIES', '38110', 'V-2.19-USES'], ['Potrero', 'INSTITUTIONAL', '86100', 'V-2.20-USES'],
+    ] as [$barangay, $zone, $code, $rule]) {
+        expect('V-'.Ordinance::SECTION_FOR_CODE[$zone].'-USES')->toBe($rule);
+        $f = zoFinding(zoCheck($barangay, [$code], officer: ['lot_zone' => $zone]), 'V-2');
+        expect($f['rules'])->toContain($rule);
+        // Listed where the table names the line; a cemetery lists no trade.
+        expect($f['status'])->toBe($zone === 'CEMETERY' ? 'review' : 'met', "{$code} in {$zone}");
+    }
+});
+
 it('resolves each zone’s inherited uses as the ordinance writes them', function () {
     expect(Ordinance::closure('R-2-BASIC'))->toBe(['R-2-BASIC', 'R-1'])
         ->and(Ordinance::closure('R-2-MAX'))->toBe(['R-2-MAX', 'R-1', 'R-2-BASIC'])
@@ -200,11 +228,24 @@ it('resolves each zone’s inherited uses as the ordinance writes them', functio
     expect(Ordinance::closure('GENERAL-COMMERCIAL'))->toContain('R-3-BASIC');
     expect(Ordinance::closure('CBD'))->toContain('C-1', 'C-2', 'C-3', 'GENERAL-COMMERCIAL');
     expect(Ordinance::inheritanceRule('CBD', 'GENERAL-COMMERCIAL'))->toBe('V-2.11-INH');
+
+    // Each zone reaches the next by the clause that says so, and the finding
+    // cites that clause.
+    foreach ([
+        ['R-2-BASIC', 'R-1', 'V-2.2-INH'], ['R-2-MAX', 'R-2-BASIC', 'V-2.3-INH'], ['R-3-BASIC', 'R-1', 'V-2.4-INH'],
+        ['C-2', 'C-1', 'V-2.8-INH'], ['C-2', 'R-1', 'V-2.8-INH-R2'], ['C-3', 'C-2', 'V-2.9-INH'],
+        ['GENERAL-COMMERCIAL', 'R-3-BASIC', 'V-2.10-INH'],
+    ] as [$zone, $source, $rule]) {
+        expect(Ordinance::inheritanceRule($zone, $source))->toBe($rule);
+    }
+    expect(zoFinding(zoCheck('Potrero', ['85100'], officer: ['lot_zone' => 'R-2-BASIC']), 'V-2')['rules'])->toContain('V-2.2-INH');
 });
 
 it('sends a use found only in Basic R-3 to CPDO where the inheritance skips it', function () {
-    // "four (4) wheeler" appears in Basic R-3's garage rule and nowhere else.
-    $id = zoPsic('99001', 'Wheeler');
+    // "four (4) wheeler … refrigerated vans" appears in Basic R-3's garage
+    // rule and nowhere else. A code the register does not hold, so it is
+    // matched only by two shared words, and only ever as a possibility.
+    $id = zoPsic('99001', 'Four wheeler refrigerated vans');
     $f = zoFinding(zoCheck('Acacia', [$id]), 'V-2.5-INH');
 
     expect($f['status'])->toBe('review')
@@ -223,9 +264,10 @@ it('never reports a trade missing from every list as refused', function () {
 });
 
 it('sends a use allowed only on the Zoning Administrator’s conditions to CPDO', function () {
-    $id = zoPsic('99002', 'Corner store (other related small scale stores)');
-    $f = zoFinding(zoCheck('Muzon', [$id], officer: ['lot_zone' => 'R-2-MAX']), 'V-2.3-RETAIL-ZA');
-    expect($f['status'])->toBe('review');
+    // A tobacco shop: Maximum R-2 names no such shop, but it lists "other
+    // related small scale stores" on the Zoning Administrator's conditions.
+    $f = zoFinding(zoCheck('Muzon', ['47230'], officer: ['lot_zone' => 'R-2-MAX']), 'V-2.3-RETAIL-ZA');
+    expect($f['status'])->toBe('review')->and($f['reason'])->toContain('Other related small scale stores');
 
     // Inherited from R-1 into Maximum R-2: the same condition, from §2.3's
     // first line.
@@ -355,19 +397,93 @@ it('checks a water refilling station in Maximum R-2 for delivery parking', funct
     expect(zoStatus(zoCheck('Muzon', ['36000'], ['delivery_parking' => true], $lot), 'V-2.3-WRS'))->toBe('met');
 });
 
-it('checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts', function () {
-    $ok = ['garage_vehicle_count' => 2, 'heavy_vehicles' => false, 'motor_pool' => false, 'two_way_street' => true, 'onsite_maneuvering' => true, 'existing_malabon_business' => true];
-    $lot = ['lot_zone' => 'R-2-MAX'];
+it('asks what the vehicles are for before applying any residential garage rule', function () {
+    // A garage described by the applicant, no answer yet: the four residential
+    // rules differ by purpose, so none is applied until it is given.
+    $garage = [['psic_code_id' => zoPsic('77100'), 'description' => 'Garage for our rental cars']];
+    $f = zoFinding(zoCheck('Muzon', $garage, [], ['lot_zone' => 'R-2-MAX']), 'V-2.3-PARK');
+    expect($f['status'])->toBe('review')->and($f['asks'])->toContain('vehicle_use')
+        ->and(zoFinding(zoCheck('Muzon', $garage, [], ['lot_zone' => 'R-2-MAX']), 'V-2.3-GAR')['asks'])->toContain('vehicle_use');
+});
 
-    expect(zoStatus(zoCheck('Muzon', ['49221'], $ok, $lot), 'V-2.3-GAR'))->toBe('met');
-    $heavy = zoFinding(zoCheck('Muzon', ['49221'], ['heavy_vehicles' => true] + $ok, $lot), 'V-2.3-GAR');
-    expect($heavy['status'])->toBe('not_met')->and($heavy['rules'])->toContain('V-2.3-PARK');
-    expect(zoStatus(zoCheck('Muzon', ['49221'], ['garage_vehicle_count' => 3] + $ok, $lot), 'V-2.3-GAR'))->toBe('not_met');
-    expect(zoStatus(zoCheck('Muzon', ['49221'], ['motor_pool' => true] + $ok, $lot), 'V-2.3-TRI'))->toBe('not_met');
+it('applies a pay parking lot’s own conditions, not a garage’s vehicle cap', function () {
+    $lot = [['psic_code_id' => zoPsic('68100'), 'description' => 'Pay parking lot']];
+    $ok = ['vehicle_use' => 'parking_lot', 'heavy_vehicles' => false, 'motor_pool' => false, 'onsite_maneuvering' => true, 'garage_vehicle_count' => 40];
+    $mr2 = ['lot_zone' => 'R-2-MAX'];
 
-    // Basic R-3 has its own, tighter, garage rule.
-    $br3 = zoFinding(zoCheck('Dampalit', ['49230'], ['onsite_maneuvering' => false] + $ok, ['lot_zone' => 'R-3-BASIC']), 'V-2.4-GAR');
-    expect($br3['status'])->toBe('not_met')->and($br3['rules'])->toContain('V-2.4-PARK');
+    // Forty cars: a rentable lot has no cap on numbers, unlike a garage.
+    $r = zoCheck('Muzon', $lot, $ok, $mr2);
+    expect(zoStatus($r, 'V-2.3-PARK'))->toBe('met')
+        ->and(zoFinding($r, 'V-2.3-GAR'))->toBeNull();
+    // It is found on Maximum R-2's own list, by what it is, not by its code.
+    $use = zoFinding($r, 'V-2');
+    expect($use['status'])->toBe('met')->and($use['reason'])->toContain('rentable parking lots');
+
+    expect(zoStatus(zoCheck('Muzon', $lot, ['heavy_vehicles' => true] + $ok, $mr2), 'V-2.3-PARK'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Muzon', $lot, ['motor_pool' => true] + $ok, $mr2), 'V-2.3-PARK'))->toBe('not_met');
+
+    // Basic R-3 adds no backing onto the road.
+    $br3 = ['lot_zone' => 'R-3-BASIC'];
+    expect(zoStatus(zoCheck('Dampalit', $lot, $ok, $br3), 'V-2.4-PARK'))->toBe('met');
+    expect(zoStatus(zoCheck('Dampalit', $lot, ['onsite_maneuvering' => false] + $ok, $br3), 'V-2.4-PARK'))->toBe('not_met');
+});
+
+it('keeps vulcanizing and vehicle repair out of a parking building', function () {
+    $building = [['psic_code_id' => zoPsic('68100'), 'description' => 'Parking building']];
+    $ok = ['vehicle_use' => 'parking_building', 'heavy_vehicles' => false, 'motor_pool' => false];
+
+    expect(zoStatus(zoCheck('Muzon', $building, ['parking_repair_services' => true] + $ok, ['lot_zone' => 'R-2-MAX']), 'A-72'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Muzon', $building, ['parking_repair_services' => false] + $ok, ['lot_zone' => 'R-2-MAX']), 'A-72'))->toBe('met');
+});
+
+it('caps a ride-hailing garage at two units and a taxi garage at one', function () {
+    $garage = [['psic_code_id' => zoPsic('49221'), 'description' => 'Garage']];
+    $mr2 = ['lot_zone' => 'R-2-MAX'];
+
+    expect(zoStatus(zoCheck('Muzon', $garage, ['vehicle_use' => 'ride_hailing_garage', 'garage_vehicle_count' => 2], $mr2), 'V-2.3-GAR'))->toBe('met');
+    expect(zoStatus(zoCheck('Muzon', $garage, ['vehicle_use' => 'ride_hailing_garage', 'garage_vehicle_count' => 3], $mr2), 'V-2.3-GAR'))->toBe('not_met');
+
+    // One taxi, not two: the cap of two was wrongly applied to every kind.
+    expect(zoStatus(zoCheck('Muzon', $garage, ['vehicle_use' => 'taxi_garage', 'garage_vehicle_count' => 1], $mr2), 'V-2.3-GAR'))->toBe('met');
+    $taxis = zoFinding(zoCheck('Muzon', $garage, ['vehicle_use' => 'taxi_garage', 'garage_vehicle_count' => 2], $mr2), 'V-2.3-GAR');
+    expect($taxis['status'])->toBe('not_met')->and($taxis['reason'])->toContain('one taxi');
+    expect(zoStatus(zoCheck('Dampalit', $garage, ['vehicle_use' => 'taxi_garage', 'garage_vehicle_count' => 2], ['lot_zone' => 'R-3-BASIC']), 'V-2.4-GAR'))->toBe('not_met');
+});
+
+it('checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one', function () {
+    $parking = [['psic_code_id' => zoPsic('49230'), 'description' => 'Parking for our delivery vans']];
+    $ok = ['vehicle_use' => 'business_parking', 'existing_malabon_business' => true, 'lot_owner_is_business_owner' => true,
+        'garage_vehicle_count' => 2, 'heavy_vehicles' => false, 'motor_pool' => false, 'two_way_street' => true, 'onsite_maneuvering' => true];
+    $mr2 = ['lot_zone' => 'R-2-MAX'];
+
+    expect(zoStatus(zoCheck('Muzon', $parking, $ok, $mr2), 'V-2.3-GAR'))->toBe('met');
+    foreach ([
+        'existing_malabon_business' => [false, 'already operating in malabon'],
+        'lot_owner_is_business_owner' => [false, 'owner of the lot'],
+        'two_way_street' => [false, 'two-way traffic'],
+        'onsite_maneuvering' => [false, 'backing onto the road'],
+        'motor_pool' => [true, 'motor pooling'],
+        'heavy_vehicles' => [true, 'trailer trucks'],
+        'garage_vehicle_count' => [3, 'two delivery vans'],
+    ] as $fact => [$value, $words]) {
+        $f = zoFinding(zoCheck('Muzon', $parking, [$fact => $value] + $ok, $mr2), 'V-2.3-GAR');
+        expect($f['status'])->toBe('not_met', $fact)->and(mb_strtolower($f['reason']))->toContain($words);
+    }
+
+    // Basic R-3 allows ONE four-wheeler or 2-ton van: two was wrongly "met".
+    $br3 = ['lot_zone' => 'R-3-BASIC'];
+    expect(zoStatus(zoCheck('Dampalit', $parking, ['garage_vehicle_count' => 1] + $ok, $br3), 'V-2.4-GAR'))->toBe('met');
+    $two = zoFinding(zoCheck('Dampalit', $parking, $ok, $br3), 'V-2.4-GAR');
+    expect($two['status'])->toBe('not_met')->and($two['reason'])->toContain('one four-wheeler');
+    expect(zoStatus(zoCheck('Dampalit', $parking, ['garage_vehicle_count' => 1, 'existing_malabon_business' => false] + $ok, $br3), 'V-2.4-GAR'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Dampalit', $parking, ['garage_vehicle_count' => 1, 'lot_owner_is_business_owner' => false] + $ok, $br3), 'V-2.4-GAR'))->toBe('not_met');
+});
+
+it('checks a tricycle terminal in Maximum R-2 for backing and motor pools', function () {
+    $terminal = ['vehicle_use' => 'tricycle_terminal', 'onsite_maneuvering' => true, 'motor_pool' => false];
+    expect(zoStatus(zoCheck('Muzon', ['49221'], $terminal, ['lot_zone' => 'R-2-MAX']), 'V-2.3-TRI'))->toBe('met');
+    expect(zoStatus(zoCheck('Muzon', ['49221'], ['motor_pool' => true] + $terminal, ['lot_zone' => 'R-2-MAX']), 'V-2.3-TRI'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Muzon', ['49221'], ['onsite_maneuvering' => false] + $terminal, ['lot_zone' => 'R-2-MAX']), 'V-2.3-TRI'))->toBe('not_met');
 });
 
 it('treats a recreation business in a residential zone as a conditional use', function () {
@@ -460,6 +576,11 @@ it('checks hauling and trucking garages for their Malabon business condition', f
 
     $small = zoFinding(zoCheck('Dampalit', ['49230'], ['existing_malabon_business' => true], ['lot_zone' => 'I-1'], ['lot_area_sqm' => 800]), 'V-2.12-TRUCK');
     expect($small['status'])->toBe('not_met')->and($small['reason'])->toContain('1,000');
+
+    // The owner must already run a business in Malabon.
+    $outsider = zoFinding(zoCheck('Dampalit', ['49230'], ['existing_malabon_business' => false], ['lot_zone' => 'I-1'], ['lot_area_sqm' => 1500]), 'V-2.12-TRUCK');
+    expect($outsider['status'])->toBe('not_met')->and($outsider['reason'])->toContain('already run a business in Malabon');
+    expect(zoStatus(zoCheck('Dampalit', ['49230'], ['existing_malabon_business' => true], ['lot_zone' => 'I-1'], ['lot_area_sqm' => 1500]), 'V-2.12-TRUCK'))->toBe('met');
 });
 
 it('checks a container yard for a one-hectare lot and three-layer stacking', function () {
@@ -472,6 +593,7 @@ it('checks a container yard for a one-hectare lot and three-layer stacking', fun
 it('keeps pollutive industry out of I-1', function () {
     expect(zoStatus(zoCheck('Dampalit', ['10711'], ['industry_pollutive' => true], ['lot_zone' => 'I-1']), 'V-2.12-CLASS'))->toBe('not_met');
     expect(zoStatus(zoCheck('Dampalit', ['10711'], ['industry_pollutive' => false], ['lot_zone' => 'I-1']), 'V-2.12-CLASS'))->toBe('met');
+    expect(zoFinding(zoCheck('Dampalit', ['10711'], ['industry_pollutive' => true], ['lot_zone' => 'I-1']), 'V-2.12-CLASS')['rules'])->toContain('V-2.13-CLASS');
     // I-2 takes pollutive industry, so the rule does not reach a lot there.
     expect(zoFinding(zoCheck('Acacia', ['10711'], ['industry_pollutive' => true], ['lot_zone' => 'I-2']), 'V-2.12-CLASS'))->toBeNull();
 });
@@ -521,8 +643,14 @@ it('measures a slaughterhouse against its distance rules', function () {
 
     expect(zoStatus($r, 'V-3-E-1'))->toBe('not_met')
         ->and(zoFinding($r, 'V-3-E-3')['reason'])->toContain('premises of a public market')
+        ->and(zoFinding($r, 'V-3-E-3')['rules'])->toContain('V-3-E-4')
         ->and(zoStatus($r, 'V-3-E-5-6'))->toBe('not_met')
         ->and(zoStatus($r, 'V-3-E-8'))->toBe('not_met');
+
+    // 25 m from a market or other food business, not merely off its premises.
+    $near = zoFinding(zoCheck('Acacia', ['46303'], ['distance_to_market_m' => 20], ['special_use' => 'slaughterhouse']), 'V-3-E-3');
+    expect($near['status'])->toBe('not_met')->and($near['reason'])->toContain('25 m');
+    expect(zoStatus(zoCheck('Acacia', ['46303'], ['distance_to_market_m' => 30], ['special_use' => 'slaughterhouse']), 'V-3-E-3'))->toBe('met');
 });
 
 it('keeps a cockpit to a parks zone and 200 m from homes', function () {
@@ -553,6 +681,7 @@ it('applies the flood overlay everywhere and the heritage and eco-tourism overla
     $longos = zoCheck('Longos', ['47111']);
     expect(zoFinding($longos, 'V-4.3-USES'))->toBeNull()->and(zoFinding($longos, 'V-4.2-SCOPE'))->toBeNull();
     expect(zoFinding($longos, 'ANNEX-C'))->not->toBeNull();
+    expect(zoFinding($longos, 'V-4.1-USES')['rules'])->toContain('IV-3', 'V-4');
 });
 
 it('limits a declared heritage house to its listed uses on the ground floor', function () {
@@ -580,7 +709,8 @@ it('applies the eco-tourism rules to a business in Dampalit’s fishponds', func
     expect(zoStatus($r, 'V-4.2-AREA'))->toBe('not_met')
         ->and(zoStatus($r, 'V-4.2-STOREY'))->toBe('not_met')
         ->and(zoStatus($r, 'V-4.2-USES'))->toBe('met')
-        ->and(zoFinding($r, 'V-2.16')['question'])->toBe('C17');
+        ->and(zoFinding($r, 'V-2.16')['question'])->toBe('C17')
+        ->and(zoFinding($r, 'V-4.2-USES')['rules'])->toContain('V-4.2-SCOPE');
 
     $ok = zoCheck('Dampalit', ['56101'], ['in_fishpond_area' => true], [], ['floor_area_sqm' => 200, 'lot_area_sqm' => 1000, 'storeys' => 1]);
     expect(zoStatus($ok, 'V-4.2-AREA'))->toBe('met')->and(zoStatus($ok, 'V-4.2-STOREY'))->toBe('met');
@@ -660,6 +790,13 @@ it('asks a parking business with 20 or more slots for trees and permeable paving
     $lot = [['psic_code_id' => zoPsic('68100'), 'description' => 'Pay parking lot']];
     expect(zoStatus(zoCheck('Niugan', $lot, ['parking_slots' => 25]), 'VI-4-4'))->toBe('review');
     expect(zoStatus(zoCheck('Niugan', $lot, ['parking_slots' => 10]), 'VI-4-4'))->toBe('met');
+
+    // Twenty or more: trees at least 1.8 m tall and half the paving permeable.
+    $bare = zoFinding(zoCheck('Niugan', $lot, ['parking_slots' => 25, 'parking_landscaped' => false]), 'VI-4-4');
+    expect($bare['status'])->toBe('not_met')->and($bare['reason'])->toContain('1.8 m');
+    expect(zoStatus(zoCheck('Niugan', $lot, ['parking_slots' => 25, 'parking_landscaped' => true]), 'VI-4-4'))->toBe('met');
+    // An answer that it is a pay parking lot reaches the rule without the word in the description.
+    expect(zoStatus(zoCheck('Niugan', ['68100'], ['vehicle_use' => 'parking_lot', 'parking_slots' => 25, 'parking_landscaped' => false]), 'VI-4-4'))->toBe('not_met');
 });
 
 it('lists the performance standards an industrial or noisy business must meet', function () {
@@ -750,7 +887,8 @@ it('reports a mandatory rule as not met and a recommendation only as information
     // "shall not exceed five (5)" is a shall: a failed answer is Not met.
     expect(zoStatus(zoCheck('Muzon', ['47111'], ['home_based' => true, 'persons_engaged' => 6], ['lot_zone' => 'R-2-MAX']), 'V-2.1-HO-1'))->toBe('not_met');
     // "Recommended no. of storeys" and "Buildings on stilts are encouraged" are not.
-    expect(zoStatus(zoCheck('Baritan', ['47111']), 'VI-7'))->toBe('info');
+    expect(zoStatus(zoCheck('Baritan', ['47111']), 'VI-7'))->toBe('info')
+        ->and(zoFinding(zoCheck('Baritan', ['47111']), 'VI-7')['rules'])->toContain('III-2-f');
     expect(zoStatus(zoCheck('Dampalit', ['56101'], ['in_fishpond_area' => true]), 'V-4.2-DESIGN'))->toBe('info');
 });
 
@@ -836,4 +974,216 @@ it('lets only the zoning office record the lot’s zone', function () {
     expect($app->fresh()->zoning_officer_facts)->toMatchArray(['lot_zone' => 'C-1', 'parking_on_street' => false]);
     $parking = collect($res->json('data.facts'))->firstWhere('key', 'parking_on_street');
     expect($parking['answered_by'])->toBe('officer');
+});
+
+// ── Definitions that carry a rule (Art. III §1; Annex A) ─────────────────
+
+it('allows a home business in a residential zone only through the home-occupation clause', function () {
+    // A lawyer's office: no residential list names it, but §2.1's home
+    // occupation does — for a business run from a house someone lives in.
+    $home = zoFinding(zoCheck('Potrero', ['69100'], ['home_based' => true], ['lot_zone' => 'R-1']), 'V-2');
+    expect($home['status'])->toBe('met')->and($home['rules'])->toContain('V-2.1-HO')
+        ->and($home['reason'])->toContain('run from a home');
+
+    $office = zoFinding(zoCheck('Potrero', ['69100'], ['home_based' => false], ['lot_zone' => 'R-1']), 'A-89');
+    expect($office['status'])->toBe('review');
+});
+
+it('reads a hotel whose rooms have kitchens as a hotel apartment', function () {
+    $hotel = zoCheck('Niugan', ['55101'], ['rooms_have_kitchens' => false], ['lot_zone' => 'C-1']);
+    expect(zoStatus($hotel, 'A-44'))->toBe('met')
+        ->and(zoFinding($hotel, 'V-2')['reason'])->toContain('Hotel');
+
+    $apartel = zoCheck('Niugan', ['55101'], ['rooms_have_kitchens' => true], ['lot_zone' => 'C-1']);
+    expect(zoStatus($apartel, 'A-44'))->toBe('info')
+        ->and(zoFinding($apartel, 'V-2')['reason'])->toContain('Apartel')
+        ->and(zoFinding($apartel, 'V-2')['rules'])->toContain('A-45');
+    expect(zoStatus(zoCheck('Niugan', ['55101'], [], ['lot_zone' => 'C-1']), 'A-44'))->toBe('review');
+});
+
+it('reads dry cleaning with flammable solvents as an Industrial-2 plant', function () {
+    // Niugan has no Industrial-2: a laundry is listed, a solvent plant is not.
+    $laundry = zoCheck('Niugan', ['96200'], ['flammable_solvents' => false], ['lot_zone' => 'C-1']);
+    expect(zoStatus($laundry, 'A-28'))->toBe('met')->and(zoStatus($laundry, 'V-2'))->toBe('met');
+
+    $plant = zoCheck('Niugan', ['96200'], ['flammable_solvents' => true], ['lot_zone' => 'C-1']);
+    expect(zoStatus($plant, 'A-28'))->toBe('not_met')
+        ->and(collect($plant['findings'])->where('group', 'uses')->where('status', 'met')->pluck('rule'))->not->toContain('V-2');
+
+    $i2 = zoCheck('Acacia', ['96200'], ['flammable_solvents' => true], ['lot_zone' => 'I-2']);
+    expect(zoFinding($i2, 'V-2')['status'])->toBe('met')
+        ->and(zoFinding($i2, 'V-2')['reason'])->toContain('Dry cleaning plants using flammable liquids');
+});
+
+it('reads a lessor’s building as an apartment building from three families', function () {
+    $lot = ['lot_zone' => 'R-1'];
+    $duplex = zoCheck('Potrero', ['68100'], ['leases_what' => 'dwellings', 'families_in_building' => 2], $lot);
+    expect(zoStatus($duplex, 'III-1-APT'))->toBe('met')->and(zoStatus($duplex, 'V-2'))->toBe('met');
+
+    // Residential-1 lists houses and duplexes, not apartment buildings.
+    $apartments = zoCheck('Potrero', ['68100'], ['leases_what' => 'dwellings', 'families_in_building' => 4], $lot);
+    expect(zoFinding($apartments, 'III-1-APT')['reason'])->toContain('apartment building')
+        ->and(zoFinding($apartments, 'A-89'))->not->toBeNull();
+
+    expect(zoStatus(zoCheck('Potrero', ['68100'], ['leases_what' => 'dwellings', 'families_in_building' => 4], ['lot_zone' => 'R-2-BASIC']), 'V-2'))->toBe('met');
+    expect(zoStatus(zoCheck('Potrero', ['68100'], [], $lot), 'III-1-APT'))->toBe('review');
+});
+
+it('keeps coffins and wreaths out of a funeral chapel at a cemetery', function () {
+    $lot = ['lot_zone' => 'CEMETERY'];
+    expect(zoStatus(zoCheck('Tugatog', ['96301'], ['sells_coffins' => true], $lot), 'A-38'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Tugatog', ['96301'], ['sells_coffins' => false], $lot), 'A-38'))->toBe('met');
+    // A funeral parlour in Commercial-2 is not a fraternal chapel.
+    expect(zoFinding(zoCheck('Acacia', ['96301'], ['sells_coffins' => true], ['lot_zone' => 'C-2']), 'A-38'))->toBeNull();
+});
+
+it('keeps retail out of an office building', function () {
+    expect(zoStatus(zoCheck('Niugan', ['47111'], ['in_office_building' => true], ['lot_zone' => 'C-1']), 'A-64'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Niugan', ['47111'], ['in_office_building' => false], ['lot_zone' => 'C-1']), 'A-64'))->toBe('met');
+    // A professional's office is not retail merchandising.
+    expect(zoFinding(zoCheck('Niugan', ['69100'], [], ['lot_zone' => 'C-1']), 'A-64'))->toBeNull();
+});
+
+it('keeps a home pet business’s pet house to 4 sq. m. and out of the business', function () {
+    $home = ['home_based' => true];
+    $lot = ['lot_zone' => 'R-1'];
+    expect(zoStatus(zoCheck('Potrero', ['47760'], ['pet_house_area_sqm' => 6] + $home, $lot), 'V-2.1-PET'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Potrero', ['47760'], ['pet_house_area_sqm' => 3] + $home, $lot), 'V-2.1-PET'))->toBe('review');
+    expect(zoStatus(zoCheck('Potrero', ['47760'], ['pet_house_area_sqm' => 0] + $home, $lot), 'V-2.1-PET'))->toBe('met');
+});
+
+it('keeps warfare research out of the Institutional zone', function () {
+    $lab = zoPsic('72100', 'Research and experimental development on natural sciences and engineering');
+    $lot = ['lot_zone' => 'INSTITUTIONAL'];
+    expect(zoStatus(zoCheck('Potrero', [$lab], ['warfare_research' => true], $lot), 'V-2.20-RESEARCH'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Potrero', [$lab], ['warfare_research' => false], $lot), 'V-2.20-RESEARCH'))->toBe('met');
+});
+
+it('limits new construction beside a heritage house to its roof apex and its period design', function () {
+    $new = ['heritage_house' => false, 'new_construction' => true];
+    expect(zoStatus(zoCheck('Concepcion', ['47111'], ['above_heritage_apex' => true] + $new), 'V-4.3-BHL'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Concepcion', ['47111'], ['above_heritage_apex' => false] + $new), 'V-4.3-BHL'))->toBe('met');
+    expect(zoStatus(zoCheck('Concepcion', ['47111'], ['period_design' => false] + $new), 'V-4.3-NEWDESIGN'))->toBe('not_met');
+    expect(zoStatus(zoCheck('Concepcion', ['47111'], ['period_design' => true] + $new), 'V-4.3-NEWDESIGN'))->toBe('met');
+    // Not built new: neither applies.
+    expect(zoFinding(zoCheck('Concepcion', ['47111'], ['heritage_house' => false, 'new_construction' => false]), 'V-4.3-BHL'))->toBeNull();
+});
+
+// ── The ordinance's contradictions, named where they bear ────────────────
+
+it('names the conditions General Commercial leaves out, for a lot there too', function () {
+    // C-1 attaches parking, façade and grease-trap conditions to auto repair;
+    // General Commercial lists it with none. Not imposed there, not silent.
+    $gc = zoCheck('Catmon', ['45201'], [], ['lot_zone' => 'GENERAL-COMMERCIAL']);
+    $flat = zoAsked($gc, 'C28');
+    expect($flat['status'])->toBe('review')->and($flat['rules'])->toContain('V-2.10-FLAT', 'V-2.7-AUTO')
+        ->and($flat['reason'])->toContain('General Commercial');
+    expect(zoFinding($gc, 'V-2.7-AUTO')['rule'])->toBe('V-2.10-FLAT');
+
+    expect(zoAsked(zoCheck('Catmon', ['92000'], [], ['lot_zone' => 'GENERAL-COMMERCIAL']), 'C28')['rules'])->toContain('V-2.7-LOTTO');
+    // And the other way round: C-2 lists hauling with none of GC's condition.
+    expect(zoAsked(zoCheck('Acacia', ['49230'], [], ['lot_zone' => 'C-2']), 'C28')['rules'])->toContain('V-2.10-HAUL');
+});
+
+it('names the two height caps where Commercial-2 adjoins Residential-1', function () {
+    $f = zoAsked(zoCheck('Potrero', ['47111'], ['new_construction' => true], ['lot_zone' => 'C-2']), 'C29');
+    expect($f['rule'])->toBe('VII-1-1-3')->and($f['reason'])->toContain('12 m')->toContain('9 m');
+});
+
+it('sets the soil advice beside a 180 m height limit', function () {
+    $f = zoAsked(zoCheck('Potrero', ['47111'], ['new_construction' => true], ['lot_zone' => 'C-3']), 'C30');
+    expect($f['status'])->toBe('review')->and($f['reason'])->toContain('180 m')->toContain('1 to 4');
+});
+
+it('names the contradictions in the special uses: cockpits, filling stations, billboards, MRFs', function () {
+    $cockpit = zoCheck('Catmon', ['93290'], [], ['special_use' => 'cockpit']);
+    expect(zoAsked($cockpit, 'C31')['reason'])->toContain('does not name cockpits');
+
+    $station = zoCheck('Muzon', ['47300'], [], ['lot_zone' => 'R-2-MAX']);
+    expect(collect($station['findings'])->firstWhere('title', 'A residential clause for a use no residential zone lists')['question'])->toBe('C13');
+
+    $billboard = zoCheck('Catmon', ['73100'], [], ['special_use' => 'billboard']);
+    expect(collect($billboard['findings'])->firstWhere('title', 'Where a billboard may stand')['reason'])
+        ->toContain('whether it be National Road')->toContain('29-30');
+
+    $mrf = zoFinding(zoCheck('Catmon', ['38110']), 'V-3-H-2-5');
+    expect($mrf['question'])->toBe('C24')->and($mrf['reason'])->toContain('Local Zoning Committee')
+        ->and($mrf['rules'])->toContain('VI-1-IRR');
+});
+
+it('names an activity the ordinance lists both as commerce and as industry', function () {
+    $f = zoAsked(zoCheck('Acacia', ['31001'], [], ['lot_zone' => 'C-2']), 'C32');
+    expect($f['reason'])->toContain('box beds')->and($f['rules'])->toContain('V-2.13-USES');
+    expect(zoAsked(zoCheck('Acacia', ['10799'], [], ['lot_zone' => 'I-2']), 'C32')['reason'])->toContain('ice plants');
+});
+
+it('names Industrial-2’s missing warehouse line for a warehouse there', function () {
+    expect(zoAsked(zoCheck('Acacia', ['52101'], [], ['lot_zone' => 'I-2']), 'C33')['rules'])->toContain('V-2.13-USES');
+});
+
+it('names the riverbank that is both easement and Mangrove Zone', function () {
+    $f = zoAsked(zoCheck('Dampalit', ['47111'], ['beside_waterway' => true]), 'C35');
+    expect($f['reason'])->toContain('Mangrove')->and($f['rules'])->toContain('V-2.14-USES');
+});
+
+it('names the two sources of the base flood elevation for new construction', function () {
+    $f = zoAsked(zoCheck('Longos', ['47111'], ['new_construction' => true]), 'C27');
+    expect($f['reason'])->toContain('DPWH')->toContain('DRRMO')->and($f['rules'])->toContain('III-1-BFE');
+});
+
+it('names the two grease limits, the missing implementing guidelines and the eco-tourism share', function () {
+    expect(zoFinding(zoCheck('Longos', ['56101']), 'VI-8-SEWER')['question'])->toBe('C36');
+    expect(zoAsked(zoCheck('Dampalit', ['10711'], ['industry_pollutive' => false]), 'C26')['rule'])->toBe('VI-1-IRR');
+
+    $eco = zoFinding(zoCheck('Dampalit', ['56101'], ['in_fishpond_area' => true], [], ['floor_area_sqm' => 100, 'lot_area_sqm' => 1000]), 'V-4.2-AREA');
+    expect($eco['question'])->toBe('C38')->and($eco['reason'])->toContain('3% of the lot');
+});
+
+it('names the overlapping and incomplete rows of the boundary table', function () {
+    expect(zoAsked(zoCheck('Muzon', []), 'C17')['title'])->toBe('Muzon’s fishponds have no zone in the text');
+    expect(zoAsked(zoCheck('Catmon', []), 'C34')['rule'])->toBe('IV-5-PR-UTS');
+    expect(zoAsked(zoCheck('Panghulo', []), 'C37')['reason'])->toContain('Panghulo Market');
+    expect(zoAsked(zoCheck('Santulan', []), 'C37')['reason'])->toContain('Aurora St. to Javier St.');
+});
+
+it('gives Sanciangco St. both of its road-widening readings', function () {
+    $f = zoFinding(zoCheck('Tonsuya', ['47111'], [], [], ['street' => 'Sanciangco St.']), 'VI-8-ROAD');
+    expect($f['question'])->toBe('C39')->and($f['reason'])->toContain('3 m')->toContain('1 m');
+});
+
+it('names the machine-shop clause that reads as forbidding firewalls', function () {
+    $f = zoFinding(zoCheck('Acacia', ['25920'], [], ['lot_zone' => 'C-2']), 'V-2.8-MACH');
+    expect($f['question'])->toBe('C40')->and($f['reason'])->toContain('makeshift materials with firewalls');
+});
+
+it('names every difference between the map sheet and the text, in every barangay', function () {
+    $checked = 0;
+    foreach (Barangay::with('zoningClassifications')->get() as $barangay) {
+        $text = Ordinance::textZones()[Ordinance::key($barangay->name)] ?? [];
+        if ($text === []) {
+            continue;
+        }
+        $sheet = $barangay->zoningClassifications->pluck('code')->all();
+        $differ = array_merge(
+            array_diff($sheet, $text, ['PARKS', 'UTILITIES']),
+            array_diff($text, $sheet),
+        );
+        if ($differ === []) {
+            continue;
+        }
+        $f = zoFinding(zoCheck($barangay->name, []), 'IV-6-g');
+        expect($f)->not->toBeNull("{$barangay->name}: no finding names the map/text difference");
+        foreach ($differ as $code) {
+            expect(str_contains($f['reason'], Ordinance::ZONE_NAMES[$code]))->toBeTrue("{$barangay->name}: {$code} not named");
+        }
+        $checked++;
+    }
+    // Twenty of the twenty-one barangays differ somewhere (audit, 3 October 2026).
+    expect($checked)->toBeGreaterThanOrEqual(20);
+
+    // And where a listing rests on a zone only the text places there, the
+    // use finding says so: Industrial-1 in Catmon is in the text, not on the sheet.
+    $noodles = zoFinding(zoCheck('Catmon', ['10740']), 'V-2');
+    expect($noodles['reason'])->toContain('map sheet does not draw Industrial-1')->and($noodles['rules'])->toContain('IV-6-g')
+        ->and($noodles['question'])->toBe('C11');
 });

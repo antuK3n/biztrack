@@ -20,6 +20,7 @@ the claims (tests exist, lines exist, questions exist) on every Pest run.
 """
 import json
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -28,6 +29,7 @@ MD = ROOT / 'docs/zoning-ordinance/rules.md'
 SEARCH = [
     'api/app/Support/Zoning/ZoningCheck.php',
     'api/app/Support/Zoning/Ordinance.php',
+    'api/app/Support/Zoning/TradeUses.php',
     'api/app/Support/ZoningConformance.php',
     'api/app/Services/WorkflowService.php',
 ]
@@ -39,12 +41,17 @@ STATUS_WORDS = {
 }
 
 
+COMMENT = re.compile(r'^\s*(?:\*|//|/\*|#)')
+
+
 def locate(path: str, marker: str):
+    """The first line of CODE holding the marker. A docblock or comment that
+    quotes a rule id is not where the rule is checked, so it never counts."""
     file = ROOT / path
     if not file.is_file():
         return None
     for n, line in enumerate(file.read_text(encoding='utf-8').split('\n'), 1):
-        if marker in line:
+        if marker in line and not COMMENT.match(line):
             return n
     return None
 

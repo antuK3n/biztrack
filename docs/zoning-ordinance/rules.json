@@ -3,10 +3,10 @@
   "source": "Malabon Zoning Ordinance.pdf (110 pages); approved by the Sangguniang Panlungsod on 26 November 2018",
   "how_to_read": "One entry per normative statement. `verbatim` is the ordinance’s own text, taken from the PDF text layer (list bullets shown as •); `citation` gives the printed page number an officer finds on paper, `pdf_pages` the PDF page. Every entry has a status: implemented (the check and the test that proves it), shown (surfaced as information, and where), not_applicable (why it cannot bear on a business filing), or question (the entry in docs/questions-for-malabon.md). Regenerate rules.md with `python3 scripts/zoning-rules.py`.",
   "status_counts": {
-    "implemented": 188,
-    "not_applicable": 60,
-    "question": 12,
-    "shown": 82
+    "implemented": 158,
+    "not_applicable": 57,
+    "question": 22,
+    "shown": 127
   },
   "rules": [
     {
@@ -153,11 +153,9 @@
       "verbatim": "The definition of the terms used in this Zoning Ordinance shall carry the same meaning given to them in already approved codes and regulations, such as but not limited to the National Building Code, Water Code, Philippine Environmental Code and other Implementing Rules and Regulations promulgated by the Housing and Land Use Regulatory Board. The words, terms and phrases enumerated hereunder shall be understood to have the corresponding meaning indicated as follows: Other words and phrases used in this Ordinances are hereby defined in Appendix “A” of this Ordinance which is attached herewith and made an integral part hereof, and shall be construed as being covered by such terms.",
       "plain": "Undefined terms take their meaning from the National Building Code, Water Code and HLURB rules; Annex A’s definitions are part of the ordinance.",
       "data_needed": [],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:414",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::uses the ordinance’s own definitions where a rule depends on one",
-        "marker": "'A-23'"
+      "status": "shown",
+      "shown": {
+        "where": "Cited on the “Possibly on the zones’ lists” finding (applicant and CPDO): a term the ordinance does not define is read by CPDO in its national-code meaning. The check never reads one itself, so a trade that rests on such a term — or a code not yet read against the lists — is never reported as Met."
       }
     },
     {
@@ -181,7 +179,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:448",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:634",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
       }
     },
@@ -204,10 +202,9 @@
         "application_type",
         "operating_since_year"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
+      "status": "shown",
+      "shown": {
+        "where": "Named in the non-conforming-use finding on the applicant and CPDO checklists, for a renewal or amendment whose trade is not listed."
       }
     },
     {
@@ -254,8 +251,80 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1399",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1908",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::holds the locational clearance for an ECC when DENR’s list says the trade needs one"
+      }
+    },
+    {
+      "id": "III-1-APT",
+      "article": "III",
+      "section": "1",
+      "clause": "Apartment building",
+      "pdf_pages": [
+        13
+      ],
+      "printed_pages": [
+        3
+      ],
+      "citation": "Art. III §1 · p. 3",
+      "title": "An apartment building houses three or more families",
+      "verbatim": "Apartment building- a building arranged, intended or designed to be occupied by three or more families living independently of each other.",
+      "plain": "A building for three or more families living independently is an apartment building. A lessor of one or two homes leases what Residential-1 lists (single-detached or duplex); of three or more, what Basic R-2 and the zones above it list.",
+      "data_needed": [
+        "leases_what",
+        "families_in_building"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:726",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads a lessor’s building as an apartment building from three families"
+      }
+    },
+    {
+      "id": "III-1-BFE",
+      "article": "III",
+      "section": "1",
+      "clause": "Base Flood Elevation",
+      "pdf_pages": [
+        13
+      ],
+      "printed_pages": [
+        3
+      ],
+      "citation": "Art. III §1 · p. 3",
+      "title": "Base flood elevation: the DPWH’s calculation",
+      "verbatim": "Base Flood Elevation– the elevation to which floodwater is expected to reach during flood events as calculated by the regional office of the DPWH.",
+      "plain": "The base flood elevation is the level floodwater is expected to reach, as the DPWH regional office calculates it. Art. V §4.1 instead takes it from the CLUP 2018-2027 assessment unless the DRRMO updates it, and its table’s classes share their edges.",
+      "data_needed": [
+        "new_construction"
+      ],
+      "status": "question",
+      "question": {
+        "id": "C27",
+        "ref": "docs/questions-for-malabon.md#c27"
+      }
+    },
+    {
+      "id": "III-1-WAREHOUSE",
+      "article": "III",
+      "section": "1",
+      "clause": "Warehouse",
+      "pdf_pages": [
+        19
+      ],
+      "printed_pages": [
+        9
+      ],
+      "citation": "Art. III §1 · p. 9",
+      "title": "A warehouse stores goods for others, for profit",
+      "verbatim": "Warehouse – refers to a storage and/or depository of those in business of performing warehouse services for others, for profit.",
+      "plain": "A warehouse is storage run as a service to others for profit; a store’s own stockroom is an accessory use, not a warehouse.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for warehousing trades (PSIC 52101), applicant and CPDO checklists (TradeUses::DEFINITIONS)."
       }
     },
     {
@@ -279,7 +348,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1971",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
       }
     },
@@ -408,7 +477,7 @@
       "data_needed": [],
       "status": "not_applicable",
       "not_applicable": {
-        "reason": "Pure definitions. They impose no condition; each zone, overlay and device they define is regulated by its own entry in this file (Art. V, VIII)."
+        "reason": "Definitions of words only — the zones, overlays, CLUP, variance, exception and the rest, each regulated by its own entry here (Art. V, VIII). The Art. III definitions a check reads are entries of their own: accessory use, apartment building, base flood elevation, warehouse, the non-conforming terms, ECA and ECP, locational clearance."
       }
     },
     {
@@ -431,7 +500,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:312",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:498",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::never reports a trade missing from every list as refused"
       }
     },
@@ -449,14 +518,15 @@
       "citation": "Art. III §2 · p. 9",
       "title": "\"And the like\" includes similar uses",
       "verbatim": "generic terms such as others, and the like, etc. shall be construed to mean as including all specific terms similar to or compatible with those enumerated;",
-      "plain": "Words like \"others\", \"and the like\" and \"etc.\" take in every similar or compatible use, so a trade can be allowed without being named.",
+      "plain": "Where a list names examples (“like:”, “and the like”), similar uses are included. A trade that only resembles a listed one is reported as possibly listed — CPDO judges the likeness — and never as Met or as not listed.",
       "data_needed": [
         "psic"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:242",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::never reports a trade missing from every list as refused"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:376",
+        "test": "api/tests/Feature/ZoningTradeMatchingTest.php::offers a look-alike line to CPDO as a possibility, never as Met",
+        "marker": "$rules = ['V-2', 'III-2-a', 'III-1', 'A-89'];"
       }
     },
     {
@@ -498,7 +568,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1702",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2229",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reports a mandatory rule as not met and a recommendation only as information",
         "marker": "private function yesNo"
       }
@@ -523,7 +593,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:140",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:141",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::names the zones Art. IV §5 places in the barangay"
       }
     },
@@ -570,7 +640,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:140",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:141",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::maps every base zone to the section that lists its uses"
       }
     },
@@ -594,7 +664,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:974",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1415",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
       }
     },
@@ -644,8 +714,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:140",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:141",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::names the zones Art. IV §5 places in the barangay"
+      },
+      "also_question": {
+        "id": "C37",
+        "ref": "docs/questions-for-malabon.md#c37"
       }
     },
     {
@@ -672,7 +746,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:171",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:172",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::recognises a lot on a commercial strip street named in Art. IV §5"
       }
     },
@@ -749,9 +823,13 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:298",
+        "check": "api/app/Support/ZoningConformance.php:306",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::counts parks and utilities zones only where the sheet draws them",
         "marker": "in_array($code, ['PARKS', 'UTILITIES'], true)"
+      },
+      "also_question": {
+        "id": "C34",
+        "ref": "docs/questions-for-malabon.md#c34"
       }
     },
     {
@@ -856,10 +934,9 @@
       "data_needed": [
         "lot_split_by_boundary"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:194",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks CPDO which side of a boundary a split lot falls on"
+      "status": "shown",
+      "shown": {
+        "where": "CPDO review sheet: when CPDO records that a zone boundary crosses the lot, the larger-part rule is stated for the officer to apply. Nothing is measured."
       }
     },
     {
@@ -880,10 +957,10 @@
       "data_needed": [
         "street"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:171",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::surfaces both readings of one lot deep when the street is a strip street"
+      "status": "question",
+      "question": {
+        "id": "C15",
+        "ref": "docs/questions-for-malabon.md#c15"
       }
     },
     {
@@ -906,7 +983,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:154",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:155",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::uses the written zone list over the map and names every difference"
       }
     },
@@ -931,7 +1008,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1120",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1581",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -996,10 +1073,10 @@
         "street",
         "lot_split_by_boundary"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:171",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::surfaces both readings of one lot deep when the street is a strip street"
+      "status": "question",
+      "question": {
+        "id": "C15",
+        "ref": "docs/questions-for-malabon.md#c15"
       }
     },
     {
@@ -1022,7 +1099,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:154",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:155",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::uses the written zone list over the map and names every difference"
       }
     },
@@ -1047,7 +1124,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:281",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:337",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::judges a filing with several lines by its principal line"
       }
     },
@@ -1071,7 +1148,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:281",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:337",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::judges a filing with several lines by its principal line"
       }
     },
@@ -1093,10 +1170,9 @@
       "data_needed": [
         "lines"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:281",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::judges a filing with several lines by its principal line"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, in the principal-use finding when no figure sets the lines apart (“by impact, then by the area each takes”). The area of each line is not collected, so nothing is compared."
       }
     },
     {
@@ -1168,7 +1244,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:208",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:232",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance"
       }
     },
@@ -1195,8 +1271,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1221,8 +1297,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1249,8 +1325,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1275,8 +1351,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1301,8 +1377,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1325,11 +1401,10 @@
         "psic",
         "barangay"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
-        "marker": "public static function lookup"
+      "status": "question",
+      "question": {
+        "id": "C22",
+        "ref": "docs/questions-for-malabon.md#c22"
       }
     },
     {
@@ -1355,8 +1430,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1383,9 +1458,13 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
+      },
+      "also_question": {
+        "id": "C32",
+        "ref": "docs/questions-for-malabon.md#c32"
       }
     },
     {
@@ -1409,8 +1488,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1437,8 +1516,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1463,8 +1542,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1491,9 +1570,13 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
+      },
+      "also_question": {
+        "id": "C32",
+        "ref": "docs/questions-for-malabon.md#c32"
       }
     },
     {
@@ -1519,9 +1602,13 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
+      },
+      "also_question": {
+        "id": "C33",
+        "ref": "docs/questions-for-malabon.md#c33"
       }
     },
     {
@@ -1545,8 +1632,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1571,8 +1658,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1597,8 +1684,8 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
     },
@@ -1625,9 +1712,34 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::finds a trade among the uses the barangay’s zones allow, with inheritance",
+        "check": "api/app/Support/ZoningConformance.php:215",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
+      }
+    },
+    {
+      "id": "V-2.20-RESEARCH",
+      "article": "V",
+      "section": "2.20",
+      "clause": "Allowable Uses: research facilities",
+      "pdf_pages": [
+        57
+      ],
+      "printed_pages": [
+        47
+      ],
+      "citation": "Art. V §2.20 · p. 47",
+      "title": "Research facilities in the Institutional zone, except warfare facilities",
+      "verbatim": "Scientific, cultural, and academic centers and research facilities except nuclear, radioactive, chemical and biological warfare facilities",
+      "plain": "The Institutional zone allows scientific, cultural and academic centres and research facilities, except nuclear, radioactive, chemical and biological warfare facilities.",
+      "data_needed": [
+        "psic",
+        "warfare_research"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:789",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps warfare research out of the Institutional zone"
       }
     },
     {
@@ -1650,7 +1762,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:368",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:297",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks the home-occupation questions only of a home-based business"
       }
     },
@@ -1675,7 +1787,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:426",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:612",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home occupation of more than five people"
       }
     },
@@ -1700,7 +1812,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:434",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:620",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business that changes the outside of the house"
       }
     },
@@ -1726,7 +1838,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:444",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:630",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a home occupation against 20% of the house, and surfaces Annex A’s quarter"
       }
     },
@@ -1751,7 +1863,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:448",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:634",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
       }
     },
@@ -1776,7 +1888,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:454",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:640",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business whose customers park on the street"
       }
     },
@@ -1801,7 +1913,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:460",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:646",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags home-business equipment that is a nuisance off the premises"
       }
     },
@@ -1826,7 +1938,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:383",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:569",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -1854,7 +1966,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:397",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:583",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -1880,7 +1992,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:406",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:592",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -1905,7 +2017,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:414",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:600",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO"
       },
       "also_question": {
@@ -1936,7 +2048,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:416",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:602",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -1960,7 +2072,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:550",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:852",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a recreation business in a residential zone as a conditional use"
       }
     },
@@ -1985,8 +2097,33 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:448",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:634",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
+      }
+    },
+    {
+      "id": "V-2.1-PET",
+      "article": "V",
+      "section": "2.1",
+      "clause": "Customary accessory uses: pet houses",
+      "pdf_pages": [
+        38
+      ],
+      "printed_pages": [
+        28
+      ],
+      "citation": "Art. V §2.1 · p. 28",
+      "title": "Pet houses: at most 4.00 sq. m., and never for gain",
+      "verbatim": "Houses for pets such as dogs, birds, rabbits and the like of not more than 4.00 sq. m. in floor area",
+      "plain": "A house for the household’s pets is an accessory use of at most 4.00 sq. m.; like every accessory use in Residential-1 it may not be used for gain, so it cannot house animals for a pet business run from the home.",
+      "data_needed": [
+        "home_based",
+        "pet_house_area_sqm"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:781",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps a home pet business’s pet house to 4 sq. m. and out of the business"
       }
     },
     {
@@ -2470,7 +2607,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:238",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:283",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -2496,7 +2633,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:523",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:820",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a small eatery in Maximum R-2 for a customer area and street dining"
       }
     },
@@ -2521,7 +2658,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:527",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:824",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a water refilling station in Maximum R-2 for delivery parking"
       }
     },
@@ -2545,7 +2682,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:255",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:306",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use allowed only on the Zoning Administrator’s conditions to CPDO"
       }
     },
@@ -2565,14 +2702,14 @@
       "verbatim": "Tricycle/Pedicab Terminals • Provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Motor pool is not allowed.",
       "plain": "A tricycle or pedicab terminal may not bring unusual traffic, must let vehicles enter and leave without backing onto the road, and may not be a motor pool.",
       "data_needed": [
-        "psic",
+        "vehicle_use",
         "onsite_maneuvering",
         "motor_pool"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:716",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1133",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a tricycle terminal in Maximum R-2 for backing and motor pools"
       }
     },
     {
@@ -2589,16 +2726,16 @@
       "citation": "Art. V §2.3 · p. 30",
       "title": "Rentable parking in Maximum R-2: light vehicles, no motor pool",
       "verbatim": "Rentable parking lots/parking buildings for light vehicles only; provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Motor pool is not allowed. • Private",
-      "plain": "A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, and may not be a motor pool.",
+      "plain": "A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, and may not be a motor pool. It has no cap on the number of vehicles; the residential garage caps do not apply to it.",
       "data_needed": [
-        "psic",
+        "vehicle_use",
         "heavy_vehicles",
         "motor_pool"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:695",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1004",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies a pay parking lot’s own conditions, not a garage’s vehicle cap"
       }
     },
     {
@@ -2615,21 +2752,21 @@
       "citation": "Art. V §2.3 · p. 30",
       "title": "Private garages in Maximum R-2: vehicle limits and conditions",
       "verbatim": "Garage for UBER and GRAB Services • Maximum of two units per residential garage. • Garage for one (1) unit taxi cab. • Parking lot in support to existing business activity located in the city of Malabon. • Provided that the lot owner is also the owner of the business establishments. • Maximum of two (2) units delivery vans/trucks only. • Motor pooling is not allowed. • Provided that the street or access road to the proposed garage is capable to accommodate two way traffic. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Container van and tractor head with trailer trucks are not allowed.",
-      "plain": "A residential garage may keep at most two ride-hailing units or one taxi; a parking lot for an existing Malabon business must be on the business owner’s own lot, hold at most two delivery vans or trucks, be on a street that takes two-way traffic, let vehicles turn without backing onto the road, and hold no motor pool, container van or tractor head.",
+      "plain": "A residential garage may keep at most two ride-hailing units, or one taxi. A parking lot for an existing Malabon business must be on its owner’s own lot, hold at most two delivery vans or trucks, be on a street that takes two-way traffic, let vehicles turn without backing onto the road, and hold no motor pool, container van, tractor head or trailer truck.",
       "data_needed": [
-        "psic",
+        "vehicle_use",
         "garage_vehicle_count",
         "heavy_vehicles",
         "motor_pool",
         "two_way_street",
         "onsite_maneuvering",
         "existing_malabon_business",
-        "is_rented"
+        "lot_owner_is_business_owner"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:695",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1004",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one"
       }
     },
     {
@@ -2655,7 +2792,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:550",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:852",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a recreation business in a residential zone as a conditional use"
       }
     },
@@ -2699,15 +2836,15 @@
       "verbatim": "Rentable parking lots/parking buildings for light vehicles only, provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Motor pooling is not allowed.",
       "plain": "A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, must let vehicles turn without backing onto the road, and may not be a motor pool.",
       "data_needed": [
-        "psic",
+        "vehicle_use",
         "heavy_vehicles",
         "onsite_maneuvering",
         "motor_pool"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:709",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1004",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies a pay parking lot’s own conditions, not a garage’s vehicle cap"
       }
     },
     {
@@ -2726,17 +2863,17 @@
       "verbatim": "Garage for UBER and GRAB Services • Maximum of two units per residential garage. • Garage for one (1) unit taxi cab. • Parking lot in support to existing business activity located in the City of Malabon. • Provided that the lot owner is also the owner of the business establishments. • For one (1) unit four (4) wheeler or 2 tons delivery vans, closed van and refrigerated vans. • Motor pooling is not allowed.",
       "plain": "A residential garage may keep at most two ride-hailing units or one taxi; a parking lot for an existing Malabon business must be on the owner’s lot, for one four-wheeler or 2-ton van, with no motor pooling.",
       "data_needed": [
-        "psic",
+        "vehicle_use",
         "garage_vehicle_count",
         "heavy_vehicles",
         "motor_pool",
         "existing_malabon_business",
-        "is_rented"
+        "lot_owner_is_business_owner"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:709",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a terminal or garage in a residential zone for backing, motor pools and vehicle counts"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1004",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one"
       }
     },
     {
@@ -2759,7 +2896,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:334",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:520",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -2785,12 +2922,8 @@
       "data_needed": [
         "barangay"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:293",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a site in a zone the ordinance leaves unlisted to CPDO"
-      },
-      "also_question": {
+      "status": "question",
+      "question": {
         "id": "C22",
         "ref": "docs/questions-for-malabon.md#c22"
       }
@@ -2815,7 +2948,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:334",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:520",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -2848,7 +2981,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:749",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1168",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a warehouse in C-1 against the 200 m² cap and its other conditions"
       }
     },
@@ -2873,7 +3006,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:556",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:858",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -2898,7 +3031,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:564",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:866",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -2923,7 +3056,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:567",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:869",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -2948,7 +3081,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:572",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:874",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a lotto outlet against 200 m from institutions"
       }
     },
@@ -2975,7 +3108,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:586",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:888",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks auto repair and car washes in C-1 for parking, façade and grease traps"
       }
     },
@@ -3002,7 +3135,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:586",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:888",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks auto repair and car washes in C-1 for parking, façade and grease traps"
       }
     },
@@ -3073,8 +3206,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:762",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1187",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
+      },
+      "also_question": {
+        "id": "C13",
+        "ref": "docs/questions-for-malabon.md#c13"
       }
     },
     {
@@ -3098,7 +3235,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:770",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1195",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       },
       "also_question": {
@@ -3127,7 +3264,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:773",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1198",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       }
     },
@@ -3152,7 +3289,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:600",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:902",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::allows only Category II and III funeral parlours in C-1"
       }
     },
@@ -3279,8 +3416,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:607",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:909",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours"
+      },
+      "also_question": {
+        "id": "C40",
+        "ref": "docs/questions-for-malabon.md#c40"
       }
     },
     {
@@ -3306,7 +3447,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:610",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:912",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours"
       }
     },
@@ -3379,7 +3520,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:615",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:917",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks hauling and trucking garages for their Malabon business condition"
       }
     },
@@ -3395,16 +3536,20 @@
         38
       ],
       "citation": "Art. V §2.10 · p. 38",
-      "title": "General Commercial lists auto repair, car washes and filling stations without C-1’s conditions",
+      "title": "General Commercial lists C-1 and C-2 uses without their conditions",
       "verbatim": "Auto repair, tire, vulcanizing shops and carwash • Auto sales and rentals, automotive handicraft, accessory and spare parts shops, marine craft and aircraft sales yards • Boat storage • Gasoline filling stations/service stations",
-      "plain": "The General Commercial zone lists auto repair, car washes and filling stations flat, without the conditions C-1 attaches; where both lists reach a zone (the CBD) BizTrack sends the conditions to CPDO rather than dropping or imposing them.",
+      "plain": "General Commercial restates many C-1 and C-2 uses — auto repair, car washes, filling stations, restaurants, recreation, lotto outlets, warehouses, machine and junk shops — with none of their conditions, and the CBD takes in both versions; C-2 in turn lists hauling with none of General Commercial’s condition. BizTrack does not impose the condition where a lot may be in the zone that drops it, and names the difference to CPDO.",
       "data_needed": [
         "psic"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1668",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2186",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a condition to CPDO where one list attaches it and another does not"
+      },
+      "also_question": {
+        "id": "C28",
+        "ref": "docs/questions-for-malabon.md#c28"
       }
     },
     {
@@ -3452,7 +3597,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:719",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1138",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -3477,7 +3622,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:653",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:975",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps pollutive industry out of I-1"
       }
     },
@@ -3503,7 +3648,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:629",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:931",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks hauling and trucking garages for their Malabon business condition"
       }
     },
@@ -3529,7 +3674,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:641",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:943",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a container yard for a one-hectare lot and three-layer stacking"
       }
     },
@@ -3554,7 +3699,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:653",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:975",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps pollutive industry out of I-1"
       }
     },
@@ -3578,7 +3723,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:875",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1308",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the special-use permit and its conditions for a special use"
       }
     },
@@ -3602,8 +3747,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1120",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1581",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
+      },
+      "also_question": {
+        "id": "C35",
+        "ref": "docs/questions-for-malabon.md#c35"
       }
     },
     {
@@ -3627,7 +3776,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1120",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1581",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -3652,7 +3801,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1120",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1581",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -3679,7 +3828,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1144",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1611",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       },
       "also_question": {
@@ -3708,8 +3857,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:298",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:354",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::rules out business and building in the Mangrove Zone"
+      },
+      "also_question": {
+        "id": "C35",
+        "ref": "docs/questions-for-malabon.md#c35"
       }
     },
     {
@@ -3758,7 +3911,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:835",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1268",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the special-use permit and its conditions for a special use"
       },
       "also_question": {
@@ -3787,7 +3940,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:889",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1324",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a cemetery against 20 m from homes and 50 m from water"
       }
     },
@@ -3812,7 +3965,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:890",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1325",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a cemetery against 20 m from homes and 50 m from water"
       }
     },
@@ -3951,10 +4104,9 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:850",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the funeral-establishment documents for a funeral parlour"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, funeral-establishment finding: the six documents are listed for the applicant to bring. None of them is checked."
       }
     },
     {
@@ -3978,7 +4130,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:853",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1286",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       },
       "also_question": {
@@ -4057,7 +4209,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:855",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1288",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures open storage against 200 m from institutions"
       }
     },
@@ -4129,7 +4281,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:903",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1338",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4177,7 +4329,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:912",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4202,7 +4354,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:912",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4227,7 +4379,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:914",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1349",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4275,7 +4427,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:918",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1353",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4325,8 +4477,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:936",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1371",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps a cockpit to a parks zone and 200 m from homes"
+      },
+      "also_question": {
+        "id": "C31",
+        "ref": "docs/questions-for-malabon.md#c31"
       }
     },
     {
@@ -4398,7 +4554,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:862",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1295",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::requires CENRO’s site recommendation for a materials recovery facility"
       }
     },
@@ -4423,6 +4579,10 @@
       "status": "shown",
       "shown": {
         "where": "CPDO review sheet, materials-recovery findings."
+      },
+      "also_question": {
+        "id": "C24",
+        "ref": "docs/questions-for-malabon.md#c24"
       }
     },
     {
@@ -4446,8 +4606,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:941",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1379",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps billboards to the National Road and 100 m apart"
+      },
+      "also_question": {
+        "id": "C21",
+        "ref": "docs/questions-for-malabon.md#c21"
       }
     },
     {
@@ -4517,7 +4681,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:945",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1383",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps billboards to the National Road and 100 m apart"
       }
     },
@@ -4566,12 +4730,8 @@
         "has_sign",
         "roof_sign"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1174",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
-      },
-      "also_question": {
+      "status": "question",
+      "question": {
         "id": "C21",
         "ref": "docs/questions-for-malabon.md#c21"
       }
@@ -4621,7 +4781,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1168",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1384",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
       }
     },
@@ -4715,7 +4875,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:956",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1397",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -4788,7 +4948,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:957",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1398",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -4833,10 +4993,9 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:961",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, transport-terminal findings (“Submit a site development plan at 1:500 with the application”). The plan is not checked."
       }
     },
     {
@@ -4857,10 +5016,9 @@
       "data_needed": [
         "barangay"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:974",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
+      "status": "shown",
+      "shown": {
+        "where": "Cited on every overlay finding (applicant and CPDO); each overlay’s own rules are their entries."
       }
     },
     {
@@ -4881,10 +5039,9 @@
       "data_needed": [
         "barangay"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:974",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the “Flood overlay” row on every filing."
       }
     },
     {
@@ -4910,6 +5067,10 @@
       "status": "shown",
       "shown": {
         "where": "Applicant and CPDO checklists, \"Flood overlay\" row with the table, on every filing (all 21 barangays carry the overlay); marked as applying to new construction."
+      },
+      "also_question": {
+        "id": "C27",
+        "ref": "docs/questions-for-malabon.md#c27"
       }
     },
     {
@@ -4956,7 +5117,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1070",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1530",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -4981,7 +5142,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1086",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1546",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -5007,8 +5168,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1099",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1559",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
+      },
+      "also_question": {
+        "id": "C38",
+        "ref": "docs/questions-for-malabon.md#c38"
       }
     },
     {
@@ -5032,7 +5197,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1107",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1568",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -5081,7 +5246,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1001",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1447",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits a declared heritage house to its listed uses on the ground floor"
       }
     },
@@ -5107,7 +5272,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1029",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1476",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends new construction in the heritage overlay to CPDO under R-1 uses"
       },
       "also_question": {
@@ -5127,17 +5292,42 @@
         53
       ],
       "citation": "Art. V §4.3 · p. 53",
-      "title": "Heritage: no change to a heritage house’s height or floor area; new buildings below its roof apex",
-      "verbatim": "The following regulations supersede those provided in the base R-1 zone: • For declared houses of ancestry: The height and floor area of the existing building shall not be altered. • For new construction: BHL: Building height limit for buildings within the buffer zone shall not be more than the roof apex of the declared heritage structure (Guidelines, Policies and Standards for the Conservation and Development of Historic Centers/Heritage Zones, NHCP 2012)",
-      "plain": "A declared house of ancestry keeps its height and floor area; new buildings in its buffer stay below its roof apex (NHCP 2012).",
+      "title": "Heritage houses keep their height and floor area",
+      "verbatim": "For declared houses of ancestry: The height and floor area of the existing building shall not be altered.",
+      "plain": "A declared house of ancestry keeps its height and floor area: they may not be altered.",
       "data_needed": [
         "heritage_house",
         "house_altered"
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1020",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1466",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits a declared heritage house to its listed uses on the ground floor"
+      }
+    },
+    {
+      "id": "V-4.3-BHL",
+      "article": "V",
+      "section": "4.3",
+      "clause": "Building Density and Bulk: new construction",
+      "pdf_pages": [
+        63
+      ],
+      "printed_pages": [
+        53
+      ],
+      "citation": "Art. V §4.3 · p. 53",
+      "title": "New buildings no higher than the heritage house’s roof apex",
+      "verbatim": "For new construction: BHL: Building height limit for buildings within the buffer zone shall not be more than the roof apex of the declared heritage structure (Guidelines, Policies and Standards for the Conservation and Development of Historic Centers/Heritage Zones, NHCP 2012)",
+      "plain": "A new building in the heritage buffer may not rise above the roof apex of the declared heritage structure (NHCP 2012 guidelines).",
+      "data_needed": [
+        "new_construction",
+        "above_heritage_apex"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1484",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits new construction beside a heritage house to its roof apex and its period design"
       }
     },
     {
@@ -5152,17 +5342,41 @@
         54
       ],
       "citation": "Art. V §4.3 · p. 54",
-      "title": "Heritage: keep the original design; signs blend with the period",
-      "verbatim": "Repair and renovation works, to include building and landscape, shall ensure that the original architectural design at the interior and exterior are maintained. The size and appearance of business and other signs shall be made to blend with the period design of the house. • For new construction: Designs, to include building and landscape, shall be made similar to the period designs of the declared houses of ancestry.",
-      "plain": "Repairs keep the original design inside and out; business signs blend with the house’s period design; new buildings follow the period designs.",
+      "title": "Heritage houses: repairs keep the original design; signs blend with the period",
+      "verbatim": "Repair and renovation works, to include building and landscape, shall ensure that the original architectural design at the interior and exterior are maintained. The size and appearance of business and other signs shall be made to blend with the period design of the house.",
+      "plain": "Repairs and renovations of a declared house keep its original design inside and out, and its business signs blend with its period design.",
       "data_needed": [
         "heritage_house",
         "has_sign"
       ],
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the heritage-house finding (“Repairs keep the original design inside and out, and any business sign blends with the house’s period design”). Not evaluated."
+      }
+    },
+    {
+      "id": "V-4.3-NEWDESIGN",
+      "article": "V",
+      "section": "4.3",
+      "clause": "Building/Structure Design: new construction",
+      "pdf_pages": [
+        64
+      ],
+      "printed_pages": [
+        54
+      ],
+      "citation": "Art. V §4.3 · p. 54",
+      "title": "New buildings follow the heritage houses’ period design",
+      "verbatim": "Designs, to include building and landscape, shall be made similar to the period designs of the declared houses of ancestry.",
+      "plain": "New buildings and their landscaping in the heritage overlay are designed like the period designs of the declared houses of ancestry.",
+      "data_needed": [
+        "new_construction",
+        "period_design"
+      ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1020",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits a declared heritage house to its listed uses on the ground floor"
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1489",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits new construction beside a heritage house to its roof apex and its period design"
       }
     },
     {
@@ -5227,10 +5441,31 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1336",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Cited with the performance-standard findings for industry and for noisy or pollutive work, applicant and CPDO checklists."
+      }
+    },
+    {
+      "id": "VI-1-IRR",
+      "article": "VI",
+      "section": "1",
+      "clause": "Implementing Guidelines",
+      "pdf_pages": [
+        64
+      ],
+      "printed_pages": [
+        54
+      ],
+      "citation": "Art. VI §1 · p. 54",
+      "title": "Performance standards enforced through guidelines that are not attached",
+      "verbatim": "These shall be enforced through the Implementing Guidelines that is made part of this Zoning Ordinance.",
+      "plain": "The performance standards are to be enforced through Implementing Guidelines that the ordinance says are part of it. None is attached; the MRF clause likewise cites Implementing Rules and Regulations that do not exist.",
+      "data_needed": [],
+      "status": "question",
+      "question": {
+        "id": "C26",
+        "ref": "docs/questions-for-malabon.md#c26"
       }
     },
     {
@@ -5297,7 +5532,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1379",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1888",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for an NWRB permit when the business draws from a deep well"
       }
     },
@@ -5369,10 +5604,9 @@
       "data_needed": [
         "industry_hazardous"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1357",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, when the applicant says the business is hazardous: toxic and hazardous waste needs DENR-approved handling. Nothing is checked."
       }
     },
     {
@@ -5416,10 +5650,9 @@
       "data_needed": [
         "industry_pollutive"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1352",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the emissions finding when the applicant says the work is pollutive. The standards are stated, not measured."
       }
     },
     {
@@ -5463,10 +5696,9 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1341",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, for manufacturing: CPDO may ask for a description of the process."
       }
     },
     {
@@ -5553,7 +5785,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1321",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1825",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks a parking business with 20 or more slots for trees and permeable paving"
       }
     },
@@ -5625,7 +5857,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1266",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1744",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for the neighbour’s consent when new construction abuts their lot"
       }
     },
@@ -5649,7 +5881,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1201",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1668",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags parking that spills into the street"
       }
     },
@@ -5672,10 +5904,9 @@
         "psic",
         "parking_on_street"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks traffic-generating trades for on-site parking, a traffic statement and a drainage study"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the traffic-generator finding for malls, markets, schools, terminals, trucking, hospitals and cinemas. On-site parking and loading bays are named, not checked."
       }
     },
     {
@@ -5696,10 +5927,9 @@
       "data_needed": [
         "nuisance_equipment"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the equipment finding when the applicant says machinery is noticeable outside. DENR noise levels are named, not measured."
       }
     },
     {
@@ -5720,10 +5950,9 @@
       "data_needed": [
         "nuisance_equipment"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the equipment finding when the applicant says machinery is noticeable outside."
       }
     },
     {
@@ -5791,10 +6020,9 @@
         "psic",
         "new_construction"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks traffic-generating trades for on-site parking, a traffic statement and a drainage study"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the traffic-generator and new-construction findings: a Drainage Impact Assessment is named as required. It is not checked."
       }
     },
     {
@@ -5816,10 +6044,9 @@
         "psic",
         "building_storeys"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks traffic-generating trades for on-site parking, a traffic statement and a drainage study"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the traffic-generator finding: a Traffic Impact Statement is named as required. It is not checked."
       }
     },
     {
@@ -5844,8 +6071,12 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1292",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1782",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares the building’s storeys with the barangay’s soil-hazard advice"
+      },
+      "also_question": {
+        "id": "C30",
+        "ref": "docs/questions-for-malabon.md#c30"
       }
     },
     {
@@ -5866,10 +6097,9 @@
       "data_needed": [
         "nuisance_equipment"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the equipment finding: enclosure, silencers and a 3 m planted yard are stated. Not measured."
       }
     },
     {
@@ -5890,10 +6120,9 @@
       "data_needed": [
         "industry_pollutive"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1352",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the emissions finding for pollutive work: Ringelmann No. 2 is stated. Not measured."
       }
     },
     {
@@ -5914,10 +6143,9 @@
       "data_needed": [
         "industry_pollutive"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1352",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the emissions finding for pollutive work: 0.3 g/m³ is stated. Not measured."
       }
     },
     {
@@ -5938,10 +6166,9 @@
       "data_needed": [
         "industry_pollutive"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1352",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the emissions finding for pollutive work. Not measured."
       }
     },
     {
@@ -5962,10 +6189,9 @@
       "data_needed": [
         "nuisance_equipment"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1347",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the equipment finding. Not measured."
       }
     },
     {
@@ -5986,10 +6212,9 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1341",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the performance standards an industrial or noisy business must meet"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the manufacturing finding. Not evaluated."
       }
     },
     {
@@ -6013,6 +6238,10 @@
       "status": "shown",
       "shown": {
         "where": "CPDO review sheet, performance standards for food, laundry, auto-repair and manufacturing trades."
+      },
+      "also_question": {
+        "id": "C36",
+        "ref": "docs/questions-for-malabon.md#c36"
       }
     },
     {
@@ -6037,7 +6266,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1213",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1680",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for the homeowners’ or barangay’s approval for a business in a residential zone"
       }
     },
@@ -6059,10 +6288,13 @@
       "data_needed": [
         "street"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1224",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::names the road-widening setback for a site on one of the seven roads"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, when the street given is one of the seven roads: the setback is named for CPDO to check against the building line. Sanciangco St. is given both readings."
+      },
+      "also_question": {
+        "id": "C39",
+        "ref": "docs/questions-for-malabon.md#c39"
       }
     },
     {
@@ -6087,6 +6319,10 @@
       "status": "shown",
       "shown": {
         "where": "CPDO review sheet, height row (with the zone limits), when the business involves new construction."
+      },
+      "also_question": {
+        "id": "C29",
+        "ref": "docs/questions-for-malabon.md#c29"
       }
     },
     {
@@ -6172,9 +6408,9 @@
       "verbatim": "No part of road, off-street parking space, loading space, or other open space required of any building shall, for the purpose of complying with this Ordinance, be included as part of the yard; open space, off-street parking or loading space similarly required of any adjacent neighboring building. However, this shall not apply to building/s with common party walls or adjacent building lines, in which case, only the yard for the free or non-abutting sides will be required.",
       "plain": "Required yards and parking cannot be counted twice for neighbouring buildings.",
       "data_needed": [],
-      "status": "not_applicable",
-      "not_applicable": {
-        "reason": "A standard for site works and building design, checked on a development or building plan. BizTrack shows it to CPDO when the applicant says the business involves new construction (the New construction row); a filing for an existing premises carries no plan to check it against."
+      "status": "shown",
+      "shown": {
+        "where": "CPDO review sheet, the height-and-yards row shown when the applicant will build a new structure. Not evaluated: no site plan is filed."
       }
     },
     {
@@ -6195,10 +6431,9 @@
       "data_needed": [
         "psic"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1239",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks traffic-generating trades for on-site parking, a traffic statement and a drainage study"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the traffic-generator finding: the 5 m parking setback is named. Not measured."
       }
     },
     {
@@ -6219,10 +6454,9 @@
       "data_needed": [
         "has_sign"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1164",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
+      "status": "shown",
+      "shown": {
+        "where": "Cited on the business-sign finding, applicant and CPDO checklists."
       }
     },
     {
@@ -6241,9 +6475,9 @@
       "verbatim": "In any district where more than one structure may be permitted to be erected on a single lot, the yard and other requirements of this Ordinance shall be met for each structure as though it were to be erected on individual lot.",
       "plain": "Each principal structure on a lot meets the yard rules as if it stood alone.",
       "data_needed": [],
-      "status": "not_applicable",
-      "not_applicable": {
-        "reason": "A standard for site works and building design, checked on a development or building plan. BizTrack shows it to CPDO when the applicant says the business involves new construction (the New construction row); a filing for an existing premises carries no plan to check it against."
+      "status": "shown",
+      "shown": {
+        "where": "CPDO review sheet, the height-and-yards row shown when the applicant will build a new structure. Not evaluated: no site plan is filed."
       }
     },
     {
@@ -6306,9 +6540,9 @@
       "verbatim": "Lots abutting on a district boundary line shall conform to the yard requirements of the more restrictive district bounded by the line.",
       "plain": "A lot on a zone boundary follows the yard rules of the more restrictive zone.",
       "data_needed": [],
-      "status": "not_applicable",
-      "not_applicable": {
-        "reason": "A standard for site works and building design, checked on a development or building plan. BizTrack shows it to CPDO when the applicant says the business involves new construction (the New construction row); a filing for an existing premises carries no plan to check it against."
+      "status": "shown",
+      "shown": {
+        "where": "CPDO review sheet, the height-and-yards row shown when the applicant will build a new structure. Not evaluated: no site plan is filed."
       }
     },
     {
@@ -6354,7 +6588,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1309",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1808",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks CPDO about the 4 m buffer when the lot adjoins a conflicting zone"
       }
     },
@@ -6397,10 +6631,13 @@
       "data_needed": [
         "has_sign"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1156",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the business-sign finding: a sign needs CPDO’s clearance and must suit the zone, not be oversized and block no view. Size and fit are CPDO’s to judge; nothing is measured."
+      },
+      "also_question": {
+        "id": "C21",
+        "ref": "docs/questions-for-malabon.md#c21"
       }
     },
     {
@@ -6426,7 +6663,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1168",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1635",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
       }
     },
@@ -6697,7 +6934,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1399",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1908",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::holds the locational clearance for an ECC when DENR’s list says the trade needs one"
       }
     },
@@ -6796,7 +7033,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1418",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1927",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a held locational clearance unused for a year as expired"
       }
     },
@@ -7089,7 +7326,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1426",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1935",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::refuses a construction-only clearance as the business’s clearance"
       }
     },
@@ -7112,10 +7349,13 @@
         "application_type",
         "operating_since_year"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the non-conforming-use finding for a renewal or amendment whose trade is not listed. Stated; the one-year deadline is not computed (the effectivity date is unknown)."
+      },
+      "also_question": {
+        "id": "C16",
+        "ref": "docs/questions-for-malabon.md#c16"
       }
     },
     {
@@ -7201,10 +7441,13 @@
       "data_needed": [
         "application_type"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the non-conforming-use finding for a renewal or amendment whose trade is not listed. Stated; the one-year deadline is not computed (the effectivity date is unknown)."
+      },
+      "also_question": {
+        "id": "C16",
+        "ref": "docs/questions-for-malabon.md#c16"
       }
     },
     {
@@ -7225,10 +7468,13 @@
       "data_needed": [
         "application_type"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, the non-conforming-use finding for a renewal or amendment whose trade is not listed. Stated; the one-year deadline is not computed (the effectivity date is unknown)."
+      },
+      "also_question": {
+        "id": "C16",
+        "ref": "docs/questions-for-malabon.md#c16"
       }
     },
     {
@@ -7249,12 +7495,8 @@
       "data_needed": [
         "application_type"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1499",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::shows both the continue-until-closing rule and the ten-year phase-out"
-      },
-      "also_question": {
+      "status": "question",
+      "question": {
         "id": "C16",
         "ref": "docs/questions-for-malabon.md#c16"
       }
@@ -7301,7 +7543,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1462",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1971",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
       }
     },
@@ -7326,7 +7568,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1471",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1980",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7350,7 +7592,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1474",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1983",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7375,7 +7617,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:350",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:536",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a new business it cannot start as a non-conforming use"
       }
     },
@@ -7443,7 +7685,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1478",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1987",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7467,7 +7709,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1481",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1990",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7492,7 +7734,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1484",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1993",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7514,12 +7756,8 @@
       "data_needed": [
         "application_type"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1499",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::shows both the continue-until-closing rule and the ten-year phase-out"
-      },
-      "also_question": {
+      "status": "question",
+      "question": {
         "id": "C16",
         "ref": "docs/questions-for-malabon.md#c16"
       }
@@ -7542,10 +7780,13 @@
       "data_needed": [
         "lzeac_allowed"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1496",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
+      "status": "shown",
+      "shown": {
+        "where": "Applicant and CPDO checklists, non-conforming-use findings, when the applicant says an old variance or exception allowed the business."
+      },
+      "also_question": {
+        "id": "C16",
+        "ref": "docs/questions-for-malabon.md#c16"
       }
     },
     {
@@ -7969,12 +8210,58 @@
       "citation": "Art. IX §29 · p. 70",
       "title": "Effectivity: after HLURB approval and publication",
       "verbatim": "This Zoning Ordinance takes effect upon approval by the Sangguniang Panlalawigan (SP)/Housing and Land Use Regulatory Board (HLURB) and after compliance with the publication requirements of the Local Government Code.",
-      "plain": "The ordinance takes effect on approval by HLURB (or the Sangguniang Panlalawigan) and publication. The date matters for the ten-year phase-out and the one-year certificate deadline; BizTrack does not have it.",
+      "plain": "The ordinance takes effect on approval by the “Sangguniang Panlalawigan (SP)/HLURB” and publication. Malabon is a highly urbanized city with no province, and the HLURB resolution number is blank, so the date it took effect is not in the document.",
       "data_needed": [],
       "status": "question",
       "question": {
         "id": "C16",
         "ref": "docs/questions-for-malabon.md#c16"
+      }
+    },
+    {
+      "id": "A-5",
+      "article": "Annex A",
+      "section": "5",
+      "clause": null,
+      "pdf_pages": [
+        80
+      ],
+      "printed_pages": [
+        70
+      ],
+      "citation": "Annex A item 5 · p. 70",
+      "title": "A bar sells liquor for a price",
+      "verbatim": "5. Bar: any place where intoxicating and fermented liquors or malt drinks are sold or disposed of for a price, hired hostesses occasionally dancing to music.",
+      "plain": "A bar is any place where liquor or malt drinks are sold for a price.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a bar (PSIC 56302), applicant and CPDO checklists."
+      }
+    },
+    {
+      "id": "A-18",
+      "article": "Annex A",
+      "section": "18",
+      "clause": null,
+      "pdf_pages": [
+        81
+      ],
+      "printed_pages": [
+        71
+      ],
+      "citation": "Annex A item 18 · p. 71",
+      "title": "Car barns: garages and terminals for public utility vehicles",
+      "verbatim": "18. Car barns: terminals or garage for public utility vehicles for hire, such as jeepneys, taxicabs, trucks and animal drawn vehicles, where such vehicles are stored, repaired and maintained within its own premises outside of any street.",
+      "plain": "A car barn is a terminal or garage where public utility vehicles are stored, repaired and maintained on their own premises, off the street.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for passenger land transport (PSIC 49221)."
       }
     },
     {
@@ -7997,12 +8284,35 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:414",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:600",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO"
       },
       "also_question": {
         "id": "C19",
         "ref": "docs/questions-for-malabon.md#c19"
+      }
+    },
+    {
+      "id": "A-24",
+      "article": "Annex A",
+      "section": "24",
+      "clause": null,
+      "pdf_pages": [
+        81
+      ],
+      "printed_pages": [
+        71
+      ],
+      "citation": "Annex A item 24 · p. 71",
+      "title": "Department stores, malls and shopping centres",
+      "verbatim": "24. Department Store / Malls / Shopping Center: a large store divided into various departments selling different types of goods. Complex store, restaurants and services establishments with common parking area.",
+      "plain": "A department store, mall or shopping centre is a large store of many departments, with restaurants and services around a common parking area.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a department store (PSIC 47190)."
       }
     },
     {
@@ -8050,6 +8360,79 @@
       }
     },
     {
+      "id": "A-28",
+      "article": "Annex A",
+      "section": "28",
+      "clause": null,
+      "pdf_pages": [
+        81
+      ],
+      "printed_pages": [
+        71
+      ],
+      "citation": "Annex A item 28 · p. 71",
+      "title": "Dry cleaning; with flammable solvents it is an Industrial-2 plant",
+      "verbatim": "28. Dry cleaning: the cleaning of textiles, fabrics, garments and other articles by the use of cleaning solvents therefrom, drying and ironing the same. The activities usually housed in a building and consisting of one or more dry cleaning units of machinery or equipment where said articles are carried through a complete cleaning process.",
+      "plain": "Dry cleaning cleans textiles with solvents. Industrial-2 lists “dry cleaning plants using flammable liquids”; the commercial zones list laundries. A dry cleaner using flammable solvents is read as the Industrial-2 plant.",
+      "data_needed": [
+        "psic",
+        "flammable_solvents"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:738",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads dry cleaning with flammable solvents as an Industrial-2 plant"
+      }
+    },
+    {
+      "id": "A-38",
+      "article": "Annex A",
+      "section": "38",
+      "clause": null,
+      "pdf_pages": [
+        82
+      ],
+      "printed_pages": [
+        72
+      ],
+      "citation": "Annex A item 38 · p. 72",
+      "title": "Funeral chapels at cemeteries show or sell no coffins or wreaths",
+      "verbatim": "38. Fraternal Chapels: private, non-denominational funeral chapels located at or near or attached to cemeteries for the purpose of spiritual meditation and vigil before burial of deceased persons. The display or sale of coffins or flower wreaths are not conducted therein although dedicated wreaths may be displayed in memory of the deceased person.",
+      "plain": "A fraternal chapel is a funeral chapel at or near a cemetery for vigil before burial; coffins and flower wreaths are not displayed or sold there, though dedicated wreaths may be.",
+      "data_needed": [
+        "psic",
+        "sells_coffins"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:742",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps coffins and wreaths out of a funeral chapel at a cemetery"
+      }
+    },
+    {
+      "id": "A-41",
+      "article": "Annex A",
+      "section": "41",
+      "clause": null,
+      "pdf_pages": [
+        82
+      ],
+      "printed_pages": [
+        72
+      ],
+      "citation": "Annex A item 41 · p. 72",
+      "title": "Gasoline service stations",
+      "verbatim": "41. Gasoline Service Station: a place where gasoline or any other motor fuel, lubricating oil or grease from operation of automobile is offered for sale to the public.",
+      "plain": "A gasoline service station sells motor fuel and lubricants to the public, with washing and minor adjustments.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a filling station (PSIC 47300)."
+      }
+    },
+    {
       "id": "A-42",
       "article": "Annex A",
       "section": "42",
@@ -8074,12 +8457,109 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:484",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:670",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a home occupation against 20% of the house, and surfaces Annex A’s quarter"
       },
       "also_question": {
         "id": "C14",
         "ref": "docs/questions-for-malabon.md#c14"
+      }
+    },
+    {
+      "id": "A-44",
+      "article": "Annex A",
+      "section": "44",
+      "clause": null,
+      "pdf_pages": [
+        82,
+        83
+      ],
+      "printed_pages": [
+        72,
+        73
+      ],
+      "citation": "Annex A item 44 · p. 72",
+      "title": "A hotel has no cooking in its rooms",
+      "verbatim": "44. Hotel : a building or part thereof with rooms occupied or intended to be occupied or intended to be occupied for hire as temporary aboding place of individuals with a general kitchen and public dining room service, but no provisions for cooking in any individuals suite or room.",
+      "plain": "A hotel has rooms for hire with a general kitchen and dining room, and no cooking in any room. One whose rooms have their own cooking is a hotel apartment (item 45), which the lists name separately.",
+      "data_needed": [
+        "psic",
+        "rooms_have_kitchens"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:756",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads a hotel whose rooms have kitchens as a hotel apartment"
+      }
+    },
+    {
+      "id": "A-45",
+      "article": "Annex A",
+      "section": "45",
+      "clause": null,
+      "pdf_pages": [
+        83
+      ],
+      "printed_pages": [
+        73
+      ],
+      "citation": "Annex A item 45 · p. 73",
+      "title": "Hotel apartments",
+      "verbatim": "45. Hotel apartment: an apartment which may furnish dining room service and other services for the exclusive use of its tenants.",
+      "plain": "A hotel apartment is an apartment that may give dining and other services to its own tenants.",
+      "data_needed": [
+        "psic",
+        "rooms_have_kitchens"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a hotel whose rooms have their own kitchens (PSIC 55101)."
+      }
+    },
+    {
+      "id": "A-48",
+      "article": "Annex A",
+      "section": "48",
+      "clause": null,
+      "pdf_pages": [
+        83
+      ],
+      "printed_pages": [
+        73
+      ],
+      "citation": "Annex A item 48 · p. 73",
+      "title": "Laundromats",
+      "verbatim": "48. Laundromat: a business activity provided with individual clothes washing machines for the use of retail customers.",
+      "plain": "A laundromat provides washing machines for customers to use.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a laundry (PSIC 96200)."
+      }
+    },
+    {
+      "id": "A-60",
+      "article": "Annex A",
+      "section": "60",
+      "clause": null,
+      "pdf_pages": [
+        83
+      ],
+      "printed_pages": [
+        73
+      ],
+      "citation": "Annex A item 60 · p. 73",
+      "title": "Motels",
+      "verbatim": "60. Motel: a hotel for motorists. A group of furnished rooms near or along a highway that offer accommodations for highway travelers for short time periods.",
+      "plain": "A motel is a hotel for motorists along a highway, for short stays; Commercial-2 and General Commercial list it, Commercial-1 does not.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a motel (PSIC 55103)."
       }
     },
     {
@@ -8102,9 +8582,34 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:401",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2040",
         "test": "api/tests/Feature/AmendmentFlowTest.php::carries a new zoning clearance when an amendment changes the trade or enlarges the floor area",
-        "marker": "Annex A 63"
+        "marker": "$this->add(['IX-8-CHANGE', 'A-63'], 'met',"
+      }
+    },
+    {
+      "id": "A-64",
+      "article": "Annex A",
+      "section": "64",
+      "clause": null,
+      "pdf_pages": [
+        83
+      ],
+      "printed_pages": [
+        73
+      ],
+      "citation": "Annex A item 64 · p. 73",
+      "title": "An office building holds no retail merchandising",
+      "verbatim": "64. Office Building: commercial buildings used to house offices for lease or rent. It may concern a single occupancy use or mixed occupancy uses not invoicing retail merchandising except professional services.",
+      "plain": "An office building houses offices for lease, with no retail merchandising except professional services. A shop inside one is reported as not meeting the definition.",
+      "data_needed": [
+        "psic",
+        "in_office_building"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:762",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps retail out of an office building"
       }
     },
     {
@@ -8125,12 +8630,8 @@
       "data_needed": [
         "street"
       ],
-      "status": "implemented",
-      "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:171",
-        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::surfaces both readings of one lot deep when the street is a strip street"
-      },
-      "also_question": {
+      "status": "question",
+      "question": {
         "id": "C15",
         "ref": "docs/questions-for-malabon.md#c15"
       }
@@ -8155,8 +8656,33 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:753",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1178",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures open storage against 200 m from institutions"
+      }
+    },
+    {
+      "id": "A-72",
+      "article": "Annex A",
+      "section": "72",
+      "clause": null,
+      "pdf_pages": [
+        84
+      ],
+      "printed_pages": [
+        74
+      ],
+      "citation": "Annex A item 72 · p. 74",
+      "title": "A parking building does no vulcanizing or vehicle repair",
+      "verbatim": "72. Parking Building: a building of several floors used for temporary parking of private vehicles on various floors and provided with the following services, gasoline filling stations, washing, greasing, cleaning and other maintenance services, except vulcanizing of tires and repair of vehicles.",
+      "plain": "A parking building may offer fuel, washing, greasing and cleaning, but not tire vulcanizing or vehicle repair.",
+      "data_needed": [
+        "vehicle_use",
+        "parking_repair_services"
+      ],
+      "status": "implemented",
+      "implemented": {
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1049",
+        "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps vulcanizing and vehicle repair out of a parking building"
       }
     },
     {
@@ -8183,6 +8709,52 @@
       }
     },
     {
+      "id": "A-76",
+      "article": "Annex A",
+      "section": "76",
+      "clause": null,
+      "pdf_pages": [
+        84
+      ],
+      "printed_pages": [
+        74
+      ],
+      "citation": "Annex A item 76 · p. 74",
+      "title": "Restaurants",
+      "verbatim": "76. Restaurant –any establishment where food are cooked and served.",
+      "plain": "A restaurant is any establishment where food is cooked and served.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for a restaurant or coffee shop (PSIC 56101, 56102, 56301)."
+      }
+    },
+    {
+      "id": "A-86",
+      "article": "Annex A",
+      "section": "86",
+      "clause": null,
+      "pdf_pages": [
+        85
+      ],
+      "printed_pages": [
+        75
+      ],
+      "citation": "Annex A item 86 · p. 75",
+      "title": "Wet and dry markets",
+      "verbatim": "86. Wet/Dry Market: a facility (usually semi-enclosed) selling fresh produce meat and poultry as well as basic household wares.",
+      "plain": "A wet or dry market is a facility, usually semi-enclosed, selling fresh produce, meat and poultry and basic household wares.",
+      "data_needed": [
+        "psic"
+      ],
+      "status": "shown",
+      "shown": {
+        "where": "Quoted on the use-list finding for market stalls (PSIC 47810, 47820)."
+      }
+    },
+    {
       "id": "A-89",
       "article": "Annex A",
       "section": "89",
@@ -8202,7 +8774,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:312",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:376",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::never reports a trade missing from every list as refused"
       }
     },
@@ -8222,11 +8794,11 @@
       "citation": "Annex A item 1-88 · p. 70",
       "title": "The other Annex A definitions",
       "verbatim": "“Accessoria” or row house: a house of not more than two (2) stories, composed of a row of dwelling units entirely separate from one another by party wall or walls and with as independent for each dwelling unit. 2. Alterations, structural: any change in the supporting members of a building such as bearing walls, columns, beams or girders. 3. Alley, lane or callejon: a public space or thoroughfare affording generally a secondary means of access to abutting property. 4. Animal stockyard: usually an open-faced yards without buildings where livestock are quartered, fed and cured to recuperate in weight before slaughter. Usually adjacent to the slaughter. 5. Bar: any place where intoxicating and fermented liquors or malt drinks are sold or disposed of for a price, hired hostesses occasionally dancing to music. 6. Barangay: he basic political unit in the Philippines composed of all persons who have been residents of the barrio, district or barangay for at least six months, citizens of the Philippines and duly registers in the list of barangay members kept by the barrio, district or barangay secretary. 7. Block: the combine area of one or more lots forming a street block bounded by more than two (2) streets. 8. Botanical garden: a park opened to the public where specimen trees, plants and shrubs of native or imported varieties are grown, exhibited and maintained with their scientific and local names in well landscaped gardens for the education, enjoyment and relaxation of the public. Sometimes combined with the zoological garden to give the natural setting needed for confined birds, reptiles and animals. 9. Boundary line: the abstract line formed by the technical description of bearings and distance given on the certificate of title of the property or as defined herein. 10. Buffer strip: a strip established to separate and protect one type of land use from another, for example, as a screen to objectible noise, smoke, or visual aspects of an industrial zone adjacent to a residential zone. 11. Building: any structure having a roof supported by columns or walls. A main building is one in which the principal use of the lot upon which it is situated is conducted. Every dwelling in a residential district is a main building. Accessory building is a subordinate building, the use of which is incidental and accessory to the principal use on the same lot. The term building includes the term structure. 12. Building accessory: a building subordinate to the main building or the same lot, the use of which is either (1) necessary to the enjoyment or operation of a lawful principal use, transitional use or conditional use, or (2) appropriate, incidental and subordinate to any such as servant’s quarter, garage, pump house, laundry, etc. 13. Buildable area: the remaining space in a lot after deducting the required minimum open spaces. 14. Building are: the combined (roofed) covered area of a building measured at the ground floor excluding the projection of roof-caves. Similar to buildable area. 15. Building, existing: a building erected prior to the adoption of this Code or one for which a legal building permit has been issued. 16. Bus Terminal: a facility that includes passenger handling, storage, service and maintenance of public transportation vehicles. 17. Business: commercial activity customarily engaged in as a means of livelihood and typically involving some independence of judgement and power of division. 18. Car barns: terminals or garage for public utility vehicles for hire, such as jeepneys, taxicabs, trucks and animal drawn vehicles, where such vehicles are stored, repaired and maintained within its own premises outside of any street. 19. Central Business District – shall refer to areas designated principally for trade, services and business purposes. 20. Cockpit: a pit or enclosure within a building or a portion thereof where cockfightings are held. Money betting may or may not be made. 21. Commercial district: an area predominantly used for commerce. 22. Condominium building: a multi-rise structure usually used for commercial or residential purposes and generally owned by the occupants thereof. 23. Cottage industry: an economic activity carried on the homes or in other places for profit, with capitalization not exceeding Php 100,000.00 at the time of registration. The definition provided for in P.D. 817 is hereby adopted for zoning purposes. 24. Department Store / Malls / Shopping Center: a large store divided into various departments selling different types of goods. Complex store, restaurants and services establishments with common parking area. 25. District: a division of a City. 26. Dominant land use: land use which accounts for at least 70% of the area within 1,000 meter radius from the periphery of the lot being applied for. 27. Dormitories: an institutional building where boarders are provided with board and lodging, sleeping and eating in common halls and consisting of at least ten (10) or more persons. 28. Dry cleaning: the cleaning of textiles, fabrics, garments and other articles by the use of cleaning solvents therefrom, drying and ironing the same. The activities usually housed in a building and consisting of one or more dry cleaning units of machinery or equipment where said articles are carried through a complete cleaning process. 29. Dumping site: a lot or land or part thereof used primarily for the disposal by dumping burials, burning or any other means and / or whatsoever purpose of garbage, sewerage, trash, refuse, junk, discarded machinery, vehicles, or part thereof, or waste materials of any kind. 30. Dwelling: a building designed or used exclusively as the living quarters for one or more family. 31. Dwelling, one-family: a house accommodating a single family and having two side yards. 32. Dwelling, one-family; semi-detached: a one-family house having one party wall and one side yard. 33. Dwelling, row or group: a building consisting of a series of one-family sections having a common wall between each two adjacent sections. 34. Dwelling, multiple: a building used as a home or residence of three (3) or more families living independently from one another each occupying one or more rooms as a single housekeeping unit. 35. Dwelling, two family: a house or structure divided into two separate and independent living quarter by a wall extending from the floor to the ceiling. Each portion provides complete living facilities for a household. 36. Filling station: any area of land, including structures thereon, that is used or designed to be used for the supply of gasoline or oil or other fuel for the propulsion of motor vehicles and which may include facilities used or designed to be used for polishing, greasing, washing, spraying, dry cleaning or other cleaning or servicing such motor vehicles. 37. Fraternal Clubs and Lodges: all buildings used a non-profit private clubs exclusively for civic, religious, charitable and Masonic organizations. 38. Fraternal Chapels: private, non-denominational funeral chapels located at or near or attached to cemeteries for the purpose of spiritual meditation and vigil before burial of deceased persons. The display or sale of coffins or flower wreaths are not conducted therein although dedicated wreaths may be displayed in memory of the deceased person. 39. Garage, Commercial: a garage where automobile and other vehicles are housed, cared for, equipped, repaired or kept for remuneration at an automobile station defined herein. 40. Garment Factory: a factory producing garment of cloth or plastic such as ready-made dresses, hats, shirts, under clothes, children’s clothes, raincoats, etc. of commercial quantity. 41. Gasoline Service Station: a place where gasoline or any other motor fuel, lubricating oil or grease from operation of automobile is offered for sale to the public. Deliveries are made directly into the vehicle including lubrication of the premises, the washing of automobiles where no mechanical conveyor, blower or steam cleaning device is involved and including only such other services and minor adjustments as are customarily permitted at gasoline supply station. 42. Home Occupation: occupation conducted within a dwelling and not in any accessory building provided no person who is not a resident in the premises is employed, no mechanical equipment is used, except such as is permissible for purely domestic or household purposes and not more than one-fourth (1/4) of the floor area or one storey of the dwelling is devoted to such home occupation does not require internal or external alteration, or involve construction features or use of equipment not customary in dwellings. 43. Hospital: unless otherwise specified, the term “hospital” shall be deemed to include sanitarium, prevent rum, clinic, rest house, nursery home, convalescent, or other case of ailments, and shall be deemed to be limited to places for diagnosis, treatment or other cases of human ailment. 44. Hotel : a building or part thereof with rooms occupied or intended to be occupied or intended to be occupied for hire as temporary aboding place of individuals with a general kitchen and public dining room service, but no provisions for cooking in any individuals suite or room. 45. Hotel apartment: an apartment which may furnish dining room service and other services for the exclusive use of its tenants. 46. Hotel Residential: a dwelling occupied by permanent guests only and not by transients. It may include restaurants, newsstands and other accessory services primarily for serving its occupants and only incidental to the public. 47. Junk Yard: a lot or part thereof, used primarily for the collection, storage and sale of waste or discarded materials or for the collection, dismantling, storage and salvaging of machinery or vehicles not in running condition and for the sale of parts thereto. 48. Laundromat: a business activity provided with individual clothes washing machines for the use of retail customers. 49. Loading and Unloading Areas: vehicular loading and unloading of passengers or goods specific, limited areas or zones along the street or driveway system. 50. Lodging House: a building or part thereof containing sleeping rooms where lodging is provided for a fixed compensation in accordance with previous arrangements. 51. Lot: a parcel of land on which a principal building and its accessories are placed or may be placed together with the required open spaces. 52. Lot Area per Family: a portion of an area of a lot allocated for one family. 53. Lot, Depth: the average horizontal distance between the front and the rear property lines. 54. Lot, Inside: a lot fronting one street or public alley with remaining sides bounded by lot lines. 55. Lot Lines; the line of demarcation between either public or private property on all sides. 56. Lot Open: as lot bounded on all sides by street lines. 57. Lot, Width: the average horizontal distance between the side lot lines. 58. Mixed use: refer to areas containing residential, commercial, recreational and institutional. 59. Money Shop: an extension service unit of a bank, usually operating within or near a public place with authority to accept money for specific purposes. 60. Motel: a hotel for motorists. A group of furnished rooms near or along a highway that offer accommodations for highway travelers for short time periods. 61. Night Club: a restaurant open at night usually serving liquor, having a floor show and providing music and space for dancing. 62. Non-conforming building use: the use of a building or land or any portion of such building or land which does not conform with the use regulations of the district where it situated. 63. Occupancy: the purpose for which a building is used or intended to be used. The term shall also include the building or room housing such use. Change or occupancy is not intended to include change of tenants or proprietors. 64. Office Building: commercial buildings used to house offices for lease or rent. It may concern a single occupancy use or mixed occupancy uses not invoicing retail merchandising except professional services. 65. Off-Street Parking: the stopping or parking of any vehicle along any street, except at designated areas located in the premises either at the front side and rear yards of the same or any nearby lot. 66. One block deep strip: 70 meters from the center of the road, unless specified on zoning map and zone boundaries. 67. One lot deep strip: 30 meters from the center of the road, unless specified on zoning map and zone boundaries. 68. Open Market: a public place, government or privately owned where dry and perishable goods are sold. Usually, no refrigeration facilities are available. 69. Open Space: an unoccupied space open to the sky on the same lot with the building. 70. Open Storage: a roofed structure without sidewalks used for the safekeeping of goods. 71. Open Use: any use of a lot that is not conducted within a building. 72. Parking Building: a building of several floors used for temporary parking of private vehicles on various floors and provided with the following services, gasoline filling stations, washing, greasing, cleaning and other maintenance services, except vulcanizing of tires and repair of vehicles. 73. Parking Space: an off-street space available for the parking of one motor vehicle and having an area of not less than twenty square meter (20 sq. me.) exclusive of passageways and driveways appurtenant thereto and giving access thereto and having direct access to a street or alley. 74. Parking Lot: an off-street open area, the principal use of which is for the parking of automobile by the public, whether for compensation or not, or as an accommodation to client or customers. 75. Required Open space: any front, side or rear yards, courts usable, open space, or off-street parking space provided about a building in order to meet the requirements of this office. 76. Restaurant –any establishment where food are cooked and served. 77. Setback: easement from the property line as per the National Building Code. 78. Slum, Blighted Areas: an area where the values of real estate tend to deteriorate because of the dilapidated, obsolescent and unsanitary condition of the building within the area. 79. Soda Fountain: any place where refreshments and/or drinks are served usually on a counter, where there are stalls lined alongside. 80. Stable: any structure designed and intended for the enclosure, shelter or protection of any horse, carabao or other cattle. 81. Stable, private: an accessory building in which horses are kept for private use and not for hire, remuneration or sale. 82. Storage house or rooms: certain room areas either part of a building or detached accessory building to store limited stock of goods in connection with the nature of retail business or store. The area being restricted according to the nature of zoning uses. 83. Street: a public thoroughfare including public roads or highways which afford principal means of access to abutting property. 84. Supper Club: any establishment where food and drinks are served to its patrons to the accompaniment of music furnished by the management and where patrons are allowed to dance with partners, whom they bring along. No hostesses are provided for by the management. 85. Tenement Housing: refers to the multi-storey buildings composed of single dwelling units designed and erected with public funds to house low-income families at low rentals. 86. Wet/Dry Market: a facility (usually semi-enclosed) selling fresh produce meat and poultry as well as basic household wares. 87. Dock: an artificial enclosed area of water for ships to be loaded. 88. Wharves: a flat form for loading and unloading ships in harbor.",
-      "plain": "Definitions of building types, lots, uses and establishments (accessoria, bar, cockpit, filling station, hotel, junk yard, motel and the rest). They say what words mean; the ones a rule depends on are entries of their own.",
+      "plain": "Definitions of building types, lots, uses and establishments. They say what words mean; the ones a rule or a match depends on are entries of their own.",
       "data_needed": [],
       "status": "not_applicable",
       "not_applicable": {
-        "reason": "Pure definitions; they impose no condition."
+        "reason": "Definitions of words only — accessoria, building, bus terminal, business, cockpit, junk yard, lodging house, money shop, night club, open market, parking lot, soda fountain and the rest; none sets a condition a business must meet. The items a check reads are entries of their own: 5, 18, 23, 24, 26, 27, 28, 38, 41, 42, 44, 45, 48, 60, 63, 64, 66-67, 70, 72, 73, 76, 86 and 89."
       }
     },
     {
@@ -8276,7 +8848,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:974",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1415",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
       }
     }
