@@ -307,3 +307,52 @@ export function initialsOf(name: string | null | undefined): string {
 
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
+
+/**
+ * How a line of business READS — the applicant's own words first.
+ *
+ * ── The certificate that said "Other (not listed)" ──────────────────────────
+ *
+ * A Mayor's Permit printed its Line of Business as *Other (not listed)*,
+ * because the face was built from the PSIC title and a hardware store had been
+ * filed under the catch-all code 00000. The client's question is the whole
+ * specification: *"pwede ba yon? make sure na meron kung ano nilagay nya o
+ * ininput"* [1 October 2026].
+ *
+ * The words were never missing — the wizard REQUIRES them on a catch-all line
+ * and stores them on `business_lines.line_of_business`. What was missing was
+ * agreement about which of the two to show, and the expression `typed || title`
+ * had been written separately in `carriedOver.ts` and in the wizard's summary
+ * while three server-side readers did the opposite. This is that rule, named
+ * once; the API's own copy is `BusinessLine::tradeName()`.
+ */
+export function tradeName(
+  line: { line_of_business?: string | null; psic_code?: { title: string } | null } | null,
+): string | null {
+  return line?.line_of_business?.trim() || line?.psic_code?.title || null
+}
+
+/**
+ * The same, for a reader who also needs the CLASSIFICATION — a reviewer
+ * checking that the trade was sorted into the right PSIC code.
+ *
+ * The applicant's words lead and the code follows in parentheses, so the line
+ * reads as a description with a reference rather than as a reference that has
+ * swallowed the description. The title is left out when it would only repeat
+ * what is already on the left.
+ */
+export function lineOfBusinessText(
+  line: {
+    line_of_business?: string | null
+    psic_code?: { title: string; code: string } | null
+  } | null,
+): string {
+  const trade = tradeName(line)
+  const psic = line?.psic_code
+
+  if (!psic) return trade ?? ''
+
+  const classification = psic.title === trade ? psic.code : `${psic.title} (${psic.code})`
+
+  return trade ? `${trade} — ${classification}` : classification
+}

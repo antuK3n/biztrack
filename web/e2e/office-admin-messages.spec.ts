@@ -68,27 +68,49 @@ test.describe('an office account', () => {
     })
   })
 
-  test('finds the administrator pinned to the top of Messages', async ({ page }) => {
+  test('finds the administrator behind a button of its own', async ({ page }) => {
     await page.goto('/staff/messages')
 
-    const first = page.getByRole('button', { name: /System Administrator/ }).first()
-    await expect(first).toBeVisible({ timeout: 20000 })
-
     /*
-     * PINNED: it is the FIRST row, not sorted in by date. An officer who has
-     * never needed to ask would otherwise find it below thirty filings.
+     * ---- Pinned, then given a shelf --------------------------------------
      *
-     * Scoped to `main`: the mobile tab bar and the filter pills are lists too,
-     * and `getByRole('list').first()` picked one of those.
+     * This asserted the administrator's line was the FIRST row of Messages,
+     * not sorted in by date, because an officer who has never needed to ask
+     * would otherwise find it below thirty filings.
+     *
+     * It has its own button now [client, 1 October 2026]. The reason for the
+     * pin stands and is better served: a row that is always first is a row
+     * always in the way, and an officer scanning their caseload was reading
+     * past their own account details every time. The button is on screen
+     * whatever shelf they are on, which is what "findable" asked for.
+     *
+     * The button carries a count when something is waiting on it, so moving
+     * the row off the default shelf cannot silence it - asserted separately
+     * in office-enquiries.spec.ts.
      */
+    const shelf = page.getByRole('button', { name: /^System Administrator/ })
+    await expect(shelf).toBeVisible({ timeout: 20000 })
+
+    // Not on the caseload shelf: that is what having its own means.
     const rows = page.getByRole('main').getByRole('listitem')
+    await expect(rows.first()).toBeVisible({ timeout: 20000 })
+    await expect(rows.filter({ hasText: 'Your account and details' })).toHaveCount(0)
+
+    await shelf.click()
+
     await expect(rows.first()).toContainText('System Administrator')
     await expect(rows.first()).toContainText('Your account and details')
   })
 
   test('can write to the administrator, and sees it appear', async ({ page }) => {
     await page.goto('/staff/messages')
-    await page.getByRole('button', { name: /System Administrator/ }).first().click()
+    await page.getByRole('button', { name: /^System Administrator/ }).first().click()
+    await page
+      .getByRole('main')
+      .getByRole('listitem')
+      .filter({ hasText: 'Your account and details' })
+      .first()
+      .click()
 
     const note = `Please correct my surname. [${Date.now()}]`
     await page.getByRole('textbox').last().fill(note)

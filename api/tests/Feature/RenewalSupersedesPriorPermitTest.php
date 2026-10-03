@@ -186,9 +186,20 @@ it('starts the renewed permit the day the old one ends', function () {
     expect($new->valid_from->toDateString())
         ->toBe($old->valid_until->copy()->addDay()->toDateString());
 
-    // And the full term is granted from there — nothing is lost to renewing early.
+    /*
+     * And it runs to the end of the year it starts in.
+     *
+     * This asserted `+365` — the continue-the-term convention — until the
+     * client replaced it for clearances with a fixed year end [1 October 2026,
+     * see `RenewalSeason::endOfCalendarYearFor`]. The START date is unchanged
+     * and still the point of this test: a renewal filed early does not begin
+     * until the old permit lapses, so the two certificates never overlap.
+     *
+     * What renewing early now costs is the tail of the term rather than
+     * nothing, which is the documented price of a common expiry date.
+     */
     expect($new->valid_until->toDateString())
-        ->toBe($old->valid_until->copy()->addDay()->addDays(365)->toDateString());
+        ->toBe($new->valid_from->copy()->setDate($new->valid_from->year, 12, 31)->toDateString());
 });
 
 it('starts today when the permit being renewed has already lapsed', function () {

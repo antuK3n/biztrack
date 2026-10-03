@@ -20,7 +20,8 @@ class ReferenceSeeder extends Seeder
      * a real PSIC number: business_lines.psic_code_id is NOT NULL, so the
      * free-text line still needs a row to hang on.
      */
-    public const OTHER_PSIC_CODE = '00000';
+    /** Kept as the seeder's name for it; the definition is PsicCode's. */
+    public const OTHER_PSIC_CODE = PsicCode::UNCLASSIFIED;
 
     public function run(): void
     {
