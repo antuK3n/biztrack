@@ -1747,7 +1747,7 @@ test('the barangay’s zoning card lists the zones in plain words, links the Cit
 async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
   // "permits", plural: a renewal now covers every permit the shop holds rather
   // than one picked from a list, and the dialog's heading says so.
-  const name = type === 'renewal' ? /which permits are you renewing/i : /what are you amending/i
+  const name = type === 'renewal' ? /which permits? are you renewing/i : /what are you amending/i
   const modal = page.getByRole('dialog', { name })
   await expect(modal).toBeVisible({ timeout: 30_000 })
 
@@ -1759,7 +1759,17 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
    * multi-select — and the first one ticked is the primary, which is what the
    * renewal chain is keyed on.
    */
-  const permits = modal.locator('ul[aria-label*="Which permits are you"]').getByRole('checkbox')
+  /*
+   * By TAG, not by role, because the role moves with the rule.
+   *
+   * The picker is a radiogroup while a renewal may carry one permit and
+   * a checkbox list once the Mayor's Permit has opened it to several
+   * (client, 3 October 2026; see `App\Support\RenewalScope`). A helper
+   * that answers the dialog should not have to know which, and a locator
+   * that breaks when a control legitimately changes shape reports a
+   * redesign as a regression.
+   */
+  const permits = modal.locator('ul[aria-label*="are you renewing"] input')
   await expect(permits.first()).toBeVisible({ timeout: 20_000 })
   await permits.first().check()
 

@@ -82,7 +82,7 @@ test.describe('renewal limits, as the applicant sees them', () => {
      */
     await page.goto('/apply?type=renewal')
 
-    const modal = page.getByRole('dialog', { name: /which permits are you renewing/i })
+    const modal = page.getByRole('dialog', { name: /which permits? are you renewing/i })
     await expect(modal).toBeVisible({ timeout: 30_000 })
 
     // Business 1 is the seeded owner's shop, and the one the fixture
