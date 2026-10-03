@@ -22,8 +22,8 @@ All are listed in `api/.env.example` with empty values.
 | Key | What it is | Default |
 |---|---|---|
 | `PAYMENT_GATEWAY` | The mode to use until someone flips the switch (`simulated` or `kwikpay`). After that, the saved switch is used. | `simulated` |
-| `KWIKPAY_BASE_URL` | KwikPay's address. | `https://pay4-kwikpay.jd.management` |
-| `KWIKPAY_MERCHANT` | Merchant number from KwikPay. | — |
+| `KWIKPAY_BASE_URL` | KwikPay's address. KwikPay's own Back Office is `https://pay4-kwikpay.jd.management`; the gateway our merchant account is on answers the same API. | `https://payment-gateway-kwgu.onrender.com` |
+| `KWIKPAY_MERCHANT` | Merchant ID from KwikPay. Not a secret: it is sent in the clear with every request. | `harson-tech` |
 | `KWIKPAY_KEY` | Merchant key from KwikPay. Signs every request and checks every callback. It is never sent to the browser, shown by the status API, or written to a log. | — |
 | `KWIKPAY_PAYMENT_TYPE` | `"1"`–`"12"`. KwikPay decides which one (see §5). | — |
 | `KWIKPAY_CALLBACK_BASE_URL` | The **public** address KwikPay calls back, without `/api/v1`. The callback is `<this>/api/v1/payments/kwikpay/callback`. | `APP_URL` |
@@ -32,8 +32,9 @@ All are listed in `api/.env.example` with empty values.
 | `KWIKPAY_FAKE` | Turns on the practice KwikPay (§4). Only works when `APP_ENV` is `local` or `testing`. | `false` |
 | `KWIKPAY_CHARGE_OVERRIDE` | **Testing only.** When set (e.g. `1.00`), KwikPay is asked to collect this amount instead of the bill. The bill, the payment record and the receipt keep the real assessed amount; the requested amount is kept in `payments.gateway_amount` and a confirmation is checked against it. **Empty it before real use**, or every bill is settled for ₱1. | empty (full amount) |
 
-The server refuses to switch to KwikPay while `KWIKPAY_MERCHANT`, `KWIKPAY_KEY`
-or `KWIKPAY_PAYMENT_TYPE` is missing. The refusal lists the missing keys by
+So the one setting a server must be given is `KWIKPAY_KEY`, plus
+`KWIKPAY_PAYMENT_TYPE` (§5). The server refuses to switch to KwikPay while
+`KWIKPAY_MERCHANT`, `KWIKPAY_KEY` or `KWIKPAY_PAYMENT_TYPE` is missing. The refusal lists the missing keys by
 name.
 
 ---

@@ -29,13 +29,17 @@ return [
     'default' => env('PAYMENT_GATEWAY') ?: 'simulated',
 
     'kwikpay' => [
-        // The provider's Back Office domain. Point it at the fake (below) for a
-        // demo without credentials.
-        'base_url' => env('KWIKPAY_BASE_URL') ?: 'https://pay4-kwikpay.jd.management',
+        // The KwikPay gateway BizTrack's merchant account is on. It answers the
+        // same /api/transfer, /api/query and /api/me as KwikPay's own Back
+        // Office (pay4-kwikpay.jd.management). Point it at the fake (below) for
+        // a demo without credentials.
+        'base_url' => env('KWIKPAY_BASE_URL') ?: 'https://payment-gateway-kwgu.onrender.com',
 
-        // Issued by KwikPay at contract time. The key signs every request and
-        // verifies every callback; it must never reach the browser or a log.
-        'merchant' => env('KWIKPAY_MERCHANT'),
+        // The merchant is an account name, not a secret: it travels in the
+        // clear in every request and callback. The key is the secret. It signs
+        // every request and verifies every callback, so it lives only in the
+        // server's env and must never reach the browser or a log.
+        'merchant' => env('KWIKPAY_MERCHANT') ?: 'harson-tech',
         'key' => env('KWIKPAY_KEY'),
 
         // "1"–"12". Which one is enabled for us is KwikPay's to say — the docs
