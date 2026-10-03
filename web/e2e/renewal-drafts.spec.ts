@@ -111,8 +111,28 @@ async function savingSettles(page: Page, act: () => Promise<void>) {
   await act()
   await written
 
-  /* The debounce can coalesce a second write; let it land before moving. */
-  await page.waitForTimeout(1500)
+  /*
+   * ── And then let the rest of it settle ────────────────────────────────
+   *
+   * One response is not the end of the sequence. Traced against the stack:
+   *
+   *     43.1s  PUT    /wizard-drafts/48     the scratch save
+   *     43.5s  POST   /applications         the real draft
+   *     45.5s  <- 201 /applications
+   *     45.6s  DELETE /wizard-drafts/48     the scratch discarded
+   *     46.7s  <- 204
+   *
+   * Returning on the first 2xx meant leaving at 44.7s — while both rows
+   * existed. The Drafts page then showed the filing twice, which looked
+   * exactly like the duplicate-draft bug this file also guards against, and
+   * sent two rounds of investigation after a product fault that was really
+   * a test reading a settling system.
+   *
+   * 8s clears the whole tail with room on a stack where the apply route
+   * takes fifty seconds to paint. The `toHaveCount(1)` below is what proves
+   * the duplicate is gone; this is only what gives it a fair moment to be.
+   */
+  await page.waitForTimeout(8000)
 }
 
 test('a renewal in progress is saved as a draft and reopens where it was left', async ({
