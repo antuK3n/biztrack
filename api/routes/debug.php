@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Debug\PanelController;
 use App\Http\Controllers\Api\Debug\PaymentsController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,6 +23,9 @@ use Illuminate\Support\Facades\Route;
  * group IS the access rule.
  */
 Route::prefix('debug')->middleware('debug.panel')->group(function () {
+    // When the panel closes, for the page's header. Read-only: nothing opens it from here.
+    Route::get('panel', [PanelController::class, 'show']);
+
     // Payments: how owners pay, and what KwikPay collects.
     Route::get('payments', [PaymentsController::class, 'show']);
     Route::put('payments', [PaymentsController::class, 'update']);

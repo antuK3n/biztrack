@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -96,4 +97,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+        /*
+         * A wrong method on a Debug route is a 404 like everything else there.
+         * Route matching answers 405 before any middleware runs, so without
+         * this a POST to a GET-only debug route would tell anybody — panel
+         * closed, not signed in — that the route exists, which is what the
+         * 404s in EnsureDebugPanelOpen are for.
+         */
+        $exceptions->render(fn (MethodNotAllowedHttpException $e, Request $request) => $request->is('api/v1/debug', 'api/v1/debug/*')
+            ? response()->json(['message' => 'Not Found.'], 404)
+            : null);
     })->create();
