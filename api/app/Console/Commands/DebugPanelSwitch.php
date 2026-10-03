@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Support\DebugPanel;
+use App\Support\ManilaCalendar;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Command;
 
 /**
@@ -50,7 +52,7 @@ class DebugPanelSwitch extends Command
             return self::INVALID;
         }
 
-        $this->info('Debug page open to the super admin until '.$until->toDayDateTimeString().' ('.(int) $hours.' '.((int) $hours === 1 ? 'hour' : 'hours').'). It closes itself then.');
+        $this->info('Debug page open to the super admin until '.self::manila($until).' ('.(int) $hours.' '.((int) $hours === 1 ? 'hour' : 'hours').'). It closes itself then.');
 
         return self::SUCCESS;
     }
@@ -68,11 +70,17 @@ class DebugPanelSwitch extends Command
     {
         $until = DebugPanel::openUntil();
         $this->line($until
-            ? 'Debug page: <info>open</info> until '.$until->toDayDateTimeString().' ('.$until->diffForHumans().').'
+            ? 'Debug page: <info>open</info> until '.self::manila($until).' ('.$until->diffForHumans().').'
             : 'Debug page: closed.');
         $this->bypassNote();
 
         return self::SUCCESS;
+    }
+
+    /** City Hall's clock, not the server's UTC: the person reading this is in Malabon. */
+    private static function manila(CarbonInterface $at): string
+    {
+        return ManilaCalendar::local($at)->toDayDateTimeString().' Manila time';
     }
 
     private function bypassNote(): void

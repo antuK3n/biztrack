@@ -8,10 +8,21 @@ BizTrack takes a permit payment one of two ways. A switch picks which one
 | `simulated` (default) | Chooses GCash, Maya or Card and presses **Pay Online**. The screen shows **Paid** straight away, with the line "This is a simulated payment. No real charge is made." | Nothing. This is how BizTrack has always behaved, and it is what the presentation runs on. |
 | `kwikpay` | Chooses GCash, Maya, QR Ph or GoTyme. They are sent to the payment page, or shown a QR code to scan, and finish paying in their own app. The pay screen waits and shows **Paid** once the payment is confirmed. If the payment fails, it says so and offers **Try again**. | KwikPay (merchant docs: `merchant-api-docs-en.md`). Deposits only: no payouts, no USDT. |
 
-**The switch never touches a payment that already exists.** A KwikPay
+A second switch decides **what KwikPay collects** for a new payment: a
+**test charge** (₱1.00 unless `KWIKPAY_CHARGE_OVERRIDE` names another amount)
+or **the full bill**. The bill, the payment record and the receipt always keep
+the real assessed amount; only the figure sent to KwikPay changes. The thesis
+defense runs on the test charge, and the super admin switches to the full bill
+from the Debug page if a panelist asks to see the real amount.
+
+**Neither switch touches a payment that already exists.** A KwikPay
 payment opened while the switch was on is still confirmed after it is turned
 off: its callback is still accepted and reconciliation still asks about it.
-Each payment records the path that made it in `payments.gateway`.
+Each payment records the path that made it in `payments.gateway`, and what
+KwikPay was asked to collect in `payments.gateway_amount`. A confirmation is
+checked against that amount, so a ₱1.00 order still settles for ₱1.00 after
+the charge is switched to the full bill, and a full-bill order still needs the
+full bill after it is switched back.
 
 ---
 
@@ -30,7 +41,11 @@ All are listed in `api/.env.example` with empty values.
 | `KWIKPAY_CALLBACK_IPS` | Optional comma-separated allowlist for callbacks. KwikPay's docs give `34.21.238.122`. Leave it empty unless trusted proxies are set up (see §6). The signature is always checked either way. | empty (not enforced) |
 | `KWIKPAY_TIMEOUT` | Seconds to wait for KwikPay. | `15` |
 | `KWIKPAY_FAKE` | Turns on the practice KwikPay (§4). Only works when `APP_ENV` is `local` or `testing`. | `false` |
-| `KWIKPAY_CHARGE_OVERRIDE` | **Testing only.** When set (e.g. `1.00`), KwikPay is asked to collect this amount instead of the bill. The bill, the payment record and the receipt keep the real assessed amount; the requested amount is kept in `payments.gateway_amount` and a confirmation is checked against it. **Empty it before real use**, or every bill is settled for ₱1. | empty (full amount) |
+| `KWIKPAY_CHARGE_OVERRIDE` | Two jobs. It is the **test amount**: what KwikPay collects while the charge switch says "test charge" (₱1.00 when it is empty or not a positive number). And until somebody sets the charge switch, it is the **default**: a positive amount means the test charge, empty means the full bill, exactly as before the switch existed. Once the switch is set (Debug page, API or artisan), the switch decides. The bill, the payment record and the receipt keep the real assessed amount either way. | empty (full bill; test amount ₱1.00) |
+
+The two switches themselves are not env settings. They live in the `settings`
+table (`payment_gateway` and `kwikpay_charge`), so they change on a running
+server; the env values above are only what applies until somebody switches.
 
 So the one setting a server must be given is `KWIKPAY_KEY`. The server refuses to switch to KwikPay while
 `KWIKPAY_MERCHANT`, `KWIKPAY_KEY` or `KWIKPAY_PAYMENT_TYPE` is missing. The refusal lists the missing keys by
@@ -40,30 +55,75 @@ name.
 
 ## 2. Switching
 
-Every switch is written to the audit log (`payment_gateway.switched`, with
-`from`, `to`, and `via` set to `api` or `artisan`).
+Two switches, three ways to reach them. Every change is written to the audit
+log, with who made it:
+
+| Door | Audit action | Recorded |
+|---|---|---|
+| Debug page (`/api/v1/debug/payments`) | `debug.payments` | both switches `before` and `after`, actor |
+| Admin API (`/api/v1/admin/payment-gateway`) | `payment_gateway.switched`, `payment_gateway.charge_switched` | `from`, `to`, `via: api`, actor (and `test_amount` for the charge) |
+| Terminal (artisan) | the same two | `from`, `to`, `via: artisan`, no actor |
+
+### From the Debug page (super admin)
+
+The **Payments** section of the Debug page (`/admin/debug`, or just `/debug`)
+shows both switches as two pairs of cards:
+
+- **How owners pay:** Simulated or KwikPay. When KwikPay cannot be turned on,
+  the page lists the settings missing on the server. **Test connection**
+  makes one signed call to KwikPay and shows the answer.
+- **What KwikPay collects:** "₱1.00 test charge" or "The full bill". Switching
+  to the full bill asks for confirmation first, because owners are then
+  charged real money. Switching back to the test charge asks nothing.
+- **Online payments still waiting**, and the ones flagged for staff.
+
+The Debug page is closed by default. It opens only from the server, for a
+few hours at a time, and closes by itself after that:
+
+```bash
+cd api
+php artisan biztrack:debug-panel on --hours=6   # 1 to 24 hours; 6 if not given
+php artisan biztrack:debug-panel status
+php artisan biztrack:debug-panel off
+```
+
+While it is closed, the Debug rail entry is hidden and every `/api/v1/debug`
+route answers 404, the super admin included. With `APP_ENV=local` the flag is
+not needed.
 
 ### From a terminal
 
 ```bash
 cd api
-php artisan biztrack:payment-gateway status   # mode, config check, payments still waiting
-php artisan biztrack:payment-gateway test     # one signed call to KwikPay /api/me
-php artisan biztrack:payment-gateway on       # → kwikpay (refused if credentials are missing)
-php artisan biztrack:payment-gateway off      # → simulated
+php artisan biztrack:payment-gateway status       # mode, charge, config check, payments still waiting
+php artisan biztrack:payment-gateway test         # one signed call to KwikPay /api/me
+php artisan biztrack:payment-gateway on           # → kwikpay (refused if credentials are missing)
+php artisan biztrack:payment-gateway off          # → simulated
+php artisan biztrack:payment-gateway test-charge  # KwikPay collects the test amount (₱1.00)
+php artisan biztrack:payment-gateway full-charge  # KwikPay collects the full bill
 ```
 
 ### Over the API (super admin only)
 
-A debug screen will be built on these later.
-
 | | |
 |---|---|
-| `GET /api/v1/admin/payment-gateway` | Mode, default, whether KwikPay is configured (missing keys by name), the callback URL KwikPay must reach, how many online payments are still waiting, and the ones flagged for staff. |
-| `PUT /api/v1/admin/payment-gateway` `{"mode":"kwikpay"}` | Switches. Returns 422 with a plain message if credentials are missing. |
+| `GET /api/v1/admin/payment-gateway` | Mode and charge (`test` or `full`), their defaults from env, the test amount, whether KwikPay is configured (missing keys by name), the callback URL KwikPay must reach, how many online payments are still waiting, and the ones flagged for staff. |
+| `PUT /api/v1/admin/payment-gateway` `{"mode":"kwikpay"}`, `{"charge":"full"}` or both | Switches. At least one of the two is required, and a request with only `mode` works as it always has. Returns 422 with a plain message if credentials are missing; a request for both that is refused on the mode changes neither. |
 | `POST /api/v1/admin/payment-gateway/test` | Calls KwikPay `/api/me` and reports whether KwikPay accepted this server's address and signature. |
 
-Every other role gets 403.
+Every other role gets 403. The Debug page's `GET/PUT /api/v1/debug/payments`
+and `POST /api/v1/debug/payments/test` take the same bodies and answer the
+same way, behind the Debug page's gate instead.
+
+### What the owner sees
+
+While payments go through KwikPay and the test charge is on, the pay screen
+says before the owner pays: "Test charge. You will be charged ₱1.00 for this
+bill instead of ₱3,596.00. The bill and your receipt keep the full amount."
+The waiting screen shows the amount the payment was opened for, with "Test
+charge. Your bill of ₱3,596.00 is recorded in full." The owner's API gets
+only `test_charge` on `payment-options` and `gateway_amount` on their own
+payments, never the switches themselves.
 
 ---
 
@@ -215,27 +275,44 @@ Ask the KwikPay account manager for these before switching on:
 
 ## 6. Presentation checklist
 
-- [ ] `php artisan biztrack:payment-gateway status` says **New payments:
-      simulated**. If it does not, run `php artisan biztrack:payment-gateway off`.
-      Run this on the **server being presented** (for the tunnel,
-      in `biztrack-demo/api`), because the switch is stored in that server's
-      database.
-- [ ] The pay screen shows **GCash, Maya, Card** and the line "This is a
-      simulated payment. No real charge is made."
+The defense takes real payments through KwikPay at ₱1. Run these on the
+**server being presented** (for the tunnel, in `biztrack-demo/api`), because
+both switches and the Debug page's flag are stored in that server's database.
+
+- [ ] `php artisan biztrack:debug-panel on --hours=6` shortly before the
+      defense, so the super admin has the Debug page. It closes by itself;
+      `off` closes it sooner.
+- [ ] On the Debug page, under **Payments**: **KwikPay** is on, and
+      **₱1.00 test charge** is on. (Or from a terminal:
+      `biztrack:payment-gateway on` and `biztrack:payment-gateway test-charge`,
+      then `status` says **KwikPay collects: a ₱1.00 test charge**.)
+- [ ] **Test connection** says "Connected".
+- [ ] The owner's pay screen shows **GCash, Maya, QR Ph, GoTyme** and the
+      "Test charge" note naming ₱1.00.
 - [ ] "Online payments still waiting" is 0, or each waiting one is
-      understood. Switching off does not cancel them.
+      understood. Switching does not cancel them.
 - [ ] `KWIKPAY_FAKE` is not set on the presented server unless the practice
       flow is being shown on purpose.
+
+If a panelist asks to see the real amount: Debug page → **The full bill** →
+**Charge the full bill**. The next payment collects the whole bill; one
+already started still asks for ₱1.00. Switch back to **₱1.00 test charge**
+afterwards.
+
+To show the old no-money flow instead, switch **How owners pay** to
+**Simulated**: the pay screen then shows **GCash, Maya, Card** and "This is a
+simulated payment. No real charge is made.".
 
 ## 7. Where the code is
 
 | | |
 |---|---|
-| Switch | `api/app/Support/PaymentMode.php`, `settings` table, `api/app/Console/Commands/PaymentGatewaySwitch.php`, `api/app/Http/Controllers/Api/Admin/PaymentGatewayController.php` |
+| Switches | `api/app/Support/PaymentMode.php` (mode and charge), `settings` table, `api/app/Console/Commands/PaymentGatewaySwitch.php`, `api/app/Http/Controllers/Api/Admin/PaymentGatewayController.php` |
+| Debug page | `api/app/Support/DebugPanel.php` (who may open it), `api/app/Http/Middleware/EnsureDebugPanelOpen.php`, `api/routes/debug.php`, `api/app/Http/Controllers/Api/Debug/`, `api/app/Console/Commands/DebugPanelSwitch.php`, `web/src/pages/admin/debug/` |
 | KwikPay | `api/app/Services/KwikPay/` (`Signature`, `KwikPayClient`, `KwikPayGateway`, `KwikPayCallback`) |
 | Callback | `api/app/Http/Controllers/Api/KwikPayCallbackController.php` |
 | Reconciliation | `api/app/Console/Commands/ReconcilePayments.php`, scheduled in `api/routes/console.php` |
 | Practice KwikPay | `api/app/Http/Controllers/FakeKwikPayController.php`, `api/app/Services/KwikPay/FakeKwikPay.php` |
 | Simulated | `api/app/Services/PaymentGateway.php` (unchanged behaviour) |
 | Owner screen | `web/src/pages/applicant/PayPage.tsx` |
-| Tests | `api/tests/Unit/KwikPaySignatureTest.php`, `api/tests/Feature/KwikPayGatewayTest.php`, `api/tests/Feature/FakeKwikPayTest.php`, `web/e2e/payment-gateway.spec.ts` |
+| Tests | `api/tests/Unit/KwikPaySignatureTest.php`, `api/tests/Feature/KwikPayGatewayTest.php`, `api/tests/Feature/FakeKwikPayTest.php`, `api/tests/Feature/DebugPanelTest.php`, `web/e2e/payment-gateway.spec.ts`, `web/e2e/debug-payments.spec.ts` |
