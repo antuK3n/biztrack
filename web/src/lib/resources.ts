@@ -1,3 +1,4 @@
+import type { ZoningFactValues } from './zoningCheck'
 import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
@@ -429,6 +430,8 @@ export const applications = {
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
       data_privacy_consent?: boolean
+      /** The applicant's answers to the zoning ordinance's questions. */
+      zoning_facts?: ZoningFactValues
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),

@@ -1,3 +1,5 @@
+import type { ZoningCheckResult, ZoningFactValues } from './zoningCheck'
+
 export interface Department {
   id: number
   code: string
@@ -1262,6 +1264,12 @@ export interface ApplicationCorrection {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /**
+   * The applicant's answers to the zoning ordinance's questions (see
+   * lib/zoningCheck.ts). Optional and nullable: a filing nobody has asked
+   * them of carries none.
+   */
+  zoning_facts?: ZoningFactValues | null
   /**
    * What was corrected after a return, oldest first.
    *
@@ -2932,6 +2940,12 @@ export interface OfficeForm {
    * is true of CHO, BFP, OBO and CENRO.
    */
   requirements?: OfficeFormRequirement[] | null
+  /**
+   * City Ordinance No. 24-2018 applied rule by rule — on CPDD's sheet only,
+   * null on the other four. The same evaluation the applicant's wizard reads,
+   * so the early warning and the officer's cited checklist cannot disagree.
+   */
+  zoning_check?: ZoningCheckResult | null
   /**
    * What the applicant changed on the rows this office last returned.
    *
