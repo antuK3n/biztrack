@@ -108,12 +108,15 @@ interface LocationInsightsData {
    *
    * A lookup, never a determination — `ZoningConformance` in the API carries
    * the four reasons the ordinance cannot be automated into a verdict. Hence
-   * `listed` / `not_listed` / `undetermined` rather than conforming and
-   * prohibited, and hence `matched_use`: quoting the clause that matched makes
-   * a bad match visible to the applicant instead of hiding it behind a word.
+   * `listed` / `possible` / `not_listed` / `undetermined` rather than
+   * conforming and prohibited, and hence `matched_use`: quoting the clause
+   * that matched makes a bad match visible to the applicant instead of hiding
+   * it behind a word. `possible` is a line the trade may be (a "like:" list's
+   * example, a different scale) — CPDO decides, and it is never shown as
+   * allowed.
    */
   zoning: {
-    verdict: 'listed' | 'not_listed' | 'undetermined'
+    verdict: 'listed' | 'possible' | 'not_listed' | 'undetermined'
     reason: string
     trade: string | null
     zones: {
@@ -121,6 +124,8 @@ interface LocationInsightsData {
       name: string
       use_count: number
       listed: boolean
+      /** The zone's list may hold the trade; CPDO decides. Optional for older responses. */
+      possible?: boolean
       matched_use: string | null
       /**
        * Whether Art. IV §5's TEXT places this zone in the barangay. The
@@ -580,9 +585,15 @@ export function ZoningConformanceNote({
   if (!zoning || zoning.verdict === 'undetermined') return null
 
   const listed = zoning.verdict === 'listed'
+  /*
+   * A line the trade may be, not one that names it: a vet beside "medical,
+   * dental and similar clinics". Said as "may be", in the royal of a thing
+   * CPDO checks — never the green of allowed, never the amber of not listed.
+   */
+  const possible = zoning.verdict === 'possible'
   // The zones the verdict was decided on: the text's, not a sheet-only one.
   const governing = zoning.zones.filter((z) => z.governing !== false)
-  const matched = governing.find((z) => z.listed)
+  const matched = governing.find((z) => (possible ? z.possible : z.listed))
   const where = barangayName ?? 'this barangay'
   /*
    * Zone names are the plain ones (lib/zoningNames.ts), never the codes: this
@@ -602,12 +613,16 @@ export function ZoningConformanceNote({
       data-testid="zoning-note"
       data-verdict={zoning.verdict}
       className={`rounded-xl border-2 p-4 sm:p-5 ${
-        listed ? 'border-[#12724a] bg-s-green-tint' : 'border-s-yellow bg-s-yellow-tint'
+        listed
+          ? 'border-[#12724a] bg-s-green-tint'
+          : possible
+            ? 'border-royal bg-royal-tint'
+            : 'border-s-yellow bg-s-yellow-tint'
       }`}
     >
       <p
         className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] ${
-          listed ? 'text-[#12724a]' : 'text-s-yellow-ink'
+          listed ? 'text-[#12724a]' : possible ? 'text-royal-deep' : 'text-s-yellow-ink'
         }`}
       >
         {listed ? (
@@ -615,7 +630,7 @@ export function ZoningConformanceNote({
         ) : (
           <InfoCircleIcon size={16} aria-hidden="true" />
         )}
-        {listed ? 'Allowed here' : 'Not on the zoning list'}
+        {listed ? 'Allowed here' : possible ? 'May be on the zoning list' : 'Not on the zoning list'}
       </p>
       {/*
         * Plain, and still only what the rules say.
@@ -633,10 +648,14 @@ export function ZoningConformanceNote({
           ? matched
             ? `Your type of business is allowed in ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
             : `Your type of business is allowed in ${where}.`
-          : `Your type of business is not on the zoning rules’ list for ${where}.`}
+          : possible
+            ? matched
+              ? `Your type of business may fit ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
+              : `Your type of business may fit a zone in ${where}.`
+            : `Your type of business is not on the zoning rules’ list for ${where}.`}
       </p>
 
-      {listed && matched?.matched_use && (
+      {(listed || possible) && matched?.matched_use && (
         /*
          * The clause that matched, quoted, because the match is a text
          * heuristic and can be wrong — a dairy MANUFACTURER can match a clause
@@ -648,10 +667,11 @@ export function ZoningConformanceNote({
          */
         <p className="mt-2 text-base text-ink-secondary" title={matched.matched_use}>
           The rules list: “{firstClause(matched.matched_use)}”
+          {possible && ', which may or may not take in yours.'}
         </p>
       )}
 
-      {!listed && zoneNames.length > 0 && (
+      {!listed && !possible && zoneNames.length > 0 && (
         /*
          * Not alarming, because it is not a refusal: Annex A leaves the lists
          * open, so absence from one is not prohibition. The zones are named so
@@ -679,7 +699,7 @@ export function ZoningConformanceNote({
         */}
       <p className="mt-3 text-sm text-ink">
         The City&rsquo;s zoning office (CPDO) checks your exact spot and makes the final call.
-        {!listed && (
+        {!listed && !possible && (
           <>
             {' '}
             <strong className="font-semibold">

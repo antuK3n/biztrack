@@ -104,6 +104,63 @@ test.describe('the applicant', () => {
     await rules.scrollIntoViewIfNeeded()
     await shot(page, 'applicant-location-zoning-step')
   })
+
+  /*
+   * The trade is read against the ordinance's own words, never one shared
+   * word. A gasoline station used to read as allowed in Maximum R-2 because
+   * "station" is also in "Water refilling Station"; a veterinary clinic is not
+   * named anywhere, but sits beside "medical, dental and similar clinics", which
+   * CPDO — not the screen — decides it is like.
+   */
+  test('says a look-alike trade may be on the list, and never shows a one-word match as allowed', async ({ page }) => {
+    await page.getByRole('checkbox').first().check()
+    await page.getByRole('button', { name: /next/i }).click()
+    await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+    const search = page.getByLabel(/search for the one line of business/i)
+    const pick = async (words: string) => {
+      await search.click()
+      await search.fill(words)
+      await expect(page.getByText(new RegExp(`trades matching “${words}”`))).toBeVisible()
+      await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
+      // Products / Services opens the map; the note under it follows the pin.
+      await page.getByRole('textbox', { name: /products \/ services/i }).first().fill('consultations')
+    }
+    const rules = page.getByTestId('zoning-rules-applicant')
+
+    // A veterinary clinic in Longos: no list names it; "medical, dental and
+    // similar clinics" may take it in. The map opens on City Hall, in Longos.
+    await pick('veterinary')
+    await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+    const map = page.locator('.leaflet-container')
+    await map.scrollIntoViewIfNeeded()
+    await map.click()
+    await expect(page.getByText(/pin placed/i)).toBeVisible()
+
+    const note = page.getByTestId('zoning-note')
+    await expect(note).toHaveAttribute('data-verdict', 'possible', { timeout: 20_000 })
+    await expect(note).toContainText('May be on the zoning list')
+    await expect(note).toContainText(/similar clinic/i)
+    await expect(note).not.toContainText('Allowed here')
+
+    const use = finding(rules, 'V-2')
+    await expect(use).toHaveAttribute('data-status', 'review', { timeout: 20_000 })
+    await expect(use).toContainText('Possibly on the zones’ lists')
+    await expect(use).toContainText('CPDO checks')
+    await note.scrollIntoViewIfNeeded()
+    await shot(page, 'applicant-possible-match')
+    await shot(page, 'applicant-possible-match-note', note)
+
+    // A gasoline station in Muzon (Maximum R-2 and Institutional): it shares
+    // only "station" with "Water refilling Station", and is not on the list.
+    await page.getByRole('button', { name: 'Change line of business' }).click()
+    await pick('gasoline')
+    await page.getByLabel(/barangay name/i).selectOption({ label: 'Muzon' })
+    const gasoline = finding(rules, 'V-2')
+    await expect(gasoline).toContainText(/not on the list for any zone in muzon/i, { timeout: 20_000 })
+    await expect(gasoline).not.toContainText(/water refilling/i)
+    await expect(gasoline).not.toHaveAttribute('data-status', 'met')
+  })
 })
 
 /**
