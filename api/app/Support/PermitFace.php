@@ -6,6 +6,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
 use App\Models\BusinessLine;
+use App\Models\OfficeSignatory;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
@@ -74,17 +75,35 @@ class PermitFace
     ];
 
     /**
-     * The City Mayor, as the certificate prints it.
+     * The role line the City Mayor signs over, and the office whose
+     * signatories hold the Mayor's name.
      *
-     * One constant rather than a column, because the LGU has one mayor at a
-     * time and a permit freezes the name at signature anyway — so the only
-     * thing a table would buy is somewhere for the name to go stale
-     * independently of the permits carrying it.
+     * The NAME is data, not code: it is the BPLO's `office_signatories` row
+     * with this role, seeded as "Hon. Jeannie Sandoval". Officeholders rotate,
+     * and a name in a constant keeps printing a former mayor until somebody
+     * edits code and redeploys; a row is changed with
+     * `php artisan biztrack:signatory BPLO "City Mayor" "<name>"`. Issued
+     * permits keep the name they were signed with, because it is frozen onto
+     * `issued_details` at issue.
      *
      * "Hon." is the Philippine civic form of address and belongs to the name
      * rather than to the role line beneath it, which reads "City Mayor".
      */
-    public const MAYOR = 'Hon. Jeannie Sandoval';
+    public const MAYOR_ROLE = 'City Mayor';
+
+    public const MAYOR_OFFICE = 'BPLO';
+
+    /** The City Mayor's name as the signatories hold it now; null prints a ruled line. */
+    public static function mayorName(): ?string
+    {
+        $name = OfficeSignatory::query()
+            ->current()
+            ->where('role', self::MAYOR_ROLE)
+            ->whereHas('department', fn ($q) => $q->where('code', self::MAYOR_OFFICE))
+            ->value('name');
+
+        return is_string($name) && trim($name) !== '' ? trim($name) : null;
+    }
 
     /**
      * What is true of this business right now.
@@ -156,7 +175,7 @@ class PermitFace
              * still carries, and answers null once that filing is gone.
              */
             return $face + [
-                'mayor_name' => $frozen['mayor_name'] ?? self::MAYOR,
+                'mayor_name' => $frozen['mayor_name'] ?? self::mayorName(),
                 'officer_in_charge' => $frozen['officer_in_charge']
                     ?? self::officerInChargeFor($permit->application, $permit->permitType)?->fullName(),
             ];
@@ -178,7 +197,7 @@ class PermitFace
     public static function captureSignatories(?User $officer): array
     {
         return [
-            'mayor_name' => self::MAYOR,
+            'mayor_name' => self::mayorName(),
             'officer_in_charge' => $officer?->fullName(),
         ];
     }

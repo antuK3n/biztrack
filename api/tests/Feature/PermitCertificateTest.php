@@ -2,6 +2,7 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\OfficeSignatory;
@@ -9,6 +10,7 @@ use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\PermitFace;
 use Smalot\PdfParser\Parser;
 
 /*
@@ -141,13 +143,44 @@ it('prints the office signatory on file rather than a name in the template', fun
  * mayor (Jeannie Sandoval) and officer in charge, sa lahat na yan ng permits"*
  * [client, 1 October 2026].
  *
- * These two are not office_signatories rows. The Mayor is the city's, not any
- * one office's, and the officer in charge is per PERMIT — the person holding
- * the issuing office's assignment on the filing — so neither can come from a
- * table keyed by department. They are frozen onto `issued_details` at issue
- * beside the business face, and these tests pin the three things that can go
+ * The Mayor's NAME is data: the BPLO's `office_signatories` row with the role
+ * "City Mayor" (PermitFace::mayorName), so a new mayor is one edit, not a code
+ * change. The officer in charge is per PERMIT — the person holding the issuing
+ * office's assignment on the filing. Both are frozen onto `issued_details` at
+ * issue beside the business face, and these tests pin the things that can go
  * wrong with that: the wrong name, no name, and a name that keeps changing.
  */
+
+it('takes the Mayor from the signatories, and keeps an issued permit’s Mayor when the row changes', function () {
+    $row = OfficeSignatory::query()
+        ->where('role', 'City Mayor')
+        ->whereHas('department', fn ($q) => $q->where('code', 'BPLO'))
+        ->firstOrFail();
+    expect($row->name)->toBe('Hon. Jeannie Sandoval')
+        ->and(PermitFace::mayorName())->toBe('Hon. Jeannie Sandoval');
+
+    $permit = ownersPermit();
+    $permit->update(['issued_details' => array_merge(
+        $permit->issued_details ?? [],
+        PermitFace::captureSignatories(null),
+    )]);
+
+    $this->artisan('biztrack:signatory', ['office' => 'BPLO', 'role' => 'City Mayor', 'name' => 'Hon. Next Mayor'])
+        ->assertSuccessful();
+
+    expect(PermitFace::mayorName())->toBe('Hon. Next Mayor')
+        ->and(PermitFace::captureSignatories(null)['mayor_name'])->toBe('Hon. Next Mayor');
+
+    // The permit already signed keeps the Mayor who signed it.
+    authAs('owner@biztrack.local');
+    $roles = array_column(
+        $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate.signatories'),
+        'name',
+        'role',
+    );
+    expect($roles['City Mayor'])->toBe('Hon. Jeannie Sandoval');
+    expect(AuditLog::where('action', 'signatory.updated')->count())->toBe(1);
+});
 
 it('prints the Mayor and the filing’s officer in charge on every permit', function () {
     $permit = ownersPermit();
