@@ -1459,7 +1459,7 @@ final class ZoningCheck
             $since <= 2018 => ['review', sprintf('Operating since %d, before the ordinance: it may continue as a non-conforming use. CPDO issues a Notice of Non-Conformance citing what it does not conform to, and a Certificate of Non-Conformance valid one year and renewed yearly.', $since)],
             default => ['review', sprintf('Started in %d, after the ordinance, in a zone that does not list the trade: the non-conforming rules do not cover it. CPDO decides whether it fits a listed use or needed an exception.', $since)],
         };
-        $this->add(['IX-12-0', 'IX-11-NOTICE', 'IX-11-VALID', 'IX-10.2-D', 'III-1-NCU', 'III-1-CNC', 'III-1-NNC', 'IX-14-1b', 'IX-28'], $status, $reason,
+        $this->add(['IX-12-0', 'IX-11-NOTICE', 'IX-11-VALID', 'IX-10.2-D', 'III-1-NCU', 'III-1-CNC', 'III-1-NNC', 'IX-14-1b', 'IX-28', 'PREAMBLE'], $status, $reason,
             ['group' => 'nonconforming', 'asks' => ['operating_since_year']]);
 
         if (is_numeric($since) && $since > 2018) {

@@ -29,7 +29,7 @@ it('gives every rule in the inventory one of the four statuses, with what that s
     foreach ($rules as $rule) {
         expect($rule['status'])->toBeIn(['implemented', 'shown', 'not_applicable', 'question'], $rule['id']);
         expect($rule['verbatim'] ?? '')->not->toBe('', "{$rule['id']} has no verbatim text");
-        expect($rule['citation'] ?? '')->toMatch('/^(Art\. [IVX]+|Annex [A-C])/', $rule['id']);
+        expect($rule['citation'] ?? '')->toMatch('/^(Art\. [IVX]+|Annex [A-C]|Preamble)/', $rule['id']);
         match ($rule['status']) {
             'implemented' => expect($rule['implemented']['check'] ?? '')->not->toBe('', $rule['id'])
                 ->and($rule['implemented']['test'] ?? '')->not->toBe('', $rule['id']),
