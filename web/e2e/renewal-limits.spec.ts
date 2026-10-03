@@ -88,7 +88,7 @@ test.describe('renewal limits, as the applicant sees them', () => {
     // Business 1 is the seeded owner's shop, and the one the fixture
     // attached the long-lapsed sanitary permit to.
     await modal
-      .getByLabel(/which business are you renewing/i)
+      .getByRole('combobox', { name: /^business\b/i })
       .selectOption({ value: '1' })
 
     const blocked = modal.getByText(/can no longer be renewed/i).first()

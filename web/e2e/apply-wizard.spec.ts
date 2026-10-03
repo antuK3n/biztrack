@@ -1751,7 +1751,7 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
   const modal = page.getByRole('dialog', { name })
   await expect(modal).toBeVisible({ timeout: 30_000 })
 
-  await modal.getByLabel(new RegExp(`which business are you ${type === 'renewal' ? 'renewing' : 'amending'}`, 'i')).selectOption({ value: '1' })
+  await modal.getByRole('combobox', { name: /^business\b/i }).selectOption({ value: '1' })
 
   /*
    * Checkboxes in a labelled list, not radios in a radiogroup. A renewal covers
@@ -2365,7 +2365,7 @@ test('the business is reached on a +63 mobile and a grouped landline, never an 0
    * painting the boxes red across the nine invalid lengths on the way to a
    * valid one teaches an applicant to ignore the colour.
    */
-  const mobileError = page.getByRole('alert').filter({ hasText: /10 digits after \+63/i })
+  const mobileError = page.getByRole('alert').filter({ hasText: /enter a valid mobile number/i })
   for (const box of mobileBoxes) await box.fill('')
   await first.fill('812')
   await second.fill('345')
