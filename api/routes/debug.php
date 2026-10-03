@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Debug\FilingsController;
 use App\Http\Controllers\Api\Debug\HealthController;
 use App\Http\Controllers\Api\Debug\PanelController;
 use App\Http\Controllers\Api\Debug\PaymentsController;
@@ -45,4 +46,10 @@ Route::prefix('debug')->middleware('debug.panel')->group(function () {
     // System switches: sign-in codes, captcha, office-hours notice, pretend date.
     Route::get('switches', [SwitchesController::class, 'show']);
     Route::put('switches', [SwitchesController::class, 'update']);
+
+    // Move a filing along: the offices' own steps, the super admin acting for them.
+    Route::get('filings', [FilingsController::class, 'index']);
+    Route::get('filings/{application}', [FilingsController::class, 'show'])->whereNumber('application');
+    Route::post('filings/{application}/steps', [FilingsController::class, 'step'])->whereNumber('application');
+    Route::post('filings/{application}/advance', [FilingsController::class, 'advance'])->whereNumber('application');
 });
