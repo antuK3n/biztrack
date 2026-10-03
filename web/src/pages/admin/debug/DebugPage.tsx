@@ -7,6 +7,7 @@ import { useAsync } from '../../../lib/useAsync'
 import { useAuth } from '../../../stores/auth'
 import { canUseDebug } from './access'
 import { debugPanel } from './api'
+import { HealthSection } from './HealthSection'
 import { PaymentsSection } from './PaymentsSection'
 
 /*
@@ -51,6 +52,13 @@ const SECTIONS: DebugSection[] = [
     summary:
       'How owners pay, and what KwikPay collects. Changes apply to the next payment; none touches a payment already started.',
     body: () => <PaymentsSection />,
+  },
+  {
+    id: 'health',
+    title: 'Health',
+    summary:
+      'Whether everything this server needs is running, and when each was last seen. Reading it changes nothing.',
+    body: () => <HealthSection />,
   },
 ]
 
