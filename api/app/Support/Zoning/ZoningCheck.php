@@ -287,7 +287,8 @@ final class ZoningCheck
         // A vehicle trade not yet told what its vehicles are for is asked on
         // this finding: the answer decides which listed use it is.
         $decides = $phrases !== [] ? ['vehicle_use'] : array_merge($reading['asks'],
-            $vehicle === null && $principal['psic']->code !== '00000' && $this->isVehicleTrade($principal['psic']) ? ['vehicle_use'] : []);
+            $vehicle === null && $this->isVehicleTrade($principal['psic'])
+                && ($principal['psic']->code !== '00000' || $this->vehicleKindsNamed() !== []) ? ['vehicle_use'] : []);
         $pending = $phrases === [] ? $reading['pending'] : null;
 
         $certain = array_filter($hits, fn ($h) => $h['certain']);
@@ -1018,10 +1019,23 @@ final class ZoningCheck
         if ($this->ctx->fact('leases_what') === 'parking' && in_array('68100', $this->ctx->psicCodes(), true)) {
             return 'parking_lot';
         }
-        // Description words decide only for a vehicle trade, and only a kind
-        // that is that trade's own (Ordinance::VEHICLE_INFERENCES): "with
-        // parking lot" beside a gasoline station says it has a car park, and
-        // beside a trucking company it is still a trucking garage.
+        $named = $this->vehicleKindsNamed();
+
+        return count($named) === 1 ? $named[0] : null;
+    }
+
+    /**
+     * The vehicle uses the lines' own descriptions name. Description words
+     * count only for a vehicle trade, and only a kind that is that trade's
+     * own (Ordinance::VEHICLE_INFERENCES): "with parking lot" beside a
+     * gasoline station says it has a car park, and beside a trucking company
+     * it is still a trucking garage. Every kind named is returned, not the
+     * first in a fixed order; vehicleUse() infers one only when there is one.
+     *
+     * @return list<string>
+     */
+    private function vehicleKindsNamed(): array
+    {
         $patterns = [
             'parking_building' => '/\bparking\s+building\b/',
             'parking_lot' => '/\bpay\s*parking\b|\bparking\s+(?:lot|area|space)s?\s+for\s+rent\b|\bparking\s+lot\b/',
@@ -1030,16 +1044,23 @@ final class ZoningCheck
             'tricycle_terminal' => '/\b(?:tricycle|pedicab)\s+terminal\b/',
             'trucking_garage' => '/\b(?:trucking|hauling)\b/',
         ];
+        // Every kind the words name, not the first in a fixed order: when
+        // they name two ("trucking with parking lot"), none is inferred and
+        // the question is asked. A "pay parking building" is one kind.
+        $named = [];
         foreach ($this->ctx->lines as $line) {
             $words = mb_strtolower((string) ($line['description'] ?? ''));
             foreach (Ordinance::VEHICLE_INFERENCES[(string) $line['psic']->code] ?? [] as $kind) {
                 if (preg_match($patterns[$kind], $words) === 1) {
-                    return $kind;
+                    $named[$kind] = true;
                 }
             }
         }
+        if (isset($named['parking_building'])) {
+            unset($named['parking_lot']);
+        }
 
-        return null;
+        return array_keys($named);
     }
 
     /**
