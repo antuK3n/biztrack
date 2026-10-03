@@ -5324,6 +5324,22 @@ export function ApplyWizard() {
     return permitTypes.find((pt) => pt.code === code)?.department?.name ?? null
   }, [priorPermitChoice, permitTypes])
 
+  /**
+   * Who receives this filing when Submit is pressed.
+   *
+   * BPLO for a new application and an amendment, both of which go to its
+   * counter first. For a clearance-only renewal it is the permit's OWN
+   * office: BPLO is never routed one of those at all
+   * (`WorkflowService::submit`), so naming it in the confirmation told the
+   * applicant their papers were going somewhere they were not — at the one
+   * moment they are committing.
+   *
+   * `renewingOffice` reads `permit_types.department`, so CHO, BFP, OBO,
+   * CENRO and CPDD each name themselves without a table in the browser that
+   * could fall out of step with the register.
+   */
+  const submitOffice = (clearanceOnlyRenewal ? renewingOffice : null) ?? 'BPLO'
+
   /*
    * Item 110 — the two lines the Business Information summary prints back.
    *
@@ -9302,10 +9318,20 @@ export function ApplyWizard() {
          * a filing that sits still with no explanation is the state testers
          * report as broken.
          */}
+        {/*
+          Same correction as the submit confirmation above it: this named BPLO,
+          a Tax Order of Payment and five clearances on every filing, and a
+          clearance-only renewal has none of the three. It goes to the permit's
+          own office, is never billed at submission, and carries one permit.
+        */}
         <p className="mt-4 text-sm text-ink-secondary">
-          BPLO is now reviewing your form. No action needed from you right now — we will tell you
-          when your Tax Order of Payment is ready, and your five LGU clearances open once it is
-          paid.
+          {clearanceOnlyRenewal
+            ? `${submitOffice} is now reviewing your application and will arrange an ` +
+              'inspection. No action needed from you right now — nothing is due today, and ' +
+              'the fee joins your next business permit renewal in January.'
+            : 'BPLO is now reviewing your form. No action needed from you right now — we will ' +
+              'tell you when your Tax Order of Payment is ready, and your five LGU clearances ' +
+              'open once it is paid.'}
         </p>
         <div className="mt-3 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
@@ -13235,7 +13261,27 @@ export function ApplyWizard() {
            * under-describes it, and this one would have promised a debit that
            * the API now refuses at this stage.
            */}
-          <p className="pt-4 text-center text-lg">Submit this application to BPLO for approval?</p>
+          {/*
+            ── Named, because BPLO is not always who receives it ─────────────
+            *
+            * This said BPLO on every filing. On a clearance-only renewal BPLO
+            * is never routed it at all (`WorkflowService::submit`) — the
+            * permit's own office reads it and inspects the premises — so the
+            * confirmation named the wrong recipient at the moment the
+            * applicant commits, which is the worst moment to be wrong about
+            * who is receiving their papers.
+            *
+            * Reported on a Sanitary renewal, 4 October 2026. The same was true
+            * of every other clearance: CHO, BFP, OBO, CENRO and CPDD each read
+            * their own.
+            *
+            * `submitOffice` falls back to BPLO, which is right for the filings
+            * BPLO really does read — a new application and an amendment both
+            * go to its counter first.
+            */}
+          <p className="pt-4 text-center text-lg">
+            Submit this application to {submitOffice} for approval?
+          </p>
           {/*
             ── What the press costs, said before it is pressed ────────────────
             *
@@ -13258,8 +13304,9 @@ export function ApplyWizard() {
           <div className="mb-2 rounded-lg border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm text-amber-900">
             <p className="font-bold">Please check your answers first.</p>
             <p className="mt-1">
-              Once you submit, you will not be able to change your answers yourself. If BPLO needs a
-              correction, they will return the application to you with a note saying what to fix.
+              Once you submit, you will not be able to change your answers yourself. If{' '}
+              {submitOffice} needs a correction, they will return the application to you with a
+              note saying what to fix.
             </p>
             <p className="mt-2">
               Press <span className="font-semibold">Cancel</span> if you would like to look over
