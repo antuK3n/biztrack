@@ -273,6 +273,8 @@ it('returns the form to the applicant only with a note, through returnMainForm',
     // Nothing left for the page to press: it is the applicant's move.
     $filing = test()->getJson("/api/v1/debug/filings/{$app->id}")->assertOk();
     expect($filing->json('data.steps'))->toBe([])
+        // No "Advance to" either: a button that could only stop at once is not offered.
+        ->and($filing->json('data.targets'))->toBe([])
         ->and($filing->json('data.blockers.0'))->toContain('when the applicant resubmits');
 });
 

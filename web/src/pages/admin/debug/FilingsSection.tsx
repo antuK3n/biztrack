@@ -39,24 +39,34 @@ import { CheckCircleIcon, XCircleIcon } from '../../../components/icons'
 
 export function FilingsSection() {
   const [selected, setSelected] = useState<number | null>(null)
+  /* Bumped after every step, so the list's status chips do not go stale. */
+  const [moves, setMoves] = useState(0)
 
   return (
     <div className="space-y-5">
-      <FindFiling selected={selected} onChoose={setSelected} />
+      <FindFiling selected={selected} onChoose={setSelected} moves={moves} />
       {/* Keyed, so choosing another filing starts its log and note afresh. */}
-      {selected !== null && <MoveFiling key={selected} id={selected} />}
+      {selected !== null && <MoveFiling key={selected} id={selected} onMoved={() => setMoves((n) => n + 1)} />}
     </div>
   )
 }
 
 /* ── Finding the filing ─────────────────────────────────────────────────── */
 
-function FindFiling({ selected, onChoose }: { selected: number | null; onChoose: (id: number) => void }) {
+function FindFiling({
+  selected,
+  onChoose,
+  moves,
+}: {
+  selected: number | null
+  onChoose: (id: number) => void
+  moves: number
+}) {
   const inputId = useId()
   const hintId = useId()
   const [typed, setTyped] = useState('')
   const [query, setQuery] = useState('')
-  const hits = useAsync(() => debugFilings.search(query), [query])
+  const hits = useAsync(() => debugFilings.search(query), [query, moves])
 
   function find(event: FormEvent) {
     event.preventDefault()
@@ -153,7 +163,7 @@ interface LogEntry {
   reached?: boolean
 }
 
-function MoveFiling({ id }: { id: number }) {
+function MoveFiling({ id, onMoved }: { id: number; onMoved: () => void }) {
   const filing = useAsync(() => debugFilings.show(id), [id])
   const noteId = useId()
   const noteHintId = useId()
@@ -188,6 +198,7 @@ function MoveFiling({ id }: { id: number }) {
         note: step.note && trimmed !== '' ? trimmed : undefined,
       })
       filing.setData(outcome.filing)
+      onMoved()
       record({ title: outcome.result.label, results: [outcome.result], stopped: null })
       if (outcome.result.ok && step.note) setNote('')
     } catch (err) {
@@ -210,6 +221,7 @@ function MoveFiling({ id }: { id: number }) {
     try {
       const outcome = await debugFilings.advance(id, to)
       filing.setData(outcome.filing)
+      onMoved()
       record({ title: `Advance to ${label}`, results: outcome.results, stopped: outcome.stopped, reached: outcome.reached })
     } catch (err) {
       setError(toApiError(err).message)
