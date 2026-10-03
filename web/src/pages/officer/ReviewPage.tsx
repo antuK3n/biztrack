@@ -1,3 +1,4 @@
+import { OfficerZoningChecklist } from '../../components/ZoningRuleChecklist'
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -5681,6 +5682,22 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     rows={form.requirements}
                     corrections={form.corrections ?? []}
                   />
+                )}
+                {/*
+                  City Ordinance No. 24-2018 rule by rule — the cited checklist
+                  CPDO decides against, from the same evaluator the applicant's
+                  early warning came from. CPDO records what only it can (the
+                  lot's zone first) and may correct any answer with a measured
+                  one; read-only once this office's review is in.
+                */}
+                {form.permit_type_code === 'ZONING' && form.zoning_check && (
+                  <div className="mt-4">
+                    <OfficerZoningChecklist
+                      applicationId={app.id}
+                      initial={form.zoning_check}
+                      readOnly={!owesReview}
+                    />
+                  </div>
                 )}
                 <p className="mt-3 text-xs text-ink-muted">
                   The applicant’s own filing — address, line of business, uploaded requirements and

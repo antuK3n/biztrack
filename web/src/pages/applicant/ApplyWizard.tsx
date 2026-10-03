@@ -90,6 +90,13 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * paragraph above warns about.
  */
 import BarangayZoningMap from './BarangayZoningMap'
+import { ZoningRuleChecklist } from '../../components/ZoningRuleChecklist'
+import {
+  fetchZoningCheck,
+  useZoningCheck,
+  type ZoningCheckQuery,
+  type ZoningFactValues,
+} from '../../lib/zoningCheck'
 import {
   LocationInsightsPanel,
   ZoningConformanceNote,
@@ -3775,6 +3782,15 @@ export function ApplyWizard() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
   /*
+   * The answers City Ordinance No. 24-2018 needs that nothing else on the
+   * form asks: whether the business is run from a home, how far it is from
+   * the nearest school, whether the lot is beside a creek. Asked inside the
+   * zoning checklist, under the rule that needs each one, never as a block of
+   * their own. Saved with the draft like the consent tick, for the same reason
+   * that one is: an answer that is not watched by `snapshot` is never saved.
+   */
+  const [zoningFacts, setZoningFacts] = useState<ZoningFactValues>({})
+  /*
    * Defaults to annual, which is both the Code's ordinary case and what the
    * server has always written when the key is absent. A renewal that never
    * reaches the picker therefore records what it would have recorded before
@@ -4261,6 +4277,27 @@ export function ApplyWizard() {
     () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
     [amendRows],
   )
+  /**
+   * Whether this amendment needs a NEW locational clearance — a move, or
+   * either of the two changes City Ordinance No. 24-2018 Art. IX §8 names:
+   * "any change in the activity or expansion of the area". The same rule as
+   * `WorkflowService::amendmentNeedsLocationalClearance`, which decides
+   * whether the filing carries ZONING; this decides whether the zoning step
+   * and the warning appear. A floor area with no earlier figure to compare is
+   * not counted, there as here.
+   */
+  const amendNeedsZoning = useMemo(() => {
+    if (amendMovesPremises) return true
+    return amendRows.some((r) => {
+      if (!r.requested) return false
+      if (r.field === 'line_of_business') return true
+      if (r.field !== 'business_area_sqm') return false
+      const before = Number(r.current_value)
+      const after = Number(r.new_value)
+      return r.current_value !== null && r.current_value !== '' && Number.isFinite(before)
+        && Number.isFinite(after) && after > before
+    })
+  }, [amendMovesPremises, amendRows])
   /*
    * The Mayor's / Business Permit rides along on every application (it is what
    * the application is for), so BPLO always ends up in the routing. The picker
@@ -4709,6 +4746,67 @@ export function ApplyWizard() {
   const insightsRadiusM = insights.data?.radius_m ?? null
 
   /*
+   * ── City Ordinance No. 24-2018, rule by rule, for what is on screen ───────
+   *
+   * Asked from the answers as they are typed — barangay, trade, street, floor
+   * and lot area, headcount, capital — plus the zoning questions the checklist
+   * itself asks. Keyed on the barangay rather than the pin, as the zoning note
+   * above is, because the ordinance's zones are written per barangay and the
+   * pin cannot say which of a barangay's zones the lot is in (that is CPDO's
+   * to record, and the checklist says where it matters).
+   *
+   * An amendment is asked from the SAVED filing instead (`fetchZoningCheck`):
+   * what CPDO assesses there is the requested change — the new trade, the new
+   * address — which only the server holds, and the answer refreshes each time
+   * the draft finishes saving.
+   */
+  const numberOrNull = (raw: string) => {
+    const n = Number(plainAmount(raw))
+    return raw.trim() !== '' && Number.isFinite(n) ? n : null
+  }
+  const zoningQuery = useMemo<ZoningCheckQuery | null>(
+    () =>
+      form.barangay_id && applicationType !== 'amendment'
+        ? {
+            barangay_id: Number(form.barangay_id),
+            application_type: applicationType,
+            lines: form.lines
+              .filter((l) => l.psic_code_id)
+              .map((l) => ({
+                psic_code_id: l.psic_code_id,
+                description: [l.line_of_business, l.products_services].filter(Boolean).join(' '),
+              })),
+            floor_area_sqm: numberOrNull(feeDraft.floor_area_sqm),
+            lot_area_sqm: numberOrNull(form.lot_area_sqm),
+            employees: numberOrNull(feeDraft.employees),
+            capitalization: numberOrNull(form.capital_investment),
+            street: form.street.trim() || null,
+            is_rented: form.is_rented,
+            storeys: numberOrNull(feeDraft.storeys),
+            zoning_facts: zoningFacts,
+          }
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [form.barangay_id, applicationType, form.lines, feeDraft.floor_area_sqm, form.lot_area_sqm,
+      feeDraft.employees, form.capital_investment, form.street, form.is_rented, feeDraft.storeys, zoningFacts],
+  )
+  const zoningPreview = useZoningCheck(zoningQuery)
+  const zoningStored = useAsync(
+    async () =>
+      applicationType === 'amendment' && applicationId !== null && !dirty
+        ? fetchZoningCheck(applicationId)
+        : null,
+    [applicationType, applicationId, dirty],
+  )
+  const zoningCheck = applicationType === 'amendment' ? zoningStored : zoningPreview
+  const zoningLoading = applicationType === 'amendment' ? zoningStored.loading : zoningPreview.stale
+  const answerZoning = useCallback(
+    (key: string, value: ZoningFactValues[string]) =>
+      setZoningFacts((facts) => ({ ...facts, [key]: value })),
+    [],
+  )
+
+  /*
    * `carriedOverBusiness` is gone from this file.
    *
    * It was the business as every office sheet carries it — the name, address
@@ -4780,13 +4878,14 @@ export function ApplyWizard() {
    *
    * ── The one step that comes and goes ──────────────────────────────────
    *
-   * An amendment that moves the premises applies for a fresh Zoning
-   * Clearance, so CPDD's sheet joins the wizard as its own step — between
-   * the changes and the documents, which is where it falls in the filing.
-   * Move the pin back and the step leaves again.
+   * An amendment that moves the premises, changes the line of business or
+   * enlarges the floor area applies for a fresh Zoning Clearance (City
+   * Ordinance No. 24-2018, Art. IX §8), so CPDD's sheet joins the wizard as
+   * its own step — between the changes and the documents, which is where it
+   * falls in the filing. Withdraw the change and the step leaves again.
    *
-   * Keyed on `amendMovesPremises`, the same value the warning and the
-   * server's `WorkflowService::amendmentMovesPremises` read, so a step
+   * Keyed on `amendNeedsZoning`, the same rule the server's
+   * `WorkflowService::amendmentNeedsLocationalClearance` applies, so a step
    * cannot appear for a clearance the filing will not carry.
    *
    * `stepIndex` is clamped against this array's length on every render, so a
@@ -4887,7 +4986,7 @@ export function ApplyWizard() {
     }
 
     if (applicationType === 'amendment') {
-      if (!amendMovesPremises) return AMENDMENT_PHASES
+      if (!amendNeedsZoning) return AMENDMENT_PHASES
 
       return AMENDMENT_PHASES.flatMap((p) => (p === 'documents' ? ['zoning', p] : [p]))
     }
@@ -4907,7 +5006,7 @@ export function ApplyWizard() {
     if (renewsBusinessPermit) return RENEWAL_PHASES
 
     return BASE_PHASES
-  }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit, returnedPhases])
+  }, [applicationType, amendNeedsZoning, officeSteps, renewsBusinessPermit, returnedPhases])
 
   const totalParts = sequence.length
 
@@ -4988,7 +5087,7 @@ export function ApplyWizard() {
        * submits is a clearance CPDO would be routed for no reason.
        */
       const zoningTypeId =
-        applicationType === 'amendment' && amendMovesPremises
+        applicationType === 'amendment' && amendNeedsZoning
           ? (permitTypes.find((pt) => pt.code === 'ZONING')?.id ?? null)
           : null
 
@@ -5015,7 +5114,7 @@ export function ApplyWizard() {
         ? f
         : { ...f, permit_type_ids: next },
     )
-  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes])
+  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes, amendNeedsZoning])
 
   /**
    * The answers each section contributed, for the review summary.
@@ -7999,6 +8098,7 @@ export function ApplyWizard() {
            * reaches it would otherwise keep the default for good.
            */
           payment_mode: paymentMode,
+          zoning_facts: zoningFacts,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -8009,7 +8109,7 @@ export function ApplyWizard() {
           await applications.setPriorPermit(id, priorPermitId, priorPermitIds)
         }
       } else {
-        await applications.update(id, { fee_profile: feeProfile })
+        await applications.update(id, { fee_profile: feeProfile, zoning_facts: zoningFacts })
       }
       // The office sheets used to be flushed here alongside everything else.
       // They are not this wizard's to save any more — <ClearanceStage> saves
@@ -8091,8 +8191,9 @@ export function ApplyWizard() {
          * triggers a save.
          */
         consent,
+        zoningFacts,
       }),
-    [title, form, feeDraft, applicationType, priorPermitId, amendment, consent],
+    [title, form, feeDraft, applicationType, priorPermitId, amendment, consent, zoningFacts],
   )
   const syncedRef = useRef(false)
 
@@ -9096,6 +9197,7 @@ export function ApplyWizard() {
          * safe direction to be wrong in.
          */
         setConsent(app.data_privacy_consent ?? false)
+        setZoningFacts(app.zoning_facts ?? {})
         setFeeDraft(feeProfileToDraft(app.fee_profile, lineIds))
         // Restore uploaded documents by document-type code.
         const codeToId = new Map<string, number>()
@@ -10101,6 +10203,22 @@ export function ApplyWizard() {
                     <ZoningConformanceNote
                       zoning={insights.data?.zoning ?? null}
                       barangayName={barangayName ?? null}
+                    />
+                  )}
+                  {/*
+                    Every other rule the ordinance applies to this filing,
+                    each with its article and page, and the few questions those
+                    rules need answered — asked here, under the rule, rather
+                    than as a block of their own. The note above stays the
+                    headline; this is what it rests on.
+                  */}
+                  {form.barangay_id && (
+                    <ZoningRuleChecklist
+                      variant="applicant"
+                      result={zoningCheck.data}
+                      loading={zoningLoading}
+                      values={zoningFacts}
+                      onAnswer={answerZoning}
                     />
                   )}
                 </div>
@@ -12594,6 +12712,23 @@ export function ApplyWizard() {
                       </p>
                     )}
 
+                    {/*
+                      The other two changes that cost a Zoning Clearance (Art.
+                      IX §8). Said where the change is made, as the move's
+                      warning is under the address — not discovered when a
+                      step appears in the bar.
+                    */}
+                    {group.key === 'other' && amendNeedsZoning && !amendMovesPremises && (
+                      <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
+                        <span className="font-semibold text-ink">
+                          This needs a new Zoning Clearance.
+                        </span>{' '}
+                        The zoning rules ask for one whenever the line of business changes or the
+                        floor area grows, so it is applied for as part of this amendment and the
+                        City Planning Office checks it.
+                      </p>
+                    )}
+
                     {group.key === 'address' && amendMovesPremises && (
                       <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
@@ -13062,6 +13197,23 @@ export function ApplyWizard() {
                 Payment after it approves this form.
               </p>
             </div>
+            )}
+            {/*
+              The zoning rules again, at the point of committing — and the only
+              place a renewal or an amendment meets them, since neither walks
+              through Location & Zoning. Answerable here too: a question
+              skipped on the map step is not a reason to go back.
+            */}
+            {form.barangay_id && (
+              <div className="mt-6 w-full">
+                <ZoningRuleChecklist
+                  variant="applicant"
+                  result={zoningCheck.data}
+                  loading={zoningLoading}
+                  values={zoningFacts}
+                  onAnswer={answerZoning}
+                />
+              </div>
             )}
             {/*
               Named as well as numbered. This said "Renewing MCB-2026-000003"

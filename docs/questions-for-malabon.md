@@ -725,6 +725,15 @@ wrong.
 **What we assumed meanwhile.** Every permit runs for one year, like the
 business permit.
 
+**What the zoning ordinance says (3 October 2026).** City Ordinance No. 24-2018
+gives a locational clearance no yearly expiry. Art. IX §9 makes it lapse only if
+the use has not started within a year of issue, and §§8-9 require a NEW one when
+the activity changes or the area grows. The one thing it does renew yearly is a
+non-conforming use's Certificate of Non-Conformance (Art. IX §10.2(d), §11). So
+an unchanged, conforming business renewing its zoning clearance every January is
+the City's practice, not the ordinance's — which may be right, but should be
+confirmed. The zoning checklist says this to a renewal rather than hiding it.
+
 ---
 
 # B. For MISD — systems, data, hosting, accounts
@@ -1101,6 +1110,10 @@ cannot support. Please read C1 first.
 
 ## C1. Should the system give a zoning verdict at all, or only record the location?
 
+**Update, 3 October 2026.** The "CONGRATULATIONS" panel described below is long
+gone. What the applicant sees now is described under C5: the ordinance applied
+rule by rule, never a verdict.
+
 When an applicant pins their location and names their line of business,
 BizTrack shows a **green "CONGRATULATIONS!"** panel saying the business "is
 conforming / within the allowed use" for that barangay. Beneath it, in small
@@ -1220,6 +1233,16 @@ it draws; nothing is said about their particular address.
 
 ## C5. Is a per-location conformance answer appropriate to automate at all, or must CPDO always rule case by case?
 
+**Update, 3 October 2026.** With City Ordinance No. 24-2018 in hand, BizTrack
+now applies it rule by rule (`docs/zoning-ordinance/rules.json` lists all 364
+normative statements and what the system does with each). It still renders no
+verdict: each rule is reported as met, not met or for CPDO's review, with its
+article, section and page, to the applicant as an early warning and to the
+zoning officer as a cited checklist. The questions below (C13-C40) are the
+places where the ordinance contradicts itself or is silent, and the check shows
+both readings there rather than choosing. The original question stands: does
+CPDO want even this much said to an applicant before it rules?
+
 And who at CPDO owns that determination? Would they accept a system-generated
 preliminary result even as an indication?
 
@@ -1267,6 +1290,16 @@ Three things to check when you look at it:
   about any applicant's lot. If the CLUP 2018-2027 susceptibility assessment
   Art. V §4.1 cites exists as data, that is the layer this question was really
   asking for.
+
+**Update, 3 October 2026 — the §5 table read again from the page images.**
+The heritage column is aligned in the rows that matter: Dampalit's and Flores's
+C-1 strips, and Bayan-Bayanan's Maximum R-2 and C-1 rows, all carry "Heritage
+Overlay Zone". So §5 genuinely names eight barangays and Annex C maps five. The
+zoning check now asks "is the building a declared heritage house?" in all eight
+and tells an applicant in the three §5-only barangays that the two parts of the
+ordinance disagree. The heritage rules themselves (Art. V §4.3) bind only a
+declared house of ancestry and new construction around one, which is why the
+question is about the building and not the barangay.
 
 **What is still open:** a *no-build* layer. An overlay that adds construction
 requirements is not the same as one that refuses a site, and nothing in the
@@ -1383,7 +1416,85 @@ verification + ₱345 processing.
 **Why it matters.** It is the only clearance fee we derive entirely from the
 2016 ordinance with no counter confirmation at all.
 
+**The zoning ordinance prints a different schedule (3 October 2026).** City
+Ordinance No. 24-2018 Art. IX §10.1:
+
+| | Ordinance | What we charge |
+|---|---|---|
+| Filing fee, per application | ₱45 | ₱45 |
+| Zoning and land use verification — commercial and industrial | ₱300 (₱110 residential, institutional) | ₱345 |
+| Processing — per sq. m. of total floor area | ₱18 commercial and industrial; ₱9 residential, institutional, cemeteries; telecom towers ₱5,000 + 1% above ₱2M; billboards ₱9/m²; yards ₱2.70 commercial, ₱4.50 industrial; renovation 75% | ₱345 flat |
+| Motion for reconsideration / reclassification petition / complaint | ₱330 / ₱660 / ₱100 (free for paupers) | not charged |
+| Certificate of Non-Conformance | "the rates above depending on the activity" | not charged |
+| Government projects (not GOCCs) | exempt | charged |
+| Operating without a clearance | 25% of the processing fee + 14% a year | not charged |
+| Temporary sign, up to two months (Art. VII §13) | "corresponding fees", amount not stated | not charged |
+
+₱345 ÷ ₱18 = 19.2 sq. m., so the flat figure is not the formula at any likely
+floor area. Either the Revenue Code supersedes the zoning ordinance's schedule
+(plausible: it is the fee instrument), or ₱735 is stale. **We changed nothing:**
+what a citizen is charged is not ours to decide on our reading of two
+ordinances. Every fee line above is in `docs/zoning-ordinance/rules.json` with
+status `question`, pointing here.
+
+**Three more points in the same schedule (second reading, 3 October 2026).**
+The commercial rate applies to buildings "constructed primarily for grain
+purposes" — almost certainly "gain", but the rate turns on the word. The
+telecom-tower fee covers projects under ₱2 million and over ₱2 million, and
+says nothing of exactly ₱2 million. And §10.3 surcharges an operation without
+a "certificate of conformance", which the ordinance never defines or issues.
+
 ## C11. Five barangay sheets show zones our traced map leaves out. Which is right?
+
+**Update, 3 October 2026 — the ordinance's text settles part of this, and says
+it does.** Art. IV §6: "The textual description of the zone boundaries shall
+prevail over that of the Official Zoning Maps", and where the map is inaccurate
+"the description of the zoning boundaries appended shall govern". Art. IV §5's
+text places I-1 in Maysilo, Dampalit, Panghulo and Catmon (and I-2 in Catmon),
+which is what this question suspected. It also disagrees with our sheet
+readings elsewhere — most usefully, it puts **Basic R-2 in Potrero only**, which
+answers C4's weakest reading (we had recorded both R-2 kinds on twenty sheets).
+The zoning check now decides on §5's text and names every difference between
+text and sheet on the officer's checklist; the sheets and the traced map are
+unchanged. **Still open:** whether the text or the 2018–2027 sheets are what
+CPDO actually applies at the counter, and the re-tracing below.
+
+**Every difference, barangay by barangay (audit of 3 October 2026).** Ten zones
+the text places that our sheet readings do not show, and thirty-seven the
+other way round. Each is named to CPDO on the checklist of a filing in that
+barangay, and where a trade's listing rests on a zone only the text places
+there, the use finding says so.
+
+| Barangay | In the text, not on our sheet reading | On our sheet reading, not in the text |
+|---|---|---|
+| Baritan | — | Basic R-2 |
+| Bayan-bayanan | — | Basic R-2 |
+| Catmon | I-1, I-2 | CBD, Basic R-2 |
+| Concepcion | — | Basic R-2 |
+| Dampalit | I-1 | Basic R-2, Maximum R-2 |
+| Flores | — | Basic R-2 |
+| Hulong Duhat | — | Socialized Housing, Basic R-2 |
+| Ibaba | — | Socialized Housing, Basic R-2 |
+| Longos | — | R-1, Basic R-2 |
+| Maysilo | I-1 | Cemetery, Socialized Housing, Basic R-2 |
+| Muzon | — | Socialized Housing, Fishpond, Mangrove, Basic R-2 |
+| Niugan | — | Basic R-2 |
+| Panghulo | I-1 | Socialized Housing, Basic R-2 |
+| Potrero | CBD, Maximum R-2 | — |
+| San Agustin | — | C-2, Socialized Housing, Basic R-2 |
+| Santulan | Maximum R-2 | Basic R-2 |
+| Tañong | Socialized Housing | Basic R-2 |
+| Tinajeros | — | C-2, CBD, Basic R-2 |
+| Tonsuya | I-2 | C-2, Socialized Housing, Basic R-2 |
+| Tugatog | — | I-1, Basic R-2 |
+
+Basic R-2 accounts for twenty of the thirty-seven (C4's weakest reading).
+Parks and Utilities are left out of the table: §5 places them city-wide on
+existing facilities, so the sheet is the only place they are drawn (C34). Some
+§5 rows are also garbled — Concepcion's Maximum R-2 row has two "South"
+bounds, Panghulo's "East by North by Tahimik St." and two "East" bounds,
+Maysilo's "West bi Industrial Zone" — and those lots are CPDO's to place.
+
 
 When the map picker draws a barangay's zones, it draws our tracing of CPDO's
 sheet (C2, C4). Checking the tracings against the sheets, five barangays have a
@@ -1415,7 +1526,23 @@ enough), or send the vector data asked for in C2, which would settle all five at
 once. If the sheets are right, we re-trace these five and the map and the zone
 list change with them.
 
-## C12. How does a business owner appeal a zoning decision, and where?
+## C12. How does a business owner appeal a zoning decision, and where? — ANSWERED BY THE ORDINANCE
+
+**Answered by City Ordinance No. 24-2018 (3 October 2026).** Art. IX §16(2):
+the Local Zoning Board of Appeals acts "on appeals on Grant or Denial of
+Locational Clearance by the Zoning Administrator"; §15 sends complaints and
+oppositions there too; §17 makes its decisions appealable to HLURB; and §18
+names CPDO as the board's secretariat. A use the zone does not list goes to the
+same board as an application for an EXCEPTION (Art. VIII §1.2), with the
+procedure in Art. VIII §2 (written application citing the sections, a sign at
+the site, affidavits of no objection from the owners in front and on each side
+within 15 days, a public hearing in the barangay, a decision within 30 days).
+The sentence under the map now says "you may appeal to the Local Zoning Board of
+Appeals" and the zoning checklist spells out the procedure. **Still open:** the
+board's form and fee, if any, and whether filing starts at the CPDO counter.
+
+The original question follows.
+
 
 **Why it matters.** When a business type is not on the zoning list for its
 barangay, the note under the map now tells the owner that if CPDO says no, they
@@ -1428,6 +1555,392 @@ Zoning Administrator.
 **What we assumed meanwhile.** That the owner starts in person at CPDO and is
 told the rest there. Tell us the real route (which office receives it, whether
 there is a form or a fee, and any deadline) and the sentence changes to say it.
+
+
+## C13. Filling stations: which of the ordinance's two siting rules applies?
+
+Art. V §2.7 (C-1) says a filling station must meet **Department of Energy**
+standards and be **1 km from any existing gasoline or LPG station**. Art. V §3.C
+(special uses) says it must meet **Energy Regulatory Board** standards and be
+**200 m from the nearest school, church, hospital or similar institution**.
+
+**Why it matters.** A station can pass one and fail the other.
+
+**What we assumed meanwhile.** Both are checked and both are shown, with a
+separate finding saying the ordinance gives two rules and CPDO decides. Neither
+is dropped.
+
+**And a third inconsistency (second reading).** §2.7 lets a station into "a
+residential zone" with the homeowners' association's or barangay's and the
+fire department's written conformity — yet no residential zone lists filling
+stations, and General Commercial lists them with no condition at all. A
+station on a residential lot is now shown that clause and this question.
+
+## C14. Home businesses: §2.1 or Annex A 42?
+
+§2.1 allows a home occupation with up to **five people counting the owner**,
+**20%** of the building, and no change to the **outside**. Annex A 42 defines it
+as **no non-resident employee**, **no machinery** beyond household appliances,
+at most **a quarter** of the floor area or one storey, and **no alteration**
+inside or out.
+
+**Why it matters.** A sari-sari store with one hired helper passes §2.1 and
+fails Annex A 42; a business using 22% of the house is the reverse.
+
+**What we assumed meanwhile.** Both are checked. Where only one fails, the
+finding says so and goes to CPDO as review rather than "not met".
+
+## C15. What does "one lot deep" measure?
+
+Art. IV §6 says a one-lot-deep strip follows **the parcels as subdivided in
+2018**, and elsewhere **the average lot depth nearby**, with a 50% rule for
+deeper lots. Annex A 67 says **30 m from the road's centre** (and Annex A 66,
+70 m for "one block deep") unless the map says otherwise.
+
+**Why it matters.** Most commercial strips in §5 are described this way, so it
+decides whether a lot on Gen. Luna or M.H. del Pilar is commercial.
+
+**What we assumed meanwhile.** When the applicant's street is a strip street,
+the checklist names the strip and shows both readings; CPDO places the lot.
+
+## C16. How long may a non-conforming business continue — and when did the ordinance take effect?
+
+Art. IX §11 lets the owner "continue to use the property until such time that
+the establishment has ceased operation". §12.9 says the owner "shall program the
+phase-out and relocation within ten (10) years from the effectivity". And §29
+makes the ordinance effective only after **HLURB approval and publication** —
+a date we do not have (the PDF carries the Sangguniang Panlungsod's approval of
+26 November 2018 and a blank HLURB resolution number).
+
+**Why it matters.** If §12.9 governs, the deadline is about ten years after an
+unknown date — possibly 2029, possibly sooner. §10.2(d) also ran a one-year
+deadline from approval for every non-conforming use to secure its certificate.
+
+**What we assumed meanwhile.** Both rules are shown on a non-conforming renewal;
+no deadline is computed.
+
+**Four more points in the same articles (second reading).** §10.2(d) renews the
+certificate of non-conformance yearly "for a period specified under the amended
+Zoning Ordinance", and no period is specified anywhere. §29 (and §22 on
+amendments) needs the approval of the "Sangguniang Panlalawigan", which a
+highly urbanized city in Metro Manila does not have. §11 requires non-conforming
+uses to meet "Section 13", which is Responsibility for Administration; §12 is
+presumably meant. And §12(10) treats approvals of "the LZEAC committee" as
+non-conforming uses — a body the ordinance never defines; we read it as the old
+zoning board that granted variances and exceptions.
+
+## C17. What may operate in the Fishpond Zone?
+
+Art. V §2.16 defines a fishpond and lists **no allowable uses at all**.
+
+**Why it matters.** Dampalit's fishponds are that zone, and the Eco-Tourism
+overlay adds dining, water-recreation rentals and tourism retail on top of it —
+on top of nothing.
+
+**What we assumed meanwhile.** A business in the fishpond area is told the base
+zone is silent; the eco-tourism uses and conditions (30% of the lot, one storey)
+are checked; CPDO decides the rest.
+
+**And Muzon (second reading).** §5 places Maximum R-2 in Muzon "excluding areas
+occupied by existing fishponds" and puts no zone on those fishponds; the map
+sheet draws a Fishpond zone there. A lot on Muzon's fishponds has no zone in
+the text. Every Muzon filing now names this to CPDO.
+
+## C18. Were the inheritance gaps meant?
+
+Maximum R-3 (§2.5) and C-1 (§2.7) take in every residential zone **except Basic
+R-3**. C-2 (§2.8) takes in "R-1 and R-2 Zones", and no zone is called plain R-2
+(this one is harmless: C-2 already reaches both R-2 zones through C-1).
+
+**Why it matters.** A use listed only for Basic R-3 is, read literally, allowed
+in Dampalit's Basic R-3 but not in the zones above it.
+
+**What we assumed meanwhile.** The chains are followed exactly as written, and a
+trade found only in Basic R-3's list is sent to CPDO as a gap.
+
+**Was Basic R-3 meant to rank below Basic R-2? (second reading).** Art. III
+calls Basic R-3 "low to medium density" and Basic R-2 "medium"; Art. VII §1.4
+gives Basic R-3 11 m against Basic R-2's 13 m; and Basic R-3's parking for an
+existing business allows one van where Maximum R-2 allows two. Read in order
+(R-1, R-2, R-3) it should rank above. We apply each rule as written — one van
+in Basic R-3 is now checked as one — and ask whether that is the intent.
+
+## C19. A cottage industry's capital: the DTI's ceiling or ₱100,000?
+
+§2.1 limits a home industry to "the capitalization as set by the DTI"; Annex
+A 23 defines a cottage industry as capital of **₱100,000** or less (PD 817,
+"adopted for zoning purposes").
+
+**What we assumed meanwhile.** Up to ₱100,000 is reported as met; above it goes
+to CPDO with both texts quoted.
+
+## C20. One Potrero area is written under both C-3 and the CBD. Which is it?
+
+The area bounded by the Tullahan River, NLEX and Lots 8-B, 7, 6-C, 34-A-2,
+35-C, 38-C-1 and 38-B-1 appears word for word under Commercial-3 and under the
+Central Business District in Art. IV §5.
+
+**Why it matters.** The CBD also allows every General Commercial use (filling
+stations, motor pools, welding shops); C-3 does not.
+
+**What we assumed meanwhile.** Potrero filings show the officer both.
+
+## C21. Do the billboard rules reach an ordinary business sign?
+
+Art. V §3.I ("Billboard / Regulated Signs") says **roof signs shall not be
+allowed**, sets setbacks by road width and 100 m between billboards, and bans
+signs over sidewalks and roads. Art. VII §13 separately requires a locational
+clearance for every business sign.
+
+**Why it matters.** Many shops in Malabon have roof or projecting signs.
+
+**What we assumed meanwhile.** A sign over public property is reported as not
+met (Art. VII §13 forbids it too, unless the Zoning Administrator allows it); a
+roof sign goes to CPDO as review.
+
+**Where may a billboard stand at all? (second reading).** §3.I.1 allows
+billboards "only along lots fronting the National Road", while §3.I(m) bars
+signs along road rights-of-way "whether it be National Road", and Art. VII
+§13 allows a billboard in any zone with a locational clearance. The setback
+table skips roads 29-30, 24-25 and 19-20 m wide, and the spacing rule refers to
+"this Section 4.2", which is the Eco-Tourism overlay (the text was copied from
+an MMDA regulation). A billboard filing now shows all of this to CPDO.
+
+## C22. What may a business be in a Socialized Housing zone?
+
+Art. V §2.6 allows "all uses allowed according to the provisions of BP 220"
+and lists nothing itself.
+
+**What we assumed meanwhile.** A business that may be in a CMP area is sent to
+CPDO with that sentence quoted.
+
+## C23. Which stretches of riverbank need the 7.5 m easement?
+
+Art. V §2.14 requires 3 m along every waterway, and 7.5 m for the CAMANAVA
+works "along polder dike in Brgy. Dampalit from Kailugan Floodgate up to North
+Pinagkabalian Floodgate" and on "portions of left banks of Malabon–Navotas
+River".
+
+**What we assumed meanwhile.** A building 3 to 7.5 m from the Malabon–Navotas
+River, or from any waterway in Dampalit, goes to CPDO as review; under 3 m is
+not met. A list or map of the portions would let this be answered outright.
+
+## C24. Who issues a special use permit — and how does a business clearance reach the one-stop shop?
+
+Art. V §3 requires "a special use permit" for cemeteries, funeral
+establishments, filling stations, open storage, slaughterhouses, cockpits,
+base stations, materials recovery facilities, billboards and terminals, without
+saying who issues it, on what form or for what fee. Art. IX §10.2(B) sends a
+business's locational clearance to "the Officer in Charge at one stop shop" and
+says to "adopt the approved Citizen's Charter of Malabon for the process flow".
+
+**Why it matters.** BizTrack tells these applicants a special use permit is
+needed and cannot tell them where to get it; and we have never seen the
+Citizen's Charter flow the ordinance adopts.
+
+**What we assumed meanwhile.** The finding names the requirement and leaves the
+route to CPDO; the zoning sheet goes to CPDO through BizTrack as before.
+
+**And for materials recovery facilities (second reading).** §3.H leaves further
+conditions to be "recommended by the Local Zoning Committee subject to the
+Implementing Rules and Regulations", and cites a "Revised Comprehensive Zoning
+Ordinance of the City of Malabon". The ordinance creates no Local Zoning
+Committee and attaches no rules (see C26). Who recommends those conditions?
+
+## C25. In the Heritage overlay, is new construction really limited to R-1 uses?
+
+Art. V §4.3: "For new construction, Allowable Uses shall be as provided in the
+base R-1 Zone". The heritage barangays' heritage houses stand on C-1 strips
+along Gen. Luna, where the base zone allows far more.
+
+**Why it matters.** Read literally, a new building beside a heritage house on a
+commercial street could hold only R-1 uses.
+
+**What we assumed meanwhile.** New construction in the overlay whose trade is
+not an R-1 use goes to CPDO as review, with the clause quoted.
+
+## C26. Where are the Implementing Guidelines the ordinance says are part of it?
+
+Art. VI §1: the performance standards "shall be enforced through the
+Implementing Guidelines that is made part of this Zoning Ordinance". §3.H (MRFs)
+likewise cites "the Implementing Rules and Regulations of this Zoning
+Ordinance". Neither is attached to the copy we have.
+
+**Why it matters.** The noise, smoke, dust, odour and waste standards in Art.
+VI §8 are stated without saying how they are measured or proved at the
+clearance; the guidelines are presumably where that is.
+
+**What we assumed meanwhile.** The standards are shown to CPDO as written, with
+this question named, and none is measured.
+
+## C27. Which base flood elevation — the DPWH's or the CLUP's — and which class at the edges?
+
+Art. III defines the base flood elevation as the level "calculated by the
+regional office of the DPWH". Art. V §4.1 sets the ground-floor height from the
+CLUP 2018-2027 assessment "unless otherwise updated assessment will be released
+by DRRMO". And §4.1's table puts each of 0.5 m, 1.0 m and 2.0 m in two classes
+(Low 0-0.50, Moderate 0.50-1.00, High 1.00-2.0).
+
+**Why it matters.** The class decides whether a new building's ground floor
+must be above 0.5, 1.0, 2.0 or 3.0 m.
+
+**What we assumed meanwhile.** New construction is told the table and shown
+this question; CPDO reads the class off Annex C's flood map.
+
+## C28. Did General Commercial mean to drop the conditions C-1 and C-2 attach?
+
+General Commercial (§2.10) restates many C-1 and C-2 uses with none of their
+"provided that" conditions: auto repair, car washes and filling stations
+(parking, façade, grease trap; DOE standards, 1 km spacing), restaurants and
+food parks (NBC parking), recreation centres, lotto outlets (200 m from
+institutions), warehouses (200 sq. m.), machine, welding and junk shops
+(firewalls, agreed hours). The CBD takes in both versions. And the other way
+round, C-2 lists hauling garages for "trucks, tow trucks and buses" with no
+condition, while General Commercial allows "trucks and tow trucks" only for a
+business within Malabon.
+
+**Why it matters.** A lotto outlet 150 m from a school fails in C-1 and passes
+in General Commercial, on the same street.
+
+**What we assumed meanwhile.** On a lot that may be in General Commercial (or
+in C-2, for hauling) the condition is not imposed, and a finding names the
+difference and this question to CPDO. In the CBD both are sent to CPDO.
+
+## C29. Beside Residential-1, is a Commercial-2 building capped at 12 m or at 9 m?
+
+Art. VII §1(1): where R-1 adjoins C-2 with no street or open space over 6 m,
+the structure fronting R-1 is limited to 12 m or four storeys. §1(2): where
+R-1 or R-2 adjoins C-2 or C-3 with no street or open space over 4 m, the C-2 or
+C-3 structure is limited to 9 m or three storeys.
+
+**Why it matters.** A gap of 4 m or less meets both conditions, with different
+limits.
+
+**What we assumed meanwhile.** New construction that may be in C-2 or C-3 in a
+barangay with R-1 or R-2 is shown both caps and this question.
+
+## C30. How do the soil-hazard storey limits fit a 180 m height limit?
+
+Art. VI §7 recommends 1-4 storeys on Prensa clay loam (Potrero among others)
+and 1-2 on hydrosol (Longos among others), with geotechnical analysis above
+that. Art. VII §1.4 lets C-3 and the CBD — both in Potrero and Longos — rise
+to 180 m.
+
+**What we assumed meanwhile.** Both are shown on new construction there; the
+soil advice is reported as advice ("recommended" is not "shall") and the
+required analysis as required.
+
+## C31. Where may a cockpit go?
+
+Art. V §3.F: cockpits "shall be located in parks and recreational zones". The
+Parks and Recreation zone's own list (§2.17) does not name cockpits, and §5
+maps no Parks zone of its own — only "existing parks", marked "follow base
+zone".
+
+**What we assumed meanwhile.** A cockpit outside a Parks zone is reported as
+not meeting §3.F, and every cockpit filing shows CPDO this question.
+
+## C32. One activity, two classes: which governs?
+
+The same activity is listed as a commercial use and as an industry: wood and
+rattan furniture and box beds (C-2, General Commercial; and I-2
+pollutive/hazardous); biscuit, doughnut, hopia and other bakery factories (C-2,
+General Commercial; and I-1); insignia and badges (C-1, General Commercial; and
+I-1); ice plants and cold storage (I-1 non-pollutive and I-2 pollutive), ice
+making in C-2 "except dry ice", which I-1 lists as non-pollutive but hazardous.
+
+**What we assumed meanwhile.** The trade is reported as listed wherever a list
+names it, and a finding shows CPDO the double listing and this question. Which
+class governs presumably turns on scale and process; the ordinance does not
+say.
+
+## C33. Industrial-2's warehouse lines
+
+The pollutive, non-hazardous part of I-2's list ends with "Warehouse/Storage
+Facility for non-pollutive/non-hazardous industries" — I-1's line, repeated —
+and the pollutive, hazardous part with "Warehouse for pollutive/hazardous". No
+line names a warehouse for pollutive, non-hazardous goods.
+
+**What we assumed meanwhile.** A warehouse that may be in I-2 is shown this
+question; CPDO decides which line it falls under.
+
+## C34. Parks and Utilities: their own zone, or the zone around them?
+
+Art. IV §5 places the Parks and Recreation zone and the Utilities zone on "all
+area occupied by existing" parks and utilities, with "Follow Base Zone" in the
+overlay column.
+
+**Why it matters.** Read one way, a mapped park is its own zone; read the
+other, a lot there takes the surrounding base zone.
+
+**What we assumed meanwhile.** A park or utility the sheet draws is treated as
+its own zone, and every filing in such a barangay shows CPDO this question.
+
+## C35. Dampalit's riverbanks: easement or Mangrove Zone?
+
+The Easement Zone (§2.14, which calls itself an overlay though Art. IV lists it
+as a base zone and §5 maps it nowhere) keeps 3 m along every waterway. The
+Mangrove Zone row in §5 is "areas along easement of Malabon–Navotas, Chungkang,
+Batasan, Muzon Rivers".
+
+**Why it matters.** In the easement nothing may be built within 3 m; in the
+Mangrove Zone nothing may be built at all.
+
+**What we assumed meanwhile.** A riverside lot where the text places a Mangrove
+Zone is checked against the easement and shown this question.
+
+## C36. Grease and oil in wastewater: 300 ppm or 10 ppm?
+
+Art. VI §8: waste water "shall not contain grease and oil in excess of 300 PPM
+or exceed daily average of 10 PPM".
+
+**What we assumed meanwhile.** Both figures are shown to CPDO for food,
+laundry, auto-repair and manufacturing trades, and DENR's effluent standards
+apply meanwhile.
+
+## C37. Overlapping and incomplete rows in Panghulo and Santulan
+
+Panghulo: C-1's "Area bounded by Rodriguez St.; Narra St., M.H. del Pilar St.
+and Panghulo Road" overlaps C-2's Panghulo Market, "bounded by Rodriguez St.,
+M.H. Del Pilar St., Narra St. and Rodriguez St.". Santulan: one C-1 row reads
+"One lot deep commercial strip (right side from Aurora St. to Javier St." —
+the street it runs along is missing — and the Luis S./M.H. del Pilar/Rodriguez/
+Narra block is listed twice.
+
+**What we assumed meanwhile.** Filings in those barangays show CPDO the rows;
+CPDO places the lot.
+
+## C38. Eco-tourism: what is "10% of 30%"?
+
+Art. V §4.2: "Thirty (30) % maximum of lot area with be allowed for operation
+of business and 10% of 30% can be converted to land-based for parking,
+sanitary facilities and the like."
+
+**Why it matters.** It is 3% of the lot, or 10% of it.
+
+**What we assumed meanwhile.** The 30% is checked; the land-based share is
+shown with both readings and left to CPDO.
+
+## C39. Sanciangco St.: a 3 m setback or 1 m?
+
+Art. VI §8: "reasonable setback of three (3) meters both sides of Gov. W.
+Pascual Avenue. and Sanciangco St., Gen. Borromeo Street, … would require
+setback of one (1) meter both sides". The stray full stop leaves Sanciangco in
+either group.
+
+**What we assumed meanwhile.** A filing on Sanciangco St. is shown both and
+CPDO checks the building line. (Earlier, the check had silently given it 1 m.)
+
+## C40. Machine shops: firewalls required, or not?
+
+Art. V §2.8 (machine, welding and furniture shops): "Provided that the facade
+be not made of makeshift materials with firewalls." Read literally it forbids
+firewalls; the junk-shop clause beside it says "provide firewalls".
+
+**What we assumed meanwhile.** Firewalls are read as required, and the finding
+says so and names this question. (Our extract of the use list, zone-uses.json,
+carries a comma — "materials, with firewalls" — that the PDF does not; the
+README records it.)
 
 ---
 
