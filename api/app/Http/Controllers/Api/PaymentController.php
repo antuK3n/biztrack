@@ -303,6 +303,14 @@ class PaymentController extends Controller
      * methods, and whether a payment is already waiting on KwikPay. The screen
      * reads the methods from here rather than listing them itself, because the
      * list depends on the mode and the mode can change on a running server.
+     *
+     * `test_charge` is the amount KwikPay will collect when the super admin's
+     * charge switch says `test` and payments are online ("1.00"), and null
+     * otherwise. The screen says so before the owner pays, so somebody
+     * watching a ₱1 payment go through for a ₱2,000 bill sees that it is
+     * deliberate. Only that one figure: the switch itself, the env and the
+     * rest of PaymentMode::status() stay behind the super admin's endpoint,
+     * and this route is the owner's own application only (authorizeOwner).
      */
     public function options(Request $request, Application $application): JsonResponse
     {
@@ -319,6 +327,7 @@ class PaymentController extends Controller
                     'label' => $m->label(),
                 ], PaymentMethod::forMode($mode)),
                 'in_progress' => $inFlight ? new PaymentResource($inFlight) : null,
+                'test_charge' => PaymentMode::ownerTestCharge(),
             ],
         ]);
     }

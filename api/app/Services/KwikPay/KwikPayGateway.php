@@ -75,9 +75,10 @@ class KwikPayGateway
             // [A-Za-z0-9]; upper-cased so a clerk can read it aloud.
             'gateway_order_id' => $reference.'-'.strtoupper(Str::random(6)),
             'amount' => $amount,
-            // What KwikPay is asked to collect. The same as `amount` unless
-            // the testing override is set; kept so a confirmation is checked
-            // against what was actually requested.
+            // What KwikPay is asked to collect: the bill, or the test amount
+            // while the super admin's charge switch says `test`. Kept, because
+            // the switch can move before this payment is confirmed and the
+            // confirmation is checked against what was actually requested.
             'gateway_amount' => $charge,
             'method' => $method,
             'status' => PaymentStatus::Pending,
@@ -411,21 +412,27 @@ class KwikPayGateway
     }
 
     /**
-     * What KwikPay was asked to collect for this payment: the testing override
-     * if one was set when the order was opened, otherwise the bill itself.
-     * Older payments, opened before the column existed, fall back to `amount`.
+     * What KwikPay was asked to collect for this payment: the test amount if
+     * the charge switch said `test` when the order was opened, otherwise the
+     * bill itself. Never re-read from the switch, so flipping it does not
+     * change what an order already open is checked against. Older payments,
+     * opened before the column existed, fall back to `amount`.
      */
     public static function requestedAmount(Payment $payment): float
     {
         return (float) ($payment->gateway_amount ?? $payment->amount);
     }
 
-    /** The amount to ask KwikPay for: the configured override, or the bill. */
+    /**
+     * The amount to ask KwikPay for: the test amount or the bill, as the
+     * charge switch says now (PaymentMode::charge). It used to read
+     * KWIKPAY_CHARGE_OVERRIDE here directly, which only an env edit and a
+     * restart could change; that value is now the switch's default and the
+     * test amount, not the decision.
+     */
     public static function chargeFor(float $amount): float
     {
-        $override = config('payments.kwikpay.charge_override');
-
-        return is_numeric($override) && (float) $override > 0 ? round((float) $override, 2) : $amount;
+        return PaymentMode::chargeFor($amount);
     }
 
     /** 2, 4, 8, 16, 32, then every 60 minutes. */
