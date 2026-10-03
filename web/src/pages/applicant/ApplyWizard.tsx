@@ -507,6 +507,21 @@ type DraftBackup = {
     priorPermitIds: number[]
     amendment: AmendmentState
   }
+  /**
+   * Whether the applicant named this filing themselves.
+   *
+   * Carried because restoring `title` alone is not enough to keep it. The
+   * suggestion effect replaces the title with the business name whenever
+   * `titleEdited` is false — so a resumed draft came back with the applicant's
+   * own name in the box for an instant, and then had it overwritten the moment
+   * the business loaded. Observed as "Nena's Sari-Sari Store" where
+   * "E2E Renewal Draft …" had been saved.
+   *
+   * Optional, because a backup written before 4 October 2026 has none. Absent
+   * reads as false, which is the old behaviour and the safe direction: a title
+   * nobody chose goes on tracking the business name.
+   */
+  titleEdited?: boolean
 }
 
 /*
@@ -3481,6 +3496,18 @@ export function ApplyWizard() {
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
+  /*
+   * The same value, readable from inside an awaited callback.
+   *
+   * The debounced scratch save closes over `applicationId` as it stood when
+   * the timer was set, and a real draft can appear during the await — see the
+   * discard in that save for what that cost. A ref is the only way to ask
+   * "has one arrived since?" from in there.
+   */
+  const applicationIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    applicationIdRef.current = applicationId
+  }, [applicationId])
   /**
    * The wizard steps a returned filing is allowed to show.
    *
@@ -3735,21 +3762,48 @@ export function ApplyWizard() {
    */
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('annual')
 
-  const refs = useAsync(
-    async () => ({
-      barangays: await reference.barangays(),
-      psic: await reference.psicCodes(),
-      permitTypes: await reference.permitTypes(),
-      documentTypes: await reference.documentTypes(),
+  /*
+   * ── All five at once, not one after another ────────────────────
+   *
+   * This was an object literal of five `await`s, which JavaScript
+   * evaluates in order: every call waited for the one before it, so the
+   * wizard's skeleton stayed on screen for the SUM of five round trips
+   * when none of them depends on another.
+   *
+   * Found on 4 October 2026 while chasing something else. Against the
+   * E2E stack — `php artisan serve`, one request at a time — the five
+   * took over a minute end to end, and `renewal-modal.spec.ts` had been
+   * reported as a BROKEN renewal path on that evidence. It was not
+   * broken; it was slow, and the specs' 30-second wait expired before
+   * the dialog could paint. A wrong diagnosis is the second thing this
+   * cost, and the reason the note is this long.
+   *
+   * `Promise.all` is the whole fix. It helps a real deployment most,
+   * where the five are served concurrently and the wait becomes the
+   * slowest one rather than their total — and it still helps against a
+   * single-process server, which no longer sits idle between them.
+   *
+   * `Promise.all` and not `allSettled`: the wizard cannot be drawn
+   * without any one of these, so a partial answer is not a lesser
+   * success. The first rejection is the error `useAsync` reports, which
+   * is what the sequential version did too.
+   */
+  const refs = useAsync(async () => {
+    const [barangays, psic, permitTypes, documentTypes, amendableFields] = await Promise.all([
+      reference.barangays(),
+      reference.psicCodes(),
+      reference.permitTypes(),
+      reference.documentTypes(),
       /*
-       * The amendment form's four boxes. Here rather than on the step so it
-       * is in hand before the wizard paints — see the endpoint's note on why
-       * the definitions stopped travelling with the values.
+       * The amendment form's four boxes. Here rather than on the step so
+       * it is in hand before the wizard paints — see the endpoint's note
+       * on why the definitions stopped travelling with the values.
        */
-      amendableFields: await reference.amendableFields(),
-    }),
-    [],
-  )
+      reference.amendableFields(),
+    ])
+
+    return { barangays, psic, permitTypes, documentTypes, amendableFields }
+  }, [])
 
   const draftIdParam = searchParams.get('draft')
   /*
@@ -6196,6 +6250,27 @@ export function ApplyWizard() {
       uploaded,
       consent,
       feeDraft,
+      /*
+       * ── The office sheets' own answers ────────────────────────────────
+       *
+       * Read at the top of this callback (`officeFormMissing(officeCode,
+       * officeData[officeCode] …)`) and missing from here, so the gate kept
+       * a closure over whatever `officeData` held when it was last built.
+       *
+       * What that looked like: on a clearance-only renewal the applicant
+       * picked a Sanitary Classification, the chip filled in — the sheet
+       * reads `officeData` straight from render, so it showed the answer —
+       * and the footer went on saying "Still needed on this part: Sanitary
+       * Classification" with Next greyed behind it. An answer visibly given
+       * and visibly not counted (client, 4 October 2026).
+       *
+       * The comments further down this array make the same argument twice
+       * for `barangayName` and `touched.barangay_id`: anything this callback
+       * READS belongs here, whether or not it happens to move in step with
+       * something already listed. `officeData` moves on its own, on every
+       * keystroke of every office sheet, and was the one reader left out.
+       */
+      officeData,
       applicationType,
       feeLines,
       psic,
@@ -8016,6 +8091,15 @@ export function ApplyWizard() {
 
     const apply = (backup: DraftBackup) => {
       setTitle(typeof backup.title === 'string' ? backup.title : '')
+      /*
+       * And whether that title was the applicant's own choice.
+       *
+       * Without this the name came back and was then taken away again: the
+       * suggestion effect overwrites the title while `titleEdited` is false,
+       * and the business name arrives a moment after the restore. The box
+       * showed the saved name, then the shop's.
+       */
+      setTitleEdited(backup.titleEdited === true)
       setForm(rebuild(EMPTY, backup.form))
       setFeeDraft(rebuild(EMPTY_FEE_PROFILE, backup.feeDraft))
       setConsent(backup.consent === true)
@@ -8244,6 +8328,7 @@ export function ApplyWizard() {
           feeDraft,
           consent,
           identity: savedIdentity,
+          titleEdited,
         } satisfies DraftBackup),
       )
     } catch {
@@ -8283,6 +8368,7 @@ export function ApplyWizard() {
           feeDraft,
           consent,
           identity: savedIdentity,
+          titleEdited,
         } satisfies DraftBackup as unknown as Record<string, unknown>,
       }
 
@@ -8299,6 +8385,34 @@ export function ApplyWizard() {
               application_type: applicationType,
               ...body,
             })
+
+            /*
+             * ── The real draft may have arrived while this was in flight ──
+             *
+             * The effect above throws the scratch row away the moment
+             * `applicationId` appears. If that happened DURING this create,
+             * it read `scratchIdRef.current` as null, found nothing to
+             * discard, and returned — and the line below would then store
+             * the id of a row nobody will ever clean up.
+             *
+             * It is not hypothetical and it is not rare on a renewal, where
+             * the business already exists so the real draft is created early
+             * while this sits out an 800ms debounce. Both rows then show on
+             * the Drafts page under one name, and the page numbers them
+             * "(1)" having noticed the clash: one filing, drawn twice, and
+             * the applicant cannot tell which is theirs. Caught by
+             * `renewal-drafts.spec.ts`, whose locator matched two cards.
+             *
+             * `applicationIdRef` and not `applicationId`: this closure was
+             * built before the await and holds whatever the state was then,
+             * which is exactly the value that is out of date.
+             */
+            if (applicationIdRef.current !== null) {
+              void wizardDrafts.discard(created.id).catch(() => {})
+
+              return
+            }
+
             scratchIdRef.current = created.id
           } else {
             await wizardDrafts.save(id, body)
@@ -8332,6 +8446,14 @@ export function ApplyWizard() {
     priorPermitId,
     priorPermitIds,
     amendment,
+    /*
+     * Nor is this. It moves with `title` today, which is in `snapshot`, so
+     * leaving it out would work by luck — the same luck the note on
+     * `barangayName` in `missingFor` declines to rely on, and for the same
+     * reason: a reader who later sets the flag from somewhere else would
+     * have no way to know this depended on it.
+     */
+    titleEdited,
   ])
 
   /* Closing the tab mid-form should not silently take the answers with it. */
