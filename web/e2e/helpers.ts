@@ -196,3 +196,35 @@ export async function waitForAnalytics(page: Page, heading: string | RegExp) {
     { timeout: 30_000 },
   )
 }
+
+/**
+ * How long the apply wizard may take to paint, on the isolated stack.
+ *
+ * ── Measured, not guessed ───────────────────────────────────────────────────
+ *
+ * `playwright.config.ts` sets `expect.timeout` to 15s, measured against
+ * `/applications`: about four and a half seconds of module graph, then a
+ * second or so for a single-process PHP server. That is the right budget for
+ * most of this suite.
+ *
+ * `/apply` is not most of this suite. `ApplyWizard.tsx` is some 615KB of
+ * source on its own, and a dev server ships it unbundled alongside the rest
+ * of the graph. Timed on the isolated stack, 4 October 2026: the renewal
+ * dialog paints in 55.6s cold and 46.5s warm, while the five reference
+ * endpoints behind it answer in under 200ms each. The wait is the browser
+ * fetching and parsing modules, not the product being slow — a production
+ * build serves one bundle and none of this applies.
+ *
+ * ── What the old 30s cost ───────────────────────────────────────────────────
+ *
+ * Every renewal spec waited 30s and timed out, and on 3 October that was
+ * reported as the renewal path being BROKEN on this branch — a wrong
+ * diagnosis that survived a day, including a check that "proved" it by
+ * reverting the component and seeing the same failure. The same failure, for
+ * the same reason: both runs were slow, not broken.
+ *
+ * 90s is the measured worst case with room, and it is deliberately NOT the
+ * global `expect` timeout: a genuinely broken expectation elsewhere should
+ * still fail in fifteen seconds rather than ninety.
+ */
+export const WIZARD_PAINT_MS = 90_000
