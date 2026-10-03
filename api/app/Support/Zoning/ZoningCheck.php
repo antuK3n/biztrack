@@ -259,7 +259,8 @@ final class ZoningCheck
             if ($others !== [] && $this->lotZone === null) {
                 $reason .= ' It is not on the list for '.$this->names($others).', so it matters which of these your lot is in.';
             }
-            $this->add(array_values(array_unique($rules)), $status, $reason, ['group' => 'uses']);
+            $this->add(array_values(array_unique($rules)), $status, $reason,
+                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses']);
         } else {
             $this->notListed($principal['psic'], $codes);
         }
@@ -343,7 +344,7 @@ final class ZoningCheck
 
         $this->add($rules, 'review',
             "{$title} is not on the list for any zone in ".$this->ctx->barangay->name.'. That is not a refusal: the ordinance reads its lists to include similar uses ("and the like", Art. III §2) and refers unlisted ones to other laws (Annex A 89). CPDO decides, and the Local Zoning Board of Appeals can grant an exception.',
-            ['group' => 'uses']);
+            ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses']);
 
         if ($this->ctx->applicationType === 'new') {
             $this->add('IX-12-3', 'review',
@@ -1337,7 +1338,7 @@ final class ZoningCheck
                 ['group' => 'performance', 'asks' => ['industry_pollutive', 'industry_hazardous']]);
         }
         if ($manufacturing) {
-            $this->add(['VI-2-13', 'VI-8-WASTE', 'VI-1'], 'review',
+            $this->add(['VI-2-13', 'VI-8-WASTE', 'VI-1', 'VI-2-0'], 'review',
                 'CPDO may ask for a description of your process: industrial processes may not harm the environment, and waste must be disposed of without nuisance.',
                 ['group' => 'performance']);
         }
@@ -1611,11 +1612,28 @@ final class ZoningCheck
             'rules' => $rules,
             'group' => $opts['group'] ?? 'conditions',
             'status' => $status,
-            'title' => (string) ($first['title'] ?? $rules[0]),
+            // A finding about several rules may name itself; most take the
+            // title of the rule they are about.
+            'title' => (string) ($opts['title'] ?? $first['title'] ?? $rules[0]),
             'rule_text' => (string) ($first['plain'] ?? ''),
             'reason' => $reason,
             'citation' => $citations[0] ?? $rules[0],
             'citations' => $citations,
+            /*
+             * Every rule the finding applies, in the inventory's words, so the
+             * officer can read each one — a finding about a special use cites
+             * six rules and the officer is deciding against all of them.
+             */
+            'rules_detail' => array_map(function (string $id) {
+                $rule = Rulebook::get($id);
+
+                return [
+                    'id' => $id,
+                    'title' => (string) ($rule['title'] ?? $id),
+                    'citation' => Rulebook::citation($id),
+                    'plain' => (string) ($rule['plain'] ?? ''),
+                ];
+            }, $rules),
             'scope' => $scope,
             'asks' => $asks,
             'officer_asks' => $officerAsks,
