@@ -866,8 +866,9 @@ function FieldEditor({
         aria-describedby={invalid ? `edit-error-${fieldKey}` : undefined}
         inputMode={hints?.inputMode}
         maxLength={hints?.maxLength ?? EDIT_FIELDS[fieldKey]?.maxLength}
+        placeholder={hints?.placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full rounded-lg border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none ${
+        className={`w-full rounded-lg border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none ${
           invalid ? 'border-s-red' : 'border-input-border focus:border-royal'
         }`}
       />
