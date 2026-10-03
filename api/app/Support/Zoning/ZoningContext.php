@@ -64,6 +64,19 @@ final class ZoningContext
         ));
     }
 
+    /**
+     * The applicant's own description of each line, lower-cased, without the
+     * PSIC title — for what the title cannot say (a pay parking lot under
+     * "other transportation support", a driving school under "other
+     * education").
+     *
+     * @return list<string>
+     */
+    public function descriptions(): array
+    {
+        return array_values(array_map(fn (array $l) => mb_strtolower(trim((string) ($l['description'] ?? ''))), $this->lines));
+    }
+
     /** @return list<string> PSIC codes of every line. */
     public function psicCodes(): array
     {

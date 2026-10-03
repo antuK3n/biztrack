@@ -73,8 +73,11 @@ final class TradeUses
         // shop taking custom jobs may be C-2's furniture-shop service line.
         '16220' => ['is' => ['manufacture of doors, windows and sashes', 'miscellaneous fabricated mill work'],
             'maybe' => ['woodworking establishments', 'furniture shops service operation']],
-        '14100' => ['is' => ['garments factory', 'garment and undergarment factories', 'miscellaneous wearing apparel', 'tailoring and dressmaking', 'dressmaking and tailoring']],
-        '15200' => ['is' => ['manufacture of shoes except', 'manufacture of slipper and sandal', 'footwear parts except', 'rubber shoes and slippers', 'manufacture of plastic footwear']],
+        // 14100, 15200 (and 47522, 85490, 95220 below) cover more than one
+        // listed use; DECIDED says which answer picks which line. Unanswered,
+        // every candidate is only "maybe".
+        '14100' => ['maybe' => ['tailoring and dressmaking', 'dressmaking and tailoring', 'garments factory', 'garment and undergarment factories', 'miscellaneous wearing apparel']],
+        '15200' => ['maybe' => ['manufacture of shoes except', 'manufacture of slipper and sandal', 'footwear parts except', 'rubber shoes and slippers', 'manufacture of plastic footwear', 'wooden shoes, shoe lace']],
         '17020' => ['is' => ['containers and boxes of paper and paper boards', 'wood and cardboard box factories']],
         '18120' => ['is' => ['printing, publication and graphics', 'engraving, photo developing and printing', 'printing/typesetting, copiers', 'printing, publishing and allied']],
         '20230' => ['maybe' => ['miscellaneous chemical products', 'perfumes, cosmetics and other toilet preparations', 'waxes and polishing preparations']],
@@ -88,7 +91,9 @@ final class TradeUses
 
         // ── Water, waste, construction (36-43) ────────────────────────────
         '36000' => ['is' => ['water refilling station', '=water stations'], 'maybe' => ['pumping plants']],
-        '38110' => ['is' => ['liquid and solid waste management facilities']],
+        // Collection is a hauling service; a waste-management facility is
+        // where it ends up. Either may be how CPDO reads a collector.
+        '38110' => ['maybe' => ['liquid and solid waste management facilities', 'hauling services and garage terminals']],
         '41000' => ['maybe' => ['=offices']],
         '43210' => ['maybe' => ['=offices']],
         '43220' => ['maybe' => ['=offices']],
@@ -138,11 +143,12 @@ final class TradeUses
         '47521' => ['is' => ['=lumber/hardware', 'construction supply stores/depots', 'gravel and sand stores', 'gravel, sand and chb stores']],
         // Glass and plumbing for building, not the household glassware the
         // lists name beside kitchen wares.
-        '47522' => ['is' => ['paint stores without bulk handling', '=lumber/hardware'],
-            'maybe' => ['paint stores with bulk handling', 'construction supply stores/depots', 'glassware']],
+        '47522' => ['maybe' => ['paint stores without bulk handling', 'paint stores with bulk handling', '=lumber/hardware', 'construction supply stores/depots', 'glassware']],
         '47591' => ['is' => ['other related small scale stores'], 'maybe' => ['household equipment and appliances', 'product showroom/display store', '=general merchandise']],
         '47592' => ['is' => ['=home appliance stores', 'consumer electronics such as', 'household equipment and appliances']],
-        '47610' => ['is' => ['bookstores and office supply', '=school supplies'], 'maybe' => ['=art supplies', 'art supplies and novelties']],
+        // Books and newspapers are a bookstore's; "School supplies" may take
+        // in a stationer, not a bookseller, so it is only a possibility.
+        '47610' => ['is' => ['bookstores and office supply'], 'maybe' => ['=school supplies', '=art supplies', 'art supplies and novelties']],
         '47640' => ['is' => ['sporting goods, dry goods']],
         '47650' => ['is' => ['other related small scale stores'], 'maybe' => ['souvenir and novelty', 'art supplies and novelties', '=general merchandise']],
         '47711' => ['is' => ['ready and knitted wear']],
@@ -216,20 +222,24 @@ final class TradeUses
 
         // ── Education and health (85-86) ───────────────────────────────────
         '85100' => ['is' => ['nursery/elementary school']],
-        '85490' => ['is' => ['=tutorial services', '=tutorial centers', '=driving school'], 'maybe' => ['training centers']],
+        '85490' => ['maybe' => ['=tutorial services', '=tutorial centers', '=driving school', 'vocational school', 'vocational/technical school', '=dance schools', '=schools for self-defense', '=speech clinics', 'training centers']],
         '86100' => ['is' => ['general hospitals, medical centers']],
         '86201' => ['is' => ['medical, dental and similar clinic', 'medical, dental, and similar clinics', 'specialty hospitals, medical, dental', 'clinic, nursing and convalescing home']],
         '86901' => ['maybe' => ['medical, dental and similar clinic', 'medical, dental, and similar clinics', 'general hospitals, medical centers']],
 
         // ── Recreation (92-93) ─────────────────────────────────────────────
         '92000' => ['is' => ['lotto terminals']],
-        '93110' => ['is' => ['=gym', '=gymnasium', 'low rise stadia, gyms']],
+        // The Parks zone's gyms are "open air or outdoor sports activities and
+        // support facilities"; an indoor gym only may be one of them.
+        '93110' => ['is' => ['=gym', '=gymnasium'], 'maybe' => ['low rise stadia, gyms']],
         '93290' => ['is' => ['billiard hall', 'internet cafe and cyber stations', 'bars, sing-along lounges'], 'maybe' => ['other sports and recreational establishment']],
 
         // ── Repair and personal services (95-96) ───────────────────────────
         '95110' => ['is' => ['cameras, computers'], 'maybe' => ['renovation and repair of office machinery']],
         '95210' => ['is' => ['cameras, computers'], 'maybe' => ['furniture and appliances repair']],
-        '95220' => ['is' => ['furniture and appliances repair']],
+        // Maximum R-2 lists these repair shops "on neighborhood scale";
+        // Commercial-1 and General Commercial without the condition.
+        '95220' => ['is' => ['=house furniture and appliances repair shops'], 'maybe' => ['repair shops on neighborhood scale']],
         '95230' => ['is' => ['shoe shine/repair', 'repair shops for watches, bags']],
         '95290' => ['maybe' => ['=watch repair shops', 'bicycle repair', 'repair shops for watches, bags']],
         '96110' => ['is' => ['barbershop', 'barber shop']],
@@ -240,6 +250,81 @@ final class TradeUses
         '96200' => ['is' => ['laundries and laundromats', '=laundries'], 'def' => 'A-48'],
         '96301' => ['is' => ['funeral parlors']],
         '96990' => [],
+    ];
+
+    /**
+     * Codes that cover more than one listed use, and the answer that says
+     * which. `fact` is asked on the use finding; `words` read the applicant's
+     * own description of the line when the question is unanswered; `by` gives
+     * each answer's lines (`is`) and possibilities (`maybe`). A bool fact's
+     * answers are keyed 'true' and 'false'. Unanswered and undescribed, the
+     * row in USES stands — every candidate only "maybe".
+     *
+     * @var array<string, array{fact: string, words?: array<string, string>, by: array<string, array{is?: list<string>, maybe?: list<string>}>}>
+     */
+    public const DECIDED = [
+        // A tailoring shop is a personal service shop (Maximum R-2, C-1); a
+        // garment factory is industry (I-1, I-2).
+        '14100' => ['fact' => 'apparel_kind',
+            'words' => ['factory' => '/\b(?:factory|factories|manufactur\w*|garments?\s+(?:making|production|plant))\b/i', 'tailoring' => '/\b(?:tailor\w*|dressmak\w*|alterations?|sastre)\b/i'],
+            'by' => [
+                'tailoring' => ['is' => ['tailoring and dressmaking', 'dressmaking and tailoring']],
+                'factory' => ['is' => ['garments factory', 'garment and undergarment factories', 'miscellaneous wearing apparel']],
+            ]],
+        // Tutorial services are Residential-1's; a driving school is only in
+        // C-1's and General Commercial's short-term special education.
+        '85490' => ['fact' => 'school_kind',
+            'words' => ['driving' => '/\bdriving\b/i', 'vocational' => '/\b(?:vocational|technical\s+school|tesda|trade\s+school)\b/i',
+                'short_course' => '/\b(?:dance|self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|speech)\b/i', 'tutorial' => '/\b(?:tutor\w*|review(?:\s+cent\w+)?)\b/i'],
+            'by' => [
+                'tutorial' => ['is' => ['=tutorial services', '=tutorial centers'], 'maybe' => ['training centers']],
+                'driving' => ['is' => ['=driving school']],
+                'vocational' => ['is' => ['vocational school', 'vocational/technical school', 'vocational and trade schools']],
+                'short_course' => ['is' => ['=dance schools', '=schools for self-defense', '=speech clinics'], 'maybe' => ['special education (sped)']],
+            ]],
+        // Industrial-1 takes shoes "except rubber, plastic and wood";
+        // Industrial-2 takes rubber and plastic; wooden shoes are I-1's own line.
+        '15200' => ['fact' => 'footwear_material',
+            'words' => ['rubber_plastic' => '/\b(?:rubber|plastic|pvc)\b/i', 'wood' => '/\bwood(?:en)?\b/i', 'leather' => '/\b(?:leather|fabric|canvas)\b/i'],
+            'by' => [
+                'leather' => ['is' => ['manufacture of shoes except', 'manufacture of slipper and sandal', 'footwear parts except']],
+                'rubber_plastic' => ['is' => ['rubber shoes and slippers', 'manufacture of plastic footwear']],
+                'wood' => ['is' => ['wooden shoes, shoe lace']],
+            ]],
+        // Commercial-2: "Paint stores without bulk handling"; Industrial-2:
+        // "Paint stores with bulk handling".
+        '47522' => ['fact' => 'paint_bulk_handling',
+            'by' => [
+                'false' => ['is' => ['paint stores without bulk handling', '=lumber/hardware'], 'maybe' => ['construction supply stores/depots', 'glassware']],
+                'true' => ['is' => ['paint stores with bulk handling'], 'maybe' => ['=lumber/hardware']],
+            ]],
+        '95220' => ['fact' => 'neighbourhood_scale',
+            'by' => [
+                'true' => ['is' => ['=house furniture and appliances repair shops', 'repair shops on neighborhood scale']],
+                'false' => ['is' => ['=house furniture and appliances repair shops']],
+            ]],
+    ];
+
+    /**
+     * Listed uses no register code reaches — a medium junk shop, a lechon
+     * store, a car wash, an event planner, the short-course schools. A filer
+     * under "Other (not listed)" lands on one by picking it (`listed_use`, which
+     * CPDO may also record for them) or by the words of their description; a
+     * register trade whose description names one is offered the line as a
+     * possibility for CPDO.
+     *
+     * @var array<string, array{words: string, is: list<string>}>
+     */
+    public const DESCRIBED = [
+        'junk_shop' => ['words' => '/\b(?:junk\s*shop|junkshop|scrap\s+(?:metal|dealer|buyer))\b/i', 'is' => ['medium scale junk shop']],
+        'lechon' => ['words' => '/\blechon\b/i', 'is' => ['=lechon stores']],
+        'chicharon' => ['words' => '/\bchicharr?on\b/i', 'is' => ['=chicharon factory']],
+        'car_wash' => ['words' => '/\bcar\s*wash\b/i', 'is' => ['car wash, subject to conditions', 'vulcanizing shops and carwash']],
+        'event_planner' => ['words' => '/\bevents?\s+(?:plann\w+|organi[sz]\w+|coordinat\w+)\b/i', 'is' => ['=event planners']],
+        'vocational' => ['words' => '/\b(?:vocational|technical\s+school|tesda)\b/i', 'is' => ['vocational school', 'vocational/technical school', 'vocational and trade schools']],
+        'dance_school' => ['words' => '/\bdance\s+(?:school|studio|class(?:es)?)\b/i', 'is' => ['=dance schools']],
+        'self_defense' => ['words' => '/\b(?:self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|judo|arnis)\b/i', 'is' => ['=schools for self-defense']],
+        'sped' => ['words' => '/\b(?:sped|special\s+education)\b/i', 'is' => ['special education (sped)']],
     ];
 
     /**
@@ -265,19 +350,68 @@ final class TradeUses
     ];
 
     /**
-     * The table's reading of `$code`, after the definitions that turn on an
-     * answer the applicant gives.
+     * The table's reading of `$code`, after the answers and definitions that
+     * decide between its lines.
+     *
+     * `$description` is the applicant's own description of the line; it
+     * decides a DECIDED code when its question is unanswered, and lands an
+     * "Other" filer on a DESCRIBED use. `asks` are the facts the reading turns
+     * on, for the use finding to put to the applicant.
      *
      * @param  array<string, mixed>  $facts
-     * @return array{curated: bool, is: list<string>, maybe: list<string>, def: ?string}
+     * @return array{curated: bool, is: list<string>, maybe: list<string>, def: ?string, asks: list<string>}
      */
-    public static function for(string $code, array $facts = []): array
+    public static function for(string $code, array $facts = [], string $description = ''): array
     {
         if (! array_key_exists($code, self::USES)) {
-            return ['curated' => false, 'is' => [], 'maybe' => [], 'def' => null];
+            return ['curated' => false, 'is' => [], 'maybe' => [], 'def' => null, 'asks' => []];
         }
         $spec = self::USES[$code];
-        $out = ['curated' => true, 'is' => $spec['is'] ?? [], 'maybe' => $spec['maybe'] ?? [], 'def' => $spec['def'] ?? null];
+        $out = ['curated' => true, 'is' => $spec['is'] ?? [], 'maybe' => $spec['maybe'] ?? [], 'def' => $spec['def'] ?? null, 'asks' => []];
+
+        if (isset(self::DECIDED[$code])) {
+            $decided = self::DECIDED[$code];
+            $out['asks'][] = $decided['fact'];
+            $answer = $facts[$decided['fact']] ?? null;
+            $key = is_bool($answer) ? ($answer ? 'true' : 'false') : $answer;
+            if ($key === null) {
+                foreach ($decided['words'] ?? [] as $option => $pattern) {
+                    if (preg_match($pattern, $description) === 1) {
+                        $key = $option;
+                        break;
+                    }
+                }
+            }
+            if (is_string($key) && isset($decided['by'][$key])) {
+                $out['is'] = $decided['by'][$key]['is'] ?? [];
+                $out['maybe'] = $decided['by'][$key]['maybe'] ?? [];
+            }
+        }
+
+        // "Other (not listed)": the pick, else the description's words.
+        if ($code === '00000') {
+            $out['asks'][] = 'listed_use';
+            $pick = $facts['listed_use'] ?? null;
+            if (is_string($pick) && isset(self::DESCRIBED[$pick])) {
+                $out['is'] = self::DESCRIBED[$pick]['is'];
+            } elseif ($pick === null) {
+                foreach (self::DESCRIBED as $use) {
+                    if (preg_match($use['words'], $description) === 1) {
+                        $out['is'] = $use['is'];
+                        break;
+                    }
+                }
+            }
+        } else {
+            // A register trade described as one of these is offered the line,
+            // ahead of the code's own loose possibilities: the applicant's
+            // words say more than the code's.
+            foreach (self::DESCRIBED as $use) {
+                if (preg_match($use['words'], $description) === 1) {
+                    $out['maybe'] = array_merge($use['is'], $out['maybe']);
+                }
+            }
+        }
 
         // Annex A 44-45: a hotel whose rooms have their own cooking is a
         // hotel apartment, which the lists name separately.
@@ -294,12 +428,16 @@ final class TradeUses
         }
 
         // Art. III §1, apartment building: three or more families. The
-        // register's one code covers houses, apartments and commercial space.
+        // register's one code covers houses, apartments, commercial space
+        // and parking slots.
         if ($code === '68100') {
             $what = $facts['leases_what'] ?? null;
             $families = $facts['families_in_building'] ?? null;
             if ($what === 'commercial') {
                 $out['is'] = [];
+                $out['maybe'] = [];
+            } elseif ($what === 'parking') {
+                $out['is'] = Ordinance::VEHICLE_USES['parking_lot']['phrases'];
                 $out['maybe'] = [];
             } elseif ($what === 'dwellings' && is_numeric($families)) {
                 $out['is'] = (float) $families >= 3
@@ -307,7 +445,7 @@ final class TradeUses
                     : ['single-detached dwelling units', 'semi-detached family dwelling units'];
                 $out['maybe'] = [];
             }
-            $out['def'] = 'III-1-APT';
+            $out['def'] = $what === 'parking' ? null : 'III-1-APT';
         }
 
         return $out;

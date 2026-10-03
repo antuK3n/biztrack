@@ -270,9 +270,13 @@ final class ZoningCheck
             }
             $title = Ordinance::VEHICLE_USES[$vehicle]['label'];
         } else {
-            $hits = $this->hits($principal['psic'], $codes);
+            $hits = $this->hits($principal['psic'], $codes, (string) ($principal['description'] ?? ''));
         }
         $hits = $this->withHomeAllowance($principal['psic'], $codes, $hits);
+        // The answers the trade's reading turns on (a shop or a factory, the
+        // kind of school), asked on the finding they decide.
+        $decides = $phrases !== [] ? ['vehicle_use']
+            : TradeUses::for((string) $principal['psic']->code, $this->ctx->facts, (string) ($principal['description'] ?? ''))['asks'];
 
         $certain = array_filter($hits, fn ($h) => $h['certain']);
         $possible = array_diff_key($hits, $certain);
@@ -314,11 +318,11 @@ final class ZoningCheck
                 $reason .= ' It is not on the list for '.$this->names($others).', so it matters which of these your lot is in.';
             }
             $this->add(array_values(array_unique($rules)), $status, $reason,
-                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'question' => $textOnly !== '' ? 'C11' : null]);
+                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'question' => $textOnly !== '' ? 'C11' : null, 'asks' => $decides]);
         } elseif ($possible !== []) {
-            $this->possiblyListed($title, $possible, $codes);
+            $this->possiblyListed($title, $possible, $codes, $decides);
         } else {
-            $this->notListed($principal['psic'], $codes);
+            $this->notListed($principal['psic'], $codes, (string) ($principal['description'] ?? ''), $decides);
         }
 
         if (count($lines) > 1) {
@@ -327,7 +331,7 @@ final class ZoningCheck
                 if ($line['psic']->id === $principal['psic']->id) {
                     continue;
                 }
-                $h = array_filter($this->hits($line['psic'], $codes), fn ($hit) => $hit['certain']);
+                $h = array_filter($this->hits($line['psic'], $codes, (string) ($line['description'] ?? '')), fn ($hit) => $hit['certain']);
                 $others[] = $line['psic']->title.($h === [] ? ' (not plainly on the list)' : ' (listed in '.$this->names(array_keys($h)).')');
             }
             $how = $basis !== null
@@ -370,7 +374,7 @@ final class ZoningCheck
      *
      * @param  array<string, array<string, mixed>>  $possible
      */
-    private function possiblyListed(string $title, array $possible, array $codes): void
+    private function possiblyListed(string $title, array $possible, array $codes, array $asks = []): void
     {
         $first = reset($possible);
         $rules = ['V-2', 'III-2-a', 'III-1', 'A-89'];
@@ -390,7 +394,7 @@ final class ZoningCheck
             $reason .= ' '.$this->names($others).' '.(count($others) > 1 ? 'do' : 'does').' not list anything like it.';
         }
         $this->add(array_values(array_unique($rules)), 'review', $reason,
-            ['group' => 'uses', 'title' => 'Possibly on the zones’ lists', 'question' => $textOnly !== '' ? 'C11' : null]);
+            ['group' => 'uses', 'title' => 'Possibly on the zones’ lists', 'question' => $textOnly !== '' ? 'C11' : null, 'asks' => $asks]);
     }
 
     /**
@@ -492,7 +496,7 @@ final class ZoningCheck
      * are open (Art. III §2, Annex A 89). Three more specific reasons are
      * looked for first, because each changes what CPDO is asked.
      */
-    private function notListed(PsicCode $psic, array $codes): void
+    private function notListed(PsicCode $psic, array $codes, string $description = '', array $asks = []): void
     {
         $title = $psic->title;
         $rules = ['V-2', 'III-2', 'III-2-a', 'A-89'];
@@ -503,11 +507,11 @@ final class ZoningCheck
         }
 
         // Listed only in a zone the map draws and the text does not.
-        $sheetHits = $this->lotZone === null ? $this->hits($psic, $this->sheetOnly) : [];
+        $sheetHits = $this->lotZone === null ? $this->hits($psic, $this->sheetOnly, $description) : [];
         if ($sheetHits !== []) {
             $this->add(array_merge($rules, ['IV-6-g']), 'review',
                 "{$title} is on the list for ".$this->names(array_keys($sheetHits)).', which the map sheet shows here but the text of Art. IV §5 does not. The text prevails; CPDO decides.',
-                ['group' => 'uses', 'question' => 'C11']);
+                ['group' => 'uses', 'question' => 'C11', 'asks' => $asks]);
 
             return;
         }
@@ -516,10 +520,10 @@ final class ZoningCheck
         // zone except Basic R-3, so a use listed only there is reachable from
         // nowhere that inherits.
         $skipping = array_values(array_filter($codes, fn ($c) => in_array($c, ['R-3-MAX', 'C-1', 'C-2', 'C-3', 'CBD'], true)));
-        if ($skipping !== [] && ZoningConformance::matchUse($psic, ZoningConformance::matchable('R-3-BASIC'), $this->ctx->facts) !== null) {
+        if ($skipping !== [] && ZoningConformance::matchUse($psic, ZoningConformance::matchable('R-3-BASIC'), $this->ctx->facts, $description) !== null) {
             $this->add(array_merge($rules, ['V-2.5-INH', 'V-2.7-INH']), 'review',
                 "{$title} is listed for Basic Residential-3, but ".$this->names($skipping).' inherit every residential zone except Basic Residential-3. Whether that gap was meant is for the City to say; CPDO decides meanwhile.',
-                ['group' => 'uses', 'question' => 'C18']);
+                ['group' => 'uses', 'question' => 'C18', 'asks' => $asks]);
 
             return;
         }
@@ -529,8 +533,8 @@ final class ZoningCheck
         }
 
         $this->add($rules, 'review',
-            "{$title} is not on the list for any zone in ".$this->ctx->barangay->name.'. That is not a refusal: the ordinance reads its lists to include similar uses ("and the like", Art. III §2) and refers unlisted ones to other laws (Annex A 89). CPDO decides, and the Local Zoning Board of Appeals can grant an exception.',
-            ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses']);
+            "{$title} is not on the list for ".($this->lotZone !== null ? $this->zoneName($this->lotZone) : 'any zone in '.$this->ctx->barangay->name).'. That is not a refusal: the ordinance reads its lists to include similar uses ("and the like", Art. III §2) and refers unlisted ones to other laws (Annex A 89). CPDO decides, and the Local Zoning Board of Appeals can grant an exception.',
+            ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'asks' => $asks]);
 
         if ($this->ctx->applicationType === 'new') {
             $this->add('IX-12-3', 'review',
@@ -831,7 +835,7 @@ final class ZoningCheck
         // Vehicles kept on the lot: a trade that is about vehicles, a line
         // the applicant describes as parking or a garage, or an answer
         // already given. The register has no code for a pay parking lot.
-        $vehicles = $has('passenger_terminal') || $has('trucking') || $has('vehicle_rental')
+        $vehicles = $has('passenger_terminal') || $has('trucking') || $has('vehicle_rental') || $has('transport_support')
             || $clause('/\bpay\s*parking\b|\bparking\s*(?:lot|building)s?\b|\bgarage\b|\btaxi\b|\btnvs\b|\bgrab\b|\buber\b/i')
             || $this->vehicleUse() !== null;
         if ($vehicles) {
@@ -874,7 +878,7 @@ final class ZoningCheck
             $this->proviso('V-2.7-LOTTO', $status, $reason, ['C-1', 'C-2', 'C-3'], ['CBD'], ['distance_to_institution_m'], null, ['GENERAL-COMMERCIAL']);
         }
 
-        if ($has('auto_repair') || $clause('/\bcar\s*wash/i')) {
+        if ($has('auto_repair') || $clause('/\bcar\s*wash/i') || $this->ctx->fact('listed_use') === 'car_wash') {
             $street = $this->ctx->fact('parking_on_street');
             $facade = $this->ctx->fact('makeshift_facade');
             $trap = $this->ctx->fact('grease_trap');
@@ -908,11 +912,11 @@ final class ZoningCheck
         if ($has('machine_shop')) {
             $this->machineShop('V-2.8-MACH');
         }
-        if ($clause('/\bjunk\s*shop|\bjunkshop/i')) {
+        if ($clause('/\bjunk\s*shop|\bjunkshop/i') || $this->ctx->fact('listed_use') === 'junk_shop') {
             $this->machineShop('V-2.8-JUNK');
         }
 
-        if ($has('trucking')) {
+        if ($has('trucking') || $this->vehicleUse() === 'trucking_garage') {
             $within = $this->ctx->fact('operates_within_malabon');
             $this->proviso('V-2.10-HAUL', ...$this->yesNo($within,
                 'The hauling business operates within Malabon.',
@@ -976,12 +980,38 @@ final class ZoningCheck
         }
     }
 
-    /** The applicant's answer to what vehicles on the lot are for, or null. */
+    /**
+     * What vehicles on the lot are for: the applicant's answer; else a lessor
+     * who leases parking; else what the line's own description plainly says
+     * ("pay parking lot", "taxi garage"). The register has no code for a pay
+     * parking lot, so an operator files under transport support or real
+     * estate and the description is the only place it is said. An inferred
+     * kind is still asked (vehicle_use), so the applicant can correct it.
+     */
     private function vehicleUse(): ?string
     {
         $answer = $this->ctx->fact('vehicle_use');
+        if (is_string($answer) && isset(Ordinance::VEHICLE_USES[$answer])) {
+            return $answer;
+        }
+        if ($this->ctx->fact('leases_what') === 'parking') {
+            return 'parking_lot';
+        }
+        $words = implode(' ', $this->ctx->descriptions());
+        foreach ([
+            'parking_building' => '/\bparking\s+building\b/',
+            'parking_lot' => '/\bpay\s*parking\b|\bparking\s+(?:lot|area|space)s?\s+for\s+rent\b|\bparking\s+lot\b/',
+            'taxi_garage' => '/\btaxi\b/',
+            'ride_hailing_garage' => '/\b(?:grab|uber|tnvs|ride[- ]hailing)\b/',
+            'tricycle_terminal' => '/\b(?:tricycle|pedicab)\s+terminal\b/',
+            'trucking_garage' => '/\b(?:trucking|hauling)\b/',
+        ] as $kind => $pattern) {
+            if (preg_match($pattern, $words) === 1) {
+                return $kind;
+            }
+        }
 
-        return is_string($answer) && isset(Ordinance::VEHICLE_USES[$answer]) ? $answer : null;
+        return null;
     }
 
     /**
@@ -2209,11 +2239,11 @@ final class ZoningCheck
     }
 
     /** @return array<string, array{use: string, from: string, via: ?string, certain: bool, basis: string, definition: ?string}> zone => hit */
-    private function hits(PsicCode $psic, array $codes): array
+    private function hits(PsicCode $psic, array $codes, string $description = ''): array
     {
         $out = [];
         foreach ($codes as $code) {
-            $hit = ZoningConformance::lookup($code, $psic, $this->ctx->facts);
+            $hit = ZoningConformance::lookup($code, $psic, $this->ctx->facts, $description);
             if ($hit !== null) {
                 $out[$code] = $hit;
             }
