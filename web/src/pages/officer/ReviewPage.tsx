@@ -23,6 +23,7 @@ import {
   formatDateTime,
   formatMoney,
   formatVersionDate,
+  lineOfBusinessText,
 } from '../../lib/format'
 /*
  * The wizard's own function for item 2's heading, so the sheet reads back
@@ -5938,9 +5939,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     */}
                       <Field
                         label={`Line of Business ${business.lines!.length > 1 ? i + 1 : ''}`.trim()}
-                        value={
-                          line.psic_code ? `${line.psic_code.title} (${line.psic_code.code})` : ''
-                        }
+                        // The applicant's own words first, then the class they
+                        // were sorted into: a line under the catch-all 00000 no
+                        // longer reaches the reviewer as "Other (not listed)".
+                        value={lineOfBusinessText(line)}
                       />
                       {/*
                        * Products / Services — the paper's own second column of

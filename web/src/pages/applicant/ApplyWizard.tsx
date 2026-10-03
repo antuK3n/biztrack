@@ -53,7 +53,7 @@ import {
   ProtoModal,
   inputCls,
 } from '../../components/ui/Proto'
-import { formatBytes, formatDate, formatMoney } from '../../lib/format'
+import { formatBytes, formatDate, formatMoney, tradeName } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import {
   applications,
@@ -5056,7 +5056,17 @@ export function ApplyWizard() {
     /* The trades declared, each with the class the Revenue Code taxes it under. */
     const trades = form.lines.map((line, i) => {
       const code = psic.find((c) => c.id === line.psic_code_id)
-      const name = code?.code === OTHER_PSIC_CODE ? line.line_of_business : (code?.title ?? '')
+      /*
+       * The same precedence the rest of the system now reads by — see
+       * `tradeName`. It was "the typed text, but only on the catch-all code",
+       * which agreed with the shared rule on the line that matters and
+       * disagreed with it on a classified line carrying a description.
+       */
+      const name =
+        tradeName({
+          line_of_business: line.line_of_business,
+          psic_code: code ? { title: code.title } : null,
+        }) ?? ''
 
       return {
         label: form.lines.length > 1 ? `Line of Business ${i + 1}` : 'Line of Business',
@@ -5664,7 +5674,12 @@ export function ApplyWizard() {
     const address = chosen.address
     const line = chosen.lines?.[0]
     const owner = chosen.owner
-    const trade = asked('line_of_business') ?? line?.line_of_business?.trim() ?? line?.psic_code?.title ?? '—'
+    /*
+     * `??` down this chain let an EMPTY typed line win over the PSIC title and
+     * print nothing. `tradeName` falls through on blank, which is what the
+     * fallback was there for.
+     */
+    const trade = asked('line_of_business') ?? tradeName(line) ?? '—'
 
     /*
      * Composed the way the register composes it, so the preview and the

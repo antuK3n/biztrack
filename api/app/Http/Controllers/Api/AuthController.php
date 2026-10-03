@@ -7,6 +7,7 @@ use App\Http\Resources\UserResource;
 use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\AccountRestriction;
 use App\Support\Audit;
 use App\Support\DebugPanel;
 use App\Support\EmailCodes;
@@ -154,6 +155,15 @@ class AuthController extends Controller
                  * and every /debug endpoint checks it again regardless.
                  */
                 'debug_panel' => DebugPanel::allows($user),
+                /*
+                 * Whether this account is barred, and where its owner takes it
+                 * (App\Support\AccountRestriction). On the session payload because
+                 * the answer governs the whole session: the shell raises the
+                 * warning from it, the navigation hides what it bars, and the
+                 * router refuses the rest. Null for every account that is not a
+                 * business owner's.
+                 */
+                'restriction' => AccountRestriction::for($user),
                 /*
                  * An owner with no home address on file [checklist 2026-09-28,
                  * Register 2] — anyone who registered before it was asked. The

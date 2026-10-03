@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\BusinessLine;
 use App\Support\ApplicationVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -191,14 +192,20 @@ class InspectionResource extends JsonResource
             'city' => $address?->city,
             'province' => $address?->province,
             'postal_code' => $address?->postal_code,
-            // Every declared line, joined — a business may carry more than one,
-            // and an inspector needs to know all the trades on the premises, not
-            // the first one the applicant happened to type.
+            /*
+             * Every declared line, joined — a business may carry more than one,
+             * and an inspector needs to know all the trades on the premises, not
+             * the first one the applicant happened to type.
+             *
+             * This preferred the PSIC title whenever that relation happened to
+             * be loaded, so an inspector was sent to "Other (not listed)" on
+             * every catch-all line while the applicant's own description sat
+             * one column away. `tradeName()` puts the two in the right order
+             * for every reader at once.
+             */
             'line_of_business' => $business?->relationLoaded('lines')
                 ? ($business->lines
-                    ->map(fn ($l) => $l->relationLoaded('psicCode') && $l->psicCode
-                        ? $l->psicCode->title
-                        : $l->line_of_business)
+                    ->map(fn (BusinessLine $l) => $l->tradeName())
                     ->filter()
                     ->implode(', ') ?: null)
                 : null,

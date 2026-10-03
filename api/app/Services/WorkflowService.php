@@ -4659,8 +4659,6 @@ class WorkflowService
      */
     private function issuePermitFor(Application $app, PermitType $type): Permit
     {
-        $validityDays = (int) ($type->validity_days ?: 365);
-
         /*
          * ── A renewal continues the term; it does not restart it ─────────────
          *
@@ -4709,9 +4707,47 @@ class WorkflowService
          * future permit type will read; zeroing it to signal "anchored instead"
          * would make the column mean two things.
          */
+        /*
+         * ---- Two anchors, and `validity_days` is now read by neither -------
+         *
+         * The business permit ends on 20 January, per Sec. 2N above. Every
+         * other certificate ends on 31 December of the year it was issued:
+         * *"ang expiration ay always end of a year, so laging December 31,
+         * 202X"* [client, 1 October 2026].
+         *
+         * That replaces continue-the-term for the five clearances — the
+         * `addDays($validityDays)` this used to be — which came from the
+         * 9 September reasoning that anchoring punishes renewing early. The
+         * client has overruled it for the look of the certificate, and the cost
+         * is real and small: a clearance issued in November runs about seven
+         * weeks rather than a year.
+         *
+         * `validity_days` stays on the row, now read by nothing. It is left
+         * rather than zeroed for the reason the note below already gives about
+         * the business permit: a column that means "the term" on some rows and
+         * "ignore me" on others means nothing on any of them, and a future
+         * permit type that does run a rolling term will want it back.
+         */
         $validUntil = $type->code === PermitType::OUTCOME_CODE
             ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
-            : CarbonImmutable::parse($validFrom)->addDays($validityDays);
+            : RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom));
+
+        /*
+         * Who signs it, with one addition only this moment can make.
+         *
+         * `officerInChargeFor` answers from the record — the assignment, then
+         * the classifier — and is the only thing print time may use. At issue
+         * there is one more candidate it cannot see: the person performing the
+         * act. An officer approving their office's clearance IS that office's
+         * signatory even on a filing nobody formally claimed.
+         *
+         * Guarded on the department, which is what keeps the Business Permit
+         * right: released at payment, its acting user is the applicant, who
+         * belongs to no office and so is never written here.
+         */
+        $acting = Auth::user();
+        $officer = PermitFace::officerInChargeFor($app, $type)
+            ?? ($acting?->department_id === $type->issuing_department_id ? $acting : null);
 
         $permit = Permit::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
@@ -4740,9 +4776,23 @@ class WorkflowService
                  * because the relation was not on the model would be worse than
                  * no snapshot at all, since it prints as blank on the paper.
                  */
+                /*
+                 * The signatories are frozen with the rest of the face, and
+                 * for the same reason [client, 1 October 2026: put the Mayor
+                 * and the officer in charge on every permit].
+                 *
+                 * A certificate names the people who signed it. Reading them
+                 * live would have a new mayor retroactively re-signing every
+                 * permit the city has ever issued, and an officer moving office
+                 * rewriting the clearances they granted in the old one.
+                 *
+                 * The officer is resolved above, from the record rather than
+                 * from the session — on the Business Permit the acting user is
+                 * the applicant who just paid.
+                 */
                 'issued_details' => PermitFace::capture(
                     $app->business?->loadMissing(['address.barangay', 'owner', 'lines.psicCode'])
-                ),
+                ) + PermitFace::captureSignatories($officer),
             ],
         );
 

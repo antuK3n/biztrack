@@ -603,10 +603,11 @@ class PermitController extends Controller
      * name, so the caller can say "removed from register" instead of blank.
      *
      * The signature block is data, never a literal. Officeholders rotate; a
-     * name compiled into this file or into the blade keeps printing someone who
-     * left the post until somebody redeploys. Names come from office_signatories
-     * for the office that issues this permit type, and when that office has none
-     * configured the block falls back to ruled lines with role captions only —
+     * name compiled into a view keeps printing someone who left the post until
+     * somebody redeploys. Two sources feed it, and neither is a view: the
+     * Mayor and the issuing officer come frozen off the permit itself
+     * (`PermitFace::signatureBlock`), and the office's own names come from
+     * office_signatories. A role with no name still prints as a ruled line —
      * an empty line is honest, a guessed name is not.
      *
      * @return array<string, mixed>
@@ -627,6 +628,9 @@ class PermitController extends Controller
             'business.owner',
             'business.lines.psicCode',
             'application',
+            // For the signatory fallback on permits frozen before the face
+            // carried one — see PermitFace::forPrinting.
+            'issuedBy',
         ]);
 
         /*
@@ -635,12 +639,37 @@ class PermitController extends Controller
          * invited the next field to be assembled beside the snapshot instead
          * of inside it.
          */
-        $signatories = $permit->permitType?->department?->signatories
+        $face = PermitFace::forPrinting($permit);
+
+        /*
+         * The Mayor and the issuing officer first, then whatever the office
+         * configured for itself.
+         *
+         * The two are not alternatives. `office_signatories` holds the extra
+         * names a particular office prints — CENRO's Evaluator and Chief, read
+         * off their actual form — and those offices still print them. What the
+         * client asked for on 1 October 2026 is that every certificate also
+         * carry the Mayor and the officer in charge, which no office had
+         * configured and which is not an office-level fact anyway: the officer
+         * is whoever signed THIS permit.
+         *
+         * Dedupe on the role, frozen name winning, so an office that configures
+         * its own "City Mayor" row does not put the same caption on the sheet
+         * twice. The frozen one wins because it names who signed this permit,
+         * where the configured one names whoever holds the post today.
+         */
+        $block = PermitFace::signatureBlock($face);
+        $taken = array_map('strtolower', array_column($block, 'role'));
+
+        $office = $permit->permitType?->department?->signatories
             ?->where('is_active', true)
             ->sortBy([['sort_order', 'asc'], ['role', 'asc']])
             ->map(fn ($s) => ['role' => $s->role, 'name' => $s->name])
+            ->reject(fn (array $s) => in_array(strtolower($s['role']), $taken, true))
             ->values()
             ->all() ?? [];
+
+        $signatories = [...$block, ...$office];
 
         return [
             'permit_number' => $permit->permit_number,
@@ -660,7 +689,7 @@ class PermitController extends Controller
              * writes the snapshot, so the frozen face and a live fallback
              * cannot drift into two different shapes.
              */
-            ...PermitFace::forPrinting($permit),
+            ...$face,
             'tracking_id' => $permit->application?->tracking_id,
             'valid_from' => optional($permit->valid_from)->format('F j, Y'),
             'valid_until' => optional($permit->valid_until)->format('F j, Y'),

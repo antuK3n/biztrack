@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnforceAccountRestriction;
 use App\Http\Middleware\EnsureDebugPanelOpen;
 use App\Http\Middleware\EnsureEmailConfirmedToFile;
 use App\Http\Middleware\EnsurePermission;
@@ -26,6 +27,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'email.confirmed' => EnsureEmailConfirmedToFile::class,
             // The Debug page's API: super admin AND the panel open, else 404.
             'debug.panel' => EnsureDebugPanelOpen::class,
+            // A suspended or blacklisted owner reaches their messages and
+            // their notices, and nothing else. See the middleware for what it
+            // is attached to and why it is attached per group.
+            'unrestricted' => EnforceAccountRestriction::class,
         ]);
         $middleware->append(SecurityHeaders::class);
         /*
