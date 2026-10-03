@@ -61,6 +61,7 @@ import {
   documents,
   officeForms,
   payments,
+  permits as permitsApi,
   reference,
 } from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
@@ -461,7 +462,15 @@ const AUTOSAVE_DELAY_MS = 1200
  * localStorage is on the effects that use this, and it is about a shared
  * terminal at City Hall rather than about storage.
  */
-const DRAFT_BACKUP_KEY = 'biztrack:apply:pre-draft'
+/*
+ * The tab's own copy, one slot PER FILING TYPE.
+ *
+ * It was a single key while only a new permit was backed up. With renewals
+ * and amendments backed up too (3 October 2026) one key would mean a renewal
+ * started in one tab overwriting the new permit half-typed in another, and
+ * whichever was reopened first would silently take the other's answers.
+ */
+const draftBackupKey = (type: ApplicationType) => `biztrack:apply:pre-draft:${type}`
 /*
  * Bumped whenever `FormState` or `FeeProfileDraft` changes shape. A backup
  * from an older build would restore fields that have moved or gone, which is
@@ -478,6 +487,26 @@ type DraftBackup = {
   form: FormState
   feeDraft: FeeProfileDraft
   consent: boolean
+  /**
+   * What the entry dialog was told, on a renewal or an amendment.
+   *
+   * A new permit has no such answer — the form IS the filing. A renewal
+   * begins by naming a business and the permits it carries forward, and an
+   * amendment by naming the record it changes, and none of that lives in
+   * `form`. Without it here a resumed renewal would come back with every
+   * field filled in and no idea what it was a renewal OF, and the dialog
+   * would open over the restored answers asking again.
+   *
+   * Optional, because a backup written before 3 October 2026 has none and
+   * a new permit never will. Absent means "ask", which is the old
+   * behaviour and the safe one.
+   */
+  identity?: {
+    businessId: number | null
+    priorPermitId: number | null
+    priorPermitIds: number[]
+    amendment: AmendmentState
+  }
 }
 
 /*
@@ -2119,6 +2148,66 @@ function IdentifyFilingModal({
       ? ownedBusinesses.filter((b) => b.current_business_permit)
       : ownedBusinesses
   const withheldBusinesses = ownedBusinesses.length - choosableBusinesses.length
+
+  /**
+   * How many permits each business could renew today.
+   *
+   * ── The dropdown knew nothing until something was picked ────────
+   *
+   * Permits were loaded only AFTER a business was chosen, so an owner with
+   * fourteen shops and four things due had to open each one to find them.
+   * Client, 3 October 2026, having just been told by the Home badge that
+   * four were due: *"it is NOT APPARENT which to renew."*
+   *
+   * One call answers it for every business at once — `/permits` already
+   * returns the owner's own rows with the business attached, which is the
+   * same list the Home tile counts. Loaded once here rather than per
+   * business, and it is the badge's own source, so the tile and this list
+   * cannot disagree about what is due.
+   *
+   * `renewal_blocked_reason === null` is the server's answer to "may this
+   * be renewed now", not a date this screen works out: a Mayor's Permit six
+   * weeks from expiry is NOT due (it waits for January) and one that lapsed
+   * in March IS (late, with a surcharge). `status === 'active'` drops the
+   * superseded certificates the list also carries.
+   */
+  const { data: ownPermits } = useAsync(
+    () =>
+      applicationType === 'renewal'
+        ? permitsApi.list({ per_page: 100 })
+        : Promise.resolve([] as Permit[]),
+    [applicationType],
+  )
+  const dueByBusiness = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const p of ownPermits ?? []) {
+      if (p.status !== 'active' || (p.renewal_blocked_reason ?? null) !== null) continue
+      const id = p.business?.id
+      if (id === undefined) continue
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+
+    return counts
+  }, [ownPermits])
+
+  /*
+   * Split, not sorted. Two headed groups say "these are the ones" in a way
+   * an ordering cannot — a list that merely puts four at the top still
+   * looks like one list.
+   *
+   * Both halves are offered. A business with nothing due is still a legal
+   * filing: the window opens 30 days out, and an applicant who means to
+   * check or who is early should not find their own shop missing — the
+   * objection that keeps this chooser unfiltered in the first place.
+   *
+   * Only on a RENEWAL. An amendment has nothing to be due, and heading a
+   * group "Nothing due" there would answer a question it never asked.
+   */
+  const groupByDue = applicationType === 'renewal' && dueByBusiness.size > 0
+  const businessesDue = choosableBusinesses.filter((b) => (dueByBusiness.get(b.id) ?? 0) > 0)
+  const businessesNotDue = choosableBusinesses.filter(
+    (b) => (dueByBusiness.get(b.id) ?? 0) === 0,
+  )
   const [businessId, setBusinessId] = useState<number | null>(initial.businessId)
   /*
    * The ticked permits, primary first. Order is the answer's own: the first
@@ -2241,6 +2330,55 @@ function IdentifyFilingModal({
       : allPermits
 
   /*
+   * Is the Mayor’s / Business Permit among the ticks?
+   *
+   * It decides what the note under the picker says, and it is the same
+   * question the tick handler asks and that `RenewalScope` asks on the
+   * API: a filing carrying the business permit may carry whatever else is
+   * due with it, and one that does not carries a single permit.
+   */
+  const carriesBusinessPermitTick = permits.some(
+    (p) => permitIds.includes(p.id) && p.permit_type?.code === BUSINESS_PERMIT_CODE,
+  )
+
+  /*
+   * The permits this filing may actually carry, and the rest.
+   *
+   * Split on the SERVER's own refusal (`renewal_blocked_reason`) rather
+   * than on a date computed here, so the list cannot offer a row the API
+   * would reject — the window lives in `App\Support\RenewalWindow` and
+   * this is the half of it the applicant can see.
+   *
+   * A row already TICKED stays in the top list whatever its reason says.
+   * A draft left over a month-end can hold a permit whose window closed
+   * under it, and moving that tick into a section headed "Not due yet"
+   * would hide the one row blocking submission in the one place the
+   * applicant is not looking.
+   */
+  const renewableNow = permits.filter(
+    (p) => (p.renewal_blocked_reason ?? null) === null || permitIds.includes(p.id),
+  )
+  /*
+   * The blocked permits, split by WHY — and they are opposite states.
+   *
+   * Both were drawn under one heading reading "Still valid — nothing to
+   * do", which filed a certificate that lapsed in 2023 among the ones in
+   * force and told the applicant it was fine. Caught by the client on a
+   * screenshot, 3 October 2026.
+   *
+   * `renewal_blocked_reason` says a permit cannot be renewed TODAY and
+   * says nothing about which side of its term that is — too early and too
+   * late are one field, which is exactly why `RenewalWindow` returns the
+   * sentence rather than a flag. The expiry date is what tells them
+   * apart, so the split is on that and not on the wording.
+   */
+  const blockedRows = permits.filter(
+    (p) => (p.renewal_blocked_reason ?? null) !== null && !permitIds.includes(p.id),
+  )
+  const notDueYet = blockedRows.filter((p) => (p.days_until_expiry ?? 0) >= 0)
+  const noLongerRenewable = blockedRows.filter((p) => (p.days_until_expiry ?? 0) < 0)
+
+  /*
    * Why Confirm will not get you out of here yet — in the order the questions
    * are asked, so the sentence always names the topmost thing still blank.
    *
@@ -2342,7 +2480,7 @@ function IdentifyFilingModal({
     <ProtoModal
       title={
         applicationType === 'renewal'
-          ? 'WHICH PERMITS ARE YOU RENEWING?'
+          ? 'WHICH PERMIT ARE YOU RENEWING?'
           : 'WHICH BUSINESS ARE YOU AMENDING?'
       }
       wide
@@ -2380,14 +2518,15 @@ function IdentifyFilingModal({
     >
       <p className="text-sm leading-relaxed text-ink-secondary">
         {applicationType === 'renewal'
-          ? 'Tick the permits you are renewing. We fill in the rest from them.'
-          : 'Say which record you are amending. We fill in the rest from it.'}
+          ? 'We fill in the rest of the form from it.'
+          : 'We fill in the rest of the form from it.'}
       </p>
 
       {/* ── 1. Which business ────────────────────────────────────────────── */}
       <label className="mt-3 block">
         <FieldLabel required>Business</FieldLabel>
         <select
+          aria-label={`Which business are you ${verb}?`}
           className={inputCls}
           value={businessId ?? ''}
           onChange={(e) => setBusinessId(e.target.value ? Number(e.target.value) : null)}
@@ -2398,13 +2537,42 @@ function IdentifyFilingModal({
           <option value="">
             {businessesLoading ? 'Loading your businesses…' : 'Select a business…'}
           </option>
-          {choosableBusinesses.map((b) => (
-            <option key={b.id} value={b.id}>
-              {applicationType === 'amendment' && b.current_business_permit
-                ? `${b.name} — ${b.current_business_permit.permit_number}`
-                : b.name}
-            </option>
-          ))}
+          {groupByDue ? (
+            <>
+              {/*
+                `optgroup`, not a styled list. It is native, so it survives
+                a phone's own select UI and reads as a group to a screen
+                reader — neither of which a div pretending to be a dropdown
+                does without a great deal of work.
+              */}
+              {businessesDue.length > 0 && (
+                <optgroup label="Due for renewal">
+                  {businessesDue.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({dueByBusiness.get(b.id)} due)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {businessesNotDue.length > 0 && (
+                <optgroup label="Nothing due">
+                  {businessesNotDue.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </>
+          ) : (
+            choosableBusinesses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {applicationType === 'amendment' && b.current_business_permit
+                  ? `${b.name} — ${b.current_business_permit.permit_number}`
+                  : b.name}
+              </option>
+            ))
+          )}
         </select>
       </label>
       {!businessesLoading && ownedBusinesses.length === 0 && (
@@ -2442,7 +2610,8 @@ function IdentifyFilingModal({
       */}
       {businessId !== null && applicationType !== 'amendment' && (
         <div className="mt-3">
-          <FieldLabel required>Permits</FieldLabel>
+          {/* The list below carries the full question as its own name. */}
+          <FieldLabel required>Permit</FieldLabel>
           {/*
             One bill, said where the ticking happens.
 
@@ -2478,8 +2647,23 @@ function IdentifyFilingModal({
             worked, this sentence becomes a lie about money and must go with
             it.
           */}
+          {/*
+            Two sentences, and which one shows depends on the answer so far.
+
+            The fee line earns its place for the reason item #79 gave: nothing
+            in this picker said what a second tick costs, and the fear of a
+            second bill is what makes someone untick a permit that is due.
+
+            The other line is new on 3 October 2026 and has to come FIRST in
+            the reader's day, not after: ticking a second clearance will drop
+            the first, and a control that rearranges itself without warning is
+            read as a bug. It is also why the rule is phrased as what to do —
+            file them separately — rather than as what is forbidden.
+          */}
           <p className="mb-2 text-xs text-ink-secondary">
-            Choose as many as you need — one payment for this filing, not one per permit.
+            {carriesBusinessPermitTick
+              ? 'As many as you need — one payment, not one per permit.'
+              : 'Choose your Mayor’s / Business Permit to renew several at once.'}
           </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
@@ -2492,13 +2676,18 @@ function IdentifyFilingModal({
             // business holding nothing drew an empty bordered box above the
             // note explaining that it holds nothing, which reads as a list that
             // failed to load rather than one with no rows to show.
-            permits.length > 0 && (
+            renewableNow.length > 0 && (
               <ul
-                aria-label={`Which permits are you ${verb}?`}
-
+                aria-label={`Which permit are you ${verb}?`}
+                /*
+                 * A radiogroup while one answer is allowed, a plain list
+                 * once the Mayor's Permit has opened it to several. The
+                 * inputs below switch with it.
+                 */
+                role={carriesBusinessPermitTick ? undefined : 'radiogroup'}
                 className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
               >
-                {permits.map((p) => {
+                {renewableNow.map((p) => {
                   const chosen = permitIds.includes(p.id)
                   const days = p.days_until_expiry
                   // Never colour alone: the word says expired or not.
@@ -2556,22 +2745,9 @@ function IdentifyFilingModal({
                   const reason =
                     blockedReason !== null
                       ? { text: blockedReason, cls: 'text-s-red font-semibold' }
-                      : chosen || days === null
-                      ? null
-                      : days < 0
-                        ? {
-                            text: 'Tick it to renew — this office has no valid copy on file.',
-                            cls: 'text-s-red',
-                          }
-                        : days <= 60
-                          ? {
-                              text: `${days} ${days === 1 ? 'day' : 'days'} left — tick it to renew now and save a second filing.`,
-                              cls: 'text-ink',
-                            }
-                          : {
-                              text: 'No renewal needed — BizTrack uses the copy it holds.',
-                              cls: 'text-ink-secondary',
-                            }
+                      : chosen || days === null || days >= 0
+                        ? null
+                        : { text: 'No valid copy on file.', cls: 'text-s-red' }
                   return (
                     // Presentational so the radios are the radiogroup's own
                     // children, not list items wrapping them.
@@ -2586,7 +2762,13 @@ function IdentifyFilingModal({
                         }`}
                       >
                         <input
-                          type="checkbox"
+                          /*
+                           * One answer or several — see the note on the
+                           * list above. A radio in a group named by the
+                           * same `aria-label`, so the two never disagree.
+                           */
+                          type={carriesBusinessPermitTick ? 'checkbox' : 'radio'}
+                          name={carriesBusinessPermitTick ? undefined : 'renewal-permit'}
                           /*
                            * Disabled, not hidden. A permit the business
                            * holds and cannot renew is a fact the applicant
@@ -2604,12 +2786,38 @@ function IdentifyFilingModal({
                              * Untick-and-retick is how you change which is
                              * primary, which is the only honest way to say it
                              * without a second control asking the same thing.
+                             *
+                             * ── One filing, or one other permit ───────────
+                             *
+                             * Client, 3 October 2026, on the other permits
+                             * being independent of each other. Ticking a
+                             * second one with no Mayor's Permit in the set
+                             * REPLACES the first rather than refusing it:
+                             * the applicant is telling us which permit they
+                             * mean, and answering a changed mind with an
+                             * error is answering it with an obstacle. The
+                             * note under the list says it will happen before
+                             * it does.
+                             *
+                             * `RenewalScope` on the API refuses the set this
+                             * cannot produce, on both endpoints that write
+                             * it — the UI keeping a shape off the screen is
+                             * not the same as the server refusing it.
                              */
-                            setPermitIds((current) =>
-                              current.includes(p.id)
-                                ? current.filter((id) => id !== p.id)
-                                : [...current, p.id],
-                            )
+                            setPermitIds((current) => {
+                              if (current.includes(p.id)) {
+                                return current.filter((id) => id !== p.id)
+                              }
+
+                              const next = [...current, p.id]
+                              const carriesBusinessPermit = permits.some(
+                                (q) =>
+                                  next.includes(q.id) &&
+                                  q.permit_type?.code === BUSINESS_PERMIT_CODE,
+                              )
+
+                              return carriesBusinessPermit ? next : [p.id]
+                            })
                           }}
                           className="h-4 w-4 shrink-0 accent-royal"
                         />
@@ -2659,6 +2867,125 @@ function IdentifyFilingModal({
                 })}
               </ul>
             )
+          )}
+
+          {/*
+            ── The permits this filing may NOT carry yet ───────────
+
+            Shown, and not as rows. Client, 3 October 2026, on five of
+            these drawn as blocked checkboxes above the one that was
+            pickable: *"so much texts appear."* They each carried a
+            paragraph naming the permit and restating its dates, both of
+            which the row above already printed.
+
+            Kept rather than filtered away, because a permit the applicant
+            can see in My Permits and cannot find here reads as lost — the
+            same objection the amendment chooser answers with a count and a
+            reason instead of a silent filter.
+
+            But not as part of the QUESTION. "Which permits are you
+            renewing" takes its answer from the permits that are due; one
+            that is not is context, and one line of it is enough: the name,
+            and the date it can be renewed from, which is the only fact the
+            applicant cannot work out for themselves.
+          */}
+          {/*
+            ── Stacked, not two columns ────────────────────────
+
+            The name sat left and the dates were pushed right, so every row
+            was a short label against a long run of text with a gap between
+            them, and the one row whose sentence was longer wrapped while
+            the rest did not. Client, 3 October 2026: *"Text is too
+            compacted. Adjust the layout."*
+
+            The name leads its own line and the dates sit under it. Both
+            read left to right from the same edge, a longer sentence makes
+            the row taller instead of crushing the column beside it, and it
+            is the shape the pickable rows above already use.
+          */}
+          {notDueYet.length > 0 && (
+            <div className="mt-3">
+              {/*
+                ── The heading says the GOOD news first ──────────────
+
+                It read "Not due yet", which states the one thing these
+                permits cannot do and never says they are fine. Client,
+                3 October 2026: *"Can you put something in them that
+                explains clearly that they are still valid."*
+
+                A list of six certificates under a negative heading, each
+                line naming a future date, reads as six problems. Every one
+                of them is a permit in force that the applicant need do
+                nothing about, and that is the message.
+              */}
+              <h4 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">
+                Still valid — nothing to do
+              </h4>
+              <ul className="mt-1 divide-y divide-line rounded-lg border border-line bg-line/20">
+                {notDueYet.map((p) => (
+                  <li key={p.id} className="px-3 py-2">
+                    <span className="block text-xs font-semibold text-ink-secondary">
+                      {p.permit_type?.name ?? 'Permit'}
+                    </span>
+                    {/*
+                      Two facts, in the order they are wanted: how long the
+                      permit covers them, then when they may renew it.
+
+                      The validity was dropped when these rows were
+                      compacted, on the reasoning that the renewal date was
+                      the only thing the applicant could not work out. That
+                      was wrong in one direction: they could not work out
+                      the expiry either, because this group is the one place
+                      the dates are no longer printed.
+                    */}
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      {p.valid_until && (
+                        <span className="font-medium text-ink-secondary">
+                          Valid to {formatDate(p.valid_until)}
+                        </span>
+                      )}
+                      {p.valid_until ? ' · ' : ''}
+                      {/* The server's own sentence, already short — see RenewalWindow. */}
+                      {p.renewal_blocked_reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/*
+            ── Lapsed past the cap: a different answer, under its own heading ─
+
+            These were drawn above, among the permits in force, under a
+            heading promising there was nothing to do. There is: the term
+            ran out more than 36 months ago (`RenewalWindow`), renewal no
+            longer deters anything past Sec. 8A.05's interest cap, and what
+            the business needs is a New Application with its own inspection.
+
+            Red, and said in the row rather than only in the sentence: a
+            certificate that lapsed years ago is the one thing on this
+            screen the applicant most needs to notice, and it had been
+            filed under reassurance.
+          */}
+          {noLongerRenewable.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-s-red">
+                Lapsed — cannot be renewed
+              </h4>
+              <ul className="mt-1 divide-y divide-s-red/20 rounded-lg border border-s-red/40 bg-s-red/5">
+                {noLongerRenewable.map((p) => (
+                  <li key={p.id} className="px-3 py-2">
+                    <span className="block text-xs font-semibold text-ink">
+                      {p.permit_type?.name ?? 'Permit'}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-s-red">
+                      {p.renewal_blocked_reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/*
@@ -3031,11 +3358,20 @@ export function ApplyWizard() {
 
   function readBackup(): DraftBackup | null {
     try {
-      const raw = sessionStorage.getItem(DRAFT_BACKUP_KEY)
+      const raw = sessionStorage.getItem(draftBackupKey(applicationType))
       if (!raw) return null
       const parsed = JSON.parse(raw) as DraftBackup
       // A backup written by an older build describes a different form.
-      return parsed.v === DRAFT_BACKUP_VERSION ? parsed : null
+      if (parsed.v !== DRAFT_BACKUP_VERSION) return null
+
+      /*
+       * And one written for a different KIND of filing describes a
+       * different set of questions. The key is per type now, so this can
+       * only fire on a slot left by the single-key build — but restoring a
+       * new permit's answers into a renewal would put a form on screen
+       * that no dialog had ever been asked about.
+       */
+      return parsed.applicationType === applicationType ? parsed : null
     } catch {
       return null
     }
@@ -3043,7 +3379,7 @@ export function ApplyWizard() {
 
   function clearBackup(): void {
     try {
-      sessionStorage.removeItem(DRAFT_BACKUP_KEY)
+      sessionStorage.removeItem(draftBackupKey(applicationType))
     } catch {
       /* Nothing to do, and nothing worth telling the applicant. */
     }
@@ -3452,9 +3788,16 @@ export function ApplyWizard() {
    * draft — that one already answered this, and the hydration effect below
    * reopens it only in the one case where the saved draft is missing the
    * answer AND there are permits it could have named.
+   *
+   * Nor for a RESUMED scratch draft (`?resume=`), since 3 October 2026 —
+   * same reasoning, different kind of draft. Its answer arrives with the
+   * restore a moment later, and opening on the way would put the dialog
+   * over the form for as long as that read takes and then snatch it away.
+   * The restore opens it itself when the saved copy names no business,
+   * which is what a filing abandoned ON the dialog looks like.
    */
   const [identify, setIdentify] = useState<'entry' | 'change' | null>(
-    isReuse && !draftIdParam ? 'entry' : null,
+    isReuse && !draftIdParam && resumeParam === null ? 'entry' : null,
   )
   const [confirmingIdentity, setConfirmingIdentity] = useState(false)
   const [identifyError, setIdentifyError] = useState<string | null>(null)
@@ -3724,8 +4067,31 @@ export function ApplyWizard() {
    *
    * From `entry` there is nothing to go back TO — the wizard behind is blank
    * and unsaved, and leaving the dialog up over an empty form the applicant
-   * cannot use would be a dead end. So it leaves, to wherever they can pick
-   * this up again: drafts if there is a draft, the applications list if not.
+   * cannot use would be a dead end. So it leaves; the question is where to.
+   *
+   * ── Home, not Track ───────────────────────────────
+   *
+   * It was the applications list, on the reasoning that it is "wherever
+   * they can pick this up again". Half right: a DRAFT can be picked up,
+   * and that arm is kept. A filing that was never started cannot, and
+   * Track is a list of filings the applicant already has — which answers a
+   * different question from the one they just asked by pressing Not now.
+   *
+   * Client, 3 October 2026: *"If I click 'Not now' in the renewal modal,
+   * why does it transport me to the Track page? Would it be better if it
+   * is Home page instead."* Yes — Home is where the New, Renew and Amend
+   * actions are, so it is both where they came from and where they would
+   * start again if they change their mind back.
+   *
+   * ── `resumeParam`, which the old line missed ─────────────────
+   *
+   * There are two kinds of draft. `draftIdParam` is a real filing the API
+   * holds; `resumeParam` is a scratch row in `wizardDrafts`, and since
+   * 3 October a renewal has those too — before that date only a new permit
+   * did, which is why this line never had to think about them. Both come
+   * from a card on the Drafts page, and sending the second to Home would
+   * drop the applicant somewhere other than the list they clicked from,
+   * with their draft still sitting in it.
    */
   function cancelIdentity() {
     if (identify === 'change') {
@@ -3733,7 +4099,9 @@ export function ApplyWizard() {
       setIdentify(null)
       return
     }
-    navigate(draftIdParam ? '/drafts' : '/applications')
+
+    const cameFromDrafts = draftIdParam !== null || resumeParam !== null
+    navigate(cameFromDrafts ? '/drafts' : '/dashboard')
   }
 
   /** Apply an OCR suggestion into the matching form fields (suggestions only). */
@@ -7560,9 +7928,22 @@ export function ApplyWizard() {
   /*
    * ── Give back what was typed before the draft could exist ─────────
    *
-   * Once, on a fresh `new` filing that has nothing in it yet. Not for a
+   * Once, on a fresh filing that has nothing in it yet. Not for a
    * reopened draft — that one has a server copy, which outranks this —
    * and not while the hydration of one is still running.
+   *
+   * ── Every filing type, since 3 October 2026 ──────────────────────
+   *
+   * This and its saving twin were both gated on `applicationType ===
+   * 'new'`, which is the whole of the client's report: a renewal or an
+   * amendment was never written to `wizardDrafts` at all, so it never
+   * reached the Drafts list, ticking Data Privacy saved nothing, and
+   * there was no row to reopen at the furthest section. Every rule the
+   * new permit has about drafts was a rule only the new permit had.
+   *
+   * Nothing here was specific to a new filing; the gate was the scope
+   * the feature was built in. What a renewal needs ON TOP is the entry
+   * dialog's answer, which `DraftBackup.identity` now carries.
    */
   useEffect(() => {
     if (backupRestoredRef.current) return
@@ -7581,7 +7962,7 @@ export function ApplyWizard() {
 
       return
     }
-    if (draftIdParam || applicationId || hydrating || applicationType !== 'new') return
+    if (draftIdParam || applicationId || hydrating) return
     backupRestoredRef.current = true
 
     /*
@@ -7616,6 +7997,52 @@ export function ApplyWizard() {
       setForm(rebuild(EMPTY, backup.form))
       setFeeDraft(rebuild(EMPTY_FEE_PROFILE, backup.feeDraft))
       setConsent(backup.consent === true)
+
+      /*
+       * ── And what the filing is a renewal OF ────────────────────────
+       *
+       * Only when the saved copy names a business. A renewal resumed
+       * without one has not answered the entry dialog yet — it was
+       * abandoned on the dialog itself, or written by a build before
+       * this field existed — and `identify` below keeps the dialog up
+       * for exactly that case. Writing a null here instead would close
+       * the dialog over a renewal that names no permit, which is the
+       * one state the entry dialog exists to prevent.
+       */
+      const saved = backup.identity
+      if (saved && saved.businessId !== null) {
+        setPrefillBusinessId(saved.businessId)
+        setPriorPermitId(saved.priorPermitId ?? null)
+        setPriorPermitIds(Array.isArray(saved.priorPermitIds) ? saved.priorPermitIds : [])
+        setAmendment(rebuild(EMPTY_AMENDMENT, saved.amendment))
+        setIdentify(null)
+
+        /*
+         * The permit list, which is not in the payload and is not derived
+         * from it. The summary on Business Information names the permits
+         * this filing carries forward by reading `renewablePermits`, and
+         * the Change dialog lists them from the same place — so without
+         * this a resumed renewal shows its ticked ids against nothing and
+         * reads as a filing that has lost its permits.
+         *
+         * `loadRenewablePermits` and not the full prefill: that one would
+         * pull the registry's copy of the business back over the answers
+         * being restored in the lines above. It is the same call a
+         * reopened server draft makes, for the same reason.
+         *
+         * Not awaited and its failure is swallowed there: the list feeds
+         * the body of the form, where empty reads as "not chosen yet" and
+         * the applicant is told to press Change.
+         */
+        void loadRenewablePermits(saved.businessId, applicationType as 'renewal' | 'amendment')
+      } else if (isReuse) {
+        /*
+         * Resumed, but the saved copy names no business — abandoned on the
+         * dialog itself, or written before `identity` existed. Ask again,
+         * because a renewal that names no permit is renewing nothing.
+         */
+        setIdentify('entry')
+      }
     }
 
     let cancelled = false
@@ -7640,7 +8067,14 @@ export function ApplyWizard() {
       try {
         const saved = resumeParam === null ? null : await wizardDrafts.get(resumeParam)
         const payload = saved?.payload as DraftBackup | undefined
-        if (!cancelled && saved && payload && payload.v === DRAFT_BACKUP_VERSION) {
+        /*
+         * The id comes off the URL, so `?type=renewal&resume=<a new
+         * permit's id>` is a link anyone can type or an old bookmark can
+         * hold. Reading the row's own type rather than trusting the query
+         * keeps a new permit's answers out of a renewal form.
+         */
+        const sameKind = saved?.application_type === applicationType
+        if (!cancelled && saved && sameKind && payload && payload.v === DRAFT_BACKUP_VERSION) {
           apply(payload)
           /*
            * Adopted, so every later save goes back to the row this form was
@@ -7659,14 +8093,26 @@ export function ApplyWizard() {
       }
 
       if (!cancelled && from === null) {
+        /* `readBackup` already refuses a slot of another type. */
         const backup = readBackup()
-        if (backup && backup.applicationType === 'new') {
+        if (backup) {
           apply(backup)
           from = 'tab'
         }
       }
 
       if (cancelled) return
+
+      /*
+       * Nothing came back at all — a `resume` id that is gone, or a row
+       * belonging to somebody else. On a renewal or an amendment that
+       * leaves a form with no business behind it and, since the dialog no
+       * longer opens on the way in, nothing on screen to fix that with.
+       * So it opens here, which is the state a fresh /apply?type=renewal
+       * would have been in.
+       */
+      if (isReuse && from === null) setIdentify('entry')
+
       done = true
       /*
        * Nothing is said about `from`. Which copy the answers came back
@@ -7704,7 +8150,7 @@ export function ApplyWizard() {
    * restored OVER newer work.
    */
   useEffect(() => {
-    if (applicationType !== 'new' || hydrating || hydrateFailed) return
+    if (hydrating || hydrateFailed) return
     if (applicationId) {
       /*
        * There is a real draft now, so both scratch copies are not just
@@ -7750,9 +8196,23 @@ export function ApplyWizard() {
     }
     if (openedSnapshotRef.current === snapshot) return
 
+    /*
+     * What the entry dialog was told. Undefined on a new permit, which has
+     * no such dialog and no such answer — an empty object there would be a
+     * claim that one was asked and answered with nothing.
+     */
+    const savedIdentity: DraftBackup['identity'] = isReuse
+      ? {
+          businessId: prefillBusinessId,
+          priorPermitId,
+          priorPermitIds,
+          amendment,
+        }
+      : undefined
+
     try {
       sessionStorage.setItem(
-        DRAFT_BACKUP_KEY,
+        draftBackupKey(applicationType),
         JSON.stringify({
           v: DRAFT_BACKUP_VERSION,
           at: new Date().toISOString(),
@@ -7761,6 +8221,7 @@ export function ApplyWizard() {
           form,
           feeDraft,
           consent,
+          identity: savedIdentity,
         } satisfies DraftBackup),
       )
     } catch {
@@ -7799,6 +8260,7 @@ export function ApplyWizard() {
           form,
           feeDraft,
           consent,
+          identity: savedIdentity,
         } satisfies DraftBackup as unknown as Record<string, unknown>,
       }
 
@@ -7831,7 +8293,24 @@ export function ApplyWizard() {
 
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, applicationId, applicationType, hydrating, hydrateFailed, restoreSettled])
+  }, [
+    snapshot,
+    applicationId,
+    applicationType,
+    hydrating,
+    hydrateFailed,
+    restoreSettled,
+    /*
+     * The entry dialog's answer is not in `snapshot`, so without these a
+     * renewal whose ticked permits changed and whose form did not would
+     * save the old set — and resume against the wrong permits.
+     */
+    isReuse,
+    prefillBusinessId,
+    priorPermitId,
+    priorPermitIds,
+    amendment,
+  ])
 
   /* Closing the tab mid-form should not silently take the answers with it. */
   useEffect(() => {
