@@ -8,6 +8,7 @@ import { useAuth } from '../../../stores/auth'
 import { canUseDebug } from './access'
 import { debugPanel } from './api'
 import { HealthSection } from './HealthSection'
+import { FilingsSection } from './FilingsSection'
 import { PaymentsSection } from './PaymentsSection'
 import { SwitchesSection } from './SwitchesSection'
 
@@ -67,6 +68,13 @@ const SECTIONS: DebugSection[] = [
     summary:
       'Sign-in codes, the captcha, the office-hours notice and a pretend date for renewals. Each overrides the server’s own setting from the next request on.',
     body: () => <SwitchesSection />,
+  },
+  {
+    id: 'filings',
+    title: 'Move a filing along',
+    summary:
+      'Push a filing to its next stage with the offices’ own steps, refused wherever the office would be. Each step is recorded as you acting for the office, and the applicant is notified as usual.',
+    body: () => <FilingsSection />,
   },
 ]
 
