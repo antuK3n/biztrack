@@ -7,6 +7,7 @@ import { useAsync } from '../../../lib/useAsync'
 import { useAuth } from '../../../stores/auth'
 import { canUseDebug } from './access'
 import { debugPanel } from './api'
+import { FilingsSection } from './FilingsSection'
 import { PaymentsSection } from './PaymentsSection'
 
 /*
@@ -51,6 +52,13 @@ const SECTIONS: DebugSection[] = [
     summary:
       'How owners pay, and what KwikPay collects. Changes apply to the next payment; none touches a payment already started.',
     body: () => <PaymentsSection />,
+  },
+  {
+    id: 'filings',
+    title: 'Move a filing along',
+    summary:
+      'Push a filing to its next stage with the offices’ own steps, refused wherever the office would be. Each step is recorded as you acting for the office, and the applicant is notified as usual.',
+    body: () => <FilingsSection />,
   },
 ]
 
