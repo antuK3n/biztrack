@@ -28,6 +28,7 @@ use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
 use App\Support\Audit;
+use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
@@ -4509,7 +4510,9 @@ class WorkflowService
         }
 
         $expired = CarbonImmutable::parse($prior->valid_until)->endOfDay();
-        $filed = CarbonImmutable::parse($app->submitted_at ?? $app->created_at ?? now());
+        // The pretend date while the Debug page sets one; the real filing time
+        // otherwise (BusinessDate). submitted_at itself is never rewritten.
+        $filed = BusinessDate::filedAt($app->submitted_at ?? $app->created_at);
 
         if ($filed->lessThanOrEqualTo($expired)) {
             return $none;

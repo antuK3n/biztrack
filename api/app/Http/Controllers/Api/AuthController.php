@@ -13,6 +13,7 @@ use App\Support\EmailCodes;
 use App\Support\EmailSwitch;
 use App\Support\LegacyImport\LegacyClaim;
 use App\Support\OfficeHours;
+use App\Support\SystemSwitches;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -559,8 +560,13 @@ class AuthController extends Controller
          * a right password earns a code by e-mail, not a session. Everyone —
          * owners, officers, the super admin. With mail off (the demo) the
          * password is enough, as it always was.
+         *
+         * Asked through SystemSwitches rather than EmailSwitch directly, so
+         * the super admin can turn the code off from the Debug page with mail
+         * still on [Ken, 2026-10-04]. It still cannot be on while mail goes
+         * nowhere: that decision is EmailSwitch's, and signInCodes() asks it.
          */
-        if (EmailSwitch::on()) {
+        if (SystemSwitches::signInCodes()) {
             return $this->startSignInCode($user, $portal);
         }
 

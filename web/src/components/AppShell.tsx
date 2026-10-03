@@ -14,6 +14,7 @@ import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
 import { BellIcon } from './icons'
 import { OfficeHoursNotice } from './OfficeHoursNotice'
+import { PretendDateBanner } from './PretendDateBanner'
 
 const ROLE_LABELS: Record<string, string> = {
   business_owner: 'Business owner',
@@ -430,6 +431,8 @@ export function AppShell() {
             this corner on a phone.
           */}
           <OfficeHoursNotice audience={portal === 'public' ? 'owner' : 'staff'} className="mr-12 lg:mr-10" />
+          {/* While the Debug page simulates renewal dates, every screen says so. */}
+          <PretendDateBanner className="mr-12 lg:mr-10" />
           <Outlet />
         </div>
       </main>

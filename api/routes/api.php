@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\KwikPayCallbackController;
 use App\Http\Controllers\Api\OfficeHoursController;
+use App\Http\Controllers\Api\SystemNoticeController;
 use App\Http\Controllers\FakeKwikPayController;
 use App\Services\KwikPay\FakeKwikPay;
 use Illuminate\Support\Facades\Route;
@@ -84,6 +85,12 @@ Route::prefix('auth')->group(function () {
 
 // Is City Hall open now? Public: the sign-in pages show it [Login 6].
 Route::get('office-hours', OfficeHoursController::class);
+
+// Whether the sign-in form must carry a captcha (the Debug page can switch it off).
+Route::get('auth/sign-in-options', [SystemNoticeController::class, 'signInOptions']);
+
+// The banner every signed-in screen shows while renewal dates are simulated.
+Route::get('system-notices', [SystemNoticeController::class, 'notices'])->middleware('auth:sanctum');
 
 /*
  * KwikPay's deposit callback (docs/payment-gateway.md). Public — KwikPay holds
