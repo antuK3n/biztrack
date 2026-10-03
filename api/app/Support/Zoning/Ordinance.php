@@ -372,7 +372,11 @@ final class Ordinance
         'restaurant' => ['56101', '56102', '56103', '56301', '56302'],
         'water_refilling' => ['36000'],
         'passenger_terminal' => ['49221'],
-        'trucking' => ['49230', '52290'],
+        // A trucking garage. 52290 (freight forwarding and other transport
+        // support) is not one: it may be a pay parking lot or an office, so
+        // it is asked what its vehicles are for (`transport_support`).
+        'trucking' => ['49230'],
+        'transport_support' => ['52290'],
         'vehicle_rental' => ['77100'],
         'recreation' => ['93110', '93290', '59140'],
         'warehouse' => ['52101'],

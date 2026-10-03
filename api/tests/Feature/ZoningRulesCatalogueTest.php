@@ -1,6 +1,10 @@
 <?php
 
+use App\Models\Barangay;
+use App\Models\PsicCode;
 use App\Support\Zoning\Rulebook;
+use App\Support\Zoning\ZoningCheck;
+use App\Support\Zoning\ZoningContext;
 
 /*
  * docs/zoning-ordinance/rules.json is the inventory of every normative
@@ -147,4 +151,41 @@ it('keeps the status counts in the inventory’s header honest', function () {
     ksort($counts);
 
     expect($doc['status_counts'])->toBe($counts);
+});
+
+it('lists in each rule’s data every question its findings ask', function () {
+    /*
+     * data_needed says what a rule reads. It drifted: VI-4-4 began asking
+     * whether a large parking lot is planted and permeable, and its entry did
+     * not say so. Run a spread of filings and hold every question a finding
+     * asks to the data of one of the rules it cites.
+     */
+    $rules = collect(zrRules())->keyBy('id');
+    $runs = [
+        ['Niugan', '68100', 'Pay parking lot', ['vehicle_use' => 'parking_lot', 'parking_slots' => 25]],
+        ['Muzon', '49221', 'Garage', ['vehicle_use' => 'business_parking']],
+        ['Dampalit', '49230', 'Trucking garage', []],
+        ['Longos', '47111', '', ['home_based' => true, 'new_construction' => true, 'has_sign' => true, 'beside_waterway' => true]],
+        ['Concepcion', '47111', '', ['heritage_house' => false, 'new_construction' => true]],
+        ['Catmon', '10711', '', ['home_based' => true]],
+        ['Acacia', '96301', '', []],
+        ['Niugan', '55101', '', []],
+        ['Potrero', '68100', 'Lessor', []],
+        ['Catmon', '47300', '', []],
+    ];
+    foreach ($runs as [$barangay, $code, $description, $facts]) {
+        $ctx = ZoningContext::fromRequest([
+            'barangay_id' => Barangay::where('name', $barangay)->value('id'),
+            'application_type' => 'new',
+            'lines' => [['psic_code_id' => PsicCode::where('code', $code)->value('id'), 'description' => $description]],
+            'zoning_facts' => $facts,
+        ]);
+        foreach (ZoningCheck::evaluate($ctx)['findings'] as $f) {
+            $data = collect($f['rules'])->flatMap(fn ($id) => $rules[$id]['data_needed'] ?? [])->all();
+            foreach (array_merge($f['asks'], $f['officer_asks']) as $fact) {
+                expect(in_array($fact, $data, true))->toBeTrue("{$f['rule']} asks {$fact}, which none of ".implode(', ', $f['rules']).' lists in data_needed');
+            }
+        }
+    }
+    expect($rules['VI-4-4']['data_needed'])->toContain('parking_landscaped');
 });

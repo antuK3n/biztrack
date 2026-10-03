@@ -32,12 +32,12 @@ function ztmPsic(string $code): PsicCode
     return PsicCode::where('code', $code)->firstOrFail();
 }
 
-function ztmCheck(string $barangay, string $code, array $facts = [], ?string $lotZone = null): array
+function ztmCheck(string $barangay, string $code, array $facts = [], ?string $lotZone = null, string $description = ''): array
 {
     $ctx = ZoningContext::fromRequest([
         'barangay_id' => Barangay::where('name', $barangay)->value('id'),
         'application_type' => 'new',
-        'lines' => [['psic_code_id' => PsicCode::where('code', $code)->value('id')]],
+        'lines' => [['psic_code_id' => PsicCode::where('code', $code)->value('id'), 'description' => $description]],
         'zoning_facts' => $facts,
     ]);
     if ($lotZone !== null) {
@@ -153,9 +153,12 @@ it('lists a trade only on a line the table names, across the whole register and 
     // or schools below college; Utilities takes waste management; nothing
     // else is listed in either, and nothing at all in the Cemetery zone.
     expect(array_values(array_unique($listed['INSTITUTIONAL'] ?? [])))->toEqualCanonicalizing(['86100', '86201']);
-    expect($listed['UTILITIES'] ?? [])->toBe(['38110']);
+    // Waste collection is a hauling service, not a waste-management facility:
+    // nothing on the register is plainly a Utilities use.
+    expect($listed['UTILITIES'] ?? [])->toBe([]);
     expect($listed['CEMETERY'] ?? [])->toBe([]);
-    expect(array_diff($listed['PARKS'] ?? [], ['55101', '93110']))->toBe([]);
+    // Resort complexes; an indoor gym is not the Parks zone's outdoor sports.
+    expect(array_diff($listed['PARKS'] ?? [], ['55101']))->toBe([]);
 
     // The industrial zones list industry: manufacturing, a trucking garage,
     // warehousing, publishing — never a shop, an eatery or an office trade.
@@ -190,4 +193,100 @@ it('offers a code nobody has read only by two shared words, and never by one', f
     $hit = ZoningConformance::lookup('R-2-MAX', $two);
     expect($hit['certain'])->toBeFalse()->and($hit['basis'])->toBe('unvetted')->and($hit['use'])->toContain('Water refilling');
     expect(ZoningConformance::lookup('R-2-MAX', $one))->toBeNull();
+});
+
+/** The use finding's status, its line, and whether it asked `$fact`. */
+function ztmRead(array $result): array
+{
+    $use = ztmUse($result) ?? collect($result['findings'])->firstWhere('rule', 'V-2');
+
+    return [$use['status'] ?? null, $use['reason'] ?? '', $use['asks'] ?? []];
+}
+
+it('reads a tailor as a shop and a garment factory as industry, and neither as Met until it knows which', function () {
+    // A garment factory not run from a home used to be Met in Maximum R-2 on
+    // "Tailoring and Dressmaking shops".
+    [$status, , $asks] = ztmRead(ztmCheck('Tonsuya', '14100', ['home_based' => false], 'R-2-MAX'));
+    expect($status)->toBe('review')->and($asks)->toContain('apparel_kind');
+
+    expect(ztmRead(ztmCheck('Tonsuya', '14100', ['home_based' => false, 'apparel_kind' => 'tailoring'], 'R-2-MAX'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Tonsuya', '14100', ['home_based' => false, 'apparel_kind' => 'factory'], 'R-2-MAX'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Dampalit', '14100', ['apparel_kind' => 'factory'], 'I-1'))[0])->toBe('met');
+    // The applicant's own words decide it when the question is unanswered.
+    expect(ztmRead(ztmCheck('Tonsuya', '14100', ['home_based' => false], 'R-2-MAX', 'Garment factory'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Tonsuya', '14100', ['home_based' => false], 'R-2-MAX', 'Tailoring and alterations'))[0])->toBe('met');
+});
+
+it('never lists a driving school where the ordinance lists only tutorial services', function () {
+    // "Tutorial services" is in Residential-1; driving schools only in C-1's
+    // and General Commercial's short-term special education.
+    [$status, $reason] = ztmRead(ztmCheck('Potrero', '85490', ['home_based' => false], 'R-1', 'Driving school'));
+    expect($status)->not->toBe('met')->and($reason)->not->toContain('Tutorial services');
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'driving'], 'R-1'))[0])->not->toBe('met');
+
+    [$status, $reason] = ztmRead(ztmCheck('Niugan', '85490', ['school_kind' => 'driving'], 'C-1'));
+    expect($status)->toBe('met')->and($reason)->toContain('Driving school');
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'tutorial'], 'R-1'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'vocational'], 'R-2-BASIC'))[1])->toContain('Vocational School');
+
+    [$status, , $asks] = ztmRead(ztmCheck('Potrero', '85490', [], 'R-1'));
+    expect($status)->toBe('review')->and($asks)->toContain('school_kind');
+});
+
+it('asks the footwear material before placing a shoe factory in Industrial-1 or -2', function () {
+    [$status, , $asks] = ztmRead(ztmCheck('Dampalit', '15200', [], 'I-1'));
+    expect($status)->toBe('review')->and($asks)->toContain('footwear_material');
+    expect(ztmRead(ztmCheck('Dampalit', '15200', ['footwear_material' => 'rubber_plastic'], 'I-1'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Acacia', '15200', ['footwear_material' => 'rubber_plastic'], 'I-2'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Dampalit', '15200', ['footwear_material' => 'leather'], 'I-1'))[0])->toBe('met');
+});
+
+it('does not read books and newspapers as school supplies', function () {
+    expect(ztmRead(ztmCheck('Muzon', '47610', [], 'R-2-MAX'))[0])->toBe('review');
+    expect(ztmRead(ztmCheck('Niugan', '47610', [], 'C-1'))[1])->toContain('Bookstores');
+});
+
+it('asks whether an appliance repair shop is neighbourhood scale before Maximum R-2 lists it', function () {
+    [$status, , $asks] = ztmRead(ztmCheck('Muzon', '95220', [], 'R-2-MAX'));
+    expect($status)->toBe('review')->and($asks)->toContain('neighbourhood_scale');
+    expect(ztmRead(ztmCheck('Muzon', '95220', ['neighbourhood_scale' => true], 'R-2-MAX'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Muzon', '95220', ['neighbourhood_scale' => false], 'R-2-MAX'))[0])->not->toBe('met');
+    // Commercial-1's line has no such condition.
+    expect(ztmRead(ztmCheck('Niugan', '95220', ['neighbourhood_scale' => false], 'C-1'))[0])->toBe('met');
+});
+
+it('asks whether a paint store handles paint in bulk before Commercial-2 lists it', function () {
+    [$status, , $asks] = ztmRead(ztmCheck('Acacia', '47522', [], 'C-2'));
+    expect($status)->toBe('review')->and($asks)->toContain('paint_bulk_handling');
+    expect(ztmRead(ztmCheck('Acacia', '47522', ['paint_bulk_handling' => false], 'C-2'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Acacia', '47522', ['paint_bulk_handling' => true], 'C-2'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Acacia', '47522', ['paint_bulk_handling' => true], 'I-2'))[1])->toContain('Paint stores with bulk handling');
+});
+
+it('reads an indoor gym and waste collection only as possibly the Parks and Utilities lines', function () {
+    expect(ztmRead(ztmCheck('Catmon', '93110', [], 'PARKS'))[0])->toBe('review');
+    expect(ztmRead(ztmCheck('Catmon', '38110', [], 'UTILITIES'))[0])->toBe('review');
+});
+
+it('lets an "Other" filer land on a listed use no register code reaches', function () {
+    // By the applicant's own words…
+    [$status, $reason] = ztmRead(ztmCheck('Acacia', '00000', [], 'C-2', 'Medium scale junk shop'));
+    expect($status)->toBe('met')->and($reason)->toContain('Medium scale junk shop');
+    expect(ztmRead(ztmCheck('Acacia', '00000', [], 'C-2', 'Lechon'))[1])->toContain('Lechon stores');
+    expect(ztmRead(ztmCheck('Acacia', '00000', [], 'C-2', 'Chicharon factory'))[1])->toContain('Chicharon factory');
+
+    // …or by picking the use.
+    expect(ztmRead(ztmCheck('Niugan', '00000', ['listed_use' => 'car_wash'], 'C-1'))[1])->toContain('Car wash');
+    expect(ztmRead(ztmCheck('Muzon', '00000', ['listed_use' => 'event_planner'], 'R-2-MAX'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Potrero', '00000', ['listed_use' => 'vocational'], 'R-2-BASIC'))[1])->toContain('Vocational School');
+    expect(ztmRead(ztmCheck('Niugan', '00000', ['listed_use' => 'dance_school'], 'C-1'))[1])->toContain('Dance schools');
+
+    // Neither: not on the list, and the pick is offered.
+    [$status, , $asks] = ztmRead(ztmCheck('Acacia', '00000', [], 'C-2'));
+    expect($status)->toBe('review')->and($asks)->toContain('listed_use');
+
+    // A register trade described as one reaches the line too, as a
+    // possibility, ahead of the code's own loose readings.
+    [$status, $reason] = ztmRead(ztmCheck('Acacia', '38110', [], 'C-2', 'Junk shop and scrap buying'));
+    expect($status)->toBe('review')->and($reason)->toContain('Medium scale junk shop');
 });

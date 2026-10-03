@@ -206,15 +206,17 @@ class ZoningConformance
      * listing. Certain lines anywhere in the zone's reach are preferred to a
      * possible line in its own list.
      *
-     * `$facts` are the applicant's answers the definitions turn on (a hotel's
-     * in-room kitchens, a dry cleaner's solvents, a lessor's families).
+     * `$facts` are the applicant's answers the reading turns on (a hotel's
+     * in-room kitchens, a dry cleaner's solvents, a lessor's families, a
+     * shop or a factory); `$description` is the applicant's own description
+     * of the line, which decides when the question is unanswered.
      *
      * @param  array<string, mixed>  $facts
      * @return array{use: string, from: string, via: ?string, certain: bool, basis: string, definition: ?string}|null
      */
-    public static function lookup(string $zone, PsicCode $psic, array $facts = []): ?array
+    public static function lookup(string $zone, PsicCode $psic, array $facts = [], string $description = ''): ?array
     {
-        $spec = TradeUses::for((string) $psic->code, $facts);
+        $spec = TradeUses::for((string) $psic->code, $facts, $description);
         foreach (['is', 'maybe'] as $tier) {
             foreach (Ordinance::closure($zone) as $source) {
                 $uses = self::matchable($source);
@@ -408,9 +410,9 @@ class ZoningConformance
      *
      * @param  list<string>  $uses
      */
-    public static function matchUse(PsicCode $psic, array $uses, array $facts = []): ?string
+    public static function matchUse(PsicCode $psic, array $uses, array $facts = [], string $description = ''): ?string
     {
-        $spec = TradeUses::for((string) $psic->code, $facts);
+        $spec = TradeUses::for((string) $psic->code, $facts, $description);
         if ($spec['curated']) {
             return self::firstPhrase($spec['is'], $uses) ?? self::firstPhrase($spec['maybe'], $uses);
         }

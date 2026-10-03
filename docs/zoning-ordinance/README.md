@@ -101,6 +101,20 @@ or more homes leases an apartment building (Art. III), and a parking building,
 an office building and a cemetery chapel are held to what their definitions
 exclude (Annex A 72, 64, 38).
 
+Where one code covers uses the lists keep apart, the table does not choose:
+a tailor and a garment factory (14100), tutorial, driving, vocational and
+short-course schools (85490), leather, rubber and wooden footwear (15200), a
+paint store with or without bulk handling (47522), an appliance repair shop at
+neighbourhood scale or not (95220). Each is asked on the use finding, read from
+the applicant's own description when unanswered, and only "possibly" listed
+until one or the other says which. A pay parking lot, which has no code, is
+reached from transport support (52290), from a lessor who leases parking
+(68100) or from the description's words. Listed uses no register code reaches
+— a medium junk shop, lechon stores, a chicharon factory, a car wash, event
+planners, vocational, dance, self-defense and SPED schools — are reached from
+"Other (not listed)" by the description or by picking one (`listed_use`), which
+CPDO can also record on its sheet, its answer overriding the applicant's.
+
 ## What the ordinance *does* settle
 
 - **Overlay zones exist, and we now model all three.** Flood (all 21 barangays),

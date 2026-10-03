@@ -203,14 +203,15 @@ it('cites the lot’s own zone list on the use finding, for every zone with a li
         ['Acacia', 'C-2', '56302', 'V-2.8-USES'], ['Potrero', 'C-3', '47190', 'V-2.9-USES'],
         ['Catmon', 'GENERAL-COMMERCIAL', '47111', 'V-2.10-USES'], ['Longos', 'CBD', '47721', 'V-2.11-USES'],
         ['Dampalit', 'I-1', '10740', 'V-2.12-USES'], ['Acacia', 'I-2', '10611', 'V-2.13-USES'],
-        ['Catmon', 'PARKS', '93110', 'V-2.17-USES'], ['Tugatog', 'CEMETERY', '96990', 'V-2.18-USES'],
+        ['Catmon', 'PARKS', '55101', 'V-2.17-USES'], ['Tugatog', 'CEMETERY', '96990', 'V-2.18-USES'],
         ['Catmon', 'UTILITIES', '38110', 'V-2.19-USES'], ['Potrero', 'INSTITUTIONAL', '86100', 'V-2.20-USES'],
     ] as [$barangay, $zone, $code, $rule]) {
         expect('V-'.Ordinance::SECTION_FOR_CODE[$zone].'-USES')->toBe($rule);
         $f = zoFinding(zoCheck($barangay, [$code], officer: ['lot_zone' => $zone]), 'V-2');
         expect($f['rules'])->toContain($rule);
-        // Listed where the table names the line; a cemetery lists no trade.
-        expect($f['status'])->toBe($zone === 'CEMETERY' ? 'review' : 'met', "{$code} in {$zone}");
+        // Listed where the table names the line. A cemetery lists no trade on
+        // the register; waste collection is only possibly a Utilities facility.
+        expect($f['status'])->toBe(in_array($zone, ['CEMETERY', 'UTILITIES'], true) ? 'review' : 'met', "{$code} in {$zone}");
     }
 });
 
@@ -1186,4 +1187,23 @@ it('names every difference between the map sheet and the text, in every barangay
     $noodles = zoFinding(zoCheck('Catmon', ['10740']), 'V-2');
     expect($noodles['reason'])->toContain('map sheet does not draw Industrial-1')->and($noodles['rules'])->toContain('IV-6-g')
         ->and($noodles['question'])->toBe('C11');
+});
+
+it('reaches the pay-parking rules from a transport-support or lessor’s filing', function () {
+    $mr2 = ['lot_zone' => 'R-2-MAX'];
+    $light = ['heavy_vehicles' => false, 'motor_pool' => false];
+
+    // 52290 is not a trucking garage: a pay parking lot filed under it gets
+    // the parking rules from its own words, without being asked again…
+    $words = [['psic_code_id' => zoPsic('52290'), 'description' => 'Pay parking lot']];
+    expect(zoStatus(zoCheck('Tonsuya', $words, $light, $mr2), 'V-2.3-PARK'))->toBe('met');
+    expect(zoStatus(zoCheck('Tonsuya', $words, ['heavy_vehicles' => true, 'motor_pool' => false], $mr2), 'V-2.3-PARK'))->toBe('not_met');
+    // …and is asked what the vehicles are for when its words do not say.
+    $forwarding = [['psic_code_id' => zoPsic('52290'), 'description' => 'Freight forwarding']];
+    expect(zoFinding(zoCheck('Tonsuya', $forwarding, [], $mr2), 'V-2.3-PARK')['asks'])->toContain('vehicle_use');
+
+    // A lessor of parking slots says so in the lessor's own question.
+    $lessor = zoCheck('Tonsuya', [['psic_code_id' => zoPsic('68100'), 'description' => 'Lessor']], ['leases_what' => 'parking'] + $light, $mr2);
+    expect(zoStatus($lessor, 'V-2.3-PARK'))->toBe('met')
+        ->and(zoFinding($lessor, 'V-2')['reason'])->toContain('rentable parking lots');
 });
