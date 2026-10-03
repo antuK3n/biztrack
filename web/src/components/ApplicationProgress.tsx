@@ -236,22 +236,27 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
  * likely to be counting stages.
  *
  * Keyed on the FACTS rather than on the filing type, which is the part worth
- * reading twice. Type alone would have been wrong in both directions: a renewal
- * always passes through the stage, but a NEW filing can still land there too,
- * when it becomes ready without a confirmed RA 11032 category and falls back to
- * BPLO (see `WorkflowService::refreshReadiness`). Omitting the node from a
- * filing standing on it would put `positionOf` at -1 and paint every node "Not
+ * reading twice. ANY filing can still land there, when it becomes ready
+ * without a confirmed RA 11032 category and falls back to BPLO (see
+ * `WorkflowService::refreshReadiness`). Omitting the node from a filing
+ * standing on it would put `positionOf` at -1 and paint every node "Not
  * started" — a worse lie than the one this fixes.
  *
- * So: a renewal keeps it, and anything that has ever BEEN there keeps it.
- * Everything else draws four.
+ * The renewal exception went on 3 October 2026 with the stage itself: the
+ * client removed BPLO's re-reading of uploaded permits (*"useless if the
+ * system already tells them whether they are still valid or not"*), so a
+ * renewal no longer passes through, and drawing the node for every renewal
+ * would light a stage that never happens — the same lie, pointed the other
+ * way, that this function was written to stop.
+ *
+ * So: anything that has ever BEEN there keeps it. Everything else draws four.
  */
 function railFor(app: Application): ApplicationStatus[] {
   const beenThere =
     app.status === 'for_final_approval' ||
     (app.status_history ?? []).some((h) => h.to_status === 'for_final_approval')
 
-  if (app.application_type === 'renewal' || beenThere) return RAIL
+  if (beenThere) return RAIL
 
   return RAIL.filter((s) => s !== 'for_final_approval')
 }

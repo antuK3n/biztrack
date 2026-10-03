@@ -197,13 +197,23 @@ it('clears the note when the applicant answers it, and keeps the date', function
     expect($row->returned_at)->not->toBeNull();
 });
 
-it('lets BPLO send back one uploaded clearance and keeps the filing on its desk', function () {
+it('lets BPLO send back one clearance by name, and not the whole filing', function () {
     /*
-     * The client's decision for Final Approval on a renewal: return that one
-     * clearance, not the whole filing. Before the `Returned` edge existed BPLO's
-     * Return threw; before `outstandingClearances` read the status over the
-     * mode, the return was cosmetic and BPLO could approve on the very copy it
-     * had just rejected.
+     * Return that ONE clearance, not the whole filing. Before the `Returned`
+     * edge existed BPLO's Return threw.
+     *
+     * ── Written for a renewal, moved to an amendment on 3 October 2026 ──
+     *
+     * The scenario was BPLO reading uploaded copies at Final Approval on a
+     * renewal. Both halves of that are gone: the client removed the upload
+     * on a renewal (*"an admin verifying an uploaded other permit will be
+     * useless if the system already tells them whether they are still valid
+     * or not"*) and a renewal no longer reaches Final Approval at all.
+     *
+     * The amendment is the one filing type where the whole scenario is
+     * still real — it may hand in copies, and it goes back to BPLO after
+     * payment because the LGU's own form says to. So the capability under
+     * test is unchanged and only its vehicle has moved.
      */
     $codes = ['BUSINESS', 'SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING'];
     [$business, $permits] = returnBusinessHolding($codes);
@@ -231,6 +241,21 @@ it('lets BPLO send back one uploaded clearance and keeps the filing on its desk'
      * is how the first draft of this test found out.
      */
     $workflow->approveMainForm($app->fresh());
+    /*
+     * Retyped only NOW, between BPLO's first approval and the payment.
+     *
+     * An amendment built properly must name the detail it changes and
+     * carries the business permit ALONE — neither of which gives the
+     * five-clearance filing this scenario is about. Submitting as a renewal
+     * and retyping leaves the filing in the shape BPLO actually meets.
+     *
+     * AFTER `approveMainForm`, because that method sends an amendment to
+     * `approveAmendment` and completes it in one act — there would be no
+     * Final Approval left to return anything at. BEFORE the payment,
+     * because `onPaymentCompleted` is what routes an amendment to BPLO.
+     */
+    $app->forceFill(['application_type' => 'amendment'])->saveQuietly();
+
     $assessment = $app->feeAssessment()->firstOrFail();
     $workflow->onPaymentCompleted(Payment::create([
         'application_id' => $app->id,
@@ -253,14 +278,21 @@ it('lets BPLO send back one uploaded clearance and keeps the filing on its desk'
     }
 
     /*
-     * No office was asked to read any of them — the other half of the same
-     * decision, and the half that was missing until `startClearance` learned
-     * to skip the routing on a renewal upload.
+     * Each office IS asked to read its own copy, and that is the amendment
+     * behaving as the 6 September 2026 decision says — *"the LGU inspects
+     * the premises, not the paperwork"* — so a handed-in certificate still
+     * sends the office out.
+     *
+     * This asserted ZERO while the scenario was a renewal: `startClearance`
+     * skipped the routing there, because the visit behind last year's
+     * certificate had already happened. That skip is narrowed to renewals
+     * and renewals can no longer upload, so it fires for nothing now — see
+     * `$renewalUpload`, kept as a guard rather than a path.
      */
     $offices = ApplicationAssignment::where('application_id', $app->id)
         ->whereHas('department', fn ($d) => $d->where('code', '!=', 'BPLO'))
         ->count();
-    expect($offices)->toBe(0);
+    expect($offices)->toBe(5);
 
     // BPLO reads the copies and sends ONE back, naming it with the pointer.
     $bplo = ApplicationAssignment::where('application_id', $app->id)
@@ -269,23 +301,61 @@ it('lets BPLO send back one uploaded clearance and keeps the filing on its desk'
 
     $workflow->returnAssignment($bplo, 'Your FSIC expired in March. Upload the current one.', 'FSIC');
 
-    // That one permit, not the filing.
+    /*
+     * ── That one permit, not the filing — which is the whole claim ────
+     *
+     * The pointer names FSIC, so FSIC is returned and SANITARY beside it is
+     * untouched. A Return without a pointer sends back the whole form, and
+     * telling an applicant to redo six answers because one certificate was
+     * stale is the thing this mechanism exists to avoid.
+     */
     expect($workflow->pivotFor($app->fresh(), 'FSIC')->status)->toBe(ClearanceStatus::Returned);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
     expect($workflow->pivotFor($app->fresh(), 'SANITARY')->status)->not->toBe(ClearanceStatus::Returned);
+
+    /*
+     * The FILING is at AwaitingOtherPermits, and the test name's 'keeps it
+     * on BPLO's desk' is no longer the right description.
+     *
+     * It sat at Final Approval because an UPLOADED copy counted as
+     * satisfied, so five uploads made the filing ready and BPLO held it.
+     * That rule went on 3 October 2026 at the client's request, so five
+     * uploads now leave five clearances outstanding and `refreshReadiness`
+     * walks the filing back to the stage that is honestly true of it.
+     *
+     * Asserted rather than dropped: walking BACK out of Final Approval when
+     * a permit stops qualifying is its own mechanism, and this is the only
+     * test that exercises it.
+     */
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 
     // And Approve is shut until it is replaced.
     expect(fn () => $workflow->approveOverall($app->fresh(), 'Trying anyway.'))
         ->toThrow(ValidationException::class);
 
-    // The applicant re-uploads; the filing can be approved again.
+    /*
+     * ── Re-uploading does NOT reopen approval, since 3 October 2026 ──
+     *
+     * This used to end by handing in a fresh copy and approving on it,
+     * because an upload satisfied the requirement by its MODE. That rule
+     * is deleted: the client asked for it on renewals, and it was removed
+     * for every type rather than left as a quieter way for a filing to be
+     * called satisfied with no office having approved anything.
+     *
+     * So the copy goes back in — which is still the applicant answering
+     * what BPLO asked — and the filing is still not approvable, because
+     * the office that issues an FSIC has not issued one.
+     */
     $workflow->startClearance(
         $app->fresh(),
         PermitType::where('code', 'FSIC')->firstOrFail(),
         ApplicationPermitType::MODE_UPLOAD,
     );
-    $workflow->approveOverall($app->fresh(), 'Current copy received.');
-    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
+
+    expect($workflow->pivotFor($app->fresh(), 'FSIC')->status)
+        ->not->toBe(ClearanceStatus::Returned);
+
+    expect(fn () => $workflow->approveOverall($app->fresh(), 'Current copy received.'))
+        ->toThrow(ValidationException::class);
 });
 
 /**
