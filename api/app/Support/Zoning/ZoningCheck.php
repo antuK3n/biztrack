@@ -255,11 +255,19 @@ final class ZoningCheck
         $this->principal = $principal;
         $title = $principal['psic']->title;
 
-        // What the business IS, when the applicant's answer says more than
-        // the PSIC code can: a pay parking lot or a taxi garage has no code
-        // of its own on the register.
+        /*
+         * What the business IS, when the applicant's answer says more than
+         * the PSIC code can: a pay parking lot or a taxi garage has no code
+         * of its own on the register. Only for a vehicle trade (transport,
+         * transport support, motor-vehicle rental, "Other", a lessor of
+         * parking). Any other trade is judged by its own code, and what its
+         * vehicles are for is a second use with its own finding: a gasoline
+         * station "with parking lot" was read AS a pay parking lot and told
+         * it was allowed where filling stations are not.
+         */
         $vehicle = $this->vehicleUse();
-        $phrases = $vehicle !== null ? (Ordinance::VEHICLE_USES[$vehicle]['phrases'] ?? []) : [];
+        $replaces = $vehicle !== null && $this->isVehicleTrade($principal['psic']);
+        $phrases = $replaces ? (Ordinance::VEHICLE_USES[$vehicle]['phrases'] ?? []) : [];
         if ($phrases !== []) {
             $hits = [];
             foreach ($codes as $code) {
@@ -323,6 +331,10 @@ final class ZoningCheck
             $this->possiblyListed($title, $possible, $codes, $decides);
         } else {
             $this->notListed($principal['psic'], $codes, (string) ($principal['description'] ?? ''), $decides);
+        }
+
+        if ($vehicle !== null && ! $replaces) {
+            $this->secondVehicleUse($vehicle, $codes);
         }
 
         if (count($lines) > 1) {
@@ -994,10 +1006,16 @@ final class ZoningCheck
         if (is_string($answer) && isset(Ordinance::VEHICLE_USES[$answer])) {
             return $answer;
         }
-        if ($this->ctx->fact('leases_what') === 'parking') {
+        if ($this->ctx->fact('leases_what') === 'parking' && in_array('68100', $this->ctx->psicCodes(), true)) {
             return 'parking_lot';
         }
-        $words = implode(' ', $this->ctx->descriptions());
+        // Description words decide only for a vehicle trade: "with parking
+        // lot" beside a gasoline station says it has a car park, not that it
+        // is one.
+        $words = implode(' ', array_map(
+            fn (array $line) => mb_strtolower((string) ($line['description'] ?? '')),
+            array_values(array_filter($this->ctx->lines, fn (array $line) => $this->isVehicleTrade($line['psic']))),
+        ));
         foreach ([
             'parking_building' => '/\bparking\s+building\b/',
             'parking_lot' => '/\bpay\s*parking\b|\bparking\s+(?:lot|area|space)s?\s+for\s+rent\b|\bparking\s+lot\b/',
@@ -1012,6 +1030,58 @@ final class ZoningCheck
         }
 
         return null;
+    }
+
+    /**
+     * A trade whose business IS what its vehicles are for: passenger and
+     * freight transport, transport support, motor-vehicle rental, "Other (not
+     * listed)", and a lessor who answers that it leases parking.
+     */
+    private function isVehicleTrade(PsicCode $psic): bool
+    {
+        $code = (string) $psic->code;
+        if (in_array($code, Ordinance::VEHICLE_TRADES, true)) {
+            return true;
+        }
+
+        return $code === '68100' && ($this->ctx->fact('leases_what') === 'parking'
+            || in_array($this->ctx->fact('vehicle_use'), ['parking_lot', 'parking_building'], true));
+    }
+
+    /**
+     * What the vehicles are for, as a use of its own beside a trade that is
+     * not a vehicle trade (a restaurant's parking for its delivery vans).
+     *
+     * It is listed or not on its own line, and brings its own conditions
+     * (vehicleRules); it never makes the trade itself allowed. Never "met":
+     * the trade's finding above is the one that says whether the business is
+     * on the list.
+     */
+    private function secondVehicleUse(string $kind, array $codes): void
+    {
+        $phrases = Ordinance::VEHICLE_USES[$kind]['phrases'] ?? [];
+        if ($phrases === []) {
+            return;
+        }
+        $label = Ordinance::VEHICLE_USES[$kind]['label'];
+        $hits = [];
+        foreach ($codes as $code) {
+            $hit = ZoningConformance::lookupPhrases($code, $phrases);
+            if ($hit !== null) {
+                $hits[$code] = $hit;
+            }
+        }
+        $rules = ['V-2'];
+        foreach (array_keys($hits ?: array_flip($codes)) as $code) {
+            if (isset(Ordinance::SECTION_FOR_CODE[$code])) {
+                $rules[] = 'V-'.Ordinance::SECTION_FOR_CODE[$code].'-USES';
+            }
+        }
+        $reason = $hits !== []
+            ? "{$label} is a use of its own: ".$this->names(array_keys($hits)).' '.(count($hits) > 1 ? 'list' : 'lists').' it (“'.$this->clause(reset($hits)['use']).'”), on the conditions below. It does not change whether the business itself is allowed; the finding above says that.'
+            : "{$label} is not on the list for ".$this->names($codes).'; CPDO decides whether the lot may hold it. It does not change whether the business itself is allowed; the finding above says that.';
+        $this->add(array_values(array_unique($rules)), $hits !== [] ? 'info' : 'review', $reason,
+            ['group' => 'uses', 'title' => 'What the vehicles on the lot are for', 'asks' => ['vehicle_use']]);
     }
 
     /**
