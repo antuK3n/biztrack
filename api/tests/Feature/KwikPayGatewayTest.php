@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\KwikPay\KwikPayGateway;
 use App\Services\KwikPay\Signature;
 use App\Services\WorkflowService;
+use App\Support\ManilaCalendar;
 use App\Support\PaymentMode;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -1150,4 +1151,24 @@ it('shows the owner what the gateway was asked to collect for their own payment'
         ->postJson("/api/v1/applications/{$other->id}/pay", ['method' => 'card'])
         ->assertCreated();
     expect($paid->json('data.gateway_amount'))->toBeNull();
+});
+
+it('counts the assessed amount in the collections report, never the ₱1 the gateway took', function () {
+    PaymentMode::switchCharge('test', 'api');
+    $payment = kpOpen(kpFiling());
+    $billed = (float) $payment->amount;
+    expect($billed)->toBeGreaterThan(1.0);
+
+    $today = ManilaCalendar::today()->toDateString();
+    $collected = fn () => (float) $this->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/analytics/reports/collections?from={$today}&to={$today}")
+        ->assertOk()
+        ->json('data.sections.2.total.amount');
+
+    $before = $collected();
+    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Completed);
+
+    // The whole bill is what the City collected on paper; ₱1 is only what the test took.
+    expect(round($collected() - $before, 2))->toBe(round($billed, 2));
 });
