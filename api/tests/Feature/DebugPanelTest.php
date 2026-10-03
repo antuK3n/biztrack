@@ -28,7 +28,11 @@ beforeEach(function () {
 function debugRoutes(): array
 {
     return [
+        ['GET', '/api/v1/debug/panel', []],
         ['GET', '/api/v1/debug/payments', []],
+        // A wrong method must not answer 405: that would say the route exists.
+        ['POST', '/api/v1/debug/panel', []],
+        ['DELETE', '/api/v1/debug/payments', []],
         ['PUT', '/api/v1/debug/payments', ['charge' => 'full']],
         ['POST', '/api/v1/debug/payments/test', []],
     ];
@@ -72,6 +76,9 @@ it('lets the super admin in while the panel is open, and shuts again when it exp
     authAs('admin@biztrack.local');
 
     $this->getJson('/api/v1/debug/payments')->assertOk()->assertJsonPath('data.mode', 'simulated');
+    $panel = $this->getJson('/api/v1/debug/panel')->assertOk();
+    expect($panel->json('data.local'))->toBeFalse()
+        ->and($panel->json('data.open_until'))->toBe(DebugPanel::openUntil()?->toIso8601String());
 
     $this->travel(5)->hours();
     $this->getJson('/api/v1/debug/payments')->assertOk();
@@ -88,6 +95,9 @@ it('needs no flag when APP_ENV is local, but still only for the super admin', fu
 
     authAs('admin@biztrack.local');
     $this->getJson('/api/v1/debug/payments')->assertOk();
+    $this->getJson('/api/v1/debug/panel')->assertOk()
+        ->assertJsonPath('data.local', true)
+        ->assertJsonPath('data.open_until', null);
 
     authAs('bplo@biztrack.local');
     $this->getJson('/api/v1/debug/payments')->assertNotFound();
