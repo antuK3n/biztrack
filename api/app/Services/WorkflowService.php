@@ -385,9 +385,27 @@ class WorkflowService
              * CPDO on the filing that states it: `application_amendments` holds
              * the proposed value, and the review sheet shows old → new.
              *
-             * Only for an address change. Amending a floor area or a trade name
-             * tells CPDO nothing it assessed, and attaching zoning to those
-             * would be the five-clearance mistake again in miniature.
+             * ── A change of activity or a larger area carries it too ─────────
+             *
+             * This said "only for an address change: amending a floor area or
+             * a trade name tells CPDO nothing it assessed". The ordinance says
+             * otherwise for two of the three. Art. IX §8: "Should there be any
+             * change in the activity or expansion of the area subject of the
+             * Locational Clearance, the owner/developer shall apply for a new
+             * Locational Clearance" — repeated word for word in §9. CPDO did
+             * assess the activity (it is item V on MCG-CPDD-FO-003) and the
+             * floor area (item VIII.A, and the processing fee is charged per
+             * square metre of it, §10.1(c)). So a new line of business, or a
+             * floor area larger than the register's, now carries ZONING as a
+             * move does. A smaller floor area does not (that is no expansion),
+             * and neither does a trade name or an owner: Annex A 63 says a
+             * change of tenant or proprietor is not a change of occupancy.
+             *
+             * A floor area with NO earlier figure on the register is not
+             * treated as an expansion — there is nothing to compare, and
+             * charging a fresh clearance on a guess is the five-clearance
+             * mistake again in miniature. The zoning checklist tells CPDO and
+             * BPLO it could not compare, so the call is a person's.
              *
              * ── And only when the PREMISES actually move ─────────────────────
              *
@@ -402,7 +420,7 @@ class WorkflowService
              */
             $codes = [PermitType::OUTCOME_CODE];
 
-            if (self::amendmentMovesPremises($app)) {
+            if (self::amendmentNeedsLocationalClearance($app) !== []) {
                 $codes[] = 'ZONING';
             }
 
@@ -453,6 +471,37 @@ class WorkflowService
             ->where('field', 'address_pin')
             ->whereNotNull('new_value')
             ->exists();
+    }
+
+    /**
+     * Why this amendment needs a new locational clearance, if it does.
+     *
+     * A move (the pin), a change of activity (the line of business) or an
+     * expansion of the area (a floor area larger than the register's) — City
+     * Ordinance No. 24-2018, Art. IX §§8-9. Empty when none applies. See the
+     * note in `permitTypeIdsAtSubmission` for what is deliberately left out.
+     *
+     * @return list<'moves'|'activity'|'area'>
+     */
+    public static function amendmentNeedsLocationalClearance(Application $app): array
+    {
+        $requested = $app->requestedChanges()->whereNotNull('new_value')->pluck('new_value', 'field');
+        $why = [];
+        if ($requested->has('address_pin')) {
+            $why[] = 'moves';
+        }
+        if ($requested->has('line_of_business')) {
+            $why[] = 'activity';
+        }
+        if ($requested->has('business_area_sqm')) {
+            $before = $app->business()->withTrashed()->value('business_area_sqm');
+            $after = $requested->get('business_area_sqm');
+            if (is_numeric($before) && is_numeric($after) && (float) $after > (float) $before) {
+                $why[] = 'area';
+            }
+        }
+
+        return $why;
     }
 
     /**
@@ -3668,18 +3717,34 @@ class WorkflowService
          * `permitTypeIdsAtSubmission`), so the question "is anything still
          * outstanding" already has one answer.
          *
-         * Only an address amendment ever carries a clearance, so for every
-         * other kind this is empty and costs nothing.
+         * Only an amendment that moves, changes the activity or enlarges the
+         * area carries a clearance (Art. IX §8), so for every other kind this
+         * is empty and costs nothing.
          */
         $app->load('permitTypes');
         $outstanding = $this->outstandingClearances($app);
 
         if ($outstanding->isNotEmpty()) {
+            /*
+             * Named by what the amendment does, because BPLO cannot clear it
+             * themselves and needs to know what CPDO is assessing. A move
+             * keeps its original words ("for the new address") — the
+             * register-wide refusal message tests read them.
+             */
+            $why = self::amendmentNeedsLocationalClearance($app);
+            $what = match (true) {
+                in_array('moves', $why, true) => 'moves the premises',
+                in_array('activity', $why, true) => 'changes the line of business',
+                in_array('area', $why, true) => 'enlarges the floor area',
+                default => 'needs other permits',
+            };
             throw ValidationException::withMessages([
                 'permits' => [
-                    'This amendment moves the premises, so it cannot be approved until '
+                    "This amendment {$what}, so it cannot be approved until "
                     .$outstanding->pluck('name')->join(', ')
-                    .' has been issued for the new address.',
+                    .(in_array('moves', $why, true)
+                        ? ' has been issued for the new address.'
+                        : ' has been issued for it (City Ordinance No. 24-2018, Art. IX §8).'),
                 ],
             ]);
         }
