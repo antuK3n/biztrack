@@ -401,3 +401,15 @@ it('tells a lessor its use depends on what it leases before it says', function (
     expect($status)->toBe('review')->and($reason)->not->toContain('Apartments')
         ->and($reason)->toContain('depends on what it leases')->and($asks)->toContain('leases_what');
 });
+
+it('infers no vehicle use when the description names two, and asks', function () {
+    // "Trucking with parking lot" under transport support was read as a pay
+    // parking lot (parking was tried before trucking) and listed in Max R-2.
+    foreach (['52290' => 'Trucking with parking lot', '00000' => 'Taxi garage with pay parking'] as $code => $words) {
+        [$status, $reason, $asks] = ztmRead(ztmCheck('Tonsuya', $code, [], 'R-2-MAX', $words));
+        expect($status)->not->toBe('met', $code)->and($asks)->toContain('vehicle_use');
+    }
+    // One kind, said either way, is still read.
+    expect(ztmRead(ztmCheck('Tonsuya', '52290', [], 'R-2-MAX', 'Pay parking building'))[1])->toContain('pay parking building');
+    expect(ztmRead(ztmCheck('Tonsuya', '52290', [], 'R-2-MAX', 'Pay parking lot'))[0])->toBe('met');
+});
