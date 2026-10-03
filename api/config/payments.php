@@ -42,9 +42,9 @@ return [
         'merchant' => env('KWIKPAY_MERCHANT') ?: 'harson-tech',
         'key' => env('KWIKPAY_KEY'),
 
-        // "1"–"12". Which one is enabled for us is KwikPay's to say — the docs
-        // say to ask the account manager. Empty until they do.
-        'payment_type' => env('KWIKPAY_PAYMENT_TYPE'),
+        // "1"–"12" in KwikPay's docs, and which are enabled is the gateway's to
+        // say. harson-tech's account takes any of "1"–"4".
+        'payment_type' => env('KWIKPAY_PAYMENT_TYPE') ?: '1',
 
         /*
          * Testing only: when set (e.g. "1.00"), KwikPay is asked to collect this

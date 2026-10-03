@@ -25,15 +25,14 @@ All are listed in `api/.env.example` with empty values.
 | `KWIKPAY_BASE_URL` | KwikPay's address. KwikPay's own Back Office is `https://pay4-kwikpay.jd.management`; the gateway our merchant account is on answers the same API. | `https://payment-gateway-kwgu.onrender.com` |
 | `KWIKPAY_MERCHANT` | Merchant ID from KwikPay. Not a secret: it is sent in the clear with every request. | `harson-tech` |
 | `KWIKPAY_KEY` | Merchant key from KwikPay. Signs every request and checks every callback. It is never sent to the browser, shown by the status API, or written to a log. | — |
-| `KWIKPAY_PAYMENT_TYPE` | `"1"`–`"12"`. KwikPay decides which one (see §5). | — |
+| `KWIKPAY_PAYMENT_TYPE` | `"1"`–`"12"`. KwikPay decides which are enabled (see §5); harson-tech's account takes any of `"1"`–`"4"`. | `1` |
 | `KWIKPAY_CALLBACK_BASE_URL` | The **public** address KwikPay calls back, without `/api/v1`. The callback is `<this>/api/v1/payments/kwikpay/callback`. | `APP_URL` |
 | `KWIKPAY_CALLBACK_IPS` | Optional comma-separated allowlist for callbacks. KwikPay's docs give `34.21.238.122`. Leave it empty unless trusted proxies are set up (see §6). The signature is always checked either way. | empty (not enforced) |
 | `KWIKPAY_TIMEOUT` | Seconds to wait for KwikPay. | `15` |
 | `KWIKPAY_FAKE` | Turns on the practice KwikPay (§4). Only works when `APP_ENV` is `local` or `testing`. | `false` |
 | `KWIKPAY_CHARGE_OVERRIDE` | **Testing only.** When set (e.g. `1.00`), KwikPay is asked to collect this amount instead of the bill. The bill, the payment record and the receipt keep the real assessed amount; the requested amount is kept in `payments.gateway_amount` and a confirmation is checked against it. **Empty it before real use**, or every bill is settled for ₱1. | empty (full amount) |
 
-So the one setting a server must be given is `KWIKPAY_KEY`, plus
-`KWIKPAY_PAYMENT_TYPE` (§5). The server refuses to switch to KwikPay while
+So the one setting a server must be given is `KWIKPAY_KEY`. The server refuses to switch to KwikPay while
 `KWIKPAY_MERCHANT`, `KWIKPAY_KEY` or `KWIKPAY_PAYMENT_TYPE` is missing. The refusal lists the missing keys by
 name.
 
@@ -187,7 +186,8 @@ Ask the KwikPay account manager for these before switching on:
 
 1. **Merchant number and merchant key** (`KWIKPAY_MERCHANT`, `KWIKPAY_KEY`).
 2. **Which `payment_type` to use** (`KWIKPAY_PAYMENT_TYPE`). Their docs say
-   to ask, and every deposit is rejected without it.
+   to ask, and every deposit is rejected without it. For harson-tech the
+   answer is any of 1–4; the default is 1.
 3. **Allowlist our server's outbound IP address.** KwikPay checks the calling
    IP on every request (transfer, query and me), and anything else gets
    `403 IP not found in allowed IPs`. Send the address of the machine that
