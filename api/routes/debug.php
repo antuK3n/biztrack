@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Debug\FilingsController;
 use App\Http\Controllers\Api\Debug\PanelController;
 use App\Http\Controllers\Api\Debug\PaymentsController;
 use Illuminate\Support\Facades\Route;
@@ -30,4 +31,10 @@ Route::prefix('debug')->middleware('debug.panel')->group(function () {
     Route::get('payments', [PaymentsController::class, 'show']);
     Route::put('payments', [PaymentsController::class, 'update']);
     Route::post('payments/test', [PaymentsController::class, 'test'])->middleware('throttle:10,1');
+
+    // Move a filing along: the offices' own steps, the super admin acting for them.
+    Route::get('filings', [FilingsController::class, 'index']);
+    Route::get('filings/{application}', [FilingsController::class, 'show'])->whereNumber('application');
+    Route::post('filings/{application}/steps', [FilingsController::class, 'step'])->whereNumber('application');
+    Route::post('filings/{application}/advance', [FilingsController::class, 'advance'])->whereNumber('application');
 });
