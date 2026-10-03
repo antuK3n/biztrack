@@ -378,6 +378,9 @@ class ZoningConformance
         if ($psic === null) {
             return self::undetermined('No line of business named yet.', $zones, $trade);
         }
+        if (TradeUses::for((string) $psic->code)['pending'] !== null) {
+            return self::undetermined('Which zones list this trade depends on an answer still to be given.', $zones, $trade);
+        }
         /*
          * Every zone here enumerates nothing — a barangay that was Fishpond
          * alone would be the case. Reporting "not listed" there would be

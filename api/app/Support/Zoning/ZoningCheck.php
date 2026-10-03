@@ -283,8 +283,12 @@ final class ZoningCheck
         $hits = $this->withHomeAllowance($principal['psic'], $codes, $hits);
         // The answers the trade's reading turns on (a shop or a factory, the
         // kind of school), asked on the finding they decide.
-        $decides = $phrases !== [] ? ['vehicle_use']
-            : TradeUses::for((string) $principal['psic']->code, $this->ctx->facts, (string) ($principal['description'] ?? ''))['asks'];
+        $reading = TradeUses::for((string) $principal['psic']->code, $this->ctx->facts, (string) ($principal['description'] ?? ''));
+        // A vehicle trade not yet told what its vehicles are for is asked on
+        // this finding: the answer decides which listed use it is.
+        $decides = $phrases !== [] ? ['vehicle_use'] : array_merge($reading['asks'],
+            $vehicle === null && $principal['psic']->code !== '00000' && $this->isVehicleTrade($principal['psic']) ? ['vehicle_use'] : []);
+        $pending = $phrases === [] ? $reading['pending'] : null;
 
         $certain = array_filter($hits, fn ($h) => $h['certain']);
         $possible = array_diff_key($hits, $certain);
@@ -329,6 +333,11 @@ final class ZoningCheck
                 ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'question' => $textOnly !== '' ? 'C11' : null, 'asks' => $decides]);
         } elseif ($possible !== []) {
             $this->possiblyListed($title, $possible, $codes, $decides);
+        } elseif ($pending !== null) {
+            // A trade the lists name only once a question is answered (a
+            // lessor of homes, stalls or parking): said neutrally, and asked.
+            $this->add(['V-2', 'V-'.(Ordinance::SECTION_FOR_CODE[$codes[0] ?? ''] ?? '2').'-USES'], 'review', $pending,
+                ['group' => 'uses', 'title' => 'On the zones’ lists of allowed uses', 'asks' => $decides]);
         } else {
             $this->notListed($principal['psic'], $codes, (string) ($principal['description'] ?? ''), $decides);
         }
@@ -1009,23 +1018,24 @@ final class ZoningCheck
         if ($this->ctx->fact('leases_what') === 'parking' && in_array('68100', $this->ctx->psicCodes(), true)) {
             return 'parking_lot';
         }
-        // Description words decide only for a vehicle trade: "with parking
-        // lot" beside a gasoline station says it has a car park, not that it
-        // is one.
-        $words = implode(' ', array_map(
-            fn (array $line) => mb_strtolower((string) ($line['description'] ?? '')),
-            array_values(array_filter($this->ctx->lines, fn (array $line) => $this->isVehicleTrade($line['psic']))),
-        ));
-        foreach ([
+        // Description words decide only for a vehicle trade, and only a kind
+        // that is that trade's own (Ordinance::VEHICLE_INFERENCES): "with
+        // parking lot" beside a gasoline station says it has a car park, and
+        // beside a trucking company it is still a trucking garage.
+        $patterns = [
             'parking_building' => '/\bparking\s+building\b/',
             'parking_lot' => '/\bpay\s*parking\b|\bparking\s+(?:lot|area|space)s?\s+for\s+rent\b|\bparking\s+lot\b/',
             'taxi_garage' => '/\btaxi\b/',
             'ride_hailing_garage' => '/\b(?:grab|uber|tnvs|ride[- ]hailing)\b/',
             'tricycle_terminal' => '/\b(?:tricycle|pedicab)\s+terminal\b/',
             'trucking_garage' => '/\b(?:trucking|hauling)\b/',
-        ] as $kind => $pattern) {
-            if (preg_match($pattern, $words) === 1) {
-                return $kind;
+        ];
+        foreach ($this->ctx->lines as $line) {
+            $words = mb_strtolower((string) ($line['description'] ?? ''));
+            foreach (Ordinance::VEHICLE_INFERENCES[(string) $line['psic']->code] ?? [] as $kind) {
+                if (preg_match($patterns[$kind], $words) === 1) {
+                    return $kind;
+                }
             }
         }
 

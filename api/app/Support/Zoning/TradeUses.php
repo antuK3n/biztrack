@@ -200,7 +200,7 @@ final class TradeUses
         '64990' => ['is' => ['=bayad centers'], 'maybe' => ['=foreign exchange', '=banks']],
         '65120' => ['is' => ['=insurance']],
         // 68100 is read per Art. III's "apartment building" in TradeUses::for().
-        '68100' => ['maybe' => ['=apartments', '=apartment']],
+        '68100' => [],
         '68200' => ['is' => ['=offices']],
         '69100' => ['is' => ['=offices']],
         '69200' => ['is' => ['=offices']],
@@ -364,15 +364,17 @@ final class TradeUses
      * on, for the use finding to put to the applicant.
      *
      * @param  array<string, mixed>  $facts
-     * @return array{curated: bool, is: list<string>, maybe: list<string>, def: ?string, asks: list<string>}
+     *                                       `pending` is a neutral sentence for a trade the lists cannot place at
+     *                                       all until a question is answered (a lessor: homes, stalls or parking).
+     * @return array{curated: bool, is: list<string>, maybe: list<string>, def: ?string, asks: list<string>, pending: ?string}
      */
     public static function for(string $code, array $facts = [], string $description = ''): array
     {
         if (! array_key_exists($code, self::USES)) {
-            return ['curated' => false, 'is' => [], 'maybe' => [], 'def' => null, 'asks' => []];
+            return ['curated' => false, 'is' => [], 'maybe' => [], 'def' => null, 'asks' => [], 'pending' => null];
         }
         $spec = self::USES[$code];
-        $out = ['curated' => true, 'is' => $spec['is'] ?? [], 'maybe' => $spec['maybe'] ?? [], 'def' => $spec['def'] ?? null, 'asks' => []];
+        $out = ['curated' => true, 'is' => $spec['is'] ?? [], 'maybe' => $spec['maybe'] ?? [], 'def' => $spec['def'] ?? null, 'asks' => [], 'pending' => null];
 
         if (isset(self::DECIDED[$code])) {
             $decided = self::DECIDED[$code];
@@ -439,7 +441,13 @@ final class TradeUses
             $what = $facts['leases_what'] ?? null;
             $families = $facts['families_in_building'] ?? null;
             $out['asks'] = $what === 'dwellings' ? ['leases_what', 'families_in_building'] : ['leases_what'];
-            if ($what === 'commercial') {
+            if ($what === null) {
+                // Until it says, nothing is read in: not "Apartments" for a
+                // lessor whose description says it runs a pay parking lot.
+                $out['is'] = [];
+                $out['maybe'] = [];
+                $out['pending'] = 'Which zones list a lessor depends on what it leases: a house or duplex (Residential-1), an apartment building for three or more families (Basic Residential-2 and the zones above it), stalls or commercial space, or parking. Say what you lease.';
+            } elseif ($what === 'commercial') {
                 $out['is'] = [];
                 $out['maybe'] = [];
             } elseif ($what === 'parking') {

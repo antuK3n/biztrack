@@ -179,7 +179,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:650",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:659",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
       }
     },
@@ -251,7 +251,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2008",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2018",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::holds the locational clearance for an ECC when DENR’s list says the trade needs one"
       }
     },
@@ -276,7 +276,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:742",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:751",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads a lessor’s building as an apartment building from three families"
       }
     },
@@ -348,7 +348,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2071",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2081",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
       }
     },
@@ -500,7 +500,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:514",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:523",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::never reports a trade missing from every list as refused"
       }
     },
@@ -524,7 +524,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:392",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:401",
         "test": "api/tests/Feature/ZoningTradeMatchingTest.php::offers a look-alike line to CPDO as a possibility, never as Met",
         "marker": "$rules = ['V-2', 'III-2-a', 'III-1', 'A-89'];"
       }
@@ -568,7 +568,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2329",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2339",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reports a mandatory rule as not met and a recommendation only as information",
         "marker": "private function yesNo"
       }
@@ -664,7 +664,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1515",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1525",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
       }
     },
@@ -1011,7 +1011,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1681",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1691",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -1127,7 +1127,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:353",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:362",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::judges a filing with several lines by its principal line"
       }
     },
@@ -1151,7 +1151,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:353",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:362",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::judges a filing with several lines by its principal line"
       }
     },
@@ -1753,7 +1753,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:805",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:814",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps warfare research out of the Institutional zone"
       }
     },
@@ -1777,7 +1777,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:309",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:313",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks the home-occupation questions only of a home-based business"
       }
     },
@@ -1802,7 +1802,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:628",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:637",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home occupation of more than five people"
       }
     },
@@ -1827,7 +1827,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:636",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:645",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business that changes the outside of the house"
       }
     },
@@ -1853,7 +1853,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:646",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:655",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a home occupation against 20% of the house, and surfaces Annex A’s quarter"
       }
     },
@@ -1878,7 +1878,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:650",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:659",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
       }
     },
@@ -1903,7 +1903,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:656",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:665",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business whose customers park on the street"
       }
     },
@@ -1928,7 +1928,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:662",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:671",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags home-business equipment that is a nuisance off the premises"
       }
     },
@@ -1953,7 +1953,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:585",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:594",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -1981,7 +1981,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:599",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:608",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -2007,7 +2007,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:608",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:617",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -2032,7 +2032,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:616",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:625",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO"
       },
       "also_question": {
@@ -2063,7 +2063,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:618",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:627",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the home-industry conditions to manufacturing at home"
       }
     },
@@ -2087,7 +2087,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:868",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:877",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a recreation business in a residential zone as a conditional use"
       }
     },
@@ -2112,7 +2112,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:650",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:659",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a home business run from an accessory structure"
       }
     },
@@ -2137,7 +2137,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:797",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:806",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps a home pet business’s pet house to 4 sq. m. and out of the business"
       }
     },
@@ -2622,7 +2622,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:295",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:299",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -2648,7 +2648,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:836",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:845",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a small eatery in Maximum R-2 for a customer area and street dining"
       }
     },
@@ -2673,7 +2673,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:840",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:849",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a water refilling station in Maximum R-2 for delivery parking"
       }
     },
@@ -2697,7 +2697,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:318",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:322",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use allowed only on the Zoning Administrator’s conditions to CPDO"
       }
     },
@@ -2723,7 +2723,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1233",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1243",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a tricycle terminal in Maximum R-2 for backing and motor pools"
       }
     },
@@ -2749,7 +2749,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1104",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1114",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies a pay parking lot’s own conditions, not a garage’s vehicle cap"
       }
     },
@@ -2780,7 +2780,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1104",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1114",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one"
       }
     },
@@ -2807,7 +2807,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:868",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:877",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a recreation business in a residential zone as a conditional use"
       }
     },
@@ -2858,7 +2858,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1104",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1114",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies a pay parking lot’s own conditions, not a garage’s vehicle cap"
       }
     },
@@ -2887,7 +2887,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1104",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1114",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one"
       }
     },
@@ -2911,7 +2911,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:536",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:545",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -2963,7 +2963,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:536",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:545",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -2996,7 +2996,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1268",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1278",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a warehouse in C-1 against the 200 m² cap and its other conditions"
       }
     },
@@ -3021,7 +3021,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:874",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:883",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -3046,7 +3046,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:882",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:891",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -3071,7 +3071,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:885",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:894",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks parking for C-1 restaurants, food parks and recreation centres"
       }
     },
@@ -3096,7 +3096,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:890",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:899",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a lotto outlet against 200 m from institutions"
       }
     },
@@ -3123,7 +3123,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:904",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:913",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks auto repair and car washes in C-1 for parking, façade and grease traps"
       }
     },
@@ -3150,7 +3150,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:904",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:913",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks auto repair and car washes in C-1 for parking, façade and grease traps"
       }
     },
@@ -3221,7 +3221,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1287",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1297",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       },
       "also_question": {
@@ -3250,7 +3250,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1295",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1305",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       },
       "also_question": {
@@ -3279,7 +3279,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1298",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1308",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       }
     },
@@ -3304,7 +3304,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:918",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:927",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::allows only Category II and III funeral parlours in C-1"
       }
     },
@@ -3431,7 +3431,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:925",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:934",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours"
       },
       "also_question": {
@@ -3462,7 +3462,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:928",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:937",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours"
       }
     },
@@ -3535,7 +3535,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:933",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:942",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks hauling and trucking garages for their Malabon business condition"
       }
     },
@@ -3559,7 +3559,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2286",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2296",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a condition to CPDO where one list attaches it and another does not"
       },
       "also_question": {
@@ -3612,7 +3612,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1238",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1248",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -3638,7 +3638,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:991",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1000",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps pollutive industry out of I-1"
       }
     },
@@ -3664,7 +3664,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:947",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:956",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks hauling and trucking garages for their Malabon business condition"
       }
     },
@@ -3690,7 +3690,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:959",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:968",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a container yard for a one-hectare lot and three-layer stacking"
       }
     },
@@ -3715,7 +3715,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:991",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1000",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps pollutive industry out of I-1"
       }
     },
@@ -3739,7 +3739,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1408",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1418",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the special-use permit and its conditions for a special use"
       }
     },
@@ -3763,7 +3763,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1681",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1691",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       },
       "also_question": {
@@ -3792,7 +3792,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1681",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1691",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -3818,7 +3818,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1681",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1691",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       }
     },
@@ -3845,7 +3845,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1711",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1721",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks the waterway easement for a lot beside a river or creek"
       },
       "also_question": {
@@ -3874,7 +3874,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:370",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:379",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::rules out business and building in the Mangrove Zone"
       },
       "also_question": {
@@ -3928,7 +3928,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1368",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1378",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::lists the special-use permit and its conditions for a special use"
       },
       "also_question": {
@@ -3957,7 +3957,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1424",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1434",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a cemetery against 20 m from homes and 50 m from water"
       }
     },
@@ -3982,7 +3982,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1425",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1435",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a cemetery against 20 m from homes and 50 m from water"
       }
     },
@@ -4147,7 +4147,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1386",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1396",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks a filling station against both of the ordinance’s siting rules"
       },
       "also_question": {
@@ -4226,7 +4226,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1388",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1398",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures open storage against 200 m from institutions"
       }
     },
@@ -4298,7 +4298,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1438",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1448",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4346,7 +4346,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1447",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1457",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4371,7 +4371,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1447",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1457",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4396,7 +4396,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1449",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1459",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4444,7 +4444,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1453",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1463",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a slaughterhouse against its distance rules"
       }
     },
@@ -4494,7 +4494,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1471",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1481",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps a cockpit to a parks zone and 200 m from homes"
       },
       "also_question": {
@@ -4571,7 +4571,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1395",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1405",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::requires CENRO’s site recommendation for a materials recovery facility"
       }
     },
@@ -4623,7 +4623,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1479",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1489",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps billboards to the National Road and 100 m apart"
       },
       "also_question": {
@@ -4698,7 +4698,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1483",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1493",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps billboards to the National Road and 100 m apart"
       }
     },
@@ -4798,7 +4798,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1484",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1494",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
       }
     },
@@ -4892,7 +4892,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1497",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1507",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -4965,7 +4965,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1498",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1508",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::checks transport terminals for room to manoeuvre inside the compound"
       }
     },
@@ -5134,7 +5134,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1630",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1640",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -5159,7 +5159,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1646",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1656",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -5185,7 +5185,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1659",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1669",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       },
       "also_question": {
@@ -5214,7 +5214,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1668",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1678",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the eco-tourism rules to a business in Dampalit’s fishponds"
       }
     },
@@ -5263,7 +5263,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1547",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1557",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits a declared heritage house to its listed uses on the ground floor"
       }
     },
@@ -5289,7 +5289,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1576",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1586",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends new construction in the heritage overlay to CPDO under R-1 uses"
       },
       "also_question": {
@@ -5318,7 +5318,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1566",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1576",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits a declared heritage house to its listed uses on the ground floor"
       }
     },
@@ -5343,7 +5343,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1584",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1594",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits new construction beside a heritage house to its roof apex and its period design"
       }
     },
@@ -5392,7 +5392,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1589",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1599",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::limits new construction beside a heritage house to its roof apex and its period design"
       }
     },
@@ -5551,7 +5551,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1988",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1998",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for an NWRB permit when the business draws from a deep well"
       }
     },
@@ -5806,7 +5806,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1925",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1935",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks a parking business with 20 or more slots for trees and permeable paving"
       }
     },
@@ -5878,7 +5878,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1844",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1854",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for the neighbour’s consent when new construction abuts their lot"
       }
     },
@@ -5902,7 +5902,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1768",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1778",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags parking that spills into the street"
       }
     },
@@ -6092,7 +6092,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1882",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1892",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares the building’s storeys with the barangay’s soil-hazard advice"
       },
       "also_question": {
@@ -6287,7 +6287,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1780",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1790",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks for the homeowners’ or barangay’s approval for a business in a residential zone"
       }
     },
@@ -6609,7 +6609,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1908",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1918",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::asks CPDO about the 4 m buffer when the lot adjoins a conflicting zone"
       }
     },
@@ -6684,7 +6684,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1735",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1745",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a roof sign and a sign over public property"
       }
     },
@@ -6955,7 +6955,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2008",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2018",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::holds the locational clearance for an ECC when DENR’s list says the trade needs one"
       }
     },
@@ -7054,7 +7054,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2027",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2037",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::treats a held locational clearance unused for a year as expired"
       }
     },
@@ -7347,7 +7347,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2035",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2045",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::refuses a construction-only clearance as the business’s clearance"
       }
     },
@@ -7564,7 +7564,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2071",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2081",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a renewal whose trade is not listed that it runs as a non-conforming use"
       }
     },
@@ -7589,7 +7589,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2080",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2090",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7613,7 +7613,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2083",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2093",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7638,7 +7638,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:552",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:561",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::tells a new business it cannot start as a non-conforming use"
       }
     },
@@ -7706,7 +7706,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2087",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2097",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7730,7 +7730,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2090",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2100",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -7755,7 +7755,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2093",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2103",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::flags a non-conforming use that has grown, stopped for a year, or is changing"
       }
     },
@@ -8305,7 +8305,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:616",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:625",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO"
       },
       "also_question": {
@@ -8401,7 +8401,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:754",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:763",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads dry cleaning with flammable solvents as an Industrial-2 plant"
       }
     },
@@ -8426,7 +8426,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:758",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:767",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps coffins and wreaths out of a funeral chapel at a cemetery"
       }
     },
@@ -8478,7 +8478,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:686",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:695",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures a home occupation against 20% of the house, and surfaces Annex A’s quarter"
       },
       "also_question": {
@@ -8509,7 +8509,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:772",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:781",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads a hotel whose rooms have kitchens as a hotel apartment"
       }
     },
@@ -8603,7 +8603,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:2140",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:2150",
         "test": "api/tests/Feature/AmendmentFlowTest.php::carries a new zoning clearance when an amendment changes the trade or enlarges the floor area",
         "marker": "$this->add(['IX-8-CHANGE', 'A-63'], 'met',"
       }
@@ -8629,7 +8629,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:778",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:787",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps retail out of an office building"
       }
     },
@@ -8677,7 +8677,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1278",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1288",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::measures open storage against 200 m from institutions"
       }
     },
@@ -8702,7 +8702,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1149",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1159",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::keeps vulcanizing and vehicle repair out of a parking building"
       }
     },
@@ -8795,7 +8795,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:392",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:401",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::never reports a trade missing from every list as refused"
       }
     },
@@ -8869,7 +8869,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:1515",
+        "check": "api/app/Support/Zoning/ZoningCheck.php:1525",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them"
       }
     }
