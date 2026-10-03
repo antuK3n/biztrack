@@ -122,6 +122,13 @@ interface LocationInsightsData {
       use_count: number
       listed: boolean
       matched_use: string | null
+      /**
+       * Whether Art. IV §5's TEXT places this zone in the barangay. The
+       * verdict is decided on these alone (Art. IV §6: the text prevails over
+       * the map); a zone only the CPDO sheet draws is sent as `false`. Optional
+       * so a response from before the ordinance was read in full still renders.
+       */
+      governing?: boolean
     }[]
   }
 }
@@ -555,10 +562,13 @@ export function LocationInsightsPanel({
  *
  * An amber "not on the list" with nothing after it leaves the owner holding a
  * worry and no next step. So the last line, which already names the City's
- * zoning office as the one that decides, also says the owner may appeal to
- * that office in person. Said in that one line so CPDO is still named once on
- * the step (client's lead, 24 September 2026). The appeal route itself is an
- * open question for CPDO; see docs/questions-for-malabon.md.
+ * zoning office as the one that decides, also says where an appeal goes. It
+ * said "in person at that office" until the ordinance was read in full: City
+ * Ordinance No. 24-2018 Art. IX §16(2) sends appeals from the Zoning
+ * Administrator's grant or denial to the Local Zoning Board of Appeals, and a
+ * use the zone does not list goes there as an exception (Art. VIII §1.2).
+ * questions-for-malabon C12 records it; the checklist under this note spells
+ * out the procedure.
  */
 export function ZoningConformanceNote({
   zoning,
@@ -570,14 +580,16 @@ export function ZoningConformanceNote({
   if (!zoning || zoning.verdict === 'undetermined') return null
 
   const listed = zoning.verdict === 'listed'
-  const matched = zoning.zones.find((z) => z.listed)
+  // The zones the verdict was decided on: the text's, not a sheet-only one.
+  const governing = zoning.zones.filter((z) => z.governing !== false)
+  const matched = governing.find((z) => z.listed)
   const where = barangayName ?? 'this barangay'
   /*
    * Zone names are the plain ones (lib/zoningNames.ts), never the codes: this
    * note said "R-2 Max — …" to business owners who do not read "R-2".
    * Deduplicated because the plain table can give two codes one name.
    */
-  const zoneNames = [...new Set(zoning.zones.map((z) => plainZoneName(z.code, z.name)))]
+  const zoneNames = [...new Set(governing.map((z) => plainZoneName(z.code, z.name)))]
 
   return (
     <section
@@ -671,7 +683,7 @@ export function ZoningConformanceNote({
           <>
             {' '}
             <strong className="font-semibold">
-              If it says no, you may appeal in person at that office.
+              If it says no, you may appeal to the Local Zoning Board of Appeals.
             </strong>
           </>
         )}
