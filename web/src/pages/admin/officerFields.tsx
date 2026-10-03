@@ -140,7 +140,7 @@ export function MobileField({
         : touched && typed && !done
           ? digits.length < 11
             ? `That is ${digits.length} of 11 digits.`
-            : 'A mobile number is 11 digits starting 09, as in 09171234567.'
+            : 'A mobile number is 11 digits starting 09.'
           : undefined)
 
   return (

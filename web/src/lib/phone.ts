@@ -59,4 +59,4 @@ export function mobileValid(value: string): boolean {
   return digits.length === 10 && digits.startsWith('9')
 }
 
-export const MOBILE_ERROR = 'Enter a Philippine mobile number: 10 digits after +63, starting with 9.'
+export const MOBILE_ERROR = 'Enter a valid mobile number.'

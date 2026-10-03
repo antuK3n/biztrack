@@ -543,7 +543,7 @@ function EditModal({
     : !form.role && !roleTyped
       ? 'Choose the role this account signs in with, or type the office’s own job title.'
       : form.mobile_number.trim() !== '' && !mobileLooksRight(form.mobile_number)
-        ? 'The mobile number needs to be 11 digits starting 09.'
+        ? 'The mobile number needs 11 digits starting 09.'
         : issuing && !passwordMeetsRules(password)
           ? 'The new password does not meet all four requirements yet.'
           : null
@@ -941,7 +941,7 @@ function CreateOfficerModal({
    */
   const wrong: string | null =
     form.mobile_number.trim() !== '' && !mobileLooksRight(form.mobile_number)
-      ? 'The mobile number needs to be 11 digits starting 09.'
+      ? 'The mobile number needs 11 digits starting 09.'
       : form.password !== '' && !passwordMeetsRules(form.password)
         ? 'The password does not meet all four requirements yet.'
         : null

@@ -128,6 +128,8 @@ function CorrectionInput({
         /* Mirrors the wizard's own input, so the phone keypad matches. */
         inputMode={rule.inputMode}
         maxLength={rule.maxLength}
+        /* And its example, which is where the format lives now. */
+        placeholder={rule.placeholder}
         aria-label={label}
         aria-invalid={error !== undefined}
         aria-describedby={error ? errorId : undefined}
