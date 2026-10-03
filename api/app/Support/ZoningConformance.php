@@ -4,76 +4,56 @@ namespace App\Support;
 
 use App\Models\Barangay;
 use App\Models\PsicCode;
+use App\Support\Zoning\Ordinance;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * What City Ordinance No. 24-2018 LISTS for the zones on a barangay's CPDO
- * sheet, and whether the applicant's declared trade is one of the listed uses.
+ * What City Ordinance No. 24-2018 LISTS for the zones in a barangay, and
+ * whether the applicant's declared trade is one of the listed uses.
  *
- * ── What this is, and the word it must never say ───────────────────────────
+ * ── What this is, and what it is not ───────────────────────────────────────
  *
- * This is a LOOKUP, not a determination. `docs/zoning-ordinance/README.md`
- * sets out four reasons the ordinance cannot be turned into an "is my business
- * allowed here" checker, and every one of them still holds:
+ * The headline of the zoning check: is the trade on the list of any zone in
+ * the barangay. Everything the ordinance attaches to that answer — the
+ * "provided that" conditions, the overlays, the special uses, the
+ * non-conforming rules — is App\Support\Zoning\ZoningCheck, which reads this.
  *
- *   1. §2.16 Fishpond Zone enumerates no uses at all, so there is no textual
- *      basis to allow or refuse anything in the barangays carrying it.
- *   2. The inheritance chains are broken — §2.8 inherits from "R-2 Zones" and
- *      no zone is called that. Resolving it would be legislating.
- *   3. The same activity carries different conditions in different zones, and
- *      filling stations get two conflicting rules outright.
- *   4. Conditionality is embedded in "provided that" prose, so "permitted" and
- *      "permitted if" are not machine-separable.
+ * It is still not a verdict, for the reason that was always true and the
+ * ordinance itself writes down: the lists are open. Art. III §2(a) reads "and
+ * the like" as taking in every similar use, Art. III §2 construes the lists in
+ * favour of the applicant, and Annex A item 89 refers anything unlisted to
+ * other laws. So a trade on no list is `not_listed` — CPDO decides — and never
+ * "prohibited".
  *
- * Add Annex A entry 89 — anything unlisted is "referred to other appropriate
- * national and local laws" — and the enumeration is explicitly OPEN. Absence
- * from the list is not prohibition.
+ * ── What changed with the full reading of the ordinance ────────────────────
  *
- * So the verdicts below are `listed`, `not_listed` and `undetermined`, and the
- * screen says CPDO decides. What changed is that the sentence is now anchored
- * to 695 real uses read off the ordinance instead of to a `?zoning=deny` query
- * parameter, which is what it was anchored to before.
+ * This used to look a trade up in each zone's OWN list and nowhere else, and
+ * the docblock called the inheritance chains "broken". Read clause by clause,
+ * most of them are not: C-2 says "All uses allowed in C1-Zone", the CBD takes
+ * in C-1, C-2, C-3 and General Commercial, and so on. Ignoring that told a
+ * drugstore in a C-2-only stretch that it was not listed, when §2.8 lists it
+ * by reference. The chains are now followed exactly as written
+ * (`Ordinance::INHERITS`), and the one real gap — Maximum R-3 and C-1 skip
+ * Basic R-3 — is reported as a gap rather than papered over.
+ *
+ * The zones it reads are Art. IV §5's TEXT for the barangay, not only the map
+ * sheet, because Art. IV §6 says the text prevails over the map. Sheet-only
+ * zones are still returned, marked, so nobody loses sight of what the map
+ * draws.
  *
  * ── Why `not_listed` is still worth showing ────────────────────────────────
  *
  * Because it is the applicant's only early warning. A trade absent from every
- * zone on their barangay's sheet is the case CPDO is most likely to question,
- * and hearing that at Part 2 is cheaper than hearing it after paying. It is
- * phrased as what it is: not on the list, CPDO decides.
+ * zone in their barangay is the case CPDO is most likely to question, and
+ * hearing that at Location & Zoning is cheaper than hearing it after paying.
  */
 class ZoningConformance
 {
     /**
-     * `zoning_classifications.code` → the ordinance section enumerating its uses.
-     *
-     * Nineteen of the ordinance's twenty sections; §2.14 Easement Zone has no
-     * CPDO sheet classification and therefore no row to map from. The join is by
-     * section rather than by name because the extraction preserves the zone
-     * headings verbatim, typos included — §2.4 reads "BASIC RESIDENTIAL 3 - Z0NE"
-     * with a zero for the letter O, and matching on that string would break the
-     * day somebody corrects it.
+     * `zoning_classifications.code` → the ordinance section enumerating its
+     * uses. Held in `Ordinance` beside the inheritance chains it pairs with.
      */
-    private const SECTION_FOR_CODE = [
-        'R-1' => '2.1',
-        'R-2-BASIC' => '2.2',
-        'R-2-MAX' => '2.3',
-        'R-3-BASIC' => '2.4',
-        'R-3-MAX' => '2.5',
-        'CMP' => '2.6',
-        'C-1' => '2.7',
-        'C-2' => '2.8',
-        'C-3' => '2.9',
-        'GENERAL-COMMERCIAL' => '2.10',
-        'CBD' => '2.11',
-        'I-1' => '2.12',
-        'I-2' => '2.13',
-        'MANGROVE' => '2.15',
-        'FISHPOND' => '2.16',
-        'PARKS' => '2.17',
-        'CEMETERY' => '2.18',
-        'UTILITIES' => '2.19',
-        'INSTITUTIONAL' => '2.20',
-    ];
+    private const SECTION_FOR_CODE = Ordinance::SECTION_FOR_CODE;
 
     /**
      * Words that carry no zoning meaning and would match almost anything.
@@ -104,6 +84,81 @@ class ZoningConformance
         'store', 'stores', 'shop', 'shops', 'repair', 'trade', 'trading',
         'supply', 'supplies', 'products', 'product', 'goods', 'center', 'centre',
         'house', 'houses', 'small', 'large', 'scale', 'operation', 'operations',
+        // A billiard hall is not a barangay hall: these name a kind of room,
+        // not what is done in it.
+        'hall', 'halls', 'room', 'rooms', 'facility', 'facilities', 'building', 'buildings',
+    ];
+
+    /**
+     * The ordinance's own word for a trade whose PSIC title shares none with
+     * it — "pharmacy" against "Drugstores", "call centre" against "Business
+     * Process Outsourcing". Matched as a substring of the use, after the
+     * bracketed name and before the shared-word rule, because a word chosen by
+     * a person is better evidence than a word two texts happen to share.
+     *
+     * Kept to trades on the register's PSIC list whose title and the
+     * ordinance plainly name the same thing. A code absent here falls through
+     * to the shared-word rule as before.
+     */
+    private const ALIASES = [
+        '47112' => ['groceries', 'convenience store'],
+        '47190' => ['department store'],
+        '47411' => ['consumer electronics'],
+        '47412' => ['consumer electronics', 'cellular phone'],
+        '47420' => ['consumer electronics'],
+        '47521' => ['lumber/hardware', 'construction supply'],
+        '47522' => ['paint stores without bulk', 'glassware'],
+        '47592' => ['home appliance'],
+        '47721' => ['drugstore', 'drug store'],
+        '47730' => ['jewelry'],
+        '47760' => ['flower shop', 'pet shop', 'plant nurser'],
+        '47810' => ['wet and dry markets'],
+        '47820' => ['wet and dry markets'],
+        '45301' => ['spare parts'],
+        '45201' => ['auto repair'],
+        '45401' => ['motor vehicles and accessory repair'],
+        '47300' => ['gasoline filling station'],
+        '49221' => ['tricycle', 'transportation terminals'],
+        '49230' => ['hauling services', 'trucking garage'],
+        '52101' => ['warehouse/storage facility'],
+        '53100' => ['courier'],
+        '55101' => ['hotel'],
+        '55102' => ['apartel', 'pension house'],
+        '55103' => ['motel'],
+        '55900' => ['dormitor', 'boarding house'],
+        '56102' => ['restaurants and other eateries'],
+        '56301' => ['restaurants and other eateries'],
+        '56302' => ['bars, sing-along'],
+        '59140' => ['movie house'],
+        '62010' => ['=offices'],
+        '62090' => ['=offices'],
+        '63110' => ['=offices'],
+        '64920' => ['money lending', 'pawnshop'],
+        '64990' => ['bayad center', 'foreign exchange'],
+        '65120' => ['insurance'],
+        '68200' => ['=offices'],
+        '69100' => ['=offices'],
+        '69200' => ['=offices'],
+        '70200' => ['=offices'],
+        '71100' => ['=offices'],
+        '73100' => ['=offices'],
+        '74200' => ['photo and portrait'],
+        '77100' => ['auto sales and rentals'],
+        '78100' => ['=offices'],
+        '79110' => ['travel agenc'],
+        '80100' => ['security agenc'],
+        '81210' => ['janitorial'],
+        '82200' => ['business process outsourcing'],
+        '82990' => ['=offices'],
+        '85100' => ['nursery/elementary school'],
+        '85490' => ['tutorial', 'driving school'],
+        '86100' => ['hospital'],
+        '86201' => ['medical, dental'],
+        '93290' => ['billiard', 'internet cafe'],
+        '96110' => ['barber'],
+        '96120' => ['beauty parlor'],
+        '96200' => ['laundr'],
+        '96301' => ['funeral parlor'],
     ];
 
     /**
@@ -146,6 +201,108 @@ class ZoningConformance
     }
 
     /**
+     * A zone's own uses, without its "All uses allowed in …" pointers and
+     * without its customary accessory uses.
+     *
+     * The pointers are how a zone inherits, and `lookup` follows them; matched
+     * as text they would claim a trade is listed because it shares the word
+     * "allowed" with a sentence about another zone.
+     *
+     * Accessory uses are left out because the ordinance allows them only as
+     * "incidental to any of the principal uses" — the offices, canteens and
+     * storerooms OF an allowed use, never a business in their own right. R-1
+     * says so outright: its accessory uses "shall not include any activity
+     * conducted for monetary gain". Matching a trade against them reported a
+     * software company as allowed in the Institutional zone because that
+     * zone's accessory list says "Offices".
+     *
+     * @return list<string>
+     */
+    public static function ownUses(string $code): array
+    {
+        $section = self::SECTION_FOR_CODE[$code] ?? null;
+        $uses = $section !== null ? (self::sections()[$section]['allowed_uses'] ?? []) : [];
+
+        return array_values(array_filter(
+            $uses,
+            static fn (string $use): bool => preg_match('/^All (?:allowable )?uses (?:allowed )?(?:in|under|according)/i', $use) !== 1
+                && preg_match('/^Customary accessory uses/i', $use) !== 1,
+        ));
+    }
+
+    /**
+     * The first use in `$zone` — its own list, then each zone it takes in, in
+     * the order Art. V names them — that reads as `$psic`'s activity.
+     *
+     * @return array{use: string, from: string, via: ?string}|null
+     */
+    public static function lookup(string $zone, PsicCode $psic): ?array
+    {
+        /*
+         * Strong evidence across every list the zone reaches before weak
+         * evidence in any of them. Zone by zone, a private school matched
+         * Maximum R-2's own "School supplies" on the one word "school" before
+         * the search ever reached the "Nursery/Elementary School" that R-1
+         * names and Maximum R-2 inherits.
+         */
+        foreach ([true, false] as $strong) {
+            foreach (Ordinance::closure($zone) as $source) {
+                $uses = self::ownUses($source);
+                $matched = $strong ? self::matchStrong($psic, $uses) : self::matchWeak($psic, $uses);
+                if ($matched !== null) {
+                    return [
+                        'use' => $matched,
+                        'from' => $source,
+                        'via' => Ordinance::inheritanceRule($zone, $source),
+                    ];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The zones in a barangay: Art. IV §5's text, and the CPDO sheet.
+     *
+     * `governing` is what the check decides on. It is the text's list (Art.
+     * IV §6: the text prevails over the map), plus Parks and Utilities where
+     * the sheet draws them, since §5 places those two city-wide on existing
+     * facilities rather than in any barangay. A barangay the text does not
+     * name — none today — falls back to its sheet rather than to nothing.
+     *
+     * @return list<array{code: string, name: string, source: 'text'|'sheet'|'both', governing: bool}>
+     */
+    public static function zonesFor(?Barangay $barangay): array
+    {
+        if ($barangay === null) {
+            return [];
+        }
+        $text = Ordinance::textZones()[Ordinance::key($barangay->name)] ?? [];
+        $sheet = $barangay->zoningClassifications->pluck('name', 'code')->all();
+
+        $codes = array_values(array_unique(array_merge($text, array_keys($sheet))));
+        usort($codes, fn ($a, $b) => array_search($a, array_keys(self::SECTION_FOR_CODE), true)
+            <=> array_search($b, array_keys(self::SECTION_FOR_CODE), true));
+
+        $out = [];
+        foreach ($codes as $code) {
+            $inText = in_array($code, $text, true);
+            $onSheet = array_key_exists($code, $sheet);
+            $out[] = [
+                'code' => $code,
+                'name' => $sheet[$code] ?? Ordinance::ZONE_NAMES[$code] ?? $code,
+                'source' => $inText && $onSheet ? 'both' : ($inText ? 'text' : 'sheet'),
+                'governing' => $text === []
+                    ? true
+                    : ($inText || in_array($code, ['PARKS', 'UTILITIES'], true)),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * The zoning picture for one barangay, answered for one declared trade.
      *
      * `$psic` absent is normal and not an error: the applicant picks the
@@ -156,7 +313,7 @@ class ZoningConformance
      * @return array{
      *     verdict: 'listed'|'not_listed'|'undetermined',
      *     reason: string,
-     *     zones: list<array{code: string, name: string, use_count: int, listed: bool, matched_use: ?string}>,
+     *     zones: list<array{code: string, name: string, use_count: int, listed: bool, matched_use: ?string, source: string, governing: bool, via: ?string, from: ?string}>,
      *     trade: ?string,
      * }
      */
@@ -168,27 +325,31 @@ class ZoningConformance
             return self::undetermined('No barangay chosen yet.', [], $trade);
         }
 
-        $sections = self::sections();
         $zones = [];
         $enumerated = 0;
         $anyListed = false;
 
-        foreach ($barangay->zoningClassifications as $classification) {
-            $section = self::SECTION_FOR_CODE[$classification->code] ?? null;
-            $uses = $section !== null ? ($sections[$section]['allowed_uses'] ?? []) : [];
-            $enumerated += count($uses);
-
-            $matched = $psic !== null ? self::matchUse($psic, $uses) : null;
-            if ($matched !== null) {
-                $anyListed = true;
+        foreach (self::zonesFor($barangay) as $zone) {
+            $count = 0;
+            foreach (Ordinance::closure($zone['code']) as $source) {
+                $count += count(self::ownUses($source));
+            }
+            $hit = $psic !== null ? self::lookup($zone['code'], $psic) : null;
+            if ($zone['governing']) {
+                $enumerated += $count;
+                $anyListed = $anyListed || $hit !== null;
             }
 
             $zones[] = [
-                'code' => $classification->code,
-                'name' => $classification->name,
-                'use_count' => count($uses),
-                'listed' => $matched !== null,
-                'matched_use' => $matched,
+                'code' => $zone['code'],
+                'name' => $zone['name'],
+                'use_count' => $count,
+                'listed' => $hit !== null,
+                'matched_use' => $hit['use'] ?? null,
+                'source' => $zone['source'],
+                'governing' => $zone['governing'],
+                'via' => $hit['via'] ?? null,
+                'from' => $hit['from'] ?? null,
             ];
         }
 
@@ -199,13 +360,13 @@ class ZoningConformance
             return self::undetermined('No line of business named yet.', $zones, $trade);
         }
         /*
-         * Every zone on the sheet enumerates nothing — Dampalit's Fishpond Zone
-         * is the real case. Reporting "not listed" there would be reporting the
-         * ordinance's silence as a refusal.
+         * Every zone here enumerates nothing — a barangay that was Fishpond
+         * alone would be the case. Reporting "not listed" there would be
+         * reporting the ordinance's silence as a refusal.
          */
         if ($enumerated === 0) {
             return self::undetermined(
-                'The ordinance lists no uses for the zones on this barangay’s sheet.',
+                'The ordinance lists no uses for the zones in this barangay.',
                 $zones,
                 $trade,
             );
@@ -214,7 +375,7 @@ class ZoningConformance
         return [
             'verdict' => $anyListed ? 'listed' : 'not_listed',
             'reason' => $anyListed
-                ? 'The ordinance lists this use for a zone on this barangay’s sheet.'
+                ? 'The ordinance lists this use for a zone in this barangay.'
                 : 'This use is not among those the ordinance lists for this barangay’s zones.',
             'zones' => $zones,
             'trade' => $trade,
@@ -248,29 +409,54 @@ class ZoningConformance
      * screen's answer to `not_listed` is "CPDO decides", which is also the right
      * answer when we simply failed to match.
      */
-    private static function matchUse(PsicCode $psic, array $uses): ?string
+    public static function matchUse(PsicCode $psic, array $uses): ?string
+    {
+        return self::matchStrong($psic, $uses) ?? self::matchWeak($psic, $uses);
+    }
+
+    /**
+     * The bracketed colloquial name, then an alias, anywhere in the list.
+     *
+     * Across the whole list before any shared-word test: this was one pass
+     * trying both on each use in turn, so an early use sharing two generic
+     * words ("Small scale eatery…") beat a later one quoting the trade's own
+     * name — the strongest signal losing to the weakest because of list order.
+     */
+    private static function matchStrong(PsicCode $psic, array $uses): ?string
     {
         if ($uses === []) {
             return null;
         }
-
         $title = mb_strtolower($psic->title);
-
-        $colloquial = null;
-        if (preg_match('/\(([^)]+)\)\s*$/u', $title, $m) === 1) {
+        if (preg_match('/\(([^)]+)\)\s*$/u', $title, $m) === 1 && trim($m[1]) !== '') {
             $colloquial = trim($m[1]);
+            foreach ($uses as $use) {
+                if (str_contains(mb_strtolower($use), $colloquial)) {
+                    return $use;
+                }
+            }
         }
 
-        $terms = self::significantWords($title);
-
-        foreach ($uses as $use) {
-            $haystack = mb_strtolower($use);
-
-            if ($colloquial !== null && $colloquial !== '' && str_contains($haystack, $colloquial)) {
-                return $use;
+        // An alias starting "=" must be the whole use ("Offices"), not a word
+        // inside one ("offices of physicians", "local offices").
+        foreach (self::ALIASES[(string) $psic->code] ?? [] as $alias) {
+            foreach ($uses as $use) {
+                $text = mb_strtolower(trim($use));
+                if (str_starts_with($alias, '=') ? $text === substr($alias, 1) : str_contains($text, $alias)) {
+                    return $use;
+                }
             }
+        }
 
-            $shared = array_intersect($terms, self::significantWords($haystack));
+        return null;
+    }
+
+    /** One shared distinctive word, or two shared words of any kind. */
+    private static function matchWeak(PsicCode $psic, array $uses): ?string
+    {
+        $terms = self::significantWords(mb_strtolower($psic->title));
+        foreach ($uses as $use) {
+            $shared = array_intersect($terms, self::significantWords(mb_strtolower($use)));
             if ($shared === []) {
                 continue;
             }
