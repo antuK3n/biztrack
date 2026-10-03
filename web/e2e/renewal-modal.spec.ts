@@ -46,7 +46,7 @@ const BUSINESS_PERMIT_TYPE_ID = 1
  * asking "which permit" and then accepting three is a question that lies about
  * its own answer.
  */
-const DIALOG = /which permits are you renewing/i
+const DIALOG = /which permits? are you renewing/i
 
 function dialog(page: Page) {
   return page.getByRole('dialog', { name: DIALOG })

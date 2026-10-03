@@ -13,7 +13,7 @@ import {
 import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { Logo } from '../components/Logo'
 import { AccountRestrictedModal } from '../components/ui/Proto'
-import { businesses, requests } from '../lib/resources'
+import { businesses, permits, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { activePortal, portalPath } from '../lib/api'
 import { useAuth } from '../stores/auth'
@@ -160,6 +160,37 @@ function OwnerHome() {
   const { data: openRequests } = useAsync(() => requests.list({ per_page: 100 }), [])
   const waiting = (openRequests ?? []).filter((r) => r.awaits_applicant).length
 
+  /**
+   * Permits this owner may renew TODAY.
+   *
+   * Asked for on 3 October 2026, by analogy with the badge beside it:
+   * *"Do you see the warning thingy in the Other Requirements? Can you add
+   * too for the Renew Permit, and now it is all about permits nearing
+   * expiration and up for renewal."*
+   *
+   * ── Renewable, not "nearing expiry" ─────────────────────
+   *
+   * Counting days to expiry would be the obvious reading and the wrong
+   * one. It would badge a Mayor's Permit six weeks out that cannot be
+   * renewed until 1 January, and miss one that lapsed in March and can be
+   * renewed today with a surcharge. `renewal_blocked_reason` is the
+   * server's own answer to "may this be renewed now" — the same field the
+   * renewal picker greys a row on — so the badge and the dialog behind it
+   * can never disagree about what is due.
+   *
+   * That is also what makes the number actionable, which is the whole
+   * argument of the badge beside it: a count of work you cannot act on
+   * teaches people to ignore the badge.
+   *
+   * `status === 'active'` because the list carries superseded certificates
+   * too — last year's Mayor's Permit is still a row, and renewing it is
+   * not a thing anyone can do.
+   */
+  const { data: myPermits } = useAsync(() => permits.list({ per_page: 100 }), [])
+  const dueForRenewal = (myPermits ?? []).filter(
+    (p) => p.status === 'active' && (p.renewal_blocked_reason ?? null) === null,
+  ).length
+
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
       {showModal && restricted && (
@@ -189,7 +220,18 @@ function OwnerHome() {
       {homeAddressMissing && <HomeAddressPrompt className="mt-10 w-full max-w-2xl" />}
       <div className="mt-14 flex flex-wrap items-start justify-center gap-8 lg:gap-12">
         <HomeCard to="/apply?type=new" icon={FilePlusIcon} label="New Business Permit" />
-        <HomeCard to="/apply?type=renewal" icon={RenewIcon} label="Renew Business Permit" />
+        <HomeCard
+          to="/apply?type=renewal"
+          icon={RenewIcon}
+          label="Renew Business Permit"
+          count={dueForRenewal}
+          countLabel={(n) =>
+            n === 1
+              ? 'Renew Business Permit, one permit due for renewal'
+              : `Renew Business Permit, ${n} permits due for renewal`
+          }
+          note={(n) => (n === 1 ? 'One permit due for renewal' : `${n} permits due for renewal`)}
+        />
         <HomeCard to="/apply?type=amendment" icon={AmendIcon} label="Amendment Form" />
         <HomeCard
           to="/requests"
