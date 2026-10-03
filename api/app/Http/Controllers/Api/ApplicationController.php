@@ -273,6 +273,16 @@ class ApplicationController extends Controller
             );
         }
 
+        /*
+         * And how MANY it may name — the business permit with whatever else
+         * is due, or one other permit alone. `RenewalScope` carries the
+         * rule and the reason; `PriorPermitController` asks the same
+         * question on the other door to this answer.
+         */
+        if ($refusal = \App\Support\RenewalScope::refusal($priorIds)) {
+            abort(422, $refusal);
+        }
+
         $app = Application::create([
             'business_id' => $business->id,
             'applicant_user_id' => $request->user()->id,
