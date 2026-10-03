@@ -208,6 +208,25 @@ class PaymentMode
     }
 
     /**
+     * Change what KwikPay collects, without an audit row — the caller writes
+     * its own (switchCharge below; the Debug page writes `debug.payments`).
+     * Returns the charge it was before.
+     *
+     * @throws \InvalidArgumentException when the charge is unknown
+     */
+    public static function setCharge(string $charge): string
+    {
+        if (! in_array($charge, self::CHARGES, true)) {
+            throw new \InvalidArgumentException("Unknown charge: {$charge}. Use test or full.");
+        }
+
+        $before = self::charge();
+        Setting::write(self::CHARGE_KEY, $charge);
+
+        return $before;
+    }
+
+    /**
      * Change what KwikPay collects and write it to the audit log, the same way
      * switchTo() does for the mode. The test amount is recorded with it, so the
      * trail says "₱1.00", not merely "test".
@@ -218,12 +237,7 @@ class PaymentMode
      */
     public static function switchCharge(string $charge, string $via, ?int $actorId = null): array
     {
-        if (! in_array($charge, self::CHARGES, true)) {
-            throw new \InvalidArgumentException("Unknown charge: {$charge}. Use test or full.");
-        }
-
-        $before = self::charge();
-        Setting::write(self::CHARGE_KEY, $charge);
+        $before = self::setCharge($charge);
         Audit::log('payment_gateway.charge_switched', null, [
             'from' => $before,
             'to' => $charge,

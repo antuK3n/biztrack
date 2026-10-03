@@ -127,3 +127,6 @@ if (file_exists(__DIR__.'/location.php')) {
 if (file_exists(__DIR__.'/gis.php')) {
     require __DIR__.'/gis.php';
 }
+
+// The Debug page's controls, behind `debug.panel` (App\Support\DebugPanel).
+require __DIR__.'/debug.php';
