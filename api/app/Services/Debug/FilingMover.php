@@ -171,7 +171,13 @@ final class FilingMover
             'permits' => $this->permitRows($app),
             'blockers' => $this->blockers($app),
             'steps' => $this->steps($app),
-            'targets' => collect(self::TARGETS)
+            /*
+             * None at all when no forward step exists — a returned filing, or
+             * every permit still with the applicant. A button that can only
+             * answer "stopped after 0 steps" is one the page should not offer;
+             * "What is holding it" already says why.
+             */
+            'targets' => $this->nextForward($app) === null ? [] : collect(self::TARGETS)
                 ->filter(fn ($label, $to) => $this->targetApplies($app, $to))
                 ->map(fn ($label, $to) => ['to' => $to, 'label' => $label, 'reached' => $this->reached($app, $to)])
                 ->values()
