@@ -163,7 +163,21 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
    * this rail is green now, and it is the one that means finished.
    */
   awaiting_other_permits: { label: 'Approved', tone: 'verify', icon: CheckCircleIcon },
-  for_final_approval: { label: 'For Final Approval', tone: 'verify', icon: ClockIcon },
+  /*
+   * "With BPLO", not "For Final Approval".
+   *
+   * The old label named an internal stage, and named one the applicant is
+   * no longer told about anywhere else: it left the new rail on
+   * 18 September 2026 and the renewal rail on 3 October, so a chip reading
+   * "For Final Approval" pointed at a step in no guide on the site.
+   *
+   * A filing only lands here now by having no confirmed RA 11032 category
+   * — an internal data problem the applicant did not cause and cannot act
+   * on. "With BPLO" is true, is the only part of it that concerns them,
+   * and asks nothing. Officers read the stage by its real name in their
+   * own queue filter, which is where that name belongs.
+   */
+  for_final_approval: { label: 'With BPLO', tone: 'verify', icon: ClockIcon },
   /*
    * "Completed" — MIRROR OF `ApplicationStatus::Approved->label()`, which
    * carries the reasoning. The only green on the new-application rail.
@@ -451,7 +465,7 @@ export const NEXT_ACTION: Partial<Record<ApplicationStatus, string>> = {
     'Your Business Permit is released — download it from your profile. Now apply for your other permits, '
     +'or hand in copies of the ones you already hold. Each is approved on its own, and if one is rejected '
     +'your Business Permit is suspended until it is settled.',
-  for_final_approval: 'Every other permit is in. BPLO is approving the application.',
+  for_final_approval: 'BPLO is finishing this application. Nothing to do.',
   // Nothing is "being issued" here since 24 September 2026 — the permit went
   // out at payment. What happens next is that this filing leaves the list.
   approved: 'Nothing further is needed. This application is now in your Profile.',
@@ -566,7 +580,7 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
    * describe the cases that still reach it without naming the machinery, since
    * a guide is read by people who do not know what a processing category is.
    */
-  for_final_approval: 'BPLO makes a last check before your Mayor’s Permit is issued.',
+  for_final_approval: 'BPLO is finishing your application. Nothing to do.',
   /*
    * Not the moment of ISSUE any more — that is two steps back, at payment —
    * so this has to say what the stage IS for, or it reads as a repeat of
@@ -694,16 +708,23 @@ const FLOW_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus[]>
   amendment: ['for_approval', 'approved'],
   new: STATUS_FLOW,
   /*
-   * A renewal keeps For Final Approval, and it is a normal step rather than an
-   * interruption: BPLO reads the certificate copies the applicant uploaded,
-   * which is real evidence of outside provenance.
+   * ── Three steps, since 3 October 2026 ──────────────────────────────────
+   *
+   * For Final Approval was the fourth, and a normal step rather than an
+   * interruption, because BPLO read the certificate copies the applicant
+   * uploaded. The client removed that: *"an admin verifying an uploaded
+   * other permit will be useless if the system already tells them whether
+   * they are still valid or not."* With nothing to read there is no second
+   * BPLO act, and a renewal closes when the money lands.
    *
    * This is the BUSINESS PERMIT renewal — the January one nearly every
-   * applicant makes. Renewing one of the other permits alone is a different and
-   * shorter process, and it gets its own rail rather than a footnote on this
-   * one: see OTHER_PERMIT_FLOW.
+   * applicant makes, and the lead above says so: it renews that permit and
+   * nothing else, so there is nothing to gather either. A renewal that also
+   * ticks an EXPIRING clearance does pass through Awaiting Other Permits
+   * while that office issues it; that is the other-permit process, drawn on
+   * its own rail rather than as a fourth step here — see OTHER_PERMIT_FLOW.
    */
-  renewal: ['for_approval', 'pending_payment', 'for_final_approval', 'approved'],
+  renewal: ['for_approval', 'pending_payment', 'approved'],
 }
 
 /**
@@ -753,19 +774,25 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    */
   new: ['draft', 'for_final_approval'],
   /*
-   * `awaiting_other_permits` never happens on a renewal — `onPaymentCompleted`
-   * sends one to ForFinalApproval, because its certificates are copies BPLO
-   * reads rather than permits to be gathered.
+   * `for_final_approval` left the renewal rail on 3 October 2026 with the
+   * stage itself (see FLOW_BY_TYPE). It is listed here for the reason this
+   * whole table exists, and the reason is the client's own report: the
+   * detours are derived as "everything not on the rail", so a status merely
+   * dropped from a flow REAPPEARS under "If something interrupts it". That
+   * happened the last time this status moved — *"I thought we already
+   * removed the For Final Approval?"* — and dropping it without this line
+   * would file it beside Returned and Rejected as something that might
+   * interrupt a renewal.
    *
-   * Omitted rather than left out, which is the whole reason this table exists:
-   * the detours are derived as "everything not on the rail", so a status that
-   * merely never occurs reappears under "If something interrupts it". It did —
-   * the client's screenshot of 26 September 2026 shows "Approved" filed beside
-   * Returned and Rejected on the renewal tab, described as something that
-   * might interrupt the filing. Same fault the note above records for For
-   * Final Approval, caught the same way.
+   * `awaiting_other_permits` is omitted for a subtler reason, and it is not
+   * "never happens" any more. A renewal that ticks an EXPIRING clearance
+   * does wait there while that office issues it. But the lead above this
+   * rail says what the rail is about — *"Renews your business permit only.
+   * The other permits are separate filings."* — and the filing it describes
+   * carries nothing to gather. The clearance case is drawn on its own rail,
+   * OTHER_PERMIT_FLOW, which is where a reader who ticked one will look.
    */
-  renewal: ['draft', 'awaiting_other_permits'],
+  renewal: ['draft', 'awaiting_other_permits', 'for_final_approval'],
 }
 
 /** The rail for one kind of filing, or null where there is nothing to draw yet. */

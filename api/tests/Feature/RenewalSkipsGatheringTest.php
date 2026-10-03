@@ -3,7 +3,6 @@
 use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
 use App\Models\Application;
-use App\Models\ApplicationPermitType;
 use App\Models\Business;
 use App\Models\Payment;
 use App\Models\Permit;
@@ -12,6 +11,7 @@ use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\RenewalSeason;
 use Carbon\CarbonImmutable;
+use Illuminate\Validation\ValidationException;
 
 /*
  * A business permit renewal never waits for the other permits.
@@ -23,16 +23,34 @@ use Carbon\CarbonImmutable;
  * other permit that he/she can submit in the Upload/Submit button for the LGU
  * Clearances section."*
  *
- * Three things have to hold together for that to be true, and each of them is a
- * separate mechanism that could regress on its own:
+ * ── The promise survived its own reasoning ───────────────────────────────
  *
- *  1. `onPaymentCompleted` routes a renewal to ForFinalApproval, not to
- *     AwaitingOtherPermits — which also needs `ApplicationStatus::allowedNext`
- *     to admit that edge.
- *  2. `outstandingClearances` counts an UPLOADED copy on a renewal as
- *     satisfied, so BPLO is actually allowed to approve.
- *  3. Approving issues the BUSINESS permit and does not mint a second copy of
- *     a clearance the applicant already holds.
+ * That Upload/Submit button is gone from renewals (client, 3 October 2026:
+ * *"an admin verifying an uploaded other permit will be useless if the system
+ * already tells them whether they are still valid or not"*), and with it the
+ * mechanism this file was written around: uploads counting as satisfied, and
+ * BPLO reading them at For Final Approval.
+ *
+ * The OUTCOME the client asked for still holds, by a better route. A renewal
+ * carries only the permits the applicant ticked, so a still-valid clearance is
+ * not on the filing at all — there is nothing to upload and nothing to wait
+ * for. The January filing they described renews the Mayor's Permit by itself
+ * and closes the moment the money lands.
+ *
+ * What is NEW, and is the honest other half: a renewal that ticks a clearance
+ * because it IS expiring now waits for that office to issue it. It has to —
+ * nobody has approved anything yet — and the client's own correction of
+ * 18 September is the authority for the distinction: a permit still valid is
+ * not renewed, one that is expiring is.
+ *
+ * Three mechanisms, each able to regress alone:
+ *
+ *  1. `onPaymentCompleted` sends a renewal down the new filing's path, and
+ *     straight to Approved when it carries nothing else — which also needs
+ *     `ApplicationStatus::allowedNext` to admit that edge.
+ *  2. The Mayor's Permit is released at payment, as it is for a new filing.
+ *  3. A renewal that does carry a clearance waits for it, and no upload can
+ *     stand in for the office's approval.
  *
  * `PartialRenewalTest` owns "a renewal keeps the permits that were ticked".
  * This file owns what happens to such a filing after the money lands.
@@ -76,12 +94,13 @@ function renewalBusinessHolding(array $codes): array
 }
 
 /**
- * A renewal of the business permit, paid for, with the five clearances handed
- * in as uploaded copies rather than applied for.
+ * A renewal, paid for, carrying exactly the permits it says it carries.
+ *
+ * `$codes` is the whole variable under test in this file: the January filing
+ * renews BUSINESS alone, and the awkward one renews a clearance alongside it.
  */
-function paidBusinessRenewal(): Application
+function paidBusinessRenewal(array $codes = ['BUSINESS']): Application
 {
-    $codes = ['BUSINESS', 'SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING'];
     [$business, $permits] = renewalBusinessHolding($codes);
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
 
@@ -99,19 +118,6 @@ function paidBusinessRenewal(): Application
 
     $workflow = app(WorkflowService::class);
     $workflow->submit($app->fresh());
-
-    /*
-     * The five clearances arrive as UPLOADS. Set on the pivot directly rather
-     * than through `submitHeld`, which also stores a file: this file is about
-     * what the mode MEANS to the flow, and a multipart upload per permit would
-     * make it about storage.
-     */
-    foreach (['SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING'] as $code) {
-        $type = PermitType::where('code', $code)->firstOrFail();
-        ApplicationPermitType::where('application_id', $app->id)
-            ->where('permit_type_id', $type->id)
-            ->update(['mode' => ApplicationPermitType::MODE_UPLOAD]);
-    }
 
     $workflow->approveMainForm($app->fresh());
     expect($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
@@ -141,67 +147,45 @@ function settle(Application $app, string $reference): Payment
     ]);
 }
 
-it('sends a paid business permit renewal straight to final approval', function () {
+it('closes a renewal that carries nothing but the business permit', function () {
+    /*
+     * The client's 17 September filing, and the common one in January: renew
+     * the Mayor's Permit, nothing else. There is no office to hear from, so
+     * the money landing is the last event in its life.
+     */
     $app = paidBusinessRenewal();
 
     app(WorkflowService::class)->onPaymentCompleted(settle($app, 'RENEW-SKIP-1'));
 
-    /*
-     * The whole decision, in one assertion. A new filing lands on
-     * AwaitingOtherPermits here and has five permits to obtain; this one has
-     * them already and goes to the only thing left, which is BPLO reading them.
-     */
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
-
-    // And it never touched the gathering stage on the way — the history is the
-    // record, because a status the filing passed through for a millisecond is
-    // still a status an officer's queue could have caught it in.
-    $visited = $app->fresh()->statusHistory()->pluck('to_status')->all();
-    expect($visited)->not->toContain(ApplicationStatus::AwaitingOtherPermits->value);
-});
-
-it('lets BPLO approve a renewal whose clearances were uploaded, not applied for', function () {
-    $app = paidBusinessRenewal();
-    $workflow = app(WorkflowService::class);
-    $workflow->onPaymentCompleted(settle($app, 'RENEW-SKIP-2'));
-
-    /*
-     * Every clearance is still `not_started` — no office was routed, no form
-     * filled, no inspection booked, because on a renewal none of that happens.
-     * Before `outstandingClearances` learned to read `mode`, this was exactly
-     * the state in which BPLO was refused with "These permits are not approved
-     * yet", naming all five, with nothing anyone could do about it.
-     */
-    $statuses = $app->fresh()->permitTypes
-        ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
-        ->map(fn (PermitType $pt) => $pt->pivot->status)
-        ->unique()
-        ->values();
-    expect($statuses->all())->toBe([ClearanceStatus::NotStarted]);
-
-    $workflow->approveOverall($app->fresh(), 'Copies checked.');
-
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
-});
-
-it('issues the business permit and no second copy of a clearance already held', function () {
-    $app = paidBusinessRenewal();
-    $workflow = app(WorkflowService::class);
-    $workflow->onPaymentCompleted(settle($app, 'RENEW-SKIP-3'));
-    $workflow->approveOverall($app->fresh(), 'Copies checked.');
 
     /*
-     * ONE new certificate, and it is the business permit.
+     * And it never touched the gathering stage on the way — the history is the
+     * record, because a status the filing passed through for a millisecond is
+     * still a status an officer's queue could have caught it in.
      *
-     * The applicant already holds a valid sanitary permit — they uploaded it —
-     * so minting a second would leave the business with two live certificates
-     * of one type, which is the state `issuePermitFor`'s supersede logic exists
-     * to prevent and which an inspector verifying the premises could be handed
-     * either of.
+     * This is why `onPaymentCompleted` asks what is outstanding BEFORE it
+     * announces where the filing is going, rather than parking it and tidying
+     * up afterwards.
      */
+    $visited = $app->fresh()->statusHistory()->pluck('to_status')->all();
+    expect($visited)->not->toContain(ApplicationStatus::AwaitingOtherPermits->value)
+        ->and($visited)->not->toContain(ApplicationStatus::ForFinalApproval->value);
+});
+
+it('releases the renewed business permit the moment the money lands', function () {
+    /*
+     * The 24 September rule — *"after payment, business permit is already
+     * released"* — reaching renewals on 3 October, because they now take the
+     * new filing's path out of payment. A business renewing in January holds
+     * its permit from the day it pays rather than from the day BPLO gets to it.
+     */
+    $app = paidBusinessRenewal();
+    app(WorkflowService::class)->onPaymentCompleted(settle($app, 'RENEW-SKIP-2'));
+
     $issued = Permit::where('application_id', $app->id)->get();
-    expect($issued)->toHaveCount(1);
-    expect($issued->first()->permitType->code)->toBe(PermitType::OUTCOME_CODE);
+    expect($issued)->toHaveCount(1)
+        ->and($issued->first()->permitType->code)->toBe(PermitType::OUTCOME_CODE);
 
     /*
      * And it ends on 20 January, whatever today is — the other half of the
@@ -213,4 +197,58 @@ it('issues the business permit and no second copy of a clearance already held', 
             CarbonImmutable::parse($issued->first()->valid_from),
         )->toDateString(),
     );
+});
+
+it('waits for the office of a clearance the renewal actually renews', function () {
+    /*
+     * The honest other half, and the case the upload used to paper over.
+     *
+     * A renewal that TICKS the Sanitary Permit is saying it is expiring, so
+     * CHO has to issue it — nobody has approved anything, and a copy of last
+     * year's is not an approval. Before 3 October the uploaded mode counted as
+     * satisfied and BPLO could close the filing over five clearances that no
+     * office had touched; this is that hole, asserted shut.
+     *
+     * The client's own correction of 18 September 2026 is the authority for
+     * the distinction: a permit still valid is not renewed and is not on the
+     * filing; one that is expiring is renewed, and is.
+     */
+    $app = paidBusinessRenewal(['BUSINESS', 'SANITARY']);
+    $workflow = app(WorkflowService::class);
+    $workflow->onPaymentCompleted(settle($app, 'RENEW-SKIP-3'));
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+
+    /* And BPLO is refused while CHO has not issued it. */
+    expect(fn () => $workflow->approveOverall($app->fresh(), 'Closing early.'))
+        ->toThrow(ValidationException::class);
+
+    /*
+     * The business permit is still released, though — the wait is for the
+     * clearance, not for the permit the applicant paid for.
+     */
+    expect(
+        Permit::where('application_id', $app->id)
+            ->whereRelation('permitType', 'code', PermitType::OUTCOME_CODE)
+            ->exists()
+    )->toBeTrue();
+});
+
+it('closes the renewal once that office has issued its permit', function () {
+    /*
+     * The inverse, so the test above cannot be passed by a filing that simply
+     * never closes.
+     */
+    $app = paidBusinessRenewal(['BUSINESS', 'SANITARY']);
+    $workflow = app(WorkflowService::class);
+    $workflow->onPaymentCompleted(settle($app, 'RENEW-SKIP-4'));
+
+    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
+    $app->permitTypes()->updateExistingPivot($sanitary->id, [
+        'status' => ClearanceStatus::Approved->value,
+    ]);
+
+    $workflow->refreshReadiness($app->fresh()->load('permitTypes'));
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });

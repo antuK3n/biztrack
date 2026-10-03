@@ -240,12 +240,29 @@ it('walks a new application from filing to every permit issued', function () {
         ->toContain('BUSINESS', 'CEC', 'ZONING', 'SANITARY', 'FSIC', 'OCCUPANCY');
 })->group('lifecycle');
 
-it('renews two of the six and issues only those', function () {
+it('renews one of the six and issues only that', function () {
     /*
-     * The second half of the client's request, and the case the old code broke:
-     * a renewal that leaves the Mayor's Permit alone. The prior permits are
-     * staggered on purpose — differing expiry dates are the client's whole
-     * reason for renewing a subset.
+     * The second half of the client's request, and the case the old code
+     * broke: a renewal that leaves the Mayor's Permit alone. The prior
+     * permits are staggered on purpose — differing expiry dates are the
+     * client's whole reason for renewing part of a holding.
+     *
+     * ── It renewed TWO until 3 October 2026 ────────────────────
+     *
+     * Sanitary and Zoning on one filing, which `App\Support\RenewalScope`
+     * now refuses: the client ruled that each of the other permits is
+     * renewed on its own application, because each is read by its own
+     * office and the two share no step, no fee and no reviewer.
+     *
+     * This test is also why the 30-day early window was reverted on
+     * 1 October — it refused that staggered pair — and the reason went with
+     * the pair: those six clearances are six filings now whatever the window
+     * is set to, so the window went back on the day the scope rule landed.
+     * The two are one decision seen twice.
+     *
+     * Everything the test was written to prove survives at one permit: the
+     * set is not expanded to six, BPLO is not involved, nothing is billed
+     * now, and the fee waits for January.
      */
     $businessId = registerBusiness('Bautista Hardware & Construction Supply', 'DTI-2026-0451233');
     $ownerId = User::where('email', 'owner@biztrack.local')->value('id');
@@ -257,6 +274,28 @@ it('renews two of the six and issues only those', function () {
         'status' => 'approved',
     ]);
 
+    /*
+     * Staggered, with the one being renewed INSIDE its 30-day window and the
+     * rest well outside it.
+     *
+     * The spread was `15 + ($i * 45)` by position, which put Sanitary 105
+     * days out — fine while nothing bounded an early renewal, and refused at
+     * submission once one did. `RenewalWindow` is enforced in
+     * `ApplicationController`, not merely drawn in the picker.
+     *
+     * Named per code rather than derived from the loop index, so reordering
+     * the list below cannot silently move which permit is the due one.
+     */
+    $expiresInDays = [
+        'BUSINESS' => 200,
+        'ZONING' => 150,
+        /* The one this filing renews. */
+        'SANITARY' => 15,
+        'CEC' => 180,
+        'FSIC' => 220,
+        'OCCUPANCY' => 260,
+    ];
+
     $prior = [];
     foreach (['BUSINESS', 'ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'] as $i => $code) {
         $type = PermitType::where('code', $code)->firstOrFail();
@@ -267,13 +306,13 @@ it('renews two of the six and issues only those', function () {
             'permit_number' => $type->permit_number_prefix.'-2025-'.str_pad((string) ($i + 1), 6, '0', STR_PAD_LEFT),
             'issued_at' => now()->subYear(),
             'valid_from' => now()->subYear(),
-            'valid_until' => now()->addDays(15 + ($i * 45)),
+            'valid_until' => now()->addDays($expiresInDays[$code]),
             'status' => 'active',
         ]);
     }
 
-    // ── 1. File a renewal for the two that are falling due ───────────────
-    $renewCodes = ['SANITARY', 'ZONING'];
+    // ── 1. File a renewal for the one that is falling due ───────────────
+    $renewCodes = ['SANITARY'];
     authAs('owner@biztrack.local');
     $appId = $this->postJson('/api/v1/applications', [
         'business_id' => $businessId,
@@ -281,7 +320,7 @@ it('renews two of the six and issues only those', function () {
         'data_privacy_consent' => true,
         'permit_type_ids' => PermitType::whereIn('code', $renewCodes)->pluck('id')->all(),
         'prior_permit_id' => $prior['SANITARY']->id,
-        'prior_permit_ids' => [$prior['SANITARY']->id, $prior['ZONING']->id],
+        'prior_permit_ids' => [$prior['SANITARY']->id],
         'fee_profile' => feeProfile(2_100_000),
     ])->assertCreated()->json('data.id');
 
@@ -307,8 +346,8 @@ it('renews two of the six and issues only those', function () {
      *    final approval to give.
      *
      * The three properties this test was written for are unchanged and still
-     * asserted: the permit set is not expanded, the stage offers two rather
-     * than five, and exactly two certificates come out.
+     * asserted: the permit set is not expanded, the stage offers what was
+     * ticked rather than five, and exactly that many certificates come out.
      */
     expect(Application::find($appId)->defersPayment())->toBeTrue();
 
@@ -333,11 +372,11 @@ it('renews two of the six and issues only those', function () {
     expect(permitCodesOn($appId))->toBe($renewCodes);
 
     /*
-     * And the money is waiting for January rather than lost. Two permits
-     * issued unpaid, two receivables against the business — which is the whole
+     * And the money is waiting for January rather than lost. The permit is
+     * issued unpaid and a receivable stands against the business — the whole
      * of the deferral the client asked for, seen from the HTTP side.
      */
     $deferred = UnbilledPermitFee::where('business_id', $businessId)->outstanding()->get();
-    expect($deferred)->toHaveCount(2);
+    expect($deferred)->toHaveCount(1);
     expect($deferred->sum('amount'))->toBeGreaterThan(0);
 })->group('lifecycle');

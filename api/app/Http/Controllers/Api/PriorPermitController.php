@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\Application;
 use App\Support\Audit;
+use App\Support\RenewalScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -93,6 +94,20 @@ class PriorPermitController extends Controller
                 ? $application->business->permits()->whereKey($ids)->count()
                 : 0;
             abort_unless($owned === count($ids), 422, 'A selected prior permit does not belong to this business.');
+        }
+
+        /*
+         * One filing carries the business permit, or one other permit —
+         * see `RenewalScope` for the rule and why it stops there.
+         *
+         * Checked here as well as in `ApplicationController`, because this
+         * is the other door to the same answer: reopening the entry dialog
+         * from a draft's summary writes through this endpoint, and a rule
+         * only one of the two enforces is one a caller walks around by
+         * picking the other.
+         */
+        if ($refusal = RenewalScope::refusal($ids)) {
+            abort(422, $refusal);
         }
 
         // The primary keys the renewal chain; the first tick is the answer.

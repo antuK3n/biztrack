@@ -155,7 +155,7 @@ final class AnalyticsDefinitions
                 // Tier", which said "tier" twice over — once in the heading and
                 // again in every bar label underneath it.
                 'label' => 'Average Processing Time (RA 11032)',
-                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, For Final Approval); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
+                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, With BPLO); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
                 /*
                  * The holiday sentence read "never faster than shown", which
                  * is backwards: a holiday counted as a working day makes the
