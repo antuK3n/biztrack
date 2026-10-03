@@ -15,7 +15,7 @@ The source PDF is not committed. It is the city's document, not ours.
 
 | File | Article | Contents |
 | --- | --- | --- |
-| **`rules.json` / `rules.md`** | **all, pp. 1–110** | **Every normative statement — 341 of them — with its verbatim text, article, section and printed page, what data it needs, and its status in BizTrack (implemented, shown, not applicable, question). The file the zoning check reads its wording from. `rules.md` is generated from it by `scripts/zoning-rules.py`.** |
+| **`rules.json` / `rules.md`** | **all, pp. 1–110** | **Every normative statement — 342 of them — with its verbatim text, article, section and printed page, what data it needs, and its status in BizTrack (implemented, shown, not applicable, question). The file the zoning check reads its wording from. `rules.md` is generated from it by `scripts/zoning-rules.py`.** |
 | `zone-boundaries.json` / `-summary.md` | IV §5 | 99 (zone, barangay) pairs: which base zones and overlays fall in which barangay, with the location prose |
 | `zone-uses.json` / `-summary.md` | V §2.1–2.20 | 695 allowed uses across all 20 base zones. The special uses, overlays and incentives (§3–5) are in `rules.json`, not here |
 | `definitions-and-standards.md` | III, VI, VII, VIII | 89 defined terms; performance standards with thresholds; general regulations; variance/exception procedure |

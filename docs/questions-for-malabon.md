@@ -1234,7 +1234,7 @@ it draws; nothing is said about their particular address.
 ## C5. Is a per-location conformance answer appropriate to automate at all, or must CPDO always rule case by case?
 
 **Update, 3 October 2026.** With City Ordinance No. 24-2018 in hand, BizTrack
-now applies it rule by rule (`docs/zoning-ordinance/rules.json` lists all 341
+now applies it rule by rule (`docs/zoning-ordinance/rules.json` lists all 342
 normative statements and what the system does with each). It still renders no
 verdict: each rule is reported as met, not met or for CPDO's review, with its
 article, section and page, to the applicant as an early warning and to the
