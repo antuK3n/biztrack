@@ -118,6 +118,19 @@ const versionDateFmt = new Intl.DateTimeFormat('en-PH', {
   day: 'numeric',
 })
 
+/**
+ * A calendar date the server sends bare ("2027-01-25"), as "January 25, 2027".
+ *
+ * Not formatDate(): `new Date('2027-01-25')` is midnight UTC, which a browser
+ * west of Greenwich prints as the 24th. A date with no time is the same day
+ * everywhere, so it is read as one.
+ */
+export function formatCalendarDate(ymd: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd ?? '')
+  if (!m) return '—'
+  return dateFmt.format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+}
+
 export function formatVersionDate(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)

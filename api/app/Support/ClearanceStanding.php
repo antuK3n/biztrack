@@ -6,7 +6,6 @@ use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\Permit;
 use App\Models\PermitType;
-use Illuminate\Support\Carbon;
 
 /**
  * Where a BUSINESS stands on each required clearance — the register's answer,
@@ -71,7 +70,9 @@ class ClearanceStanding
          */
         $onThisFiling = $application->permitTypes->pluck('code')->all();
 
-        $today = Carbon::today();
+        // BusinessDate, so a held clearance is "expired" by the same date the
+        // late surcharge and the permit countdown use.
+        $today = BusinessDate::today();
 
         return PermitType::query()
             ->whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)

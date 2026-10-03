@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Debug\HealthController;
 use App\Http\Controllers\Api\Debug\PanelController;
 use App\Http\Controllers\Api\Debug\PaymentsController;
+use App\Http\Controllers\Api\Debug\SwitchesController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -40,4 +41,8 @@ Route::prefix('debug')->middleware('debug.panel')->group(function () {
     // Health: is everything this server needs running. Read-only, bar one test e-mail.
     Route::get('health', [HealthController::class, 'show'])->middleware('throttle:20,1,debug-health');
     Route::post('health/test-mail', [HealthController::class, 'testMail'])->middleware('throttle:3,1,debug-test-mail');
+
+    // System switches: sign-in codes, captcha, office-hours notice, pretend date.
+    Route::get('switches', [SwitchesController::class, 'show']);
+    Route::put('switches', [SwitchesController::class, 'update']);
 });

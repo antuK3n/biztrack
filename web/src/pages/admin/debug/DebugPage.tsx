@@ -9,6 +9,7 @@ import { canUseDebug } from './access'
 import { debugPanel } from './api'
 import { HealthSection } from './HealthSection'
 import { PaymentsSection } from './PaymentsSection'
+import { SwitchesSection } from './SwitchesSection'
 
 /*
  * Debug — the super admin's on-the-fly controls for the thesis defense
@@ -59,6 +60,13 @@ const SECTIONS: DebugSection[] = [
     summary:
       'Whether everything this server needs is running, and when each was last seen. Reading it changes nothing.',
     body: () => <HealthSection />,
+  },
+  {
+    id: 'switches',
+    title: 'System switches',
+    summary:
+      'Sign-in codes, the captcha, the office-hours notice and a pretend date for renewals. Each overrides the server’s own setting from the next request on.',
+    body: () => <SwitchesSection />,
   },
 ]
 

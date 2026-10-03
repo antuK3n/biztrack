@@ -93,7 +93,8 @@ final class RenewalWindow
             return null;
         }
 
-        $filed = ($filedAt ?? CarbonImmutable::now())->startOfDay();
+        // Today is BusinessDate's: the Debug page's pretend date when one is set.
+        $filed = ($filedAt ?? BusinessDate::filedAt(null))->startOfDay();
         $expires = CarbonImmutable::parse($prior->valid_until)->endOfDay();
 
         $opens = self::opensDaysBefore();
