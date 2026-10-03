@@ -109,13 +109,46 @@ export function registrationNumberAgencyError(
 export function tinValid(raw: string): boolean {
   const trimmed = raw.trim()
   if (!/^[\d\s.-]+$/.test(trimmed)) return false
+
+  /*
+   * ── A GAP is not a separator ────────────────────────────────────────
+   *
+   * This counted digits and nothing else, so an empty box in the middle of
+   * the segmented input passed whenever the remaining digits happened to
+   * total nine. Clearing one group of "111-111-111-000" leaves
+   * "111--111-000" — nine digits, and accepted. Next was enabled on a TIN
+   * with a hole in it (client, 3 October 2026).
+   *
+   * `joinTin` keeps that empty segment ON PURPOSE, and its note says so:
+   * closing the gap would turn a half-typed number into a different,
+   * plausible-looking one. It then claimed the gap "fails validation",
+   * which was true only for a three-group TIN, where the hole leaves six
+   * digits. With the branch code present it leaves nine.
+   *
+   * The API refuses all four shapes — `^\d{3}-\d{3}-\d{3}(-\d{3,5})?$` —
+   * so every one of them was a step the browser waved through and the
+   * server would have rejected.
+   *
+   * Checked before the digit count rather than by tightening the count,
+   * because the fault is the SHAPE: a leading dash, a trailing dash and a
+   * doubled dash are each an unfinished box, whatever the total comes to.
+   */
+  if (/^-|-$|--/.test(trimmed.replace(/[\s.]/g, ''))) return false
+
   const digits = trimmed.replace(/\D/g, '').length
 
   return digits === 9 || (digits >= 12 && digits <= 14)
 }
 
-export const TIN_ERROR =
-  'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'
+/*
+ * Short, because it is read in a tooltip beside the field.
+ *
+ * It used to recite the rule and give a worked example — 86 characters,
+ * which wrapped to three lines over the input and pushed the form about.
+ * Client, 3 October 2026: *"no need to be this long"*. The segmented boxes
+ * already show the shape, so the message only has to say it is wrong.
+ */
+export const TIN_ERROR = 'Enter a valid TIN.'
 
 /**
  * Philippine contact number: an 11-digit mobile, the same number written +63,
@@ -181,6 +214,18 @@ export type FieldRule = {
   inputMode?: 'text' | 'decimal' | 'numeric' | 'email' | 'url' | 'tel'
   maxLength?: number
   /**
+   * The format, shown BEFORE the mistake instead of after it.
+   *
+   * Each of these used to be recited by the field's error message, which
+   * put the one useful thing — what the answer should look like — behind
+   * getting it wrong, and wrapped the message to three lines doing it
+   * (client, 3 October 2026). The wizard already showed its own; the
+   * correction card and the officer's editor build from this rule alone
+   * and had nothing, so the example lives here where all three can read
+   * it.
+   */
+  placeholder?: string
+  /**
    * Render a SELECT of these instead of a text box.
    *
    * For a field the form asks as a choice. Citizenship is the case this
@@ -214,7 +259,7 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
        */
       ?? (registrationNumberValid(v)
         ? undefined
-        : 'Use letters, numbers, spaces or dashes, with at least one digit.'),
+        : 'Enter a valid registration number.'),
     maxLength: 60,
   },
   'form:tin': {
@@ -239,28 +284,32 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
   },
   'form:telephone': {
     validate: (v) =>
-      v.trim() === '' || phoneValid(v) ? undefined : 'Enter a landline number that can be rung.',
+      v.trim() === '' || phoneValid(v) ? undefined : 'Enter a valid landline number.',
     inputMode: 'tel',
+    placeholder: '8123 4567',
     maxLength: 30,
   },
   'form:mobile_number': {
     validate: (v) => (v.trim() === '' || mobileValid(v) ? undefined : MOBILE_ERROR),
     inputMode: 'tel',
+    placeholder: '09171234567',
     maxLength: 20,
   },
   'form:email': {
     validate: (v) =>
       required(v, 'The e-mail address')
-      ?? (emailValid(v) ? undefined : 'Enter an e-mail address, like name@example.com.'),
+      ?? (emailValid(v) ? undefined : 'Enter a valid e-mail address.'),
     inputMode: 'email',
+    placeholder: 'name@example.com',
     maxLength: 255,
   },
   'form:website': {
     validate: (v) =>
       v.trim() === '' || websiteValid(v)
         ? undefined
-        : 'Enter the website as it is typed into a browser, like malabon.gov.ph.',
+        : 'Enter a valid website address.',
     inputMode: 'url',
+    placeholder: 'malabon.gov.ph',
     maxLength: 255,
   },
   'form:president_officer_name': {
@@ -285,14 +334,16 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
       required(v, 'Capital participation')
       ?? (percentValid(v)
         ? undefined
-        : 'Enter the Filipino share as a percentage between 0 and 100, like 100 or 60.'),
+        : 'Enter a percentage from 0 to 100.'),
     inputMode: 'decimal',
+    placeholder: '100',
     maxLength: 6,
   },
   'form:floor_area_sqm': {
     validate: (v) =>
-      lotAreaValid(v) ? undefined : 'Enter the business area in square metres, as a number.',
+      lotAreaValid(v) ? undefined : 'Enter the area in sq. m.',
     inputMode: 'decimal',
+    placeholder: '120',
     maxLength: 12,
   },
   'form:employees_in_lgu': {
@@ -310,8 +361,9 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
       required(v, 'Capital investment')
       ?? (positiveNumberValid(v, 1_000_000_000_000)
         ? undefined
-        : 'Enter the capital investment as an amount, like 250000.'),
+        : 'Enter an amount.'),
     inputMode: 'decimal',
+    placeholder: '250000',
     maxLength: 20,
   },
 }

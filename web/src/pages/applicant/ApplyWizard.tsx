@@ -971,7 +971,7 @@ const REGISTRATION_TYPES: {
  */
 const REGISTRATION_AGENCIES: Record<
   RegistrationAgency,
-  { label: string; placeholder: string; hint: string; shape: RegExp | null; unusual: string }
+  { label: string; placeholder: string; hint: string; shape: RegExp | null }
 > = {
   DTI: {
     /*
@@ -996,7 +996,6 @@ const REGISTRATION_AGENCIES: Record<
      * correct certificates as odd. Silence is the honest answer here.
      */
     shape: null,
-    unusual: '',
   },
   SEC: {
     label: 'SEC Registration Number',
@@ -1010,7 +1009,6 @@ const REGISTRATION_AGENCIES: Record<
      * specimen found anywhere.
      */
     shape: /^(?:CS|CN|CEO|ASO|AS|A|PP)?\d{4,11}(?:-[A-Za-z0-9]{1,6})?$/i,
-    unusual: 'That does not look like the usual SEC format (CS201912345, or digits alone).',
   },
   CDA: {
     label: 'CDA Registration Number',
@@ -1021,7 +1019,6 @@ const REGISTRATION_AGENCIES: Record<
      * 10744- series — then 8, 12 or 16 digits after the dash.
      */
     shape: /^\d{4,5}-\d{8,16}$/,
-    unusual: 'That does not look like the usual CDA format (9520-15005879).',
   },
 }
 
@@ -1150,7 +1147,7 @@ function normalizeRegistrationType(raw: string | null | undefined): string {
  * lenient about separators — the point is to catch a typo, not a format.
  */
 
-const PHONE_ERROR = 'Enter a Philippine mobile or landline number, like 09171234567 or 8123 4567.'
+const PHONE_ERROR = 'Enter a valid mobile or landline number.'
 
 /**
  * BPLO item A9. Loose on purpose: it accepts what somebody would type into a
@@ -2383,13 +2380,13 @@ function IdentifyFilingModal({
     >
       <p className="text-sm leading-relaxed text-ink-secondary">
         {applicationType === 'renewal'
-          ? 'Two ways to do this: tick the permits you are renewing, or upload a permit you already hold outside BizTrack. Either way we fill the rest of the form in from it.'
-          : 'Say which record you are amending and what about it is changing. We fill the rest of the form in from it.'}
+          ? 'Tick the permits you are renewing. We fill in the rest from them.'
+          : 'Say which record you are amending. We fill in the rest from it.'}
       </p>
 
       {/* ── 1. Which business ────────────────────────────────────────────── */}
       <label className="mt-3 block">
-        <FieldLabel required>Which business are you {verb}?</FieldLabel>
+        <FieldLabel required>Business</FieldLabel>
         <select
           className={inputCls}
           value={businessId ?? ''}
@@ -2430,8 +2427,8 @@ function IdentifyFilingModal({
       {!businessesLoading && applicationType === 'amendment' && withheldBusinesses > 0 && (
         <p className="mt-2 text-xs text-ink-secondary">
           {withheldBusinesses === 1
-            ? 'One of your businesses is not listed: its permit is still being applied for, so there is nothing to amend yet.'
-            : `${withheldBusinesses} of your businesses are not listed: their permits are still being applied for, so there is nothing to amend yet.`}
+            ? 'One business is not listed — its permit is still being applied for.'
+            : `${withheldBusinesses} businesses are not listed — their permits are still being applied for.`}
         </p>
       )}
 
@@ -2445,7 +2442,7 @@ function IdentifyFilingModal({
       */}
       {businessId !== null && applicationType !== 'amendment' && (
         <div className="mt-3">
-          <FieldLabel required>Which permits are you {verb}?</FieldLabel>
+          <FieldLabel required>Permits</FieldLabel>
           {/*
             One bill, said where the ticking happens.
 
@@ -2482,16 +2479,13 @@ function IdentifyFilingModal({
             it.
           */}
           <p className="mb-2 text-xs text-ink-secondary">
-            Tick every permit this filing covers. You can choose more than one, and they are all
-            priced on a single Tax Order of Payment — one payment for this filing, not one per
-            permit.
+            Choose as many as you need — one payment for this filing, not one per permit.
           </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
           ) : loadError ? (
             <p role="alert" className="text-xs font-medium text-s-red">
-              {loadError} Try again — a renewal has to name the permit it carries forward, so this
-              list is not optional.
+              {loadError} Try again — a renewal has to name the permit it renews.
             </p>
           ) : (
             // Guarded on the count, not just on `loadError`: without it a
@@ -2566,18 +2560,16 @@ function IdentifyFilingModal({
                       ? null
                       : days < 0
                         ? {
-                            text: 'Expired — tick it to renew. Left unticked, this office has no valid certificate on file.',
+                            text: 'Tick it to renew — this office has no valid copy on file.',
                             cls: 'text-s-red',
                           }
                         : days <= 60
                           ? {
-                              text: `Valid for ${days} more ${days === 1 ? 'day' : 'days'} — tick it to renew now and save a second filing later.`,
+                              text: `${days} ${days === 1 ? 'day' : 'days'} left — tick it to renew now and save a second filing.`,
                               cls: 'text-ink',
                             }
                           : {
-                              text: `Still valid${
-                                p.valid_until ? ` to ${formatDate(p.valid_until)}` : ''
-                              } — no renewal needed. BizTrack will use the certificate it already holds.`,
+                              text: 'No renewal needed — BizTrack uses the copy it holds.',
                               cls: 'text-ink-secondary',
                             }
                   return (
@@ -5952,7 +5944,26 @@ export function ApplyWizard() {
 
   const landedRef = useRef(false)
   useEffect(() => {
-    if (landedRef.current || !draftIdParam) return
+    /*
+     * ── BOTH kinds of draft land here, which is the whole fix ───────────
+     *
+     * This read `!draftIdParam` and returned, so it only ever ran for a
+     * draft that already has an Application row behind it — the cards that
+     * link to `/apply?draft=N`.
+     *
+     * An unfinished filing with no row yet is a `wizardDrafts` scratch copy
+     * and its card links to `/apply?type=X&resume=N`. `draftIdParam` is
+     * null for those, so the effect bailed on the first line and the
+     * applicant was put back on Data Privacy Consent every single time —
+     * for a NEW filing, a RENEWAL and an AMENDMENT alike, because that one
+     * link shape carries all three (`type=${d.application_type}`).
+     *
+     * Reported 2 October 2026: "it transports me by default to the Data
+     * Privacy Consent section… it should transport me to the farthest
+     * section I did." The landing logic was right; it was reachable from
+     * only one of the two doors.
+     */
+    if (landedRef.current || (!draftIdParam && resumeParam === null)) return
     /*
      * Wait for the answers AND for the reference data.
      *
@@ -5968,10 +5979,31 @@ export function ApplyWizard() {
      */
     if (hydrating || hydrateFailed || refs.loading) return
 
+    /*
+     * The scratch copy has its own load, and its own signal.
+     *
+     * `hydrating` only ever describes the Application-row path — it is
+     * initialised `Boolean(draftIdParam)` — so for a `resume` draft it is
+     * false from the first render and guards nothing. Landing then would
+     * read a blank form, find part 1 unfinished, and settle there for
+     * good: `landedRef` makes this a one-shot, which is the same trap the
+     * comment above describes for reference data.
+     */
+    if (resumeParam !== null && !restoreSettled) return
+
     landedRef.current = true
     const firstUnfinished = stepComplete.findIndex((done) => !done)
     setStep(firstUnfinished === -1 ? sequence.length - 1 : firstUnfinished)
-  }, [draftIdParam, hydrating, hydrateFailed, refs.loading, stepComplete, sequence.length])
+  }, [
+    draftIdParam,
+    resumeParam,
+    restoreSettled,
+    hydrating,
+    hydrateFailed,
+    refs.loading,
+    stepComplete,
+    sequence.length,
+  ])
 
   /**
    * True when jumping forward to `index` would step over an unfinished
@@ -6229,13 +6261,15 @@ export function ApplyWizard() {
         ? registrationNumberValid(form.registration_number)
           ? ''
           : /*
-               The rule they broke, and nothing else. This named the field,
-               cited the certificate and then listed four character classes
-               and a digit minimum, which the client called too long on 30
-               September 2026 — and the field's own label is directly above
-               the error, so naming it again spent a clause on nothing.
+               Shortened twice, for the same reason each time. It began by
+               naming the field and citing the certificate; on 30 September
+               2026 the client cut that, leaving the four character classes
+               and the digit minimum; on 3 October they cut those too. The
+               label sits directly above the box and the agency's own format
+               is in the placeholder — a message repeating either spends a
+               line saying what is already on the screen.
             */
-            'Use letters, numbers, spaces or dashes, with at least one digit.'
+            'Enter a valid registration number.'
         : touched.registration_number
           ? `Enter your ${registrationNumberLabel}.`
           : '',
@@ -6257,7 +6291,7 @@ export function ApplyWizard() {
       touched.tin && form.tin.trim() && !tinValid(form.tin) ? TIN_ERROR : '',
     lot_area_sqm:
       form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)
-        ? 'Enter the lot area in square metres, like 120.'
+        ? 'Enter the area in sq. m.'
         : '',
     /*
      * Both optional, so neither can complain about being empty — only about
@@ -6283,10 +6317,10 @@ export function ApplyWizard() {
         : '',
     website:
       form.website.trim() && !websiteValid(form.website)
-        ? 'Enter your website as it is typed into a browser, like malabon.gov.ph or https://malabon.gov.ph.'
+        ? 'Enter a valid website address.'
         : '',
     capital_participation_filipino: !percentValid(form.capital_participation_filipino)
-      ? 'Enter the Filipino share as a percentage between 0 and 100, like 100 or 60.'
+      ? 'Enter a percentage from 0 to 100.'
       : '',
     economic_organization_others:
       touched.economic_organization_others &&
@@ -6309,7 +6343,7 @@ export function ApplyWizard() {
     monthly_rental: form.monthly_rental.trim()
       ? Number.isFinite(Number(plainAmount(form.monthly_rental)))
         ? ''
-        : 'Enter the monthly rental as an amount in pesos.'
+        : 'Enter an amount in pesos.'
       : touched.monthly_rental && form.is_rented
         ? 'Enter the monthly rental, or set the premises to owner-occupied.'
         : '',
@@ -9406,6 +9440,7 @@ export function ApplyWizard() {
                     <FieldLabel>Lot Area (sq. m.)</FieldLabel>
                     <input
                       inputMode="decimal"
+                      placeholder="120"
                       value={form.lot_area_sqm}
                       onChange={(e) => update('lot_area_sqm', e.target.value)}
                       onBlur={() => touch('lot_area_sqm')}
