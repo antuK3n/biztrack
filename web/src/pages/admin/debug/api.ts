@@ -38,3 +38,25 @@ export const debugPayments = {
   /** One signed call to KwikPay. Changes nothing. */
   test: () => unwrap<PaymentGatewayTestResult>(api.post('/debug/payments/test')),
 }
+
+/** One Health check: ok / warn / fail, a sentence, and when its evidence is from. */
+export interface HealthCheck {
+  key: string
+  label: string
+  status: 'ok' | 'warn' | 'fail'
+  summary: string
+  /** When the evidence is from: a heartbeat's time, or the moment of checking. Null = never seen. */
+  seen_at: string | null
+}
+
+export interface HealthReport {
+  checked_at: string
+  checks: HealthCheck[]
+}
+
+/** Health: is everything this server needs running. Read-only, bar one test e-mail. */
+export const debugHealth = {
+  report: () => unwrap<HealthReport>(api.get('/debug/health')),
+  /** One plain e-mail to the signed-in super admin's own address. */
+  testMail: () => unwrap<{ ok: boolean; message: string }>(api.post('/debug/health/test-mail')),
+}
