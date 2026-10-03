@@ -302,33 +302,38 @@ it('does not close the filing just because the permit is out', function () {
         ->and($app->decided_at)->toBeNull();
 });
 
-it('leaves a renewal and an amendment to BPLO, releasing nothing at payment', function () {
+it('leaves only an amendment to BPLO, releasing nothing at payment', function () {
     /*
-     * Both go back to BPLO after paying, for reasons that outlive this change:
-     * a renewal's certificates are copies BPLO must read, and an amendment is
-     * completed at the BPLO window by the LGU's own paper. Issuing ahead of
-     * either would be issuing over the decision rather than before it.
+     * An AMENDMENT alone, since 3 October 2026.
      *
-     * Asserted on the BRANCH rather than by walking a renewal end to end. A
-     * renewal needs a prior permit to renew — `prior_permit_id` is required, and
-     * rightly — so building one here would mean issuing a certificate first,
-     * which is a second full lifecycle for a fact one line wide. The renewal
-     * flow itself is RenewalSkipsGatheringTest's subject; what belongs here is
-     * that the release is keyed on the same test that routes the filing, so the
-     * two can never disagree about which filings it applies to.
+     * It was a renewal and an amendment. The renewal's reason was that its
+     * certificates are copies BPLO must read, and the client removed those:
+     * *"an admin verifying an uploaded other permit will be useless if the
+     * system already tells them whether they are still valid or not."* So a
+     * renewal takes the new filing's path out of payment and its Mayor's
+     * Permit is released there — which is the LGU's own rule of
+     * 24 September, written about business permits and until now applied to
+     * new filings alone.
+     *
+     * The amendment's reason outlives the change and is a different one: it
+     * is completed at the BPLO window by the LGU's own paper, so issuing
+     * ahead of that would be issuing over the decision rather than before
+     * it.
+     *
+     * Asserted on the BRANCH rather than by walking a filing end to end,
+     * for the reason the original gave: the release has to be keyed on the
+     * same test that routes the filing, so the two can never disagree about
+     * which filings it applies to. Reading the source is a blunt way to say
+     * that and the honest one here.
      */
     $source = file_get_contents(base_path('app/Services/WorkflowService.php'));
 
-    expect($source)->toContain('if (! $backToBplo) {')
-        ->and($source)->toContain('$this->releaseOutcomePermit($app);');
+    expect($source)->toContain('if ($backToBplo) {')
+        ->and($source)->toContain('$this->releaseOutcomePermit($app);')
+        ->and($source)->toContain('$backToBplo = $app->application_type === ApplicationType::Amendment;');
 
-    /*
-     * And that `$backToBplo` is the renewal/amendment test, not something that
-     * has drifted to mean anything else. Reading the source is a blunt way to
-     * assert a branch and is the honest one here: the alternative is a fixture
-     * that costs more to maintain than the rule it guards.
-     */
-    expect($source)->toContain('[ApplicationType::Renewal, ApplicationType::Amendment],');
+    /* And the renewal is no longer named by it. */
+    expect($source)->not->toContain('[ApplicationType::Renewal, ApplicationType::Amendment],');
 });
 it('suspends the business permit when an office refuses one of the others', function () {
     $app = paidNewFiling();

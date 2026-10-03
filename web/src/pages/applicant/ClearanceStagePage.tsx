@@ -322,16 +322,26 @@ export function ClearanceStage({
   /**
    * May this filing hand in a certificate it already holds?
    *
-   * Not on a new one. The LGU's rule, relayed by the client on 29
+   * Not on a NEW one. The LGU's rule, relayed by the client on 29
    * September 2026: a business cannot already hold these before it applies
    * to BPLO, and one business may not hand in another's certificate.
    *
-   * `startClearance` refuses it server-side, which is where the rule
+   * Not on a RENEWAL either, since 3 October 2026. The client: *"an admin
+   * verifying an uploaded other permit will be useless if the system
+   * already tells them whether they are still valid or not."* A renewal
+   * attaches only the permits the applicant ticked, so one still in date
+   * is never on the filing — BizTrack holds it and says so. What could be
+   * uploaded was a copy of a permit the applicant had just said needs
+   * renewing, read by BPLO to confirm what the register already knew.
+   *
+   * That leaves the amendment, whose shape is an open question the client
+   * will take separately.
+   *
+   * `startClearance` refuses both server-side, which is where the rule
    * actually lives; this keeps a control off the screen that the server
-   * would reject. A renewal keeps it, which is the case the mode exists
-   * for — the visit behind last year's certificate already happened.
+   * would reject.
    */
-  const mayUploadHeldCopy = applicationType !== 'new'
+  const mayUploadHeldCopy = applicationType === 'amendment'
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
   const [rows, setRows] = useState<Clearance[] | null>(null)

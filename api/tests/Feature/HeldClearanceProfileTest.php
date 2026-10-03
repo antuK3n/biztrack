@@ -84,17 +84,36 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
         'business_id' => $businessId,
         'data_privacy_consent' => true,
         /*
-         * A RENEWAL, because handing in a certificate you already hold is
-         * only possible on one. `WorkflowService::startClearance` refuses
-         * `upload` on a new filing since 29 September 2026 — the LGU's rule
-         * that a business cannot hold these before it applies to BPLO.
+         * Built as a RENEWAL because that is a lifecycle the API will
+         * accept whole — last year's permit named, submitted, approved,
+         * paid. It is RETYPED to an amendment at the end, just before the
+         * upload, which is the only moment the rule is asked.
          *
          * These tests are about held copies, not about which filing types
-         * may have them, so the fixture moves to where the feature lives.
+         * may have them, so the fixture follows the feature wherever it
+         * lives. That is now the amendment, and it is the second move: it
+         * left the new filing on 29 September 2026 and the renewal on
+         * 3 October.
          */
         'application_type' => 'renewal',
         'prior_permit_id' => $priorPermit->id,
-        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+        /*
+         * The clearances are ON the filing, not just the business permit.
+         *
+         * Carrying the business permit alone left nothing outstanding, and
+         * since 3 October 2026 a renewal with nothing outstanding closes
+         * the moment it is paid for — after which its clearance stage is
+         * shut, because a decided filing opens nothing. The uploads these
+         * tests exist for were refused 422.
+         *
+         * This is what the fixture always meant. It is a filing that hands
+         * in copies of SANITARY, CEC and the rest; carrying them is the
+         * honest way to say so, rather than relying on `startClearance` to
+         * attach a missing type on the way past.
+         */
+        'permit_type_ids' => PermitType::whereIn('code', [
+            PermitType::OUTCOME_CODE, 'SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING',
+        ])->pluck('id')->all(),
         'fee_profile' => [
             'gross_sales' => 2000000,
             'capitalization' => 500000,
@@ -112,7 +131,17 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
     bploApprovesForm($appId);
     test()->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
-    return Application::findOrFail($appId);
+    /*
+     * Retyped only now, so every step above went through the gate it was
+     * meant to. Built as an amendment from the start it would have been
+     * refused at submission for naming no changed detail, and would carry
+     * the business permit alone — neither of which is what these tests are
+     * about. `saveQuietly` keeps the timestamps the status walk wrote.
+     */
+    $app = Application::findOrFail($appId);
+    $app->forceFill(['application_type' => 'amendment'])->saveQuietly();
+
+    return $app->fresh();
 }
 
 beforeEach(function () {

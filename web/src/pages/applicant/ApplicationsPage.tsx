@@ -117,11 +117,20 @@ const SORTS: SortFilterOption[] = [
  * FINISHED) and so does `draft` (drafts have their own page): offering a status
  * that can never match is a dead end that reads like a bug.
  */
+/*
+ * `for_final_approval` came off on 3 October 2026 with the stage itself.
+ * It is on no guide the applicant can read, and the one route left to it
+ * is an internal data problem (no confirmed RA 11032 category) that they
+ * did not cause — so offering it as something to filter their own filings
+ * by would be offering a word the site no longer explains anywhere.
+ *
+ * The chip still has a label if one of their filings does land there; see
+ * `applicationStatusMeta`. This only keeps it out of the menu.
+ */
 const FILTERABLE_STATUSES: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
   'awaiting_other_permits',
-  'for_final_approval',
   'returned',
   'rejected',
   'cancelled',
@@ -992,8 +1001,11 @@ function StatusGuide() {
 
         {/*
           The detours, under their own heading and off the rail. See Detour.
-          Per flow, because For Final Approval is a STEP on a renewal and not an
-          interruption — which is what put it under this heading by mistake.
+          Per flow, because what counts as an interruption differs by type.
+          For Final Approval is the case that taught this: it was a STEP on a
+          renewal until 3 October 2026, and dropping it from that rail
+          without naming it in OMITTED_BY_TYPE would file it under this
+          heading as something that might interrupt a filing.
 
           The list is the derived ones PLUS Suspended, and the difference is
           worth knowing before reading `statusDetoursFor` and finding its
