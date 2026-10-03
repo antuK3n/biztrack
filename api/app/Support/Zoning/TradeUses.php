@@ -274,10 +274,15 @@ final class TradeUses
         // Tutorial services are Residential-1's; a driving school is only in
         // C-1's and General Commercial's short-term special education.
         '85490' => ['fact' => 'school_kind',
+            // "Tutorial services" are Residential-1's; "tutorial centers" only
+            // C-1's and General Commercial's. A bare "tutorial" says neither.
             'words' => ['driving' => '/\bdriving\b/i', 'vocational' => '/\b(?:vocational|technical\s+school|tesda|trade\s+school)\b/i',
-                'short_course' => '/\b(?:dance|self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|speech)\b/i', 'tutorial' => '/\b(?:tutor\w*|review(?:\s+cent\w+)?)\b/i'],
+                'short_course' => '/\b(?:dance|self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|speech)\b/i',
+                'tutorial_centre' => '/\b(?:review|tutorial|learning|tutoring)\s+cent(?:er|re)s?\b/i',
+                'tutorial_service' => '/\b(?:home\s+tutor\w*|private\s+tutor\w*|tutoring\s+services?)\b/i'],
             'by' => [
-                'tutorial' => ['is' => ['=tutorial services', '=tutorial centers'], 'maybe' => ['training centers']],
+                'tutorial_service' => ['is' => ['=tutorial services'], 'maybe' => ['=tutorial centers']],
+                'tutorial_centre' => ['is' => ['=tutorial centers'], 'maybe' => ['=tutorial services', 'training centers']],
                 'driving' => ['is' => ['=driving school']],
                 'vocational' => ['is' => ['vocational school', 'vocational/technical school', 'vocational and trade schools']],
                 'short_course' => ['is' => ['=dance schools', '=schools for self-defense', '=speech clinics'], 'maybe' => ['special education (sped)']],
@@ -433,6 +438,7 @@ final class TradeUses
         if ($code === '68100') {
             $what = $facts['leases_what'] ?? null;
             $families = $facts['families_in_building'] ?? null;
+            $out['asks'] = $what === 'dwellings' ? ['leases_what', 'families_in_building'] : ['leases_what'];
             if ($what === 'commercial') {
                 $out['is'] = [];
                 $out['maybe'] = [];
@@ -440,9 +446,11 @@ final class TradeUses
                 $out['is'] = Ordinance::VEHICLE_USES['parking_lot']['phrases'];
                 $out['maybe'] = [];
             } elseif ($what === 'dwellings' && is_numeric($families)) {
-                $out['is'] = (float) $families >= 3
-                    ? ['=apartments', '=apartment', 'residential condominiums']
-                    : ['single-detached dwelling units', 'semi-detached family dwelling units'];
+                $out['is'] = match (true) {
+                    (float) $families >= 3 => ['=apartments', '=apartment', 'residential condominiums'],
+                    (float) $families >= 2 => ['semi-detached family dwelling units'],
+                    default => ['single-detached dwelling units'],
+                };
                 $out['maybe'] = [];
             }
             $out['def'] = $what === 'parking' ? null : 'III-1-APT';

@@ -138,7 +138,7 @@ final class ZoningFacts
         'apparel_kind' => ['label' => 'Is it a tailoring or dressmaking shop, or a garment factory?', 'type' => 'choice', 'who' => 'applicant',
             'options' => ['tailoring' => 'A tailoring or dressmaking shop', 'factory' => 'A garment factory']],
         'school_kind' => ['label' => 'What kind of school is it?', 'type' => 'choice', 'who' => 'applicant',
-            'options' => ['tutorial' => 'Tutorial or review centre', 'driving' => 'Driving school', 'vocational' => 'Vocational or technical school', 'short_course' => 'Dance, self-defense, speech or other short course']],
+            'options' => ['tutorial_service' => 'Tutoring (tutorial services)', 'tutorial_centre' => 'A tutorial or review centre', 'driving' => 'Driving school', 'vocational' => 'Vocational or technical school', 'short_course' => 'Dance, self-defense, speech or other short course']],
         'footwear_material' => ['label' => 'What are the shoes or slippers made of?', 'type' => 'choice', 'who' => 'applicant',
             'options' => ['leather' => 'Leather, fabric or other material', 'rubber_plastic' => 'Rubber or plastic', 'wood' => 'Wood']],
         'paint_bulk_handling' => ['label' => 'Will the store handle paint in bulk (drums, mixing, refilling)?', 'type' => 'bool', 'who' => 'applicant'],

@@ -50,7 +50,7 @@ function ztmCheck(string $barangay, string $code, array $facts = [], ?string $lo
 }
 
 /** The use-list finding: listed, possibly listed, or not listed. */
-function ztmUse(array $result): array
+function ztmUse(array $result): ?array
 {
     return collect($result['findings'])->first(fn ($f) => $f['group'] === 'uses'
         && in_array($f['title'], ['On the zones’ lists of allowed uses', 'Possibly on the zones’ lists'], true));
@@ -226,7 +226,7 @@ it('never lists a driving school where the ordinance lists only tutorial service
 
     [$status, $reason] = ztmRead(ztmCheck('Niugan', '85490', ['school_kind' => 'driving'], 'C-1'));
     expect($status)->toBe('met')->and($reason)->toContain('Driving school');
-    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'tutorial'], 'R-1'))[0])->toBe('met');
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'tutorial_service'], 'R-1'))[0])->toBe('met');
     expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'vocational'], 'R-2-BASIC'))[1])->toContain('Vocational School');
 
     [$status, , $asks] = ztmRead(ztmCheck('Potrero', '85490', [], 'R-1'));
@@ -289,4 +289,91 @@ it('lets an "Other" filer land on a listed use no register code reaches', functi
     // possibility, ahead of the code's own loose readings.
     [$status, $reason] = ztmRead(ztmCheck('Acacia', '38110', [], 'C-2', 'Junk shop and scrap buying'));
     expect($status)->toBe('review')->and($reason)->toContain('Medium scale junk shop');
+});
+
+it('never lets what the vehicles are for make a trade allowed where its own trade is not listed', function () {
+    /*
+     * Every register code, on a lot pinned to every zone, under every
+     * vehicle trigger: a description naming parking, a taxi, a ride-hailing
+     * garage, a terminal or trucking, and every answer to what the vehicles
+     * are for. A gasoline station "with parking lot" was read AS a pay parking
+     * lot and reported allowed in Maximum R-2; a "taxi repair shop" as a taxi
+     * garage. What the vehicles are for is a second use with its own
+     * conditions; it may never turn a trade not listed into a listed one.
+     *
+     * Only the vehicle trades are read as their vehicle use: passenger and
+     * freight transport, transport support, motor-vehicle rental, "Other",
+     * and a lessor who leases parking.
+     */
+    $lots = [
+        'R-1' => 'Potrero', 'R-2-BASIC' => 'Potrero', 'R-2-MAX' => 'Tonsuya', 'R-3-BASIC' => 'Dampalit', 'R-3-MAX' => 'Acacia',
+        'CMP' => 'Longos', 'C-1' => 'Niugan', 'C-2' => 'Acacia', 'C-3' => 'Potrero', 'GENERAL-COMMERCIAL' => 'Catmon', 'CBD' => 'Longos',
+        'I-1' => 'Dampalit', 'I-2' => 'Acacia', 'MANGROVE' => 'Dampalit', 'FISHPOND' => 'Dampalit', 'PARKS' => 'Catmon',
+        'CEMETERY' => 'Tugatog', 'UTILITIES' => 'Catmon', 'INSTITUTIONAL' => 'Potrero',
+    ];
+    $triggers = [
+        ['Business with parking lot', []], ['Business with a parking building', []], ['Taxi repair', []],
+        ['Grab and Uber garage', []], ['Tricycle terminal', []], ['Trucking and hauling', []],
+        ['', ['leases_what' => 'parking']],
+    ];
+    foreach (array_keys(Ordinance::VEHICLE_USES) as $kind) {
+        $triggers[] = ['', ['vehicle_use' => $kind]];
+    }
+    $vehicleTrades = ['49221', '49230', '52290', '77100', '00000'];
+
+    // Built once per barangay and trade, varied by facts and description
+    // only: the database is not asked again for each of ~40,000 cases.
+    $barangays = Barangay::with(['zoningClassifications', 'zoningOverlays'])->whereIn('name', array_unique($lots))->get()->keyBy('name');
+    $use = function (Barangay $barangay, PsicCode $psic, string $zone, array $facts, string $words): array {
+        $ctx = new ZoningContext($barangay, [['psic' => $psic, 'capitalization' => null, 'gross_sales' => null, 'description' => $words]],
+            'new', null, null, null, null, null, null, null, null, ['lot_zone' => $zone] + $facts,
+            ['lot_zone' => 'officer'] + array_fill_keys(array_keys($facts), 'applicant'), null);
+
+        return ztmRead(ZoningCheck::evaluate($ctx));
+    };
+
+    $wrong = [];
+    foreach (PsicCode::orderBy('code')->get() as $psic) {
+        $code = (string) $psic->code;
+        if (in_array($code, $vehicleTrades, true)) {
+            continue;
+        }
+        foreach ($lots as $zone => $name) {
+            if ($use($barangays[$name], $psic, $zone, [], '')[0] === 'met') {
+                continue;
+            }
+            foreach ($triggers as [$words, $facts]) {
+                // A lessor who says it leases parking is a parking operator.
+                if ($code === '68100' && (($facts['leases_what'] ?? null) === 'parking'
+                    || in_array($facts['vehicle_use'] ?? null, ['parking_lot', 'parking_building'], true))) {
+                    continue;
+                }
+                [$status, $reason] = $use($barangays[$name], $psic, $zone, $facts, $words);
+                if ($status === 'met') {
+                    $wrong[] = "{$code} in {$zone} with '{$words}' ".json_encode($facts).": {$reason}";
+                }
+            }
+        }
+    }
+    expect(count($wrong))->toBe(0, implode("\n", array_slice($wrong, 0, 10)));
+});
+
+it('reads a tutorial centre apart from a tutorial service', function () {
+    // Residential-1 lists "Tutorial services"; only C-1 and General
+    // Commercial list "Tutorial centers".
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'tutorial_centre'], 'R-1'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Potrero', '85490', [], 'R-1', 'Review center'))[0])->not->toBe('met');
+    expect(ztmRead(ztmCheck('Niugan', '85490', ['school_kind' => 'tutorial_centre'], 'C-1'))[1])->toContain('Tutorial centers');
+    expect(ztmRead(ztmCheck('Potrero', '85490', ['school_kind' => 'tutorial_service'], 'R-1'))[1])->toContain('Tutorial services');
+    // "Tutorial" alone does not say which: only possibly listed.
+    expect(ztmRead(ztmCheck('Potrero', '85490', [], 'R-1', 'Tutorial'))[0])->toBe('review');
+});
+
+it('reads a two-family building as semi-detached, a one-family house as single-detached', function () {
+    expect(ztmRead(ztmCheck('Potrero', '68100', ['leases_what' => 'dwellings', 'families_in_building' => 2], 'R-1'))[1])
+        ->toContain('Semi-detached');
+    expect(ztmRead(ztmCheck('Potrero', '68100', ['leases_what' => 'dwellings', 'families_in_building' => 1], 'R-1'))[1])
+        ->toContain('Single-detached');
+    // The lessor is asked what it leases on the finding that turns on it.
+    expect(ztmRead(ztmCheck('Potrero', '68100', [], 'R-1', 'Pay parking lot'))[2])->toContain('leases_what');
 });

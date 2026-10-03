@@ -51,7 +51,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **III-1-ACCESSORY** · Art. III §1 · p. 3 — **Accessory use** · _Implemented_
   An accessory use is one customarily associated with the principal use, such as a garage to a house. A business is not an accessory use of a dwelling.
   > Accessory Use- pertains to those that are customarily associated with the Principal Use application (such as a garage is accessory to a house).
-  checked at `api/app/Support/Zoning/ZoningCheck.php:638`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:650`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
 - **III-1-CNC** · Art. III §1 · p. 4 — **Certificate of Non-Conformance** · _Shown_
   Owners of non-conforming uses are issued a Certificate of Non-Conformance.
   > Certificate of Non-Conformance – certificate issued to Owners of non-conforming uses as provided in this Zoning Ordinance.
@@ -63,11 +63,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **III-1-ECP** · Art. III §1 · p. 6 — **Environmentally Critical Projects need an EIS** · _Implemented_
   Heavy industry, resource extraction, major infrastructure and golf courses are Environmentally Critical Projects and must submit an Environmental Impact Statement to DENR-EMB.
   > Proponents of ECPs are required to submit an EIS to the Environmental Management Bureau (EMB) of the DENR.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1938`; proved by `ZoningOrdinanceRulesTest.php` — “holds the locational clearance for an ECC when DENR’s list says the trade needs one”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2008`; proved by `ZoningOrdinanceRulesTest.php` — “holds the locational clearance for an ECC when DENR’s list says the trade needs one”
 - **III-1-APT** · Art. III §1 · p. 3 — **An apartment building houses three or more families** · _Implemented_
   A building for three or more families living independently is an apartment building. A lessor of one or two homes leases what Residential-1 lists (single-detached or duplex); of three or more, what Basic R-2 and the zones above it list.
   > Apartment building- a building arranged, intended or designed to be occupied by three or more families living independently of each other.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:730`; proved by `ZoningOrdinanceRulesTest.php` — “reads a lessor’s building as an apartment building from three families”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:742`; proved by `ZoningOrdinanceRulesTest.php` — “reads a lessor’s building as an apartment building from three families”
 - **III-1-BFE** · Art. III §1 · p. 3 — **Base flood elevation: the DPWH’s calculation** · _Question for Malabon_
   The base flood elevation is the level floodwater is expected to reach, as the DPWH regional office calculates it. Art. V §4.1 instead takes it from the CLUP 2018-2027 assessment unless the DRRMO updates it, and its table’s classes share their edges.
   > Base Flood Elevation– the elevation to which floodwater is expected to reach during flood events as calculated by the regional office of the DPWH.
@@ -79,7 +79,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **III-1-NCU** · Art. III §1 · p. 8 — **Non-conforming use** · _Implemented_
   A use that existed before the ordinance and does not conform to it may keep operating, subject to the ordinance’s conditions.
   > Non-Conforming Use – uses existing prior to the approval of this Zoning Ordinance that are not in conformity with its provisions but are allowed to operate subject to the conditions of this Zoning Ordinance.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2001`; proved by `ZoningOrdinanceRulesTest.php` — “tells a renewal whose trade is not listed that it runs as a non-conforming use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2071`; proved by `ZoningOrdinanceRulesTest.php` — “tells a renewal whose trade is not listed that it runs as a non-conforming use”
 - **III-1-NNC** · Art. III §1 · p. 8 — **Notice of Non-Conformance** · _Shown_
   Owners of every use existing before the ordinance that does not conform are issued a Notice of Non-Conformance.
   > Notice of Non-Conformance – notice issued to owners of all uses existing prior to the approval of the Ordinance which do not conform to the provisions herein provided.
@@ -103,18 +103,18 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **III-2** · Art. III §2 · p. 9 — **Read liberally, in favour of the applicant** · _Implemented_
   The ordinance is read liberally and, as far as practicable, in favour of applicants trying to comply; the lists of uses are read the same way.
   > The words and terms employed in this Ordinance shall be interpreted and understood liberally in the generic sense unless otherwise indicated and shall as far as practicable be construed in favor of applicants seeking to comply with the provisions hereof. The listing of uses shall unless otherwise indicated be similarly construed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:502`; proved by `ZoningOrdinanceRulesTest.php` — “never reports a trade missing from every list as refused”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:514`; proved by `ZoningOrdinanceRulesTest.php` — “never reports a trade missing from every list as refused”
 - **III-2-a** · Art. III §2 · p. 9 — **"And the like" includes similar uses** · _Implemented_
   Where a list names examples (“like:”, “and the like”), similar uses are included. A trade that only resembles a listed one is reported as possibly listed — CPDO judges the likeness — and never as Met or as not listed.
   > generic terms such as others, and the like, etc. shall be construed to mean as including all specific terms similar to or compatible with those enumerated;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:380`; proved by `ZoningTradeMatchingTest.php` — “offers a look-alike line to CPDO as a possibility, never as Met”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:392`; proved by `ZoningTradeMatchingTest.php` — “offers a look-alike line to CPDO as a possibility, never as Met”
 - **III-2-b-g** · Art. III §2 · p. 9 — **Grammatical reading rules** · _Not applicable_
   Singular includes plural; present includes future; "person" includes companies; "lot" includes plot and parcel; "used" includes intended to be used.
   Rules for reading the text. Applied throughout this inventory (e.g. a corporation counts as the "owner" of a business), but none is a condition a filing can meet or fail.
 - **III-2-f** · Art. III §2 · p. 9 — **"Shall" is mandatory** · _Implemented_
   Every "shall" in the ordinance is mandatory. BizTrack reports a failed "shall" as Not met, and words like "recommended", "preferably" and "encouraged" only as information.
   > the term “shall” is always mandatory
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2259`; proved by `ZoningOrdinanceRulesTest.php` — “reports a mandatory rule as not met and a recommendation only as information”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2329`; proved by `ZoningOrdinanceRulesTest.php` — “reports a mandatory rule as not met and a recommendation only as information”
 
 ## Article IV
 
@@ -132,7 +132,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IV-3** · Art. IV §3 · p. 10 — **The three overlay zones** · _Implemented_
   Three overlay zones lie over the base zones: Flood, Heritage and Ecotourism.
   > The following are designated as Overlay Zones: 1. Flood Overlay Zone (LSD-OZ) 2. Heritage Overlay Zone (HTG-OZ) 3. Ecotourism Zone (ET-OZ)
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1445`; proved by `ZoningOrdinanceRulesTest.php` — “applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1515`; proved by `ZoningOrdinanceRulesTest.php` — “applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them”
 - **IV-4** · Art. IV §4 · p. 10 — **The Official Zoning Maps are part of the ordinance** · _Shown_
   The Official Zoning Maps showing the base and overlay zones are adopted as part of the ordinance.
   > It is hereby adopted as an integral part of this Ordinance, the duly authenticated and Official Zoning Maps of the city showing location and boundaries of the Base Zones, Sub-zones and Overlay Zones herein established (refer to Annex 2 for Sample Zoning Maps).
@@ -188,7 +188,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IV-6-h** · Art. IV §6 · p. 25 — **Waterway boundaries, Water Code easements, moving banks** · _Implemented_
   A boundary along a stream or shore sits at the city limit or the high-water line; uses along it must keep the Water Code easements and setbacks, and the boundary moves with the bank.
   > Where the boundary of a zone follows a run stream or the shoreline of lake, said boundary line shall be deemed to be at the limits of the political jurisdiction of the city, as the case may be, if such limits be located along such bodies of water; otherwise, such boundary shall be located at the edge of the high-water line of such bodies of water; provided that the uses along such boundaries shall have to comply with the easements and setbacks imposed by the Water Code. Should there be a change in the existing shorelines or banks or rivers, streams or canals, the boundaries shall be construed …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1611`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1681`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
 - **IV-6-i** · Art. IV §6 · p. 26 — **Boundaries off unmapped features are scaled from the map** · _Shown_
   A boundary parallel to a feature not shown on the map is determined from the map at 1:10,000.
   > Boundaries indicated as parallel to or are extension of features not specifically indicated in the zoning map shall be determined by the zoning map drawn to the scale of 1:10,000 meters;
@@ -208,11 +208,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IV-7-a** · Art. IV §7 · p. 26 — **Mixed uses conform if the principal use is allowed** · _Implemented_
   A lot or building with several uses conforms if its main use is allowed in the zone.
   > In case it appears that in any given lot or structure within a zone there is a variety or plurality of uses to which it is devoted, the following rules of interpretation shall apply: a) The lot and/or building shall be classified as a conforming use that complies with the regulations of the zone in which it is located provided that the main or principal use of the land and/or building is consistent with the allowable uses for such zone;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:341`; proved by `ZoningOrdinanceRulesTest.php` — “judges a filing with several lines by its principal line”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:353`; proved by `ZoningOrdinanceRulesTest.php` — “judges a filing with several lines by its principal line”
 - **IV-7-b1** · Art. IV §7 · p. 26 — **Principal use = the use with the greatest impact (e.g. revenue)** · _Implemented_
   The principal use is the one with the greatest social, economic or environmental impact, such as revenue, whatever area it takes.
   > The use of the lot and/or building shall be classified as being that to which it is principally devoted, for which purpose, the principal use shall be determined in accordance with the following guidelines: 1. The use which cause the most significant social, economic and/or environmental impact, in terms of revenue raising capacity, population density, resource potential, or physical effect on the adjacent and surrounding areas shall be considered as the principal use of the structure, regardless of the area of the land or building that is occupied by such use;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:341`; proved by `ZoningOrdinanceRulesTest.php` — “judges a filing with several lines by its principal line”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:353`; proved by `ZoningOrdinanceRulesTest.php` — “judges a filing with several lines by its principal line”
 - **IV-7-b2** · Art. IV §7 · p. 26 — **Failing that, the use taking the most area** · _Shown_
   If impact does not settle it, the principal use is the one occupying the greater area.
   > In the absence of or in the event of any difficulty in interpreting the principal use as above provided, then the principal use shall be considered as that to which the greater portion or area of such land building is devoted;
@@ -303,67 +303,67 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.20-RESEARCH** · Art. V §2.20 · p. 47 — **Research facilities in the Institutional zone, except warfare facilities** · _Implemented_
   The Institutional zone allows scientific, cultural and academic centres and research facilities, except nuclear, radioactive, chemical and biological warfare facilities.
   > Scientific, cultural, and academic centers and research facilities except nuclear, radioactive, chemical and biological warfare facilities
-  checked at `api/app/Support/Zoning/ZoningCheck.php:793`; proved by `ZoningOrdinanceRulesTest.php` — “keeps warfare research out of the Institutional zone”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:805`; proved by `ZoningOrdinanceRulesTest.php` — “keeps warfare research out of the Institutional zone”
 - **V-2.1-HO** · Art. V §2.1 · p. 27 — **Home occupation is allowed in residential zones, on conditions** · _Implemented_
   A profession or home business (dressmaking, tailoring, baking, a sari-sari store and the like) may be run from a dwelling, subject to six conditions.
   > Home occupation for the practice of one’s profession such as offices of physicians, surgeons, dentists, architects, engineers, lawyers, and other professionals or for engaging home business such as dressmaking, tailoring, baking, running a sari-sari store/neighbourhood convenience store and the like, provided that:
-  checked at `api/app/Support/Zoning/ZoningCheck.php:301`; proved by `ZoningOrdinanceRulesTest.php` — “asks the home-occupation questions only of a home-based business”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:309`; proved by `ZoningOrdinanceRulesTest.php` — “asks the home-occupation questions only of a home-based business”
 - **V-2.1-HO-1** · Art. V §2.1 · p. 27 — **Home occupation: at most five people, counting the owner** · _Implemented_
   No more than five people, owner included, may work in a home occupation.
   > The number of persons engaged in such business/industry shall not exceed five (5), inclusive of owner;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:616`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home occupation of more than five people”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:628`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home occupation of more than five people”
 - **V-2.1-HO-2** · Art. V §2.1 · p. 27 — **Home occupation: the outside of the house does not change** · _Implemented_
   The outside appearance of the house may not change.
   > There shall be no change in the outside appearance of the building premises;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:624`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business that changes the outside of the house”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:636`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business that changes the outside of the house”
 - **V-2.1-HO-3** · Art. V §2.1 · p. 27 — **Home occupation: at most 20% of the building** · _Implemented_
   The business may use no more than 20% of the building.
   > That in no case shall more than 20% of the building be used for said home occupation;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:634`; proved by `ZoningOrdinanceRulesTest.php` — “measures a home occupation against 20% of the house, and surfaces Annex A’s quarter”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:646`; proved by `ZoningOrdinanceRulesTest.php` — “measures a home occupation against 20% of the house, and surfaces Annex A’s quarter”
 - **V-2.1-HO-4** · Art. V §2.1 · p. 27 — **Home occupation: not in a garage or other outbuilding** · _Implemented_
   The business may not be run in an accessory structure such as a garage or servants’ quarters.
   > No home occupation shall be conducted in any customary accessory uses cited above;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:638`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:650`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
 - **V-2.1-HO-5** · Art. V §2.1 · p. 27 — **Home occupation: no extra traffic; parking off the street and not in the front yard** · _Implemented_
   The business may not bring more traffic than a residential street expects, and any parking it needs must be off the street and not in the front yard.
   > No traffic shall be generated by such home occupation in greater volume than would normally be expected in a residential neighborhood and any need for parking generated by the conduct of such home occupation shall be met off the street and in a place other than the required front yard; and
-  checked at `api/app/Support/Zoning/ZoningCheck.php:644`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business whose customers park on the street”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:656`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business whose customers park on the street”
 - **V-2.1-HO-6** · Art. V §2.1 · p. 27 — **Home occupation: no noise, fumes or interference noticeable outside** · _Implemented_
   No equipment or process may create noise, vibration, glare, fumes, odours or electrical interference noticeable off the premises.
   > No equipment or process shall be used in such home occupation which creates noise, vibration, glare, fumes, odors and electrical interference detectable to the normal senses and visual or audible interference in any radio or television receiver or causes fluctuations in line voltage off the premises.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:650`; proved by `ZoningOrdinanceRulesTest.php` — “flags home-business equipment that is a nuisance off the premises”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:662`; proved by `ZoningOrdinanceRulesTest.php` — “flags home-business equipment that is a nuisance off the premises”
 - **V-2.1-HI** · Art. V §2.1 · p. 27 — **Home industry (cottage industry) is allowed, on conditions** · _Implemented_
   Small manufacturing at home (a cottage industry) is allowed in residential zones, subject to four conditions.
   > Home Industry classified as cottage industry, provided that:
-  checked at `api/app/Support/Zoning/ZoningCheck.php:573`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:585`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
 - **V-2.1-HI-1** · Art. V §2.1 · p. 27 — **Home industry: at most 30% of the floor area, no change outside, no nuisance** · _Implemented_
   A home industry may use at most 30% of the dwelling’s floor area, may not change its outside, and may not be a hazard or nuisance.
   > Such home industry shall not occupy more than thirty percent (30%) of the floor area of the dwelling unit. There shall be no change or alteration in the outside appearance of the dwelling unit and shall not be a hazard or nuisance;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:587`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:599`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
 - **V-2.1-HI-2** · Art. V §2.1 · p. 27 — **Home industry: non-pollutive and non-hazardous only** · _Implemented_
   A home industry must be non-pollutive and non-hazardous.
   > It shall be classified as non-pollutive/non-hazardous as provided in this integrated ZO;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:596`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:608`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
 - **V-2.1-HI-3** · Art. V §2.1 · p. 27 — **Home industry: capital within the DTI ceiling** · _Implemented_
   A home industry’s capital may not exceed the ceiling DTI sets. Annex A item 23 puts a cottage industry at ₱100,000 or less; BizTrack compares against that and leaves a higher figure to CPDO.
   > Allotted capitalization shall not exceed the capitalization as set by the DTI;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:604`; proved by `ZoningOrdinanceRulesTest.php` — “compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO” Also asked: [C19](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:616`; proved by `ZoningOrdinanceRulesTest.php` — “compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO” Also asked: [C19](../questions-for-malabon.md).
 - **V-2.1-HI-4** · Art. V §2.1 · p. 27 — **Home industry: the home-occupation rules on outbuildings, traffic and equipment apply** · _Implemented_
   The home-occupation rules on outbuildings, traffic and equipment apply to a home industry too.
   > Such shall consider the provisions pertaining to customary accessory uses, traffic and equipment/process under Home Occupation of this section.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:606`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:618`; proved by `ZoningOrdinanceRulesTest.php` — “applies the home-industry conditions to manufacturing at home”
 - **V-2.1-REC** · Art. V §2.1 · p. 27 — **Family recreation facilities, not for business** · _Implemented_
   Pools and courts in R-1 are for the household’s own use; one run as a business is a conditional use in Maximum R-2 (V-2.3-COND).
   > Recreational facilities for the exclusive use of the members of the family residing within the premises, such as: • Swimming pool • Tennis courts • Basketball courts
-  checked at `api/app/Support/Zoning/ZoningCheck.php:856`; proved by `ZoningOrdinanceRulesTest.php` — “treats a recreation business in a residential zone as a conditional use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:868`; proved by `ZoningOrdinanceRulesTest.php` — “treats a recreation business in a residential zone as a conditional use”
 - **V-2.1-ACC** · Art. V §2.1 · p. 28 — **Accessory structures may not be used for business** · _Implemented_
   Garages, servants’ quarters, laundries and other accessory structures in a residential zone may not be used for anything done for money.
   > Customary accessory uses incidental to any of the principal uses provided that such accessory uses shall not include any activity conducted for monetary gain or commercial purposes such as: • Servants quarters • Private garage • Guardhouse • Laundries • Non-commercial garages • Houses for pets such as dogs, birds, rabbits and the like of not more than 4.00 sq. m. in floor area • Pump houses • Generator houses
-  checked at `api/app/Support/Zoning/ZoningCheck.php:638`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:650`; proved by `ZoningOrdinanceRulesTest.php` — “flags a home business run from an accessory structure”
 - **V-2.1-PET** · Art. V §2.1 · p. 28 — **Pet houses: at most 4.00 sq. m., and never for gain** · _Implemented_
   A house for the household’s pets is an accessory use of at most 4.00 sq. m.; like every accessory use in Residential-1 it may not be used for gain, so it cannot house animals for a pet business run from the home.
   > Houses for pets such as dogs, birds, rabbits and the like of not more than 4.00 sq. m. in floor area
-  checked at `api/app/Support/Zoning/ZoningCheck.php:785`; proved by `ZoningOrdinanceRulesTest.php` — “keeps a home pet business’s pet house to 4 sq. m. and out of the business”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:797`; proved by `ZoningOrdinanceRulesTest.php` — “keeps a home pet business’s pet house to 4 sq. m. and out of the business”
 - **V-2.1-ACC-PWR** · Art. V §2.1 · p. 28 — **Generators in residential zones: least inconvenience, emergency use only** · _Shown_
   Small power plants and machinery must be placed to inconvenience neighbours least, must not be a nuisance, and a non-electric one may run only in an emergency or power failure.
   > Other small power plant and machineries customarily used in connection with churches, schools museum, parks, playground, community centers, golf course and dwelling and their accessory buildings, provided that such power plant and other machinery are so places as to cause the least inconvenience to adjoining residences and provided that they do not cause serious injury or nuisance to occupants through fumes or gases, dust smoke, noise and vibrations or other similar nuisance, and provided that such power plant, if other than electric should be used only in cases of emergency and power …
@@ -430,35 +430,35 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.3-INH** · Art. V §2.3 · p. 29 — **Maximum R-2 takes in R-1 and Basic R-2 uses, on the Zoning Administrator’s conditions** · _Implemented_
   Every R-1 and Basic R-2 use is allowed in Maximum R-2, with conditions the Zoning Administrator sets.
   > All uses allowed in R-1 Zone and Basic R-2 Zone with the conditions deemed appropriate by the Zoning Administrator and applicable to Maximum R-2 Zoning District.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:287`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:295`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.3-EAT** · Art. V §2.3 · p. 29 — **Small eateries in Maximum R-2: a customer area, no street dining** · _Implemented_
   A carinderia, lugawan or take-home kiosk must give customers a waiting or dining area inside, may not use the road, street or alley for it, and may be asked for more.
   > Small scale eatery, carinderia, lugawan, take home kiosk and other related stores provided that the following regulations shall be strictly observed: Must provide waiting area/dining area for customers. Prohibited from using the Road/Street/Alleys for dining/waiting area. Other requirement that maybe required
-  checked at `api/app/Support/Zoning/ZoningCheck.php:824`; proved by `ZoningOrdinanceRulesTest.php` — “checks a small eatery in Maximum R-2 for a customer area and street dining”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:836`; proved by `ZoningOrdinanceRulesTest.php` — “checks a small eatery in Maximum R-2 for a customer area and street dining”
 - **V-2.3-WRS** · Art. V §2.3 · p. 29 — **Water refilling stations in Maximum R-2 need delivery parking** · _Implemented_
   A water refilling station needs parking space for its delivery vehicles.
   > Water refilling Station, with parking space for delivery vehicles.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:828`; proved by `ZoningOrdinanceRulesTest.php` — “checks a water refilling station in Maximum R-2 for delivery parking”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:840`; proved by `ZoningOrdinanceRulesTest.php` — “checks a water refilling station in Maximum R-2 for delivery parking”
 - **V-2.3-RETAIL-ZA** · Art. V §2.3 · p. 29 — **Other small stores in Maximum R-2: on the Zoning Administrator’s conditions** · _Implemented_
   Small stores like those listed are allowed in Maximum R-2 on conditions the Zoning Administrator sets.
   > Other related small scale stores with the conditions deemed appropriate by the Zoning Administrator and appropriate to maximum R-2 zoning district.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:310`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use allowed only on the Zoning Administrator’s conditions to CPDO”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:318`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use allowed only on the Zoning Administrator’s conditions to CPDO”
 - **V-2.3-TRI** · Art. V §2.3 · p. 30 — **Tricycle and pedicab terminals in Maximum R-2** · _Implemented_
   A tricycle or pedicab terminal may not bring unusual traffic, must let vehicles enter and leave without backing onto the road, and may not be a motor pool.
   > Tricycle/Pedicab Terminals • Provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Motor pool is not allowed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1163`; proved by `ZoningOrdinanceRulesTest.php` — “checks a tricycle terminal in Maximum R-2 for backing and motor pools”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1233`; proved by `ZoningOrdinanceRulesTest.php` — “checks a tricycle terminal in Maximum R-2 for backing and motor pools”
 - **V-2.3-PARK** · Art. V §2.3 · p. 30 — **Rentable parking in Maximum R-2: light vehicles, no motor pool** · _Implemented_
   A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, and may not be a motor pool. It has no cap on the number of vehicles; the residential garage caps do not apply to it.
   > Rentable parking lots/parking buildings for light vehicles only; provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Motor pool is not allowed. • Private
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1034`; proved by `ZoningOrdinanceRulesTest.php` — “applies a pay parking lot’s own conditions, not a garage’s vehicle cap”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1104`; proved by `ZoningOrdinanceRulesTest.php` — “applies a pay parking lot’s own conditions, not a garage’s vehicle cap”
 - **V-2.3-GAR** · Art. V §2.3 · p. 30 — **Private garages in Maximum R-2: vehicle limits and conditions** · _Implemented_
   A residential garage may keep at most two ride-hailing units, or one taxi. A parking lot for an existing Malabon business must be on its owner’s own lot, hold at most two delivery vans or trucks, be on a street that takes two-way traffic, let vehicles turn without backing onto the road, and hold no motor pool, container van, tractor head or trailer truck.
   > Garage for UBER and GRAB Services • Maximum of two units per residential garage. • Garage for one (1) unit taxi cab. • Parking lot in support to existing business activity located in the city of Malabon. • Provided that the lot owner is also the owner of the business establishments. • Maximum of two (2) units delivery vans/trucks only. • Motor pooling is not allowed. • Provided that the street or access road to the proposed garage is capable to accommodate two way traffic. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1034`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1104`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one”
 - **V-2.3-COND** · Art. V §2.3 · p. 30 — **Recreation run as a business in Maximum R-2 is a conditional use** · _Implemented_
   A pool or court run as a business is a conditional use: no nuisance, noisy equipment in a soundproof room, a 4 m buffer along the whole boundary, adequate parking without backing onto the road, proper drainage, and any other condition CPDO sets.
   > Recreational Facilities as in swimming pool, basketball court and badminton court operated for business purposes: • Provided that the activity will not cause loss of privacy and/or create nuisances, hazards or inconveniences to adjacent neighborhoods. Any kind of equipment that may cause objectionable noise shall be enclosed in sound proof room. • Provision of 4 meters buffer zone shall be provided along entire boundary length in order to ameliorate the negative conditions such as, but not limited to, noise, odor, and other type of nuisance and inconveniences that may cause the adjacent …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:856`; proved by `ZoningOrdinanceRulesTest.php` — “treats a recreation business in a residential zone as a conditional use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:868`; proved by `ZoningOrdinanceRulesTest.php` — “treats a recreation business in a residential zone as a conditional use”
 - **V-2.4-INH** · Art. V §2.4 · p. 31 — **Basic R-3 takes in R-1 and Basic R-2 uses** · _Implemented_
   Every R-1 and Basic R-2 use is allowed in Basic R-3 (Maximum R-2 is not named).
   > All uses allowed in R-1 and Basic R-2
@@ -466,15 +466,15 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.4-PARK** · Art. V §2.4 · p. 31 — **Rentable parking in Basic R-3: light vehicles, no backing, no motor pool** · _Implemented_
   A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, must let vehicles turn without backing onto the road, and may not be a motor pool.
   > Rentable parking lots/parking buildings for light vehicles only, provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Motor pooling is not allowed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1034`; proved by `ZoningOrdinanceRulesTest.php` — “applies a pay parking lot’s own conditions, not a garage’s vehicle cap”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1104`; proved by `ZoningOrdinanceRulesTest.php` — “applies a pay parking lot’s own conditions, not a garage’s vehicle cap”
 - **V-2.4-GAR** · Art. V §2.4 · p. 31 — **Private garages in Basic R-3: vehicle limits** · _Implemented_
   A residential garage may keep at most two ride-hailing units or one taxi; a parking lot for an existing Malabon business must be on the owner’s lot, for one four-wheeler or 2-ton van, with no motor pooling.
   > Garage for UBER and GRAB Services • Maximum of two units per residential garage. • Garage for one (1) unit taxi cab. • Parking lot in support to existing business activity located in the City of Malabon. • Provided that the lot owner is also the owner of the business establishments. • For one (1) unit four (4) wheeler or 2 tons delivery vans, closed van and refrigerated vans. • Motor pooling is not allowed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1034`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1104`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for one’s own business: a Malabon business, the same owner, a two-way street, two vans or one”
 - **V-2.5-INH** · Art. V §2.5 · p. 31 — **Maximum R-3 takes in R-1, Basic R-2 and Maximum R-2 uses, but not Basic R-3** · _Implemented_
   Maximum R-3 inherits R-1, Basic R-2 and Maximum R-2 uses. It does not name Basic R-3, so a use listed only there is not inherited; BizTrack sends that case to CPDO.
   > All uses allowed in R-1, Basic R-2 Zone, Maximum R-2 Zone
-  checked at `api/app/Support/Zoning/ZoningCheck.php:524`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:536`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
 - **V-2.6-BP220** · Art. V §2.6 · p. 32 — **Socialized Housing zone: uses per BP 220** · _Question for Malabon_
   The Socialized Housing zone allows what BP 220 allows; the ordinance lists nothing itself, so a business there is for CPDO to judge.
   > All uses allowed according to the provisions of BP 220.
@@ -482,35 +482,35 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.7-INH** · Art. V §2.7 · p. 34 — **C-1 takes in R-1, Basic R-2, Maximum R-2 and Maximum R-3 uses, but not Basic R-3** · _Implemented_
   C-1 inherits every R-1, Basic R-2, Maximum R-2 and Maximum R-3 use. Basic R-3 is not named, so a use listed only there goes to CPDO.
   > All uses allowed in R-1, Basic R-2, Maximum R-2, and Maximum R-3 Zones
-  checked at `api/app/Support/Zoning/ZoningCheck.php:524`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:536`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
 - **V-2.7-WH** · Art. V §2.7 · p. 32 — **Warehouses in C-1: up to 200 m², safe goods, for an existing Malabon business** · _Implemented_
   A warehouse in C-1 may store only non-pollutive, non-hazardous finished products for an existing commercial activity in the city, may not exceed 200 m² of floor area, needs parking and loading space per the NBC, and may not use the street or sidewalk for parking.
   > Warehouse/storage facility for non-pollutive/non-hazardous finished products in support to existing commercial activity within the City provided that the floor area shall not exceed two hundred square meters (200 sq.m.), with adequate parking lot and proper loading and unloading space as per National Building Code (NBC); adjacent streets, roads, sidewalks shall not be used for parking.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1198`; proved by `ZoningOrdinanceRulesTest.php` — “checks a warehouse in C-1 against the 200 m² cap and its other conditions”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1268`; proved by `ZoningOrdinanceRulesTest.php` — “checks a warehouse in C-1 against the 200 m² cap and its other conditions”
 - **V-2.7-REC** · Art. V §2.7 · p. 33 — **Recreation centres in C-1 need parking per the NBC** · _Implemented_
   Play courts, billiard halls, pools and gyms in C-1 need adequate parking as the NBC requires.
   > Recreational centers/establishments, provided that adequate lots shall be provided as per National Building Code (NBC), like • Play courts e.g. tennis court, bowling lane, billiard hall • Swimming pool • Gymnasium
-  checked at `api/app/Support/Zoning/ZoningCheck.php:862`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:874`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
 - **V-2.7-RESTO** · Art. V §2.7 · p. 33 — **Restaurants in C-1 need parking per the NBC** · _Implemented_
   Restaurants and eateries in C-1 need adequate parking as the NBC requires.
   > Restaurants and other eateries • Provided that adequate parking lots shall be provided as per national Building Code (NBC).
-  checked at `api/app/Support/Zoning/ZoningCheck.php:870`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:882`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
 - **V-2.7-FOODPARK** · Art. V §2.7 · p. 33 — **Food parks in C-1 need parking per the NBC** · _Implemented_
   Food parks in C-1 need adequate parking as the NBC requires.
   > Food Parks • Provided that adequate parking lots shall be provided as per National Building Code (NBC).
-  checked at `api/app/Support/Zoning/ZoningCheck.php:873`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:885`; proved by `ZoningOrdinanceRulesTest.php` — “checks parking for C-1 restaurants, food parks and recreation centres”
 - **V-2.7-LOTTO** · Art. V §2.7 · p. 33 — **Lotto and betting outlets in C-1: over 200 m from institutions** · _Implemented_
   Lotto terminals, on-line bingo and off-track betting in C-1 must be outside a 200 m radius of schools, churches, hospitals and other institutions.
   > Lotto terminals, off-fronton, on-line bingo outlets and off-track betting stations, provided that, it is outside two hundred (200) meters radius from institutional establishments.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:878`; proved by `ZoningOrdinanceRulesTest.php` — “measures a lotto outlet against 200 m from institutions”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:890`; proved by `ZoningOrdinanceRulesTest.php` — “measures a lotto outlet against 200 m from institutions”
 - **V-2.7-AUTO** · Art. V §2.7 · p. 33 — **Auto repair and vulcanizing in C-1: space, parking, façade, grease trap** · _Implemented_
   Auto repair, tire and vulcanizing shops in C-1 need enough space not to congest the street, parking and loading off the street, a façade not of makeshift materials, a grease trap, dirt stopper and proper waste disposal, and any other condition CPDO sets.
   > Auto repair, tire, and vulcanizing shops • Such use shall have adequate space so as not to cause traffic congestion; provided the street is capable to accommodate traffic; • Provided that there is adequate parking lot and proper loading and unloading space; adjacent street, roads, sidewalks shall not be used for parking • Provided that the façade be not made of makeshift materials; • Proponent shall provide grease trap, dirt stopper and proper waste disposal • Other appropriate conditions and safeguards to minimize adverse effects on the character of the surrounding area may also be required …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:892`; proved by `ZoningOrdinanceRulesTest.php` — “checks auto repair and car washes in C-1 for parking, façade and grease traps”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:904`; proved by `ZoningOrdinanceRulesTest.php` — “checks auto repair and car washes in C-1 for parking, façade and grease traps”
 - **V-2.7-CARWASH** · Art. V §2.7 · p. 34 — **Car washes in C-1: space, parking, façade, grease trap** · _Implemented_
   Car washes in C-1 need enough space not to congest the street, parking and loading off the street, a façade not of makeshift materials, and a grease trap, dirt stopper and proper waste disposal.
   > Car wash • Such use shall have adequate space so as not to cause traffic congestion; provided the street is capable to accommodate traffic; • Provided that there is adequate parking lot and proper loading and unloading space; adjacent street, roads, sidewalks shall not be used for parking. • Provided that there façade be not made of makeshift materials; • Proponent shall provide grease trap, dirt stopper and proper waste disposal.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:892`; proved by `ZoningOrdinanceRulesTest.php` — “checks auto repair and car washes in C-1 for parking, façade and grease traps”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:904`; proved by `ZoningOrdinanceRulesTest.php` — “checks auto repair and car washes in C-1 for parking, façade and grease traps”
 - **V-2.7-GAS-DOE** · Art. V §2.7 · p. 34 — **Filling stations in C-1: DOE standards** · _Shown_
   A filling station must meet Department of Energy standards.
   > They must conform to standards set by the Department of Energy
@@ -522,19 +522,19 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.7-GAS-RES** · Art. V §2.7 · p. 34 — **Filling stations in a residential zone need written conformity** · _Implemented_
   A filling station in a residential zone needs the written conformity of the registered homeowners’ association and/or the barangay council, and the local fire department.
   > No gasoline / auto gas filling station shall be located within a residential zone without written conformity of the homeowners association duly registered with the HLURB and/or the Barangay Council and the Local Fire Department whenever applicable.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1217`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1287`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
 - **V-2.7-GAS-1KM** · Art. V §2.7 · p. 34 — **Filling stations in C-1: 1 km from any existing filling station** · _Implemented_
   A new filling station must be at least 1 km from an existing gasoline or LPG filling station.
   > A 1-kilometer distance away from an existing Gasoline Filling Station and LPG Filling Station shall be observed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1225`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1295`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
 - **V-2.7-GAS-ECC** · Art. V §2.7 · p. 34 — **Filling stations: ECC before applying for the locational clearance** · _Implemented_
   A filling station must secure its Environmental Compliance Certificate and other agencies’ documents before applying for the locational clearance.
   > Proponents must be first secure an Environmental Compliance Certificate (from DENR Pollution Control (from EPWMD) and other pertinent documents from concerned government offices prior to application of Locational Clearance.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1228`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1298`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules”
 - **V-2.7-FUNERAL-CAT** · Art. V §2.7 · p. 34 — **Only Category II and III funeral parlours in C-1** · _Implemented_
   C-1 allows Category II and III funeral parlours; Category I (and every category) is allowed from C-2 up.
   > Funeral parlors (Category II and III)
-  checked at `api/app/Support/Zoning/ZoningCheck.php:906`; proved by `ZoningOrdinanceRulesTest.php` — “allows only Category II and III funeral parlours in C-1”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:918`; proved by `ZoningOrdinanceRulesTest.php` — “allows only Category II and III funeral parlours in C-1”
 - **V-2.7-FUNERAL** · Art. V §2.7 · p. 34 — **Funeral parlours in C-1: waste, odour control, sanitary rules, HLURB guideline** · _Shown_
   A funeral parlour in C-1 must adopt waste disposal and odour control, meet the City’s and DOH’s sanitary requirements and the HLURB guideline on funeral establishments, and any other condition CPDO sets.
   > Proper waste disposal, odor control and other abatement procedures must be adopted; • Other sanitary requirements by the City and the DOH shall be complied with; • Other appropriate conditions and safeguards to minimize adverse effects on the character of the surrounding area may also be required from the proponent. • Refer to the HLURB Guideline particularly the “Implementing Rules and Regulations to Govern the Processing of Applications for Locational Clearance of Funeral Establishment as Amended”
@@ -553,11 +553,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.8-MACH** · Art. V §2.8 · p. 35 — **Machine, welding and furniture shops in C-2** · _Implemented_
   A machine, welding or furniture repair shop in C-2 may not bring unusual traffic, must park off the street and outside the setback, may not use equipment that is a nuisance off the premises, needs a non-makeshift façade with firewalls, operates only at hours agreed with the barangay, and meets any other condition CPDO sets.
   > Machine shop/Welding Shop/Furniture Shops service operation (repairing/rebuilding or custom job orders). • No traffic shall be generated by its operation in greater volume than would be normally be expected in the area and any need for parking generated by the conduct of such operation shall be met off the street and in a place other than the required setback; • Provided that there is adequate parking lot and proper loading and unloading space; adjacent street, roads. Sidewalks shall not be used for parking. • No equipment or process shall be used in such operation, which creates noise, …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:913`; proved by `ZoningOrdinanceRulesTest.php` — “checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours” Also asked: [C40](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:925`; proved by `ZoningOrdinanceRulesTest.php` — “checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours” Also asked: [C40](../questions-for-malabon.md).
 - **V-2.8-JUNK** · Art. V §2.8 · p. 35 — **Medium junk shops in C-2** · _Implemented_
   A medium junk shop in C-2 may not bring unusual traffic, must park off the street and outside the setback, needs firewalls, operates only at hours agreed with the barangay, and meets any other condition CPDO sets.
   > Medium scale junk shop • No traffic shall be generated by its operation in greater volume than would normally be expected in the area and any need for parking generated by the conduct of such operation shall be met off the street and in a place other than the required setback; • Provided that there is adequate parking lot and proper loading and unloading space; adjacent street, roads sidewalks shall not be used for parking. • Provide firewalls. • It shall be allowed to operate on certain time of the day only depending on agreements that may be reached between the proponent/lot owner and the …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:916`; proved by `ZoningOrdinanceRulesTest.php` — “checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:928`; proved by `ZoningOrdinanceRulesTest.php` — “checks machine shops and junk shops in C-2 for parking, firewalls and barangay hours”
 - **V-2.9-INH** · Art. V §2.9 · p. 36 — **C-3 takes in C-1, C-2, Maximum R-2 and Maximum R-3 uses** · _Implemented_
   Every C-1 and C-2 use is allowed in C-3, with townhouses and Maximum R-2 and R-3 housing.
   > All uses allowed in C-1 and C-2 Zones • Townhouses, Maximum R-2 and Maximum R-3
@@ -569,11 +569,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.10-HAUL** · Art. V §2.10 · p. 38 — **Hauling in General Commercial: the business must operate in Malabon** · _Implemented_
   Hauling services and truck garages in the General Commercial zone are allowed only for a business operating within Malabon.
   > Hauling services and garage terminals for trucks and tow trucks provided the business activity I within the City of Malabon
-  checked at `api/app/Support/Zoning/ZoningCheck.php:921`; proved by `ZoningOrdinanceRulesTest.php` — “checks hauling and trucking garages for their Malabon business condition”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:933`; proved by `ZoningOrdinanceRulesTest.php` — “checks hauling and trucking garages for their Malabon business condition”
 - **V-2.10-FLAT** · Art. V §2.10 · p. 38 — **General Commercial lists C-1 and C-2 uses without their conditions** · _Implemented_
   General Commercial restates many C-1 and C-2 uses — auto repair, car washes, filling stations, restaurants, recreation, lotto outlets, warehouses, machine and junk shops — with none of their conditions, and the CBD takes in both versions; C-2 in turn lists hauling with none of General Commercial’s condition. BizTrack does not impose the condition where a lot may be in the zone that drops it, and names the difference to CPDO.
   > Auto repair, tire, vulcanizing shops and carwash • Auto sales and rentals, automotive handicraft, accessory and spare parts shops, marine craft and aircraft sales yards • Boat storage • Gasoline filling stations/service stations
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2216`; proved by `ZoningOrdinanceRulesTest.php` — “sends a condition to CPDO where one list attaches it and another does not” Also asked: [C28](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2286`; proved by `ZoningOrdinanceRulesTest.php` — “sends a condition to CPDO where one list attaches it and another does not” Also asked: [C28](../questions-for-malabon.md).
 - **V-2.11-INH** · Art. V §2.11 · p. 39 — **The CBD takes in C-1, C-2, C-3 and General Commercial uses** · _Implemented_
   Every C-1, C-2, C-3 and General Commercial use is allowed in the Central Business District.
   > All uses allowed in C-1 , C-2, C-3 Zones and General Commercial Zone
@@ -581,47 +581,47 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.11-BUS** · Art. V §2.11 · p. 39 — **Bus terminals in the CBD need room to manoeuvre** · _Implemented_
   A bus terminal in the CBD must have enough area for buses to manoeuvre and back inside it.
   > Bus Terminals Must provide adequate area for maneuvering and backing of buses.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1168`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1238`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
 - **V-2.12-CLASS** · Art. V §2.12 · p. 39 — **I-1 takes only non-pollutive industries** · _Implemented_
   The I-1 zone is for light industry that is non-pollutive (hazardous or not); a pollutive industry belongs in I-2.
   > An area within cities or municipalities intended for light manufacturing or production industries that are non-pollutive/non- hazardous; and non-pollutive/hazardous.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:979`; proved by `ZoningOrdinanceRulesTest.php` — “keeps pollutive industry out of I-1”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:991`; proved by `ZoningOrdinanceRulesTest.php` — “keeps pollutive industry out of I-1”
 - **V-2.12-TRUCK** · Art. V §2.12 · p. 41 — **Trucking garages in I-1: 1,000 m² and an existing Malabon business** · _Implemented_
   A trucking garage in I-1 needs at least 1,000 m² for vehicles to back and turn inside, and its owner must already run a business in Malabon.
   > Trucking Garage provided to comply with the following: • Minimum area of 1,000 sq.m. to accommodate inside backing and maneuvering. • The owner shall have an existing business activity within the City of Malabon
-  checked at `api/app/Support/Zoning/ZoningCheck.php:935`; proved by `ZoningOrdinanceRulesTest.php` — “checks hauling and trucking garages for their Malabon business condition”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:947`; proved by `ZoningOrdinanceRulesTest.php` — “checks hauling and trucking garages for their Malabon business condition”
 - **V-2.12-CONT** · Art. V §2.12 · p. 41 — **Container yards in I-1: one hectare, three layers high** · _Implemented_
   A container yard in I-1 needs a lot of at least one hectare and may stack container vans at most three high.
   > Container yard provided to comply with the following conditions: • Minimum area of lot is one (1) hectare. • Maximum piling of container vans is three (3) layers only.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:947`; proved by `ZoningOrdinanceRulesTest.php` — “checks a container yard for a one-hectare lot and three-layer stacking”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:959`; proved by `ZoningOrdinanceRulesTest.php` — “checks a container yard for a one-hectare lot and three-layer stacking”
 - **V-2.13-CLASS** · Art. V §2.13 · p. 41 — **I-2 takes pollutive industries** · _Implemented_
   The I-2 zone is for medium industry that is pollutive, hazardous or not.
   > An area within cities or municipalities intended for medium intensity manufacturing or production industries that are: pollutive/non-hazardous; and Pollutive/hazardous.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:979`; proved by `ZoningOrdinanceRulesTest.php` — “keeps pollutive industry out of I-1”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:991`; proved by `ZoningOrdinanceRulesTest.php` — “keeps pollutive industry out of I-1”
 - **V-2.13-SLAUGHTER** · Art. V §2.13 · p. 45 — **Class A and AA slaughterhouses are I-2 uses** · _Implemented_
   Class A and AA slaughterhouses are allowed in I-2, subject to the special-use rules for abattoirs (V-3-E).
   > Class "A" slaughterhouse/abattoir • Class "AA" slaughterhouse/abattoir
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1338`; proved by `ZoningOrdinanceRulesTest.php` — “lists the special-use permit and its conditions for a special use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1408`; proved by `ZoningOrdinanceRulesTest.php` — “lists the special-use permit and its conditions for a special use”
 - **V-2.14-USES** · Art. V §2.14 · p. 45 — **Easement zone: only flood-control roads, linear parks and bike lanes** · _Implemented_
   Along waterways only flood-control maintenance roads, linear parks, landscaping and bike lanes are allowed.
   > The objective of this overlay zone is to ensure that all water ways shall have the required easement in compliance to Water Code of the Philippines and the Supreme Court Mandamus. Locations: All Minor and Major Rivers, Creeks and the like. Allowable Uses • Maintenance Road for Flood Control Facilities of National and Local Government Agencies • Linear Parks, Landscape • Bike Lanes
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1611`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek” Also asked: [C35](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1681`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek” Also asked: [C35](../questions-for-malabon.md).
 - **V-2.14-NOBLD** · Art. V §2.14 · p. 45 — **No building in the easement; permeable surface** · _Implemented_
   No building or structure may stand in the easement, and its surface must be permeable.
   > No building or any structure shall be allowed along the easement. • Easement should have permeable flooring so that the water can penetrate the sub surface
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1611`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1681`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
 - **V-2.14-3M** · Art. V §2.14 · p. 45 — **3 m easement along every waterway** · _Implemented_
   A 3 m easement runs the whole length of every river, creek and waterway (Water Code).
   > Three (3) meters easement throughout the entire length of all waterways pursuant to the Water Code of the Philippines, except the areas with specific easement requirement as follows:
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1611`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1681`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek”
 - **V-2.14-7.5M** · Art. V §2.14 · p. 45 — **7.5 m easement on the CAMANAVA polder dike and Malabon–Navotas River** · _Implemented_
   A 7.5 m easement applies along the Dampalit polder dike (Kailugan to North Pinagkabalian floodgates) and portions of the left bank of the Malabon–Navotas River.
   > A mandatory 7.50 meters easement designed for CAMANAVA Flood Control Drainage Improvement Program shall be provided on the following areas for the clearing/dredging of Waterways • Along polder dike in Brgy. Dampalit from Kailugan Floodgate up to North Pinagkabalian Floodgate with approx. length of 6.10 km. • Portions of left banks of Malabon –Navotas River
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1641`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek” Also asked: [C23](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1711`; proved by `ZoningOrdinanceRulesTest.php` — “checks the waterway easement for a lot beside a river or creek” Also asked: [C23](../questions-for-malabon.md).
 - **V-2.15-USES** · Art. V §2.15 · p. 45 — **Mangrove zone: mangrove planting only, no permanent building** · _Implemented_
   Only mangrove plantation is allowed in the Mangrove Zone, and no permanent building or structure.
   > An area in the City defined as “a community of intertidal plants including all species of trees, shrubs, vines and herbs found on coasts, swamps, or border of swamps” (Fisheries Code). Allowable Uses/Activities Mangrove Plantation Building Regulations No permanent buildings or structures are allowed.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:358`; proved by `ZoningOrdinanceRulesTest.php` — “rules out business and building in the Mangrove Zone” Also asked: [C35](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:370`; proved by `ZoningOrdinanceRulesTest.php` — “rules out business and building in the Mangrove Zone” Also asked: [C35](../questions-for-malabon.md).
 - **V-2.16** · Art. V §2.16 · p. 45 — **Fishpond zone lists no uses** · _Question for Malabon_
   The Fishpond Zone section defines a fishpond and stops: it lists no allowable uses, so BizTrack cannot say anything is or is not allowed there.
   > A land-based facility enclosed with earthen or stone material to impound water for growing fish.”(Fisheries Code).”
@@ -629,15 +629,15 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3** · Art. V §3 · p. 48 — **Special uses need a special use permit** · _Implemented_
   Cemeteries, funeral establishments, filling stations, open storage, slaughterhouses, cockpits, base stations, materials recovery facilities, billboards and transport terminals each need a special use permit, on the conditions that follow.
   > Areas within the City that are all existing projects that have been allowed by virtue of economic and historical value and other cases that cannot be classified at the time of the enactment of this Ordinance due to lack of guidelines. A special use permit shall be required for each of the following uses, subject to such terms and conditions as are hereunder prescribe:
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1298`; proved by `ZoningOrdinanceRulesTest.php` — “lists the special-use permit and its conditions for a special use” Also asked: [C24](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1368`; proved by `ZoningOrdinanceRulesTest.php` — “lists the special-use permit and its conditions for a special use” Also asked: [C24](../questions-for-malabon.md).
 - **V-3-A-1** · Art. V §3 · p. 48 — **Cemeteries: 20 m from any dwelling** · _Implemented_
   A burial ground must be at least 20 m from any dwelling, and no house may be built within that distance.
   > A. CEMETERIES As per P.D. 856 (Sanitation Code of the Philippines), burial grounds, cemeteries, memorial parks, or any place duly authorized by the government for permanent disposal of the dead should be: At least twenty (20) meters distance from any dwelling unit and no house shall be constructed within the same distance from any burial ground.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1354`; proved by `ZoningOrdinanceRulesTest.php` — “measures a cemetery against 20 m from homes and 50 m from water”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1424`; proved by `ZoningOrdinanceRulesTest.php` — “measures a cemetery against 20 m from homes and 50 m from water”
 - **V-3-A-2** · Art. V §3 · p. 48 — **Cemeteries: 50 m from a river or water supply** · _Implemented_
   A burial ground must be at least 50 m from either side of a river and from any water supply.
   > Fifty (50) meters distance from either side of the river or fifty (50) meters distance from any source of water supply.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1355`; proved by `ZoningOrdinanceRulesTest.php` — “measures a cemetery against 20 m from homes and 50 m from water”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1425`; proved by `ZoningOrdinanceRulesTest.php` — “measures a cemetery against 20 m from homes and 50 m from water”
 - **V-3-A-3** · Art. V §3 · p. 48 — **Cemeteries: not on a high water table or permeable soil** · _Shown_
   No burial ground where the water table is high, over aquifer recharge areas or water-bearing rock, or where soil is permeable.
   > No burial ground shall be located in an area with high water table, water recharge aquifers, water bearing rocks or where soil permeability is good.
@@ -665,7 +665,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-C-1** · Art. V §3 · p. 49 — **Filling stations: ERB standards; 200 m from schools, churches and hospitals** · _Implemented_
   A filling station must meet the Energy Regulatory Board’s standards and be at least 200 m from the nearest school, church, hospital or similar institution.
   > They must conform with standards set by the Energy Regulatory Board. Filling stations shall be located at least two-hundred meters (200 m.) distance from the nearest schools, churches, hospitals and other similar institutions.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1316`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1386`; proved by `ZoningOrdinanceRulesTest.php` — “checks a filling station against both of the ordinance’s siting rules” Also asked: [C13](../questions-for-malabon.md).
 - **V-3-C-2-3** · Art. V §3 · p. 49 — **Filling stations: no hazard to homes; buffer strip and firefighting equipment** · _Shown_
   A filling station may not be a safety hazard to a residential community and needs a buffer strip and firefighting equipment.
   > They shall not constitute safety hazards in a community development entirely for residential purposes. • Buffer strip and adequate firefighting equipment must be provided.
@@ -677,7 +677,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-D-1** · Art. V §3 · p. 49 — **Open storage: 200 m from schools, churches and hospitals** · _Implemented_
   Open storage must be at least 200 m from schools, churches, hospitals and similar institutions.
   > Open storage shall be located at least two hundred meters (200 m.) distance from schools, churches, hospitals and other similar institutions.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1318`; proved by `ZoningOrdinanceRulesTest.php` — “measures open storage against 200 m from institutions”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1388`; proved by `ZoningOrdinanceRulesTest.php` — “measures open storage against 200 m from institutions”
 - **V-3-D-2** · Art. V §3 · p. 49 — **Open storage: maintained by the proponent** · _Shown_
   The proponent alone is responsible for keeping open storage sound.
   > Their sound maintenance shall be the sole responsibility of the proponent.
@@ -689,7 +689,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-E-1** · Art. V §3 · p. 49 — **Slaughterhouses: 200 m from homes, schools, churches and public buildings** · _Implemented_
   A slaughterhouse must be at least 200 m from residential areas, schools, churches, places of assembly, courts and public offices.
   > Shall be least 200 meters from residential areas, school, churches and other places of assembly courts or public office.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1368`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1438`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
 - **V-3-E-2** · Art. V §3 · p. 49 — **Slaughterhouses: accessible to transport** · _Shown_
   A slaughterhouse should be accessible to transport.
   > It should be accessible to transportation.
@@ -697,15 +697,15 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-E-3** · Art. V §3 · p. 49 — **Slaughterhouses: 25 m from markets and food establishments** · _Implemented_
   A slaughterhouse should be at least 25 m from a market or any food establishment.
   > Should be at least 25 meters from market and other food establishments.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1377`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1447`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
 - **V-3-E-4** · Art. V §3 · p. 49 — **Slaughterhouses: not on the premises of a public market** · _Implemented_
   A slaughterhouse must be a reasonable distance from residential and commercial areas and not on the same premises as a public market.
   > Slaughter houses shall be located within reasonable distance from the residential and commercial area and should not be located within the same premises as public markets
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1377`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1447`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
 - **V-3-E-5-6** · Art. V §3 · p. 49 — **Slaughterhouses: waste and odour control; ECC** · _Implemented_
   A slaughterhouse must control waste and odour and secure an ECC.
   > Proper waste disposal, odor control, and other abatement procedure must be adopted. • Must secure environmental compliance certificate
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1379`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1449`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
 - **V-3-E-7** · Art. V §3 · p. 49 — **Slaughterhouses: Sanitation Code Chapter IV** · _Shown_
   Slaughterhouses follow Chapter IV of the Sanitation Code (PD 856).
   > All approved implementing rules and regulations of Chapter IV – Markets and Slaughterhouse/Abbatoir – of the Code of Sanitation (P.D. 856)
@@ -713,7 +713,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-E-8** · Art. V §3 · p. 49 — **Slaughterhouses: sworn statements of the adjacent landowners** · _Implemented_
   The proponent must obtain sworn statements from the owners of the land immediately adjacent before a special use permit is granted.
   > The proponent shall obtain sworn statements of owners of land immediately adjacent to the proposed activity as one of the prerequisites for the granting of a special use permit
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1383`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1453`; proved by `ZoningOrdinanceRulesTest.php` — “measures a slaughterhouse against its distance rules”
 - **V-3-E-9-11** · Art. V §3 · p. 49 — **Slaughterhouses: DOH and NMIC standards; HLURB guidelines; other agencies** · _Shown_
   Construction and upkeep follow DOH and National Meat Inspection Commission standards, HLURB locational guidelines and other agencies’ rules.
   > The construction and maintenance of abattoir shall conform to sanitary standards prescribed by the DOH and the National Meat and Inspection Commission. • Locational guidelines and designed standard HLURB to govern the Zoning Ordinance. • Other concerned agencies.
@@ -721,7 +721,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-F-1** · Art. V §3 · p. 49 — **Cockpits: only in Parks and Recreation zones, 200 m from homes and institutions** · _Implemented_
   A cockpit must be in a Parks and Recreation zone and at least 200 m from the nearest residence or institution.
   > They shall be located in parks and recreational zones, and shall be at least two hundred meters (200 m.) distance from the nearest residence or institutional use.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1401`; proved by `ZoningOrdinanceRulesTest.php` — “keeps a cockpit to a parks zone and 200 m from homes” Also asked: [C31](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1471`; proved by `ZoningOrdinanceRulesTest.php` — “keeps a cockpit to a parks zone and 200 m from homes” Also asked: [C31](../questions-for-malabon.md).
 - **V-3-F-2-4** · Art. V §3 · p. 49 — **Cockpits: parking for derby crowds; sanitary premises; other laws** · _Shown_
   A cockpit needs parking and loading for its largest derby crowd, must be kept sanitary, and follows other national and local rules.
   > Adequate parking space and loading/unloading areas capable of accommodating the maximum expected number of aficionados/spectators during major derbies shall be provided. • The applicant shall have the duty of maintaining the premises in sanitary condition. • Other pertinent laws, rules and regulations of the national and local government shall be complied with.
@@ -733,7 +733,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-H-1** · Art. V §3 · p. 50 — **Materials recovery facilities: on a site CENRO recommends** · _Implemented_
   A materials recovery facility or transfer station must be on a site recommended by the City Environment and Natural Resources Office.
   > Materials recovery facility shall be located within a site duly recommended by the City Environmental and Natural Resources Office (CENRO), subject to the applicable laws, ordinance and implementing Rules and Regulations of Revised Comprehensive Zoning Ordinance of the City of Malabon.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1325`; proved by `ZoningOrdinanceRulesTest.php` — “requires CENRO’s site recommendation for a materials recovery facility”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1395`; proved by `ZoningOrdinanceRulesTest.php` — “requires CENRO’s site recommendation for a materials recovery facility”
 - **V-3-H-2-5** · Art. V §3 · p. 50 — **Materials recovery facilities: fencing, upkeep, RA 9003, conditions** · _Shown_
   A materials recovery facility needs fencing, is maintained by the proponent, follows RA 9003 and DOH rules, and any condition the Local Zoning Committee recommends.
   > Adequate fencing shall be put up to prevent undue scattering of wastes; • The general maintenance of the MRF shall be the sole responsibility of the proponent; • Provisions of RA 9003 (Ecological Solid Waste Management Act of 2000) and other sanitary requirements of the City and the Department of Health (DOH) shall be complied with; • Other appropriate conditions and safeguards to minimize adverse effects on the character of the surrounding area shall be recommended by the Local Zoning Committee subject to the Implementing Rules and Regulations of this Zoning Ordinance.
@@ -741,7 +741,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-I-1** · Art. V §3 · p. 50 — **Billboards: only on lots fronting the National Road** · _Implemented_
   Billboards may stand only on lots fronting the National Road.
   > They shall be located only along lots fronting the National Road
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1409`; proved by `ZoningOrdinanceRulesTest.php` — “keeps billboards to the National Road and 100 m apart” Also asked: [C21](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1479`; proved by `ZoningOrdinanceRulesTest.php` — “keeps billboards to the National Road and 100 m apart” Also asked: [C21](../questions-for-malabon.md).
 - **V-3-I-2a** · Art. V §3 · p. 50 — **Billboards: locational, structural and DPWH clearances** · _Shown_
   A billboard needs a locational clearance, a structural clearance and a DPWH billboard clearance.
   > Billboards shall be subject to Locational Clearance, Structural Clearance and DPWH Billboard Clearance;
@@ -753,7 +753,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-I-2c** · Art. V §3 · p. 50 — **Billboards: 100 m from another billboard** · _Implemented_
   No billboard may stand within 100 m of another; an earlier-permitted sign has priority.
   > Minimum Distance between Signs. No. billboard or billboard structure shall be located within the distance of one hundred (100.00) meter radius from another; Provided; that in determining compliance with this Section 4.2, Regulated Signs that were earlier granted a permit by the relevant local government unit shall enjoy preference over Regulated Signs whose local government unit permits were issued thereafter.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1413`; proved by `ZoningOrdinanceRulesTest.php` — “keeps billboards to the National Road and 100 m apart”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1483`; proved by `ZoningOrdinanceRulesTest.php` — “keeps billboards to the National Road and 100 m apart”
 - **V-3-I-2d-i** · Art. V §3 · p. 50 — **Regulated signs: traffic signs, landscape, materials, fire exits, openings** · _Shown_
   A regulated sign may not obstruct traffic signs, the landscape, fire escapes, exits, standpipes or required light and ventilation; it must use incombustible or approved materials as the NBC requires.
   > Non-obstruction of Traffic Signs, No Regulated Sign shall be erected in such a manner as to confuse or obstruct the view or interpretation of any official Traffic Sign, signal, or device. e) Non obstruction of Landscape. No regulated Sign shall be constructed as to unduly obstruct the natural view of the landscape, distract or obstruct the view of the public as to constitute a traffic hazard, or otherwise defile, debase or offend aesthetic and cultural values and traditions. f) Restrictions on Combustible Materials. All Regulated Signs erected in highly restrictive Fire Zones as defined in …
@@ -769,7 +769,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-I-2m-n** · Art. V §3 · p. 51 — **No signs over roads, sidewalks, islands or public structures** · _Implemented_
   No sign may be installed over or along roads, sidewalks, centre islands, flyovers, posts, waiting sheds, LRT/MRT structures or road rights-of-way (MMDA Regulation 96-009).
   > All Regulated Signs, Temporary Signs and LED Signs, installed over or cross and along Public Thoroughfares, center islands and Road Rights-Of-Way, whether it be National Road are strictly prohibited. MMDA Regulation No. 96-009 (Anti-Littering Regulation) must be strictly observed specifically, Sec. h, which states that: “It is unlawful for any person/s private and public corporations, advertising and promotion companies, movie procedures, professionals and service contractors to post, install display any kind or form of Billboards, Signs, posters and other visual clutters in any part of the …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1414`; proved by `ZoningOrdinanceRulesTest.php` — “flags a roof sign and a sign over public property”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1484`; proved by `ZoningOrdinanceRulesTest.php` — “flags a roof sign and a sign over public property”
 - **V-3-I-2o-q** · Art. V §3 · p. 51 — **Signs near historical sites, on trees and posts, across carriageways** · _Shown_
   Sponsors advertise only at the edge of historical sites under an MOA; no sign on trees, posts, islands or fences that defaces a site; none across a carriageway.
   > Markers of historical sites and tourist destinations including directional signs even if these Signs are sponsored private businesses. Sponsors may put their Advertisement in the periphery of the historical sites upon acceptance and permission of the sites administrators and upon signing of a Memorandum of Understanding or Agreement (MOU/MOA) witnessed by the LGU concerned and the MMDA. p) No sign shall be installed in trees, electric or lighting posts, center islands, side strips and fences that will destroy, alter or deface the natural landscape or seascape of historical sited and tourist …
@@ -785,7 +785,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-J-1** · Art. V §3 · p. 51 — **Large terminals: a reasonable distance from residential zones** · _Implemented_
   A terminal for more than three buses, or more than six jeepneys or taxis at a time, must be a reasonable distance from residential zones.
   > The following rules shall be implemented: • Terminals for passenger buses and other transport vehicles accommodating more than three (3) units and terminals for passenger jeepers and taxis accommodating more than six (6) units at any given time shall be located at a reasonable distance from residential zones.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1427`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1497`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
 - **V-3-J-2** · Art. V §3 · p. 51 — **Terminals: boarding and queuing space** · _Shown_
   Boarding space of 1.5 × a vehicle’s size × the units boarding at once, and queuing space for every unit waiting.
   > The following basic and customary facilities shall be provided within the terminal compound for efficient, safe and orderly operation: • Boarding/loading space: the minimum area of which shall be equivalent to 1.5 times the actual dimension of a transport vehicle unit using the terminal, multiplied by the estimated maximum number of units boarding/loading in the terminal at any given time; • Temporary parking space for the other units queuing for boarding/loading shall be computed based on actual dimension of each transport vehicle unit using the terminal multiplied by the estimated maximum …
@@ -797,7 +797,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-3-J-4** · Art. V §3 · p. 52 — **Terminals: backing and manoeuvring inside the compound** · _Implemented_
   Vehicles back and manoeuvre only inside the terminal compound.
   > Backing-up and maneuverings shall be done only within the terminal compound so as not to unduly disrupt traffic flow on public roads;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1428`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1498`; proved by `ZoningOrdinanceRulesTest.php` — “checks transport terminals for room to manoeuvre inside the compound”
 - **V-3-J-5-7** · Art. V §3 · p. 52 — **Terminals: confine noise and odour; no oil into drains; nothing outside the premises** · _Shown_
   Confine noise, vibration and odour; dispose of waste properly with no oil or grease into drains; keep every terminal activity inside the premises.
   > Measures shall be provided to effectively confine noise, vibration and odors such as by constructing structural enclosures provisions of buffer yards, etc.; • Proper disposal of wastes must at all times be practiced and the direct discharge to public sewer and drainage of waste oils, grease and the likes is not permitted. It is the sole responsibility of the terminal operator to maintain the premises in good sanitary condition; • No other activities in relation to the terminal shall be done outside its premises.
@@ -824,19 +824,19 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-4.2-SCOPE** · Art. V §4.2 · p. 53 — **Eco-tourism overlay covers Dampalit’s fishponds** · _Implemented_
   The Ecotourism overlay covers every existing fishpond in Dampalit.
   > Ecotourism Overlay Zone covers the area of all exiting fishpond of Barangay Dampalit as describe in Section 5. Zone Boundaries. Objective The objective for this Overlay Zone is to ensure that the dual goals of environmental conservation and tourism economic development are attained.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1560`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1630`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
 - **V-4.2-USES** · Art. V §4.2 · p. 53 — **Eco-tourism adds dining, water-sport rentals and tourism retail** · _Implemented_
   In the eco-tourism area dining, water-recreation rental shops and tourism retail (souvenirs, money changers, clothes) are allowed on top of the base zone.
   > In addition to those uses that may be allowed in the Base Zone, the following are uses and activities that may be allowed in the Ecotourism Overlay Zone: • Dining facilities • Water-oriented recreation/sports rental equipment shops. • Tourism oriented retail store (e.g. souvenirs, foreign exchange shops, cloches etc.)
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1576`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1646`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
 - **V-4.2-AREA** · Art. V §4.2 · p. 53 — **Eco-tourism: business on at most 30% of the lot** · _Implemented_
   At most 30% of the lot may be used for the business, and a tenth of that may be on land for parking and toilets.
   > Thirty (30) % maximum of lot area with be allowed for operation of business and 10% of 30% can be converted to land-based for parking, sanitary facilities and the like.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1589`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds” Also asked: [C38](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1659`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds” Also asked: [C38](../questions-for-malabon.md).
 - **V-4.2-STOREY** · Art. V §4.2 · p. 53 — **Eco-tourism: one storey** · _Implemented_
   Dining and eco-tourism facilities should be one storey.
   > Dining facilities, eco-tourism facilities should be one (1) storey.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1598`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1668`; proved by `ZoningOrdinanceRulesTest.php` — “applies the eco-tourism rules to a business in Dampalit’s fishponds”
 - **V-4.2-DESIGN** · Art. V §4.2 · p. 53 — **Eco-tourism: DOT standards, stilts, raised appliances, no paving or firewalls** · _Shown_
   Designs follow DOT standards; stilts are encouraged; appliances sit at least 1,000 mm above the floor; no impermeable paving outside the building and no firewalls on property lines; roadside friction is kept low.
   > Designs should conform to the applicable standards of the Department of Tourism. • Buildings on stilts are encouraged. • Electrical Appliances should be raised with a minimum height of 1000mm from building’s finish floor line. • The use of impermeable paving materials outside of building envelopes shall not be allowed. • The use of firewall along property lines shall not be allowed. • Minimize roadside friction by reducing contacts between vehicular through traffic and vehicle movement to and from individual properties.
@@ -844,19 +844,19 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-4.3-USES** · Art. V §4.3 · p. 53 — **Heritage houses: residence, museum, or ground-floor shop, office or restaurant** · _Implemented_
   A declared house of ancestry may hold only a single-detached residence, a museum, or shops, offices, restaurants, craftsmen’s workshops and retail outlets on the ground floor.
   > The HTG-OZ is applied in areas with houses of ancestry. The objectives are: 1.) to preserve existing historic structures; and 2.) to harmonize the design and construction of new ones with the design of these historic structures. Allowable Uses • For declared houses of ancestry, Allowable uses shall be limited to: • Single-detached residential • Museum • Shops, offices, restaurants, craftsmen’s workshops and retail outlets (only at the ground floor)
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1477`; proved by `ZoningOrdinanceRulesTest.php` — “limits a declared heritage house to its listed uses on the ground floor”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1547`; proved by `ZoningOrdinanceRulesTest.php` — “limits a declared heritage house to its listed uses on the ground floor”
 - **V-4.3-NEWUSES** · Art. V §4.3 · p. 53 — **Heritage overlay: new construction takes R-1 uses** · _Implemented_
   In the heritage overlay, new construction is limited to R-1 uses — even where the base zone is commercial. BizTrack sends that case to CPDO.
   > For new construction, Allowable Uses shall be as provided in the base R-1 Zone
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1506`; proved by `ZoningOrdinanceRulesTest.php` — “sends new construction in the heritage overlay to CPDO under R-1 uses” Also asked: [C25](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1576`; proved by `ZoningOrdinanceRulesTest.php` — “sends new construction in the heritage overlay to CPDO under R-1 uses” Also asked: [C25](../questions-for-malabon.md).
 - **V-4.3-BULK** · Art. V §4.3 · p. 53 — **Heritage houses keep their height and floor area** · _Implemented_
   A declared house of ancestry keeps its height and floor area: they may not be altered.
   > For declared houses of ancestry: The height and floor area of the existing building shall not be altered.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1496`; proved by `ZoningOrdinanceRulesTest.php` — “limits a declared heritage house to its listed uses on the ground floor”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1566`; proved by `ZoningOrdinanceRulesTest.php` — “limits a declared heritage house to its listed uses on the ground floor”
 - **V-4.3-BHL** · Art. V §4.3 · p. 53 — **New buildings no higher than the heritage house’s roof apex** · _Implemented_
   A new building in the heritage buffer may not rise above the roof apex of the declared heritage structure (NHCP 2012 guidelines).
   > For new construction: BHL: Building height limit for buildings within the buffer zone shall not be more than the roof apex of the declared heritage structure (Guidelines, Policies and Standards for the Conservation and Development of Historic Centers/Heritage Zones, NHCP 2012)
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1514`; proved by `ZoningOrdinanceRulesTest.php` — “limits new construction beside a heritage house to its roof apex and its period design”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1584`; proved by `ZoningOrdinanceRulesTest.php` — “limits new construction beside a heritage house to its roof apex and its period design”
 - **V-4.3-DESIGN** · Art. V §4.3 · p. 54 — **Heritage houses: repairs keep the original design; signs blend with the period** · _Shown_
   Repairs and renovations of a declared house keep its original design inside and out, and its business signs blend with its period design.
   > Repair and renovation works, to include building and landscape, shall ensure that the original architectural design at the interior and exterior are maintained. The size and appearance of business and other signs shall be made to blend with the period design of the house.
@@ -864,7 +864,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-4.3-NEWDESIGN** · Art. V §4.3 · p. 54 — **New buildings follow the heritage houses’ period design** · _Implemented_
   New buildings and their landscaping in the heritage overlay are designed like the period designs of the declared houses of ancestry.
   > Designs, to include building and landscape, shall be made similar to the period designs of the declared houses of ancestry.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1519`; proved by `ZoningOrdinanceRulesTest.php` — “limits new construction beside a heritage house to its roof apex and its period design”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1589`; proved by `ZoningOrdinanceRulesTest.php` — “limits new construction beside a heritage house to its roof apex and its period design”
 - **V-4.3-ARTIFACTS** · Art. V §4.3 · p. 54 — **Heritage: artifacts under RA 10066** · _Shown_
   Gathering natural and historical artifacts is governed by RA 10066.
   > The gathering of natural and historical artifacts shall be subject to the provisions of RA 10066
@@ -894,7 +894,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VI-2-2** · Art. VI §2 · p. 54 — **Deep wells need an NWRB water permit** · _Implemented_
   A deep well is not allowed without a water permit from the National Water Resources Board.
   > Deep wells shall not be allowed unless a Water Permit is obtained from the National Water Resources Board.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1918`; proved by `ZoningOrdinanceRulesTest.php` — “asks for an NWRB permit when the business draws from a deep well”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1988`; proved by `ZoningOrdinanceRulesTest.php` — “asks for an NWRB permit when the business draws from a deep well”
 - **VI-2-3-6** · Art. VI §2 · p. 54 — **Drainage, stormwater, sedimentation and runoff quality** · _Shown_
   Activities may not alter natural drainage or waterways; stormwater is controlled; rivers are protected from sediment; internal drainage may not degrade water quality.
   > Land use activities shall not cause the alteration of natural drainage patterns or change the velocities, volumes, and physical, chemical and biological characteristics of storm water. Streams, watercourses, wetlands, lakes or ponds shall not be altered, re-graded, developed, piped, diverted or built upon. 4. All developments shall ensure that storm water runoff shall be controlled through appropriate storm water drainage system design. 5. All developments shall undertake the protection of rivers, streams, lakes and ponds from sedimentation and erosion damage. 6. The internal drainage systems …
@@ -936,7 +936,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VI-4-4** · Art. VI §4 · p. 55 — **Parking lots of 20+ slots: trees and 50% permeable paving** · _Implemented_
   A parking lot with 20 or more slots is landscaped with trees at least 1.8 m tall at occupancy and is half paved with permeable material.
   > Parking lots having at least 20 car parking slots shall be: a. Landscaped with suitable trees. The minimum height of trees at the time of securing an Occupancy Permit shall be 1.80 meters from the base to the crown. b. 50% paved with permeable or semi-permeable materials such as grass, gravel, grass pavers and the like.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1855`; proved by `ZoningOrdinanceRulesTest.php` — “asks a parking business with 20 or more slots for trees and permeable paving”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1925`; proved by `ZoningOrdinanceRulesTest.php` — “asks a parking business with 20 or more slots for trees and permeable paving”
 - **VI-5-0** · Art. VI §5 · p. 55 — **Site development standards** · _Shown_
   Projects are designed to suit the site and its neighbours.
   > The City considers it in the public interest that all projects are designed and developed in a safe, efficient and aesthetically pleasing manner. Site development shall consider the environmental character and limitations of the site and its adjacent properties. All project elements shall be in complete harmony according to good design principles and the subsequent development must be visually pleasing as well as efficiently functioning especially in relation to the adjacent properties and bordering streets. Further, designs should consider the following:
@@ -948,11 +948,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VI-5-2** · Art. VI §5 · p. 56 — **Building against a neighbour’s property needs their written consent** · _Implemented_
   A structure abutting the neighbouring property needs the neighbour’s prior written consent, which CPDO requires before the locational clearance.
   > Abutments to adjacent properties shall not be allowed without the neighbor's prior written consent which shall be required by the Zoning Administrator/Zoning Officer prior to the granting of a Locational Clearance;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1774`; proved by `ZoningOrdinanceRulesTest.php` — “asks for the neighbour’s consent when new construction abuts their lot”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1844`; proved by `ZoningOrdinanceRulesTest.php` — “asks for the neighbour’s consent when new construction abuts their lot”
 - **VI-5-3** · Art. VI §5 · p. 56 — **Parking per the NBC, never in the street right-of-way** · _Implemented_
   Parking capacity meets the NBC minimum, and parking may never spill into the street right-of-way.
   > The capacity of parking areas/lots shall be per the minimum requirements of the National Building Code. These shall be located, developed and landscaped in order to enhance the aesthetic quality of the facility. In no case shall parking areas/lots encroach into street rights-of-way.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1698`; proved by `ZoningOrdinanceRulesTest.php` — “flags parking that spills into the street”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1768`; proved by `ZoningOrdinanceRulesTest.php` — “flags parking that spills into the street”
 - **VI-5-4** · Art. VI §5 · p. 56 — **Traffic attractors: on-site parking and loading bays** · _Shown_
   Malls, schools, places of worship, markets, stadia and the like provide on-site parking and loading bays so street traffic is not impeded.
   > Developments, such as shopping malls, schools, places of worship, markets, sports stadia and the like, which attract a significant volume of transportation, such as PUVs and, private vehicles shall provide adequate on-site parking for the same. These should also provide vehicular loading and unloading bays so as through street traffic flow will not be impeded.
@@ -984,7 +984,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VI-7** · Art. VI §7 · p. 57 — **Geological hazard by soil type: storeys and geotechnical analysis** · _Implemented_
   By barangay soil: Prensa clay loam (ground shaking) — 1 to 4 storeys recommended, analysis above 1; Obando fine sandy loam (liquefaction) — 1 storey, analysis above 1; Hydrosol (liquefaction) — 1 to 2 storeys, analysis above 2.
   > Soil Type | Hazard | Affected Barangays | Building Structure design Regulation / Prensa Clay Loam | Ground Shaking | Potrero, Acacia, Maysilo, Panghulo, Tinajeros, Tugatog, Santulan | -Recommended no. of storeys as per Earthquake risk areas is 1- 4 storeys. STRUCTURE ABOVE ONE (1) STOREY REQUIRED GEOTECHNICAL & STRUCTURAL ENGINEERING ANALYSIS & DESIGN. / Obando Fine Sandy Loam | Liquefaction | Hulong Duhat, Baritan, Bayan Bayanan, Concepcion, Flores, Ibaba, San Agustin, Tañong | Recommended no. of storeys as per Earthquake risk areas is one (1) storey. STRUCTURE ABOVE ONE (1) STOREY REQUIRED …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1812`; proved by `ZoningOrdinanceRulesTest.php` — “compares the building’s storeys with the barangay’s soil-hazard advice” Also asked: [C30](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1882`; proved by `ZoningOrdinanceRulesTest.php` — “compares the building’s storeys with the barangay’s soil-hazard advice” Also asked: [C30](../questions-for-malabon.md).
 - **VI-8-NOISE** · Art. VI §8 · p. 57 — **Noisy machinery: enclosed, silenced, 3 m yard with trees** · _Shown_
   Noise- and vibration-producing machinery is enclosed in a building with noise-absorbing materials and silencers, set back by an open yard of at least 3 m planted with trees, on shock-absorbing mountings; objectionable noise only in soundproof buildings.
   > NOISE AND VIBRATIONS – All noises and vibration-producing machinery shall be enclosed by a building and shall be provided with effective noise-absorbing materials, noise silencers and mufflers, and an open yard of a distance of not less than three meters (3 m.) from the street or adjoining property lines and property planted to dense trees as buffers. To minimize vibration, a machinery should be mounted on stock-absorbing mountings, such as cork set on reinforced concrete foundations or floating isolated foundation set on piles, as needed by the machinery concerned, to produce all noise and …
@@ -1016,7 +1016,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VI-8-HOA** · Art. VI §8 · p. 58 — **Uses that change a residential area need the homeowners’ or barangay’s prior approval** · _Implemented_
   A use that will change a residential area’s character — bringing traffic or outsiders — needs the prior approval of a majority of household heads of the homeowners’ association (or, if none, the barangay), especially the immediate neighbours, before the locational clearance.
   > PETITION TO HOMEOWNER’S ASSOCIATION OF BARANGAY – Where a person plans to establish a certain use/activity which will necessarily affect the character of residential zone in terms of traffic to be generated and/or opening the area to outsiders which may result in loss of privacy of its residents, the prior approval of a majority of the household heads of the homeowner’s association or in its absence, the barangay, most especially the persons immediately adjacent to the proposed site will have to be secured as one of the pre-requisites for locational clearance and building permit.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1710`; proved by `ZoningOrdinanceRulesTest.php` — “asks for the homeowners’ or barangay’s approval for a business in a residential zone”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1780`; proved by `ZoningOrdinanceRulesTest.php` — “asks for the homeowners’ or barangay’s approval for a business in a residential zone”
 - **VI-8-ROAD** · Art. VI §8 · p. 58 — **Road-widening setbacks on seven roads** · _Shown_
   A locational clearance on Gov. W. Pascual Ave. requires a 3 m setback; on Sanciangco St., Gen. Borromeo St., Don Basilio Bautista Blvd., J.P. Rizal Ave., M.H. del Pilar St. and Panghulo Road, 1 m.
   > The classification from Residential Zone to Commercial Zone on area along Gov. W. Pascual Avenue (block deep) Gen P. Borromeo Street (lot deep) would generate heavy volume of vehicles, transversing which deems necessary to have a provision for road widening. Proponent applying for a locational clearance on a specific project activity would require reasonable setback of three (3) meters both sides of Gov. W. Pascual Avenue. and Sanciangco St., Gen. Borromeo Street, Don Basilio Bautista Bvd., J.P. Rizal Avenue, M.H. Del Pilar St., Panghulo Road would require setback of one (1) meter both sides …
@@ -1071,7 +1071,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VII-11** · Art. VII §11 · p. 61 — **A 4 m buffer between conflicting zones, provided by the more intense use** · _Implemented_
   A 4 m open buffer, separate from setbacks and free of structures, runs along the whole boundary between conflicting zones; the more intense use provides it, and it may be wider.
   > A buffer shall be define as an additional open space different from the building setback. A buffer of four (4) meters shall be provided along entire boundary length between two or more conflicting zones to mitigate adverse impacts and nuisance between two adjacent developments aside from providing light and ventilation. The following regulations shall be implemented: • The more intense development/use shall provide the four (4) meters buffer. • Such buffer strip should be open and not encroached upon by any building or structure and should be a part of the yard or open space, and maybe used …
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1838`; proved by `ZoningOrdinanceRulesTest.php` — “asks CPDO about the 4 m buffer when the lot adjoins a conflicting zone”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1908`; proved by `ZoningOrdinanceRulesTest.php` — “asks CPDO about the 4 m buffer when the lot adjoins a conflicting zone”
 - **VII-12** · Art. VII §12 · p. 61 — **NBC provisions on these subjects apply** · _Not applicable_
   NBC provisions on traffic generators, signs, multiple structures, rear lots, access, yards and dwelling groups apply where not in conflict.
   Defers to the NBC, administered by the Building Official on the building permit.
@@ -1082,7 +1082,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **VII-13-NUISANCE** · Art. VII §13 · p. 61 — **No nuisance signs; nothing over public property without leave; temporary signs up to two months** · _Implemented_
   Signs that are a nuisance or a hazard are not allowed; no sign may project over public property unless the Zoning Administrator allows it; temporary signs up to two months may be allowed on payment of the fee; the sign permit states location, size, slope, contents and construction.
   > Obnoxious signs that would constitute nuisance to adjoining property owners distract motorists or constitute as hazards to public safety shall not be allowed in any area. No sign should project to public property unless expressly allowed by the Zoning Administrator/ Zoning Officer. Temporary signs and billboards for not more than two months may be allowed by the Zoning Officer/Administrator upon payment of corresponding fees to the City/Municipality. The permit for such sign shall indicate the location, size, slope, contents and type of construction.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1665`; proved by `ZoningOrdinanceRulesTest.php` — “flags a roof sign and a sign over public property”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1735`; proved by `ZoningOrdinanceRulesTest.php` — “flags a roof sign and a sign over public property”
 - **VII-13-1-3** · Art. VII §13 · p. 62 — **Signs and heritage: no blocked views or sign projections near heritage buildings** · _Shown_
   Signs may not obstruct natural or heritage views; no commercial sign may intrude into the road right-of-way leading to important public or heritage buildings; view corridors from heritage buildings stay open.
   > No advertising billboards and business signs shall be installed as to unduly obstruct the natural view of landscape and heritage structures or otherwise defile, debase or offend the aesthetic and cultural values and traditions. 2. Commercial signs of all forms intruding into Road Right of Way (RROW) leading to or away from important public or historical/cultural buildings/structures, shall not be allowed especially commercial sign supported from any building projection (such as arcades) or other similar structure. 3. View corridors or lines of sight from historical/heritage …
@@ -1133,7 +1133,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-6** · Art. IX §6 · p. 64 — **No locational clearance before the ECC, where one is required** · _Implemented_
   A project covered by the Environmental Impact Statement System gets no locational clearance until its ECC requirements are met.
   > No Locational Clearance shall be issued to proposals covered by the EIS System unless the requirements of ECC have been complied with.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1938`; proved by `ZoningOrdinanceRulesTest.php` — “holds the locational clearance for an ECC when DENR’s list says the trade needs one”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2008`; proved by `ZoningOrdinanceRulesTest.php` — “holds the locational clearance for an ECC when DENR’s list says the trade needs one”
 - **IX-7** · Art. IX §7 · p. 64 — **No building permit without a locational clearance** · _Shown_
   The Building Official issues no building permit without a valid locational clearance.
   > No Building Permit shall be issued by the City Building Official without a valid Locational Clearance in accordance with the integrated ZO.
@@ -1149,7 +1149,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-9-USE** · Art. IX §9 · p. 64 — **A locational clearance lapses if not used within a year** · _Implemented_
   The holder has one year from issue to start the use; an unused clearance expires automatically and a new one is needed.
   > Upon issuance of an LC, the grantee thereof shall have one year within which to commence or undertake the use, activity or development covered by such clearance on his property. Non-use of LC within said period shall result in its automatic expiration, cancellation and the grantee shall not proceed with his project without applying for a new clearance.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1957`; proved by `ZoningOrdinanceRulesTest.php` — “treats a held locational clearance unused for a year as expired”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2027`; proved by `ZoningOrdinanceRulesTest.php` — “treats a held locational clearance unused for a year as expired”
 - **IX-9-CHANGE** · Art. IX §9 · p. 64 — **(Repeated) a change of activity or a bigger area needs a new clearance** · _Implemented_
   §9 repeats §8: a change of activity or expansion of area needs a new locational clearance.
   > Should there be any change in the activity or expansion of the area subject of the Locational Clearance, the owner/developer shall apply for a new Locational Clearance. Section 10
@@ -1195,7 +1195,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-10.2-C** · Art. IX §10.2 · p. 65 — **A construction clearance does not cover the business** · _Implemented_
   A locational clearance issued for construction or renovation cannot be used for the business that will run inside the building.
   > The Locational Clearance issued for construction/renovation activity cannot be used for the proposed business activity to be commenced within the constructed /renovated structure.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1965`; proved by `ZoningOrdinanceRulesTest.php` — “refuses a construction-only clearance as the business’s clearance”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2035`; proved by `ZoningOrdinanceRulesTest.php` — “refuses a construction-only clearance as the business’s clearance”
 - **IX-10.2-D** · Art. IX §10.2 · p. 65 — **Non-conforming uses: a Certificate of Non-Conformance, renewed yearly** · _Shown_
   Every non-conforming use secures a Certificate of Non-Conformance within a year of the ordinance’s approval; it is valid one year and renewed yearly.
   > A certificate of non-conformance of all non-conforming uses shall be secured from the office of the Local Zoning Administrator within one (1) year from the approval of the amended Malabon Zoning Ordinance. This certificate shall be valid for a period of one (1) year from the date of its issuance after which shall be renewed yearly for a period specified under the amended Zoning Ordinance to verify consistency of the activity and condition set forth for such non-conforming uses.
@@ -1229,19 +1229,19 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-12-0** · Art. IX §12 · p. 66 — **Lawful existing uses may continue, on conditions** · _Implemented_
   A use lawful when the ordinance was adopted may continue though it does not conform, on the ten conditions below.
   > The lawful uses of any building, structure or land at the time of adoption or amendment of this Ordinance may be continued, although such uses do not conform to the provisions of the integrated ZO, provided:
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2001`; proved by `ZoningOrdinanceRulesTest.php` — “tells a renewal whose trade is not listed that it runs as a non-conforming use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2071`; proved by `ZoningOrdinanceRulesTest.php` — “tells a renewal whose trade is not listed that it runs as a non-conforming use”
 - **IX-12-1** · Art. IX §12 · p. 66 — **A non-conforming use may not grow or move within the lot** · _Implemented_
   It may not take a greater area than it had when the ordinance was adopted, or move to another part of the lot.
   > That no such non-conforming use shall be expanded or extended to occupy a greater area of land than that already occupied by such use at the time of the adoption of this Ordinance or moved in whole or in part, to any other portion of the lot or parcel of land where such non-conforming use exists at the time of the adoption of this Ordinance.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2010`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2080`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
 - **IX-12-2** · Art. IX §12 · p. 66 — **A non-conforming use idle for over a year cannot be revived** · _Implemented_
   A non-conforming use that stopped for more than a year cannot be revived.
   > That no such non-conforming use which has ceased operation for more than one (1) year be again revived as non-conforming use.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2013`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2083`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
 - **IX-12-3** · Art. IX §12 · p. 66 — **A new business cannot start as a non-conforming use** · _Implemented_
   A vacant or idle building may not be put to a non-conforming use — so a new business whose trade the zone does not allow cannot rely on the non-conforming rules.
   > A vacant/idle building or structure may not be used for non-conforming activity;
-  checked at `api/app/Support/Zoning/ZoningCheck.php:540`; proved by `ZoningOrdinanceRulesTest.php` — “tells a new business it cannot start as a non-conforming use”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:552`; proved by `ZoningOrdinanceRulesTest.php` — “tells a new business it cannot start as a non-conforming use”
 - **IX-12-4** · Art. IX §12 · p. 66 — **Damaged non-conforming buildings: rebuild only up to 50%** · _Shown_
   A damaged non-conforming building may be rebuilt if the work is no more than 50% of replacement cost; beyond that it must conform.
   > That any non-conforming building/structure which has been damaged maybe reconstructed and used as before provided that such reconstruction is not more than fifty percent (50%) of the replacement cost. That should such non-conforming portion of any building/structure be destroyed by any means to an extent of more than fifty percent (50%) of its replacement cost at the time of destruction, it shall not be reconstructed except in conformity with the provisions of this Ordinance.
@@ -1253,15 +1253,15 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-12-6** · Art. IX §12 · p. 66 — **No change that increases non-conformity** · _Implemented_
   A non-conforming use may not be expanded or altered to increase its non-conformity, only to decrease it.
   > That no such non-conforming use and/or structure may be expanded or altered in a way which increases its non-conformity, but any structure or portion thereof may be altered to decrease its non-conformity.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2017`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2087`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
 - **IX-12-7** · Art. IX §12 · p. 66 — **A non-conforming use that moves must conform where it goes** · _Implemented_
   Once moved, by any distance, the use must conform to the zone it moves to.
   > That should such use and/or structure be moved for any reason to whatever distance, it shall thereafter conform to the regulation of the zone in which it is moved or relocated.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2020`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2090`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
 - **IX-12-8** · Art. IX §12 · p. 67 — **A non-conforming use may not be a nuisance** · _Implemented_
   It may not pollute, cause undesirable traffic, or endanger health and safety, and must meet the performance standards.
   > That such non-conforming use and/or structure should not cause nuisance effects to its neighborhood, such as but not limited to pollution of whatever form (air, noise, land, water, etc.), undesirable traffic (whether vehicular or pedestrian) and the like and should further not pose health and safety hazards and as further provided in the Performance Standards provision of this Ordinance.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2023`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2093`; proved by `ZoningOrdinanceRulesTest.php` — “flags a non-conforming use that has grown, stopped for a year, or is changing”
 - **IX-12-9** · Art. IX §12 · p. 67 — **Phase out and relocate within ten years** · _Question for Malabon_
   The owner of a non-conforming use programmes its phase-out and relocation within ten years of the ordinance taking effect. This conflicts with §11 (continue until closing); BizTrack shows both.
   > The owner of a non-conforming use and/or structure shall program the phase-out and relocation within ten (10) years from the effectively of this Ordinance.
@@ -1352,7 +1352,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-23** · Annex A item 23 · p. 71 — **Cottage industry: capital up to ₱100,000** · _Implemented_
   A cottage industry is a home or similar economic activity for profit with capital of ₱100,000 or less at registration (PD 817).
   > Cottage industry: an economic activity carried on the homes or in other places for profit, with capitalization not exceeding Php 100,000.00 at the time of registration. The definition provided for in P.D. 817 is hereby adopted for zoning purposes.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:604`; proved by `ZoningOrdinanceRulesTest.php` — “compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO” Also asked: [C19](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:616`; proved by `ZoningOrdinanceRulesTest.php` — “compares a home industry’s capital with Annex A’s ₱100,000 and leaves a higher figure to CPDO” Also asked: [C19](../questions-for-malabon.md).
 - **A-24** · Annex A item 24 · p. 71 — **Department stores, malls and shopping centres** · _Shown_
   A department store, mall or shopping centre is a large store of many departments, with restaurants and services around a common parking area.
   > 24. Department Store / Malls / Shopping Center: a large store divided into various departments selling different types of goods. Complex store, restaurants and services establishments with common parking area.
@@ -1367,11 +1367,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-28** · Annex A item 28 · p. 71 — **Dry cleaning; with flammable solvents it is an Industrial-2 plant** · _Implemented_
   Dry cleaning cleans textiles with solvents. Industrial-2 lists “dry cleaning plants using flammable liquids”; the commercial zones list laundries. A dry cleaner using flammable solvents is read as the Industrial-2 plant.
   > 28. Dry cleaning: the cleaning of textiles, fabrics, garments and other articles by the use of cleaning solvents therefrom, drying and ironing the same. The activities usually housed in a building and consisting of one or more dry cleaning units of machinery or equipment where said articles are carried through a complete cleaning process.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:742`; proved by `ZoningOrdinanceRulesTest.php` — “reads dry cleaning with flammable solvents as an Industrial-2 plant”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:754`; proved by `ZoningOrdinanceRulesTest.php` — “reads dry cleaning with flammable solvents as an Industrial-2 plant”
 - **A-38** · Annex A item 38 · p. 72 — **Funeral chapels at cemeteries show or sell no coffins or wreaths** · _Implemented_
   A fraternal chapel is a funeral chapel at or near a cemetery for vigil before burial; coffins and flower wreaths are not displayed or sold there, though dedicated wreaths may be.
   > 38. Fraternal Chapels: private, non-denominational funeral chapels located at or near or attached to cemeteries for the purpose of spiritual meditation and vigil before burial of deceased persons. The display or sale of coffins or flower wreaths are not conducted therein although dedicated wreaths may be displayed in memory of the deceased person.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:746`; proved by `ZoningOrdinanceRulesTest.php` — “keeps coffins and wreaths out of a funeral chapel at a cemetery”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:758`; proved by `ZoningOrdinanceRulesTest.php` — “keeps coffins and wreaths out of a funeral chapel at a cemetery”
 - **A-41** · Annex A item 41 · p. 72 — **Gasoline service stations** · _Shown_
   A gasoline service station sells motor fuel and lubricants to the public, with washing and minor adjustments.
   > 41. Gasoline Service Station: a place where gasoline or any other motor fuel, lubricating oil or grease from operation of automobile is offered for sale to the public.
@@ -1379,11 +1379,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-42** · Annex A item 42 · p. 72 — **Annex A’s home occupation: no outside workers, household equipment, a quarter of the floor** · _Implemented_
   Annex A defines a home occupation more strictly than §2.1: no non-resident employee, no non-household machinery, at most a quarter of the floor area or one storey, and no alteration inside or out. BizTrack checks both and sends the differences to CPDO.
   > Home Occupation: occupation conducted within a dwelling and not in any accessory building provided no person who is not a resident in the premises is employed, no mechanical equipment is used, except such as is permissible for purely domestic or household purposes and not more than one-fourth (1/4) of the floor area or one storey of the dwelling is devoted to such home occupation does not require internal or external alteration, or involve construction features or use of equipment not customary in dwellings.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:674`; proved by `ZoningOrdinanceRulesTest.php` — “measures a home occupation against 20% of the house, and surfaces Annex A’s quarter” Also asked: [C14](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/ZoningCheck.php:686`; proved by `ZoningOrdinanceRulesTest.php` — “measures a home occupation against 20% of the house, and surfaces Annex A’s quarter” Also asked: [C14](../questions-for-malabon.md).
 - **A-44** · Annex A item 44 · p. 72 — **A hotel has no cooking in its rooms** · _Implemented_
   A hotel has rooms for hire with a general kitchen and dining room, and no cooking in any room. One whose rooms have their own cooking is a hotel apartment (item 45), which the lists name separately.
   > 44. Hotel : a building or part thereof with rooms occupied or intended to be occupied or intended to be occupied for hire as temporary aboding place of individuals with a general kitchen and public dining room service, but no provisions for cooking in any individuals suite or room.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:760`; proved by `ZoningOrdinanceRulesTest.php` — “reads a hotel whose rooms have kitchens as a hotel apartment”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:772`; proved by `ZoningOrdinanceRulesTest.php` — “reads a hotel whose rooms have kitchens as a hotel apartment”
 - **A-45** · Annex A item 45 · p. 73 — **Hotel apartments** · _Shown_
   A hotel apartment is an apartment that may give dining and other services to its own tenants.
   > 45. Hotel apartment: an apartment which may furnish dining room service and other services for the exclusive use of its tenants.
@@ -1399,11 +1399,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-63** · Annex A item 63 · p. 73 — **A change of owner is not a change of occupancy** · _Implemented_
   Occupancy is the purpose a building serves; a change of tenant or proprietor is not a change of occupancy — so a change of ownership does not need a new locational clearance.
   > Occupancy: the purpose for which a building is used or intended to be used. The term shall also include the building or room housing such use. Change or occupancy is not intended to include change of tenants or proprietors.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:2070`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:2140`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
 - **A-64** · Annex A item 64 · p. 73 — **An office building holds no retail merchandising** · _Implemented_
   An office building houses offices for lease, with no retail merchandising except professional services. A shop inside one is reported as not meeting the definition.
   > 64. Office Building: commercial buildings used to house offices for lease or rent. It may concern a single occupancy use or mixed occupancy uses not invoicing retail merchandising except professional services.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:766`; proved by `ZoningOrdinanceRulesTest.php` — “keeps retail out of an office building”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:778`; proved by `ZoningOrdinanceRulesTest.php` — “keeps retail out of an office building”
 - **A-66-67** · Annex A item 66-67 · p. 74 — **One block deep = 70 m; one lot deep = 30 m from the road’s centre** · _Question for Malabon_
   Unless the map says otherwise, a one-block-deep strip runs 70 m and a one-lot-deep strip 30 m from the centre of the road. Art. IV §6 reads one lot deep differently (the 2018 parcels; the average lot depth nearby); BizTrack shows both.
   > One block deep strip: 70 meters from the center of the road, unless specified on zoning map and zone boundaries.
@@ -1411,11 +1411,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-70** · Annex A item 70 · p. 74 — **Open storage defined** · _Implemented_
   Open storage is a roofed structure without side walls used to keep goods.
   > Open Storage: a roofed structure without sidewalks used for the safekeeping of goods.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1208`; proved by `ZoningOrdinanceRulesTest.php` — “measures open storage against 200 m from institutions”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1278`; proved by `ZoningOrdinanceRulesTest.php` — “measures open storage against 200 m from institutions”
 - **A-72** · Annex A item 72 · p. 74 — **A parking building does no vulcanizing or vehicle repair** · _Implemented_
   A parking building may offer fuel, washing, greasing and cleaning, but not tire vulcanizing or vehicle repair.
   > 72. Parking Building: a building of several floors used for temporary parking of private vehicles on various floors and provided with the following services, gasoline filling stations, washing, greasing, cleaning and other maintenance services, except vulcanizing of tires and repair of vehicles.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1079`; proved by `ZoningOrdinanceRulesTest.php` — “keeps vulcanizing and vehicle repair out of a parking building”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1149`; proved by `ZoningOrdinanceRulesTest.php` — “keeps vulcanizing and vehicle repair out of a parking building”
 - **A-73** · Annex A item 73 · p. 74 — **A parking space is at least 20 m², off the street** · _Shown_
   A parking space is off-street, at least 20 m² for one vehicle, with direct access to a street or alley.
   > Parking Space: an off-street space available for the parking of one motor vehicle and having an area of not less than twenty square meter (20 sq. me.) exclusive of passageways and driveways appurtenant thereto and giving access thereto and having direct access to a street or alley.
@@ -1431,7 +1431,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-89** · Annex A item 89 · p. 75 — **Unlisted business types are referred to other laws** · _Implemented_
   A business type the annex does not define is referred to other national and local laws — the lists are open, so absence from them is not a refusal.
   > Other definition of business establishment not included in this appendix will be referred to other appropriate national and local laws.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:380`; proved by `ZoningOrdinanceRulesTest.php` — “never reports a trade missing from every list as refused”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:392`; proved by `ZoningOrdinanceRulesTest.php` — “never reports a trade missing from every list as refused”
 - **A-DEFS** · Annex A item 1-88 · p. 70 — **The other Annex A definitions** · _Not applicable_
   Definitions of building types, lots, uses and establishments. They say what words mean; the ones a rule or a match depends on are entries of their own.
   Definitions of words only — accessoria, building, bus terminal, business, cockpit, junk yard, lodging house, money shop, night club, open market, parking lot, soda fountain and the rest; none sets a condition a business must meet. The items a check reads are entries of their own: 5, 18, 23, 24, 26, 27, 28, 38, 41, 42, 44, 45, 48, 60, 63, 64, 66-67, 70, 72, 73, 76, 86 and 89.
@@ -1448,4 +1448,4 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **ANNEX-C** · Annex C · p. 87 — **Overlay maps: flood per barangay, heritage houses, eco-tourism** · _Implemented_
   Flood overlay maps for all 21 barangays; heritage house maps for Baritan, Concepcion, Hulong Duhat, Ibaba and San Agustin; the eco-tourism map over Dampalit’s fishponds.
   > ANNEX-C Barangay Overlay Maps FLOOD OVERLAY ZONE PER BARANGAY ACACIA BARITAN BAYAN-BAYANAN CATMON CONCEPCION DAMPALIT
-  checked at `api/app/Support/Zoning/ZoningCheck.php:1445`; proved by `ZoningOrdinanceRulesTest.php` — “applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them”
+  checked at `api/app/Support/Zoning/ZoningCheck.php:1515`; proved by `ZoningOrdinanceRulesTest.php` — “applies the flood overlay everywhere and the heritage and eco-tourism overlays where Annex C draws them”

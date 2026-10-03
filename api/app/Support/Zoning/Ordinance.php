@@ -442,6 +442,15 @@ final class Ordinance
         'other' => ['label' => 'Something else', 'phrases' => []],
     ];
 
+    /**
+     * Trades whose business is what their vehicles are for, so the answer to
+     * "what are the vehicles for" (or the description's own words) says which
+     * listed use they are. Every other trade is judged by its own code, and
+     * its vehicles are a second use (ZoningCheck::secondVehicleUse). 68100,
+     * a lessor, joins them only when it answers that it leases parking.
+     */
+    public const VEHICLE_TRADES = ['49221', '49230', '52290', '77100', '00000'];
+
     /** Is this PSIC code one of `$trade`'s? */
     public static function is(string $trade, string $psic): bool
     {

@@ -102,14 +102,20 @@ an office building and a cemetery chapel are held to what their definitions
 exclude (Annex A 72, 64, 38).
 
 Where one code covers uses the lists keep apart, the table does not choose:
-a tailor and a garment factory (14100), tutorial, driving, vocational and
-short-course schools (85490), leather, rubber and wooden footwear (15200), a
+a tailor and a garment factory (14100), tutorial services, tutorial centres,
+driving, vocational and short-course schools (85490), leather, rubber and wooden footwear (15200), a
 paint store with or without bulk handling (47522), an appliance repair shop at
 neighbourhood scale or not (95220). Each is asked on the use finding, read from
 the applicant's own description when unanswered, and only "possibly" listed
 until one or the other says which. A pay parking lot, which has no code, is
 reached from transport support (52290), from a lessor who leases parking
-(68100) or from the description's words. Listed uses no register code reaches
+(68100) or from the description's words — but only a vehicle trade (transport,
+transport support, vehicle rental, "Other", a lessor of parking) is read AS
+what its vehicles are for. Every other trade is judged by its own code: a
+gasoline station "with parking lot" is a gasoline station, and its parking is
+a second use with its own finding and conditions that can never make the
+station allowed where it is not listed. A sweep test holds every register code
+to that in every zone, under every vehicle answer and description. Listed uses no register code reaches
 — a medium junk shop, lechon stores, a chicharon factory, a car wash, event
 planners, vocational, dance, self-defense and SPED schools — are reached from
 "Other (not listed)" by the description or by picking one (`listed_use`), which
