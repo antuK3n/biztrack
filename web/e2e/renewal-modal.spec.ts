@@ -53,7 +53,7 @@ function dialog(page: Page) {
 }
 
 function businessSelect(page: Page) {
-  return dialog(page).getByLabel(/which business are you renewing/i)
+  return dialog(page).getByRole('combobox', { name: /^business\b/i })
 }
 
 /**
@@ -422,7 +422,7 @@ test('the picker says the ticked permits are one payment, not one per permit', a
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
   await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
 
-  const line = dialog(page).getByText(/single Tax Order of Payment/i)
+  const line = dialog(page).getByText(/one payment for this filing/i)
   await expect(line).toBeVisible()
 
   const text = (await line.innerText()).replace(/\s+/g, ' ')
