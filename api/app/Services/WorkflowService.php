@@ -3714,9 +3714,11 @@ class WorkflowService
                 'scheduled_at' => (string) $visit->scheduled_at,
             ]);
 
-            $this->notify->applicationStatus(
+            // `applicationNote`, not `applicationStatus`: the status is not
+            // changing, and the latter is silent on Approved, which is what a
+            // paid filing wears while its visits happen.
+            $this->notify->applicationNote(
                 $app,
-                $app->status,
                 'A re-inspection has been scheduled for '.$visit->scheduled_at->format('d M Y').'.',
             );
 
@@ -4995,9 +4997,10 @@ class WorkflowService
         $this->recordDeferredFee($app, $row->permitType);
         $this->raiseDenrRequirements($app, $row->permitType);
 
-        $this->notify->applicationStatus(
+        // `applicationNote` for the same reason as at the re-inspection: a
+        // permit is granted on a filing that already stands at Approved.
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             $row->permitType->name.' has been approved and issued.',
         );
 

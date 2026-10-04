@@ -3,6 +3,7 @@
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
+use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Inspection;
 use App\Models\Permit;
@@ -207,6 +208,30 @@ it('schedules a re-inspection from a failed visit and keeps the failure on the r
     expect(
         test()->withHeaders($ownerHeaders)->getJson("/api/v1/applications/{$appId}")->json('data.status')
     )->toBe('approved');
+});
+
+it('tells the owner when the re-inspection is booked', function () use ($deptEmail) {
+    /*
+     * The notice went through `applicationStatus`, which is silent on Approved,
+     * the status a paid filing wears while its visits happen — so the owner
+     * was never told the date.
+     */
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Booked Again Bakery');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+
+    $when = now()->addWeekdays(5)->startOfHour();
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => $when->toIso8601String()])
+        ->assertCreated();
+
+    $app = Application::findOrFail($appId);
+    expect(AppNotification::where('user_id', $app->applicant_user_id)
+        ->where('body', "{$app->tracking_id}: A re-inspection has been scheduled for {$when->format('d M Y')}.")
+        ->exists())->toBeTrue();
 });
 
 it('issues the permit when the re-inspection passes, over the kept failure', function () use ($deptEmail) {

@@ -6,6 +6,7 @@ use App\Enums\InspectionResult;
 use App\Enums\OfficerRequestStatus;
 use App\Models\Application;
 use App\Models\ApplicationPermitType;
+use App\Models\AppNotification;
 use App\Models\Business;
 use App\Models\Department;
 use App\Models\OfficerRequest;
@@ -104,6 +105,21 @@ it('issues a clearance’s certificate as soon as its own office is done', funct
     // And the certificate exists anyway, for that one permit and no other.
     expect($app->permits->pluck('permitType.code')->all())->toBe(['CEC']);
     expect($app->permits->first()->permit_number)->not->toBeEmpty();
+});
+
+it('tells the owner the moment that permit is approved and issued', function () {
+    /*
+     * The notice went through `applicationStatus`, which is silent on Approved
+     * — and Approved is what a paid filing wears while its permits are issued
+     * one by one. So the owner stopped hearing about each one.
+     */
+    $app = filingAwaitingItsPermits();
+    clearanceApproved($app, 'CEC');
+
+    $name = PermitType::where('code', 'CEC')->value('name');
+    expect(AppNotification::where('user_id', $app->applicant_user_id)
+        ->where('body', "{$app->tracking_id}: {$name} has been approved and issued.")
+        ->exists())->toBeTrue();
 });
 
 it('shows that certificate on the applicant’s own permit list straight away', function () {
