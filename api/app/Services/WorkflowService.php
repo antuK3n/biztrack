@@ -916,9 +916,10 @@ class WorkflowService
      *
      * The fee is NOT recomputed and BPLO cannot adjust it (client, 6 September
      * 2026: system-computed only). It was assessed at submission from the
-     * revenue-code rules and the applicant has been looking at that figure ever
-     * since; changing it at the moment it becomes payable would move the number
-     * under someone who had already decided to pay it.
+     * revenue-code rules — and again at a resubmission, so corrected figures
+     * reach it (see `resubmit`) — and the applicant has been looking at that
+     * figure ever since; changing it at the moment it becomes payable would
+     * move the number under someone who had already decided to pay it.
      */
     public function approveMainForm(Application $app, ?string $remarks = null): void
     {
@@ -1635,6 +1636,27 @@ class WorkflowService
                 foreach ($missing as $permitTypeId) {
                     $app->permitTypes()->attach($permitTypeId, ['status' => ClearanceStatus::NotStarted->value]);
                 }
+            }
+
+            /*
+             * ── The bill follows the correction ──────────────────────────
+             *
+             * The fee was assessed at submit and never again, so a return
+             * about the figures could not change what the owner was billed:
+             * a renewal corrected from ₱200,000 to ₱5,000,000 of sales kept
+             * its ₱12,200 bill, where filing it that way is ₱42,987.50
+             * (scenario run, owner-renew 27; owner-pay 13 for a new filing's
+             * floor area). Ken, 5 October 2026: recompute it before BPLO
+             * approves.
+             *
+             * Here, on the same terms `submit` assesses on, and safe to: a
+             * filing can only be Returned from For Approval, so nothing has
+             * been paid against this bill. Unchanged figures give the same
+             * bill back — the late surcharge is dated from `submitted_at`,
+             * which a resubmission does not move.
+             */
+            if ($app->application_type !== ApplicationType::Amendment) {
+                $this->assessFees($app->fresh());
             }
 
             $app->assignments()
