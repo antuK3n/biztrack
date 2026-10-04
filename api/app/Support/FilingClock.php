@@ -53,7 +53,8 @@ use Illuminate\Support\Facades\DB;
  * "Still pending at the end of the period" applies the same rules from the
  * other end: a filing rejected or cancelled by then is not pending, one
  * waiting on its applicant at that moment is not the City's backlog, and the
- * age of what is left leaves out the applicant's stretches.
+ * age of what is left leaves out the applicant's stretches. Nor is a paid
+ * filing gathering its other permits, which is Approved (see GATHERING).
  */
 final class FilingClock
 {
@@ -77,6 +78,19 @@ final class FilingClock
     public const ENDED = [
         ApplicationStatus::Rejected->value,
         ApplicationStatus::Cancelled->value,
+    ];
+
+    /**
+     * Paid, its Business Permit out, its other permits still coming in. The
+     * dashboard's Decision Outcomes and approval rate count it as Approved,
+     * and the filing reads "Approved" everywhere, so it is not the City's
+     * pending backlog either (Ken, 5 October 2026). `awaiting_other_permits`
+     * is the same stretch under the name it had until 4 October 2026, which
+     * the status history still carries.
+     */
+    public const GATHERING = [
+        ApplicationStatus::Approved->value,
+        'awaiting_other_permits',
     ];
 
     /**
@@ -197,6 +211,16 @@ final class FilingClock
             $status = $current || $history === [] ? (string) $row->status : self::statusAt($history, $asOf);
 
             if ($status === null || in_array($status, self::ENDED, true) || in_array($status, self::WITH_APPLICANT, true)) {
+                continue;
+            }
+
+            /*
+             * A filing gathering its other permits is Approved, not pending —
+             * see GATHERING. Not for one office's own reviews: the clearance
+             * an office is still reviewing on such a filing is exactly its
+             * backlog, and a filing's status says nothing about it.
+             */
+            if ($scope === null && in_array($status, self::GATHERING, true)) {
                 continue;
             }
 

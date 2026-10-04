@@ -132,13 +132,14 @@ it('leaves a filing waiting on its applicant out of what is pending, and out of 
 
     // Submitted 3 March and still with the offices on 31 March: twenty working
     // days on the wall, but fifteen of them were spent returned to the applicant.
-    $waited = anaFiling($business, ['status' => 'approved', 'submitted_at' => '2031-03-03 01:00:00']);
+    // At For Approval rather than at an undecided Approved, which it was until
+    // 5 October 2026: a paid filing gathering its other permits is Approved,
+    // not pending (see the test below).
+    $waited = anaFiling($business, ['status' => 'for_approval', 'submitted_at' => '2031-03-03 01:00:00']);
     anaHistory($waited, [
         ['for_approval', '2031-03-03 01:00:00'],
         ['returned', '2031-03-04 01:00:00'],
         ['for_approval', '2031-03-25 01:00:00'],
-        ['pending_payment', '2031-03-26 01:00:00'],
-        ['approved', '2031-03-26 02:00:00'],
     ]);
 
     $after = whoseTimeReport('pending-processing', null)['sections'][1]['total'];
@@ -146,6 +147,26 @@ it('leaves a filing waiting on its applicant out of what is pending, and out of 
     // One filing, aged 1 (3→4 March) + 4 (25→31 March) = 5 working days.
     expect($after['total'] - $before['total'])->toBe(1)
         ->and($after['within_7'] - $before['within_7'])->toBe(1);
+});
+
+it('leaves a paid filing gathering its other permits out of what is pending', function () {
+    /*
+     * Ken, 5 October 2026: a paid filing still gathering is Approved — the
+     * dashboard's Decision Outcomes and approval rate already count it so —
+     * and the Pending Applications report listed it as pending all the same.
+     * Decided, it was never pending; gathering, it is not either.
+     */
+    $this->travelTo(CarbonImmutable::parse('2031-04-10 04:00:00', 'UTC'));
+    $before = whoseTimeReport('pending-processing', null)['sections'][1]['total'];
+
+    $gathering = anaFiling(anaBusiness(), ['status' => 'approved', 'submitted_at' => '2031-03-03 01:00:00']);
+    anaHistory($gathering, [
+        ['for_approval', '2031-03-03 01:00:00'],
+        ['pending_payment', '2031-03-04 01:00:00'],
+        ['approved', '2031-03-05 01:00:00'],
+    ]);
+
+    expect(whoseTimeReport('pending-processing', null)['sections'][1]['total']['total'])->toBe($before['total']);
 });
 
 it('counts a filing waiting for BPLO’s final approval as BPLO’s pending work', function () {
