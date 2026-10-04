@@ -120,7 +120,7 @@ export function PaymentsSection() {
           KwikPay can tell BizTrack a payment went through in two ways: it posts a signed
           confirmation to biztrack.page, or it answers when BizTrack asks about the order.
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Choice
             label="Only the signed confirmation"
             description="A payment turns Paid only when KwikPay posts its signed confirmation. On a server KwikPay cannot reach, such as localhost, nothing turns Paid."
@@ -134,6 +134,13 @@ export function PaymentsSection() {
             on={s.confirm === 'query'}
             busy={busy}
             onChoose={() => change({ confirm: 'query' })}
+          />
+          <Choice
+            label="Its answer’s message"
+            description="A payment also turns Paid when the gateway’s answer says “Transaction completed successfully”. This gateway answers 5 for every order it finds and puts the real state in the message."
+            on={s.confirm === 'message'}
+            busy={busy}
+            onChoose={() => change({ confirm: 'message' })}
           />
         </div>
       </SubCard>
@@ -174,9 +181,9 @@ function modeSaid(s: PaymentGatewayStatus): string {
 }
 
 function confirmSaid(s: PaymentGatewayStatus): string {
-  return s.confirm === 'callback'
-    ? 'Switched: only KwikPay’s signed confirmation marks a payment paid.'
-    : 'Switched: KwikPay’s answer when asked also marks a payment paid.'
+  if (s.confirm === 'callback') return 'Switched: only KwikPay’s signed confirmation marks a payment paid.'
+  if (s.confirm === 'message') return 'Switched: the gateway’s answer marks a payment paid when its message says it completed.'
+  return 'Switched: KwikPay’s answer when asked also marks a payment paid.'
 }
 
 function chargeSaid(s: PaymentGatewayStatus): string {

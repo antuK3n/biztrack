@@ -176,8 +176,10 @@ class KwikPayGateway
          * "What marks a KwikPay payment paid"), and this call just keeps the
          * note above current.
          */
-        if ($ok && $echoed === $payment->gateway_order_id && PaymentMode::trustsQuery()) {
-            if ($result->status() === '5') {
+        $outcome = $ok && $echoed === $payment->gateway_order_id ? self::queryOutcome($result) : null;
+
+        if ($outcome !== null) {
+            if ($outcome === 'paid') {
                 $reported = $result->body['amount'] ?? null;
                 if ($reported !== null && (float) $reported > 0 && ! self::sameAmount($reported, $payment)) {
                     $this->flag($payment, 'KwikPay reports it paid, but for '.$reported.' instead of '.self::requestedAmount($payment).'. Not credited.');
@@ -189,7 +191,7 @@ class KwikPayGateway
                 return $payment->fresh();
             }
 
-            if ($result->status() === '3') {
+            if ($outcome === 'failed') {
                 $this->fail($payment, $source, 'KwikPay reports the payment failed.');
 
                 return $payment->fresh();
@@ -442,6 +444,34 @@ class KwikPayGateway
     }
 
     /** 2, 4, 8, 16, 32, then every 60 minutes. */
+    /**
+     * What an /api/query answer says happened, under the "What marks a payment
+     * paid" switch: 'paid', 'failed', or null for "nothing settled".
+     *
+     *   callback  nothing: only the signed callback settles a payment
+     *   query     the status code, as KwikPay's merchant docs define it
+     *   message   the message, as payment-gateway-kwgu.onrender.com reports
+     *             it: status "5" only says the lookup worked, and the message
+     *             says "Transaction completed successfully" or "Transaction
+     *             failed" once the order is final
+     */
+    public static function queryOutcome(KwikPayResult $result): ?string
+    {
+        return match (PaymentMode::confirm()) {
+            PaymentMode::CONFIRM_QUERY => match ($result->status()) {
+                '5' => 'paid',
+                '3' => 'failed',
+                default => null,
+            },
+            PaymentMode::CONFIRM_MESSAGE => $result->status() !== '5' ? null : match (true) {
+                str_contains(strtolower($result->message()), 'completed successfully') => 'paid',
+                str_contains(strtolower($result->message()), 'transaction failed') => 'failed',
+                default => null,
+            },
+            default => null,
+        };
+    }
+
     public static function backoffMinutes(int $attempts): int
     {
         return (int) min(60, 2 ** max(1, $attempts));

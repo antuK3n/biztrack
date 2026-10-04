@@ -104,7 +104,18 @@ class PaymentMode
 
     public const CONFIRM_QUERY = 'query';
 
-    public const CONFIRMS = [self::CONFIRM_CALLBACK, self::CONFIRM_QUERY];
+    /*
+     * `message`: the gateway's answer settles a payment by what its MESSAGE
+     * says, because that is how payment-gateway-kwgu.onrender.com reports an
+     * order: its /api/query answers status "5" whenever the lookup works, and
+     * the order's state is in the message — "Transaction completed
+     * successfully", "Transaction is waiting to be processed" or "Transaction
+     * failed" (its merchant-api.controller.ts, mapState). Chosen by Ken on
+     * 4 October 2026.
+     */
+    public const CONFIRM_MESSAGE = 'message';
+
+    public const CONFIRMS = [self::CONFIRM_CALLBACK, self::CONFIRM_QUERY, self::CONFIRM_MESSAGE];
 
     private const CONFIRM_KEY = 'kwikpay_confirm';
 
@@ -199,12 +210,6 @@ class PaymentMode
         return $stored !== null && in_array($stored, self::CONFIRMS, true) ? $stored : self::CONFIRM_CALLBACK;
     }
 
-    /** Whether a status answer from /api/query may complete or fail a payment. */
-    public static function trustsQuery(): bool
-    {
-        return self::confirm() === self::CONFIRM_QUERY;
-    }
-
     /**
      * Change what marks a payment paid, without an audit row (the caller
      * writes its own). Returns what it was before.
@@ -214,7 +219,7 @@ class PaymentMode
     public static function setConfirm(string $confirm): string
     {
         if (! in_array($confirm, self::CONFIRMS, true)) {
-            throw new \InvalidArgumentException("Unknown setting: {$confirm}. Use callback or query.");
+            throw new \InvalidArgumentException("Unknown setting: {$confirm}. Use callback, query or message.");
         }
 
         $before = self::confirm();

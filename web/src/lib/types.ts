@@ -873,7 +873,7 @@ export type PaymentGatewayMode = 'simulated' | 'kwikpay'
 export type PaymentGatewayCharge = 'test' | 'full'
 
 /** What may mark a KwikPay payment paid: its signed callback only, or its status answer too. */
-export type PaymentGatewayConfirm = 'callback' | 'query'
+export type PaymentGatewayConfirm = 'callback' | 'query' | 'message'
 
 /**
  * The super admin's view of both switches (GET /admin/payment-gateway). Names

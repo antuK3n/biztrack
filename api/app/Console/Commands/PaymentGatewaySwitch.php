@@ -20,6 +20,9 @@ use Illuminate\Console\Command;
  *   callback-only  only KwikPay's signed callback marks a payment paid (the
  *                default)
  *   trust-query  a "5" or "3" from /api/query also settles a payment
+ *   read-message the /api/query answer's message settles a payment
+ *                ("Transaction completed successfully" / "Transaction failed"),
+ *                the way payment-gateway-kwgu.onrender.com reports it
  *   test         one signed /api/me call to KwikPay
  *
  * The same switches as PUT /admin/payment-gateway and the Online Payments
@@ -29,7 +32,7 @@ use Illuminate\Console\Command;
  */
 class PaymentGatewaySwitch extends Command
 {
-    protected $signature = 'biztrack:payment-gateway {action : status|on|off|test-charge|full-charge|callback-only|trust-query|test}';
+    protected $signature = 'biztrack:payment-gateway {action : status|on|off|test-charge|full-charge|callback-only|trust-query|read-message|test}';
 
     protected $description = 'Show, switch or test how owners pay (simulated or KwikPay) what KwikPay collects (test charge or the full bill), and what marks a payment paid';
 
@@ -43,6 +46,7 @@ class PaymentGatewaySwitch extends Command
             'full-charge' => $this->switchCharge(PaymentMode::CHARGE_FULL),
             'callback-only' => $this->switchConfirm(PaymentMode::CONFIRM_CALLBACK),
             'trust-query' => $this->switchConfirm(PaymentMode::CONFIRM_QUERY),
+            'read-message' => $this->switchConfirm(PaymentMode::CONFIRM_MESSAGE),
             'test' => $this->test($gateway),
             default => $this->unknown(),
         };
@@ -104,9 +108,11 @@ class PaymentGatewaySwitch extends Command
 
     private static function confirmLine(string $confirm): string
     {
-        return $confirm === PaymentMode::CONFIRM_QUERY
-            ? "KwikPay's signed callback, or its status answer"
-            : "KwikPay's signed callback only";
+        return match ($confirm) {
+            PaymentMode::CONFIRM_QUERY => "KwikPay's signed callback, or its status answer",
+            PaymentMode::CONFIRM_MESSAGE => "KwikPay's signed callback, or its answer's message",
+            default => "KwikPay's signed callback only",
+        };
     }
 
     private static function chargeLine(string $charge, string $testAmount): string

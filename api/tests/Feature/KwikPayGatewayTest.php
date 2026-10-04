@@ -394,9 +394,9 @@ it('refuses callbacks from outside the allowlist when one is set', function () {
  * matched first-registered-first, so registering a second stub for the same
  * URL would be silently ignored; one stub reads this instead.
  */
-function kpQueryAnswers(string $status, ?float $amount = null, int $http = 200): void
+function kpQueryAnswers(string $status, ?float $amount = null, int $http = 200, string $message = 'x'): void
 {
-    $GLOBALS['kpQuery'] = compact('status', 'amount', 'http');
+    $GLOBALS['kpQuery'] = compact('status', 'amount', 'http', 'message');
 
     if ($GLOBALS['kpQueryFaked'] ?? false) {
         return;
@@ -405,7 +405,7 @@ function kpQueryAnswers(string $status, ?float $amount = null, int $http = 200):
 
     Http::fake([
         KP_BASE.'/api/query' => function (HttpRequest $r) {
-            ['status' => $status, 'amount' => $amount, 'http' => $http] = $GLOBALS['kpQuery'];
+            ['status' => $status, 'amount' => $amount, 'http' => $http, 'message' => $message] = $GLOBALS['kpQuery'];
 
             if ($status === 'timeout') {
                 throw new ConnectionException('cURL error 28: Operation timed out');
@@ -415,7 +415,7 @@ function kpQueryAnswers(string $status, ?float $amount = null, int $http = 200):
                 ? Http::response(['status' => '0', 'message' => 'Order not found'], $http)
                 : Http::response([
                     'status' => $status,
-                    'message' => 'x',
+                    'message' => $message,
                     'order_id' => $r['order_id'],
                     'amount' => $amount ?? 0,
                 ], $http);
@@ -512,6 +512,61 @@ it('by default still completes a payment on KwikPay\'s signed callback', functio
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Completed)
         ->and(PaymentMode::confirm())->toBe(PaymentMode::CONFIRM_CALLBACK);
+});
+
+/*
+ * `message`: how payment-gateway-kwgu.onrender.com reports an order. Its
+ * /api/query answers "5" for every order it finds and puts the state in the
+ * message, so "5" alone settles nothing.
+ */
+it('reads the answer\'s message: completed is paid, waiting is not, failed is failed', function (string $message, PaymentStatus $expected) {
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_MESSAGE);
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('5', (float) $payment->gateway_amount, 200, $message);
+
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($payment->fresh()->status)->toBe($expected);
+    if ($expected === PaymentStatus::Completed) {
+        expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
+    } else {
+        expect($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+    }
+})->with([
+    'completed' => ['Transaction completed successfully', PaymentStatus::Completed],
+    'waiting' => ['Transaction is waiting to be processed', PaymentStatus::Pending],
+    'failed' => ['Transaction failed', PaymentStatus::Failed],
+    'unknown' => ['Transaction status unknown', PaymentStatus::Pending],
+]);
+
+it('reading the message, settles nothing on an answer that is not a successful lookup', function () {
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_MESSAGE);
+    $payment = kpOpen(kpFiling());
+    kpQueryAnswers('0', null, 400, 'Transaction completed successfully');
+
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending);
+});
+
+it('reading the message, sets a waiting payment aside without completing it', function () {
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_MESSAGE);
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('5', (float) $payment->gateway_amount, 200, 'Transaction is waiting to be processed');
+
+    app(KwikPayGateway::class)->abandon($payment);
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($payment->fresh()->abandoned_at)->not->toBeNull();
+});
+
+it('switches to reading the message from the server', function () {
+    $this->artisan('biztrack:payment-gateway', ['action' => 'read-message'])->assertSuccessful();
+    expect(PaymentMode::confirm())->toBe(PaymentMode::CONFIRM_MESSAGE);
 });
 
 it('switches what marks a payment paid from the server, audit-logged', function () {
