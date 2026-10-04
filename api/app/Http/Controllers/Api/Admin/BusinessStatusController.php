@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\User;
 use App\Services\NotificationService;
+use App\Services\OwnerSanction;
 use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -407,12 +409,178 @@ class BusinessStatusController extends Controller
         ]);
     }
 
+    /*
+     * ── Business Owner Status, one row per OWNER ─────────────────────────────
+     *
+     * [Client, 5 October 2026: "ang nandoon lang tlga specific ay name ng
+     * owner, then do drop down na lang din mga businesses nya kung marami,
+     * then status, actions (active o blacklisted na lang) then view status
+     * history pa rin".] The page lists people. Each row is an owner, their
+     * businesses (a dropdown when there are several), the owner's status, and
+     * the two actions. Blacklisting and reinstating go through OwnerSanction.
+     */
+    public function owners(Request $request): JsonResponse
+    {
+        $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'status' => ['sometimes', 'nullable', 'in:active,blacklisted'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $query = User::query()
+            ->whereHas('businesses')
+            ->with([
+                'businesses' => fn ($b) => $b->select('id', 'owner_user_id', 'name', 'ban', 'status', 'created_at')
+                    ->with(['applications' => fn ($a) => $a->select('id', 'business_id', 'tracking_id', 'submitted_at', 'created_at')
+                        ->orderByRaw('COALESCE(submitted_at, created_at) DESC')
+                        ->orderByDesc('id')])
+                    ->orderBy('name'),
+                'blacklistedBy:id,name',
+            ]);
+
+        if ($q = $request->query('q')) {
+            $query->where(fn ($sub) => $sub
+                ->where('name', 'like', "%{$q}%")
+                ->orWhere('email', 'like', "%{$q}%")
+                ->orWhereHas('businesses', fn ($b) => $b->where('name', 'like', "%{$q}%")));
+        }
+
+        match ($request->query('status')) {
+            'blacklisted' => $query->whereNotNull('blacklisted_at'),
+            'active' => $query->whereNull('blacklisted_at'),
+            default => null,
+        };
+
+        $page = $query->orderByRaw('blacklisted_at IS NULL')->orderByDesc('blacklisted_at')->orderBy('name')
+            ->paginate($this->perPage($request));
+
+        return response()->json([
+            'data' => collect($page->items())->map(fn (User $owner) => [
+                'id' => $owner->id,
+                'name' => $owner->name,
+                'email' => $owner->email,
+                'status' => $owner->isBlacklisted() ? 'blacklisted' : 'active',
+                'status_label' => $owner->isBlacklisted() ? 'Blacklisted' : 'Active',
+                'blacklisted_at' => optional($owner->blacklisted_at)->toISOString(),
+                'reason' => $owner->blacklist_reason,
+                'blacklisted_by' => $owner->blacklistedBy?->name,
+                'businesses' => $owner->businesses->map(fn (Business $b) => [
+                    'id' => $b->id,
+                    'name' => $b->name,
+                    'ban' => $b->ban,
+                    'status' => $b->status,
+                    'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
+                    'tracking_id' => $b->applications->first()?->tracking_id,
+                    'created_at' => optional($b->created_at)->toISOString(),
+                ])->values(),
+            ])->values(),
+            'meta' => $this->pageMeta($page),
+        ]);
+    }
+
+    /** Change an owner's status: Active or Blacklisted, with a reason. */
+    public function ownerStatus(Request $request, User $owner, OwnerSanction $sanction): JsonResponse
+    {
+        $data = $request->validate([
+            'status' => ['required', 'in:active,blacklisted'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'status.in' => 'Choose Active or Blacklisted.',
+            'reason.required' => 'Say why. The owner is told, and it is recorded in the status history.',
+        ]);
+
+        abort_unless($owner->businesses()->exists(), 422, 'This account holds no business.');
+
+        if ($data['status'] === 'blacklisted') {
+            abort_if($owner->isBlacklisted(), 422, 'This owner is already blacklisted.');
+            $moved = $sanction->blacklist($owner, $data['reason'], $request->user());
+        } else {
+            abort_unless($owner->isBlacklisted(), 422, 'This owner is already active.');
+            $moved = $sanction->reinstate($owner, $data['reason'], $request->user());
+        }
+
+        return response()->json(['data' => [
+            'id' => $owner->id,
+            'status' => $data['status'],
+            'status_label' => $data['status'] === 'blacklisted' ? 'Blacklisted' : 'Active',
+            'businesses_moved' => $moved->count(),
+        ]]);
+    }
+
+    /**
+     * An owner's status history: every blacklisting and reinstatement, newest
+     * first, with the reason and who decided, and what it did to the
+     * businesses. Read off the audit log, like the permit history.
+     */
+    public function ownerHistory(User $owner): JsonResponse
+    {
+        $logs = AuditLog::query()
+            ->where('auditable_type', User::class)
+            ->where('auditable_id', $owner->id)
+            ->whereIn('action', ['owner.blacklisted', 'owner.blacklist_lifted'])
+            ->with('user:id,name')
+            ->orderByDesc('id')
+            ->get()
+            ->map(fn (AuditLog $log) => [
+                'at' => $log->created_at?->toIso8601String(),
+                'to' => $log->action === 'owner.blacklisted' ? 'blacklisted' : 'active',
+                'label' => $log->action === 'owner.blacklisted' ? 'Owner blacklisted — businesses suspended' : 'Owner reinstated — businesses restored',
+                'reason' => $log->changes['reason'] ?? null,
+                'by' => $log->user?->name,
+            ]);
+
+        $logs->push([
+            'at' => $owner->created_at?->toIso8601String(),
+            'to' => 'active',
+            'label' => 'Account created',
+            'reason' => null,
+            'by' => null,
+        ]);
+
+        return response()->json(['data' => $logs->values()->all()]);
+    }
+
     public function updateStatus(Request $request, Business $business): JsonResponse
     {
         $data = $request->validate([
             'status' => ['required', 'in:active,flagged,suspended,blacklisted'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
+
+        /*
+         * ── Locked while the owner is blacklisted ────────────────────────────
+         *
+         * [Client, 5 October 2026: "di dapat basta basta ma eedit status ng
+         * mga business na yon".] The business is suspended because its OWNER
+         * is barred; changing it here would contradict that finding. The way
+         * back is to reinstate the owner, which returns the businesses the
+         * blacklisting suspended.
+         */
+        $business->loadMissing('owner');
+        if ($business->owner?->isBlacklisted()) {
+            throw ValidationException::withMessages([
+                'status' => [
+                    "The owner, {$business->owner->name}, is blacklisted, so {$business->name} stays suspended and "
+                    .'its status cannot be changed. Reinstate the owner from Business Owner Status first.',
+                ],
+            ]);
+        }
+
+        // Blacklisting is of the owner now; asked of one business, it is asked of the person.
+        if ($data['status'] === Business::STATUS_BLACKLISTED && $business->owner !== null) {
+            $moved = app(OwnerSanction::class)->blacklist($business->owner, $data['reason'], $request->user());
+            $business->refresh();
+
+            return response()->json(['data' => [
+                'id' => $business->id,
+                'status' => $business->status,
+                'status_label' => self::LABELS[$business->status] ?? ucfirst($business->status),
+                'owner_blacklisted' => true,
+                'others_blacklisted' => max(0, $moved->count() - 1),
+                'others_restored' => 0,
+            ]]);
+        }
 
         $from = $business->status;
 

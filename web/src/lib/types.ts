@@ -3024,6 +3024,36 @@ export interface UploadedDocument extends AppDocument {
 
 export type BusinessStatus = 'active' | 'flagged' | 'suspended' | 'blacklisted'
 
+/** GET /admin/owners — one row per business owner [client, 5 October 2026]. */
+export interface AdminOwner {
+  id: number
+  name: string
+  email: string
+  status: 'active' | 'blacklisted'
+  status_label: string
+  blacklisted_at: string | null
+  reason: string | null
+  blacklisted_by: string | null
+  businesses: {
+    id: number
+    name: string
+    ban: string | null
+    status: BusinessStatus
+    status_label: string
+    tracking_id: string | null
+    created_at: string | null
+  }[]
+}
+
+/** One entry of GET /admin/owners/{id}/history, newest first. */
+export interface OwnerHistoryEntry {
+  at: string | null
+  to: 'active' | 'blacklisted'
+  label: string
+  reason: string | null
+  by: string | null
+}
+
 export interface AdminBusiness {
   id: number
   name: string

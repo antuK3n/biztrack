@@ -60,6 +60,8 @@ import type {
   PaymentMethod,
   PaymentOptions,
   Permit,
+  AdminOwner,
+  OwnerHistoryEntry,
   PermitHistoryEntry,
   PermitRegisterRow,
   PermitStatusOptions,
@@ -1759,6 +1761,19 @@ export const admin = {
       status_label: string
       businesses_moved: number
     }>(api.post(`/admin/owners/${ownerId}/lift-blacklist`, { status, reason })),
+
+  /*
+   * Business Owner Status, one row per owner [client, 5 October 2026]: the
+   * roster of people, their status (Active or Blacklisted), and its history.
+   */
+  owners: (params: { q?: string; status?: 'active' | 'blacklisted'; page?: number; per_page?: number } = {}) =>
+    unwrapPaged<AdminOwner>(api.get('/admin/owners', { params })),
+  setOwnerStatus: (ownerId: number, status: 'active' | 'blacklisted', reason: string) =>
+    unwrap<{ id: number; status: string; status_label: string; businesses_moved: number }>(
+      api.post(`/admin/owners/${ownerId}/status`, { status, reason }),
+    ),
+  ownerHistory: (ownerId: number) =>
+    unwrap<OwnerHistoryEntry[]>(api.get(`/admin/owners/${ownerId}/history`)),
 
   businessesPage: (filters: AdminBusinessFilters = {}) =>
     unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),
