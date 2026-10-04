@@ -375,6 +375,19 @@ it('does not dump a canned answer on input it cannot classify', function () {
         ->not->toContain('Malabon Revenue Code');
 });
 
+it('looks up a six-digit tracking id as itself, not the five-digit one inside it', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    [$five, $six] = Application::where('applicant_user_id', $owner->id)
+        ->whereNotNull('tracking_id')->orderBy('id')->take(2)->get()->all();
+    $five->forceFill(['tracking_id' => 'BIZ-2026-12345', 'status' => 'rejected'])->save();
+    $six->forceFill(['tracking_id' => 'BIZ-2026-123456', 'status' => 'for_approval'])->save();
+
+    // Numbering pads to five digits and grows past them after 99,999 filings.
+    expect(ask('status of BIZ-2026-123456 please'))
+        ->toContain('Application BIZ-2026-123456 is currently: '.$six->fresh()->statusLabel().'.')
+        ->not->toContain('BIZ-2026-12345 ');
+});
+
 it('explains the tracking number format instead of guessing on a partial one', function () {
     $body = ask('BIZ-2026-1');
 

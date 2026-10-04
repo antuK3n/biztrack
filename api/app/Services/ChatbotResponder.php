@@ -28,7 +28,12 @@ use Illuminate\Support\Collection;
  */
 class ChatbotResponder
 {
-    private const TRACKING_PATTERN = '/BIZ-\d{4}-\d{5}/i';
+    /*
+     * Five digits or more. Numbering pads the sequence to five and lets it grow
+     * past them after 99,999 filings in a year, and `\d{5}` alone read
+     * BIZ-2026-123456 as BIZ-2026-12345, answering for a different filing.
+     */
+    private const TRACKING_PATTERN = '/BIZ-\d{4}-\d{5,}/i';
 
     /** Looks like someone is quoting a tracking id, but it is not a valid one. */
     private const NEAR_MISS_TRACKING_PATTERN = '/\bbiz[\s\-_]?\d/i';
