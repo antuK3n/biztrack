@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAmendment;
 use App\Models\ApplicationAssignment;
@@ -811,6 +812,52 @@ it('refuses to approve a move until the new address is cleared', function () {
     // Nothing moved: not the register, not the filing.
     expect(Business::findOrFail($businessId)->address->barangay_id)->toBe($before)
         ->and(Application::findOrFail($appId)->status->value)->not->toBe('approved');
+});
+
+/*
+ * A move added AFTER a return goes to CPDO too (owner-amend row 28).
+ *
+ * The clearance was attached at submission only. So an amendment submitted
+ * as a trade-name change, returned by BPLO, and resubmitted with a new pin
+ * carried the business permit alone: BPLO could approve it, and the register
+ * moved the premises without CPDO ever being asked.
+ */
+it('carries the zoning clearance for a move added after BPLO returns the amendment', function () {
+    [$appId, $businessId] = amendmentFiling(['trade_name' => 'Before Return']);
+    $owner = authAs('owner@biztrack.local');
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    expect(Application::findOrFail($appId)->permitTypes()->pluck('code')->all())
+        ->toBe([PermitType::OUTCOME_CODE]);
+
+    $bplo = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', Department::where('code', 'BPLO')->value('id'))
+        ->firstOrFail();
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$bplo->id}/return", ['remarks' => 'Please check the address.'])
+        ->assertOk();
+
+    // The owner adds a move to the returned filing and sends it back.
+    $owner = authAs('owner@biztrack.local');
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/amendments", [
+        'changes' => [
+            ['field' => 'address_street', 'new_value' => 'Moved Street'],
+            ['field' => 'address_pin', 'new_value' => '14.6600,120.9500'],
+        ],
+    ])->assertOk();
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/resubmit")->assertOk();
+
+    $app = Application::findOrFail($appId);
+    expect($app->permitTypes()->pluck('code')->sort()->values()->all())->toBe(['BUSINESS', 'ZONING'])
+        ->and($app->permitTypes->firstWhere('code', 'ZONING')->pivot->status)->toBe(ClearanceStatus::NotStarted);
+
+    // And BPLO cannot approve it past CPDO.
+    $before = Business::findOrFail($businessId)->address->street;
+    $message = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$bplo->id}/approve")
+        ->assertStatus(422)
+        ->json('message');
+    expect($message)->toContain('new address')
+        ->and(Business::findOrFail($businessId)->address->street)->toBe($before);
 });
 
 /*

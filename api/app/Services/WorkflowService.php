@@ -1612,6 +1612,31 @@ class WorkflowService
              */
             $this->recordWizardCorrections($app);
 
+            /*
+             * ── A move added on the way back carries CPDO, as at submission ──
+             *
+             * An amendment's ZONING clearance is attached by
+             * `attachRequiredPermitTypes` at submission, off the changes it
+             * asks for then. A returned amendment can be given new ones, and
+             * this is the second submission — so a trade-name change returned
+             * by BPLO and sent back with a new pin carried the business permit
+             * alone, BPLO could approve it, and the register moved the premises
+             * without CPDO being asked (owner-amend row 28).
+             *
+             * Only what is MISSING is attached. `attachRequiredPermitTypes`
+             * itself is not re-run: its `syncWithoutDetaching` rewrites the
+             * status of every row it names, and on a resubmission that would
+             * put a ZONING clearance CPDO had already moved on back to Not
+             * Yet Submitted.
+             */
+            if ($app->application_type === ApplicationType::Amendment) {
+                $missing = self::permitTypeIdsAtSubmission($app)
+                    ->diff($app->permitTypes()->pluck('permit_types.id'));
+                foreach ($missing as $permitTypeId) {
+                    $app->permitTypes()->attach($permitTypeId, ['status' => ClearanceStatus::NotStarted->value]);
+                }
+            }
+
             $app->assignments()
                 ->where('status', AssignmentStatus::Returned->value)
                 ->update(['status' => AssignmentStatus::Pending->value, 'remarks' => null]);
