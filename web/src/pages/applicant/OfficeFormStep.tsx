@@ -237,7 +237,13 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'OCCUPANCY.fsec_date': 'FSEC — Date Issued',
   'OCCUPANCY.owner_address': 'Address of Owner / Permittee',
   'OCCUPANCY.owner_zip': 'ZIP Code',
+  'OCCUPANCY.owner_tel': 'Tel. No.',
+  'OCCUPANCY.owner_ctc_no': 'Community Tax Certificate No.',
+  'OCCUPANCY.owner_ctc_date': 'CTC — Date Issued',
+  'OCCUPANCY.owner_ctc_place': 'CTC — Place Issued',
   'OCCUPANCY.project_name': 'Name of Project',
+  'OCCUPANCY.project_location': 'Location of Project',
+  'OCCUPANCY.total_floor_area_sqm': 'Total Floor Area (sq. m.)',
   'OCCUPANCY.occupancy_type': 'Use / Character of Occupancy',
   'OCCUPANCY.building_storeys': 'No. of Storeys',
   'OCCUPANCY.building_units': 'No. of Units',
@@ -308,10 +314,16 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'fsec_date',
     'owner_address',
     'owner_zip',
+    'owner_tel',
+    'owner_ctc_no',
+    'owner_ctc_date',
+    'owner_ctc_place',
     'project_name',
+    'project_location',
     'occupancy_type',
     'building_storeys',
     'building_units',
+    'total_floor_area_sqm',
     'completion_date',
   ],
 }
@@ -774,9 +786,11 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
     if (!has('project_name')) missing.push('Name of Project')
+    if (!has('project_location')) missing.push('Location of Project')
     if (!has('occupancy_type')) missing.push('Use / Character of Occupancy')
     if (!has('building_storeys')) missing.push('No. of Storeys')
     if (!has('building_units')) missing.push('No. of Units')
+    if (!has('total_floor_area_sqm')) missing.push('Total Floor Area')
     if (!has('completion_date')) missing.push('Date of Completion')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
@@ -889,6 +903,8 @@ function correctionControl(key: string): CorrectionControl | undefined {
     'OCCUPANCY.building_storeys': { kind: 'numeric' },
     'OCCUPANCY.building_units': { kind: 'numeric' },
     'OCCUPANCY.owner_zip': { kind: 'numeric' },
+    'OCCUPANCY.owner_ctc_date': { kind: 'date' },
+    'OCCUPANCY.total_floor_area_sqm': { kind: 'numeric' },
     'ZONING.zoning_industrial_project_type': {
       kind: 'chips',
       options: ZONING_INDUSTRIAL_PROJECT_TYPES,
@@ -907,7 +923,7 @@ function correctionControl(key: string): CorrectionControl | undefined {
  * too, so a correction cannot introduce a spelling the office would have to
  * return a second time.
  */
-function CorrectionAnswer({
+export function CorrectionAnswer({
   code,
   field,
   label,
@@ -2923,6 +2939,59 @@ function OccupancyFields({
             />
             <CarriedTag field="owner_zip" />
           </label>
+          {/*
+            ── From the paper, 4 October 2026 ───────────────────────────────
+
+            The unified OBO form prints Tel. No. beside the owner's address,
+            and under "Submitted by: Owner/Permittee" asks for the Community
+            Tax Certificate — number, date and place issued. All four are the
+            owner's to answer and were not asked. The CTC is optional: not
+            every owner holds one today, and a blank the office can ask for is
+            better than a gate that stops the sheet.
+          */}
+          <label className="block shrink-0">
+            <FieldLabel>Tel. No.</FieldLabel>
+            <input
+              inputMode="tel"
+              value={get(data, 'owner_tel')}
+              onChange={(e) => set('owner_tel', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="owner_tel" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>Community Tax Certificate No.</FieldLabel>
+            <input
+              value={get(data, 'owner_ctc_no')}
+              onChange={(e) => set('owner_ctc_no', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[12rem]`}
+            />
+            <CarriedTag field="owner_ctc_no" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>CTC — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'owner_ctc_date')}
+              onChange={(e) => set('owner_ctc_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="owner_ctc_date" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>CTC — Place Issued</FieldLabel>
+            <input
+              value={get(data, 'owner_ctc_place')}
+              onChange={(e) => set('owner_ctc_place', e.target.value)}
+              readOnly={ro}
+              placeholder="Malabon City"
+              className={`${inputCls} w-[12rem]`}
+            />
+            <CarriedTag field="owner_ctc_place" />
+          </label>
           <DerivedField
             className="grow basis-[12rem]"
             label={
@@ -2953,6 +3022,17 @@ function OccupancyFields({
               className={inputCls}
             />
             <CarriedTag field="project_name" />
+          </label>
+          <label className="block grow basis-[18rem]">
+            <FieldLabel required>Location of Project</FieldLabel>
+            <input
+              value={get(data, 'project_location')}
+              onChange={(e) => set('project_location', e.target.value)}
+              readOnly={ro}
+              placeholder="Lot / Block / Street / Barangay"
+              className={inputCls}
+            />
+            <CarriedTag field="project_location" />
           </label>
           <DerivedField
             className="grow basis-[18rem]"
@@ -3003,6 +3083,18 @@ function OccupancyFields({
               className={`${inputCls} tnum w-[7rem]`}
             />
             <CarriedTag field="building_units" />
+          </label>
+          {/* On both the unified form and the Certificate of Completion; it was asked on neither sheet here. */}
+          <label className="block shrink-0">
+            <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
+            <input
+              inputMode="decimal"
+              value={get(data, 'total_floor_area_sqm')}
+              onChange={(e) => set('total_floor_area_sqm', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} tnum w-[10rem]`}
+            />
+            <CarriedTag field="total_floor_area_sqm" />
           </label>
           <DerivedField
             className="shrink-0"

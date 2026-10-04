@@ -43,6 +43,8 @@ import {
   officeFormFieldLabel,
   officeFormFieldRank,
   officeFormMeta,
+  CorrectionAnswer,
+  type OfficeFormCode,
 } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
 import { isGatheringOtherPermits, otherPermitProgress } from '../../lib/status'
@@ -2176,6 +2178,47 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * where the filing has not arrived yet.
    */
   const [fieldEdits, setFieldEdits] = useState<Record<string, string>>({})
+  /*
+   * ── The office's own sheet, corrected in Edit mode ──────────────────────
+   *
+   * Client, 4 October 2026: *"edit mode for the admin side still does not
+   * work. I can't edit fields."* It worked exactly as designed — Edit mode
+   * turned on the For Office Use fields and nothing the applicant had
+   * written — and the design was the complaint. The decision taken: an
+   * office may correct the answers on the ONE sheet it issues the permit
+   * for, and the server records each change by key, before and after
+   * (`OfficeFormController::upsert`, `office_form.corrected_by_office`).
+   *
+   * Its own buffer and its own Save, not folded into `fieldEdits`: that one
+   * writes the business record through `applications.updateFields`, this
+   * writes a sheet through `officeForms.save`, and one button that did two
+   * different writes could half-succeed. Keyed by sheet, because BPLO's
+   * sheet may be beside the office's own on the same page.
+   */
+  const [sheetEdits, setSheetEdits] = useState<Record<string, Record<string, string>>>({})
+  const [sheetSaving, setSheetSaving] = useState<string | null>(null)
+  const [sheetSaveError, setSheetSaveError] = useState<string | null>(null)
+  const editSheet = (code: string, key: string, value: string) =>
+    setSheetEdits((prev) => ({ ...prev, [code]: { ...(prev[code] ?? {}), [key]: value } }))
+  async function saveSheet(code: string, saved: Record<string, unknown>) {
+    const edits = sheetEdits[code]
+    if (!edits || sheetSaving !== null) return
+    setSheetSaving(code)
+    setSheetSaveError(null)
+    try {
+      await officeFormsApi.save(app.id, code, { ...saved, ...edits })
+      setSheetEdits((prev) => {
+        const next = { ...prev }
+        delete next[code]
+        return next
+      })
+      reload()
+    } catch (err) {
+      setSheetSaveError(toApiError(err).message)
+    } finally {
+      setSheetSaving(null)
+    }
+  }
   const [savingFields, setSavingFields] = useState(false)
   const [fieldSaveError, setFieldSaveError] = useState<string | null>(null)
   const [confirmFieldSave, setConfirmFieldSave] = useState(false)
@@ -5703,13 +5746,57 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   </p>
                 ) : (
                   <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
-                    {entries.map(([key, value]) => (
-                      <Field
-                        key={key}
-                        label={officeFormFieldLabel(form.permit_type_code, key)}
-                        value={officeFormValueText(key, value)}
-                      />
-                    ))}
+                    {entries.map(([key, value]) =>
+                      editing ? (
+                        /*
+                         * The same control the applicant answers a returned
+                         * field with — chips where the sheet offers chips, a
+                         * date where it asks a date — so a correction cannot
+                         * write a value the sheet itself would never produce.
+                         */
+                        <div key={key} className="min-w-[12rem] grow basis-[14rem]">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+                            {officeFormFieldLabel(form.permit_type_code, key)}
+                          </p>
+                          <CorrectionAnswer
+                            code={form.permit_type_code as OfficeFormCode}
+                            field={key}
+                            label={officeFormFieldLabel(form.permit_type_code, key)}
+                            value={
+                              sheetEdits[form.permit_type_code]?.[key] ??
+                              (value == null ? '' : String(value))
+                            }
+                            onChange={(v) => editSheet(form.permit_type_code, key, v)}
+                          />
+                        </div>
+                      ) : (
+                        <Field
+                          key={key}
+                          label={officeFormFieldLabel(form.permit_type_code, key)}
+                          value={officeFormValueText(key, value)}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
+                {editing && sheetEdits[form.permit_type_code] && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void saveSheet(form.permit_type_code, form.form_data ?? {})}
+                      aria-disabled={sheetSaving !== null || undefined}
+                      className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+                    >
+                      {sheetSaving === form.permit_type_code ? 'Saving…' : 'Save corrections to this sheet'}
+                    </button>
+                    <span className="text-xs text-ink-muted">
+                      {Object.keys(sheetEdits[form.permit_type_code]).length}
+                      {Object.keys(sheetEdits[form.permit_type_code]).length === 1 ? ' answer' : ' answers'}{' '}
+                      changed · recorded under your name
+                    </span>
+                    {sheetSaveError && (
+                      <span className="text-xs font-semibold text-s-red">{sheetSaveError}</span>
+                    )}
                   </div>
                 )}
                 {/*
