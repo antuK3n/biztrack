@@ -320,3 +320,65 @@ it('renders a certificate whose business was removed from the register', functio
     expect(substr($bytes, 0, 5))->toBe('%PDF-')
         ->and($text)->toContain('Business removed from register');
 });
+
+/*
+ * ── The BFP's Fire Safety Inspection Certificate ────────────────────────────
+ *
+ * Its own sheet, laid out from the issued BFP-QSF-FSED-005 the client sent
+ * [4 October 2026]: portrait Letter, the FSIC NO. being this system's permit
+ * number, the Fire Code fee line, and two signatures — Recommend Approval by
+ * the Chief, Fire Safety Enforcement Section, and Approved by the City Fire
+ * Marshal — with no Mayor on it.
+ */
+function fsicPermit(): Permit
+{
+    $seed = ownersPermit();
+
+    return Permit::create([
+        'permit_number' => 'FSIC-TEST-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => PermitType::where('code', 'FSIC')->value('id'),
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+}
+
+it('draws the FSIC as the BFP issues it, signed by the fire office and not the Mayor', function () {
+    $permit = fsicPermit();
+    $bfp = PermitType::where('code', 'FSIC')->value('issuing_department_id');
+    OfficeSignatory::updateOrCreate(
+        ['department_id' => $bfp, 'role' => 'City Fire Marshal'],
+        ['name' => 'Eduardo R. Lacson', 'sort_order' => 1, 'is_active' => true],
+    );
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['is_fsic'])->toBeTrue()
+        ->and($cert['fsic_purpose'])->toBeIn(['occupancy', 'business', 'other'])
+        ->and(array_column($cert['signatories'], 'role'))
+        ->toBe(['Chief, Fire Safety Enforcement Section', 'City Fire Marshal'])
+        ->and($cert['signatories'][1]['name'])->toBe('Eduardo R. Lacson')
+        // No name on file for the Chief: a ruled line, not a guess.
+        ->and($cert['signatories'][0]['name'])->toBeNull();
+
+    authAs('owner@biztrack.local');
+    $pdf = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent());
+    $text = $pdf->getText();
+
+    expect($pdf->getPages())->toHaveCount(1)
+        ->and($text)->toContain('FIRE SAFETY INSPECTION CERTIFICATE')
+        ->and($text)->toContain($permit->permit_number)
+        // (The justified paragraphs space their words apart, which the parser drops.)
+        ->and($text)->toContain('TO WHOM IT MAY CONCERN')
+        ->and($text)->toContain('Fire Code Fees')
+        ->and($text)->toContain('EDUARDO R. LACSON')
+        ->and($text)->not->toContain('City Mayor');
+
+    // Portrait US Letter, as the Bureau's sheet is.
+    $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
+    expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
+});

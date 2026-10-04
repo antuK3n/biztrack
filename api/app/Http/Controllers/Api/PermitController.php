@@ -12,6 +12,7 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
 use App\Support\QrCode;
@@ -620,6 +621,9 @@ class PermitController extends Controller
         // CENRO's certificate is landscape too, as its issued sheet is.
         if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false)) {
             $pdf->setPaper('letter', 'landscape');
+        } elseif ($cert['is_fsic'] ?? false) {
+            // The BFP's FSIC is a portrait Letter sheet, as issued.
+            $pdf->setPaper('letter', 'portrait');
         }
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
@@ -675,6 +679,8 @@ class PermitController extends Controller
             // assessment for CENRO's share of it — see the sheet blocks below.
             'application.payments',
             'application.feeAssessment',
+            // The FSIC prints its own sheet's answers (occupancy, storeys).
+            'application.officeForms',
             // For the signatory fallback on permits frozen before the face
             // carried one — see PermitFace::forPrinting.
             'issuedBy',
@@ -791,6 +797,27 @@ class PermitController extends Controller
         $code = $permit->permitType?->code;
         $isBusinessPermit = $code === PermitType::OUTCOME_CODE;
         $isCenroCertificate = $code === 'CEC';
+        $isFsic = $code === 'FSIC';
+
+        /*
+         * ── The FSIC signs as the BFP's own form does ───────────────────────
+         *
+         * BFP-QSF-FSED-005 carries two lines and no Mayor: RECOMMEND APPROVAL
+         * by the Chief, Fire Safety Enforcement Section, and APPROVED by the
+         * City Fire Marshal [client, 4 October 2026, with the issued sheet].
+         * Both captions are fixed by the form; the NAMES come from the BFP's
+         * office_signatories rows when it has them, and print as a blank ruled
+         * line until it does — an empty line is honest, a guessed name is not.
+         */
+        if ($isFsic) {
+            $named = fn (string $needle) => collect($office)
+                ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
+
+            $signatories = [
+                ['role' => 'Chief, Fire Safety Enforcement Section', 'name' => $named('enforcement'), 'action' => 'Recommend Approval'],
+                ['role' => 'City Fire Marshal', 'name' => $named('marshal'), 'action' => 'Approved'],
+            ];
+        }
 
         /*
          * The settled payment, not the latest. A filing can carry an
@@ -857,11 +884,77 @@ class PermitController extends Controller
             ];
         }
 
+        /*
+         * ── The BFP's Fire Safety Inspection Certificate ────────────────────
+         *
+         * Laid out from the issued certificate [client, 4 October 2026]. What
+         * it needs beyond the face, all from what the system already holds:
+         *
+         *   - which certificate: For Certificate of Occupancy, For Business
+         *     Permit (New/Renewal), or Others — read off the FSIC sheet's
+         *     derived "Certificate Applied For";
+         *   - the description line: occupancy, floor area and storeys, from the
+         *     sheet and the fee profile, printed only as far as they are known;
+         *   - the Fire Code fee: the BFP's own line(s) of the assessment, not
+         *     the filing's total, with the OR number and date it was paid under
+         *     (the same reasoning as CENRO's share above).
+         *
+         * The FSIC NO. is the permit number this system issued, and the
+         * tracking ID stands where the paper prints its control number.
+         */
+        if ($isFsic) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'FSIC', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+
+            $appliedFor = (string) ($sheet['certificate_applied_for'] ?? '');
+            $purpose = match (true) {
+                str_contains($appliedFor, 'Occupancy') => 'occupancy',
+                str_contains($appliedFor, 'Business Permit') => 'business',
+                default => 'other',
+            };
+
+            $profile = $application?->fee_profile ?? [];
+            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.')
+                : null;
+            $storeys = trim((string) ($sheet['building_storeys'] ?? ''));
+            $occupancy = trim((string) ($sheet['occupancy_type'] ?? ''));
+
+            $description = collect([
+                $area !== null ? "occupying approx. {$area} sq m floor area" : null,
+                $storeys !== '' ? "of a {$storeys}-storey building" : null,
+                $occupancy !== '' ? "utilized as {$occupancy}" : null,
+            ])->filter()->implode(' ');
+
+            $bfpShare = collect($application?->feeAssessment?->line_items ?? [])
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'BFP')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'fsic_purpose' => $purpose,
+                'fsic_others' => $purpose === 'other' && $appliedFor !== '' ? $appliedFor : null,
+                'fsic_valid_for' => match ($purpose) {
+                    'occupancy' => 'Issuance of FSIC for Certificate of Occupancy only',
+                    'business' => 'Issuance of FSIC for Business Permit only',
+                    default => 'Issuance of FSIC',
+                },
+                'fsic_description' => $description !== '' ? $description : null,
+                'office_amount_paid' => $paid ? '₱'.number_format($bfpShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'letterhead' => config('biztrack.letterheads.BFP'),
+            ];
+        }
+
         return [
             // Which sheet to draw. The views branch on these rather than on the
             // permit type's name, which is a label and may be reworded.
             'is_business_permit' => $isBusinessPermit,
             'is_cenro_certificate' => $isCenroCertificate,
+            'is_fsic' => $isFsic,
             ...$sheetFields,
             'permit_number' => $permit->permit_number,
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',

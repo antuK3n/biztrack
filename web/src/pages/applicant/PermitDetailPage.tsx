@@ -9,6 +9,7 @@ import { formatDate } from '../../lib/format'
 import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit } from '../../lib/types'
+import { FsicSheet } from './FsicSheet'
 
 /*
  * Permit view (PDF p17/p59): a modal-like centered sheet — royal top bar with
@@ -47,7 +48,7 @@ interface PermitCertificate {
   valid_from: string | null
   valid_until: string | null
   /** Admin-edited office signatories; never a name compiled into this file. */
-  signatories: { role: string; name: string }[]
+  signatories: { role: string; name: string | null; action?: string }[]
   verify_url: string
   /*
    * ── The Mayor's Permit prints the City's own form ────────────────────────
@@ -76,7 +77,18 @@ interface PermitCertificate {
    */
   is_cenro_certificate?: boolean
   office_amount_paid?: string | null
-  letterhead?: { address: string; trunkline: string; email: string; website: string } | null
+  letterhead?: Record<string, string | null> | null
+  /*
+   * ── The BFP's Fire Safety Inspection Certificate ────────────────────────
+   *
+   * Its own sheet, drawn by FsicSheet [client, 4 October 2026]. The BFP's share
+   * of the bill rides in `office_amount_paid`, as CENRO's does.
+   */
+  is_fsic?: boolean
+  fsic_purpose?: 'occupancy' | 'business' | 'other'
+  fsic_others?: string | null
+  fsic_valid_for?: string
+  fsic_description?: string | null
 }
 
 /**
@@ -283,6 +295,8 @@ export function PermitDetailPage() {
       {(cert?.is_business_permit || cert?.is_cenro_certificate) && (
         <style>{'@media print { @page { size: letter landscape; margin: 0.4in; } }'}</style>
       )}
+      {/* The FSIC is a portrait Letter sheet, as the download is. */}
+      {cert?.is_fsic && <style>{'@media print { @page { size: letter portrait; margin: 0.4in; } }'}</style>}
       {/* Modal-like sheet: royal bar with white X (p59) */}
       <div className="overflow-hidden rounded-md bg-white shadow-overlay print:rounded-none print:shadow-none">
         {/*
@@ -322,12 +336,22 @@ export function PermitDetailPage() {
 
         {/* The permit "document" */}
         <article className="border-[6px] border-white bg-white px-3 py-5 sm:px-10 sm:py-7 print:border-0 print:p-0">
-          {/*
+          {cert?.is_fsic ? (
+            <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-8 sm:py-6">
+              <FsicSheet
+                cert={cert}
+                verifyUrl={permit.verify_url}
+                validFrom={permit.valid_from}
+                validUntil={permit.valid_until}
+              />
+            </div>
+          ) : (
+          /*
             CENRO's sheet is green [client, 4 October 2026] — a soft tint on
             the ruled frame only, so the margin stays paper-white and the
             small italic clause still reads at AA. `print-color-adjust` keeps
             the tint when printed; browsers drop backgrounds by default.
-          */}
+          */
           <div
             className={`border-2 px-3.5 py-5 sm:px-8 sm:py-6 ${
               cert?.is_cenro_certificate
@@ -765,6 +789,7 @@ export function PermitDetailPage() {
               </>
             )}
           </div>
+          )}
         </article>
       </div>
 

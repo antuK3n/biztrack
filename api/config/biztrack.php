@@ -160,6 +160,20 @@ return [
             'email' => 'CENRO@malabon.gov.ph',
             'website' => 'Malabon.gov.ph',
         ],
+        /*
+         * The BFP's head, as the FSIC prints it. The station's street address
+         * and lines are left for the station to supply (env) rather than
+         * guessed: a wrong phone number on a certificate is worse than none.
+         * A null line simply does not print.
+         */
+        'BFP' => [
+            'agency' => 'Bureau of Fire Protection',
+            'region' => 'National Capital Region',
+            'district' => env('BFP_FIRE_DISTRICT'),
+            'station' => 'Malabon City Fire Station',
+            'address' => env('BFP_STATION_ADDRESS'),
+            'contact' => env('BFP_STATION_CONTACT'),
+        ],
     ],
 
 ];

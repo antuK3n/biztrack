@@ -189,14 +189,80 @@
         body.cenro .cenro-receipt { font-size: 9.5px; line-height: 1.5; margin-top: 16px; }
         body.cenro .cenro-receipt-label { font-weight: bold; }
 
+        /*
+         * ── The BFP's Fire Safety Inspection Certificate ────────────────────
+         *
+         * Portrait Letter, set to the issued sheet's proportions [client,
+         * 4 October 2026]: a centred agency letterhead, the FSIC NO. in red,
+         * the title in the Bureau's blue, a running paragraph with ruled
+         * fill-in lines and their italic captions beneath, then fees left and
+         * signatures right. The red PAALALA and the motto close it.
+         */
+        body.fsic .sheet { padding: 14px 28px 12px; }
+        .fsic-seal-cell { width: 108px; vertical-align: middle; }
+        .fsic-seal { height: 68px; }
+        .fsic-head { text-align: center; font-size: 10.5px; line-height: 1.25; }
+        .fsic-dilg { font-weight: bold; font-size: 11.5px; }
+        .fsic-bureau { font-weight: bold; font-size: 15px; color: #1f4e9c; letter-spacing: 0.5px; }
+        table.fsic-numbers { margin-top: 8px; }
+        table.fsic-numbers td { vertical-align: bottom; }
+        .fsic-no-label { color: #c11212; font-weight: bold; font-size: 15px; }
+        .fsic-no { display: inline-block; min-width: 190px; border-bottom: 1px solid #2b2b2b; font-size: 13px; padding: 0 6px 1px; margin-left: 6px; }
+        .fsic-date-cell { width: 190px; text-align: center; }
+        .fsic-date { border-bottom: 1px solid #2b2b2b; font-size: 12px; padding-bottom: 1px; }
+        .fsic-title { text-align: center; font-weight: bold; font-size: 22px; color: #1f4e9c; letter-spacing: 0.5px; margin-top: 10px; }
+        .fsic-purposes { margin: 4px 0 0 150px; font-size: 10.5px; font-weight: bold; color: #1f4e9c; line-height: 1.4; }
+        .fsic-check { display: inline-block; width: 11px; height: 11px; line-height: 11px; border: 1px solid #1f4e9c; text-align: center; font-size: 9px; color: #1a1a1a; margin-right: 4px; }
+        .fsic-others { display: inline-block; min-width: 230px; border-bottom: 1px solid #2b2b2b; color: #1a1a1a; font-weight: normal; }
+        .fsic-concern { font-weight: bold; font-size: 11.5px; margin-top: 8px; }
+        .fsic-body { font-size: 10.5px; line-height: 1.4; margin-top: 4px; }
+        .fsic-body p { margin: 0 0 2px; text-align: justify; }
+        .fsic-indent { text-indent: 48px; }
+        .fsic-fill { border-bottom: 1px solid #2b2b2b; text-align: center; font-size: 11.5px; font-weight: bold; padding: 1px 4px 0; min-height: 14px; }
+        .fsic-fill.fsic-nowrap { white-space: nowrap; font-size: 11px; }
+        .fsic-fill.fsic-small { font-size: 9.5px; font-weight: normal; text-align: left; }
+        .fsic-caption { text-align: center; font-size: 8px; font-style: italic; color: #333; margin-bottom: 3px; }
+        table.fsic-owned td { vertical-align: top; }
+        .fsic-lead { width: 140px; padding-top: 3px !important; white-space: nowrap; }
+        .fsic-trail { width: 135px; padding: 3px 0 0 8px !important; white-space: nowrap; }
+        .fsic-indent-cell { width: 150px; padding-left: 48px !important; }
+        table.fsic-valid { margin-top: 2px; }
+        .fsic-until-label { width: 64px; padding: 3px 0 0 8px !important; white-space: nowrap; }
+        .fsic-until { width: 150px; }
+        .fsic-violation { margin-top: 6px !important; }
+        table.fsic-foot { margin-top: 12px; }
+        .fsic-fees { width: 46%; font-size: 11px; }
+        .fsic-fees-title { font-weight: bold; }
+        table.fsic-fee-table { border-collapse: collapse; margin-top: 2px; }
+        table.fsic-fee-table td { padding: 1px 6px 1px 0; font-size: 11px; }
+        td.fsic-fee-value { border-bottom: 1px solid #2b2b2b; min-width: 150px; width: 160px; text-align: center; }
+        .fsic-control { font-size: 10px; margin-top: 8px; }
+        .fsic-signs { font-size: 11px; }
+        .fsic-action { font-weight: bold; font-size: 11px; margin-top: 2px; }
+        .fsic-sig-name { text-align: center; font-weight: bold; font-size: 12.5px; margin-top: 12px; }
+        .fsic-sig-name.blank { color: transparent; }
+        .fsic-sig-line { border-bottom: 1px solid #2b2b2b; margin: 1px 10px 0; }
+        .fsic-sig-role { text-align: center; font-size: 9px; margin-bottom: 4px; }
+        .fsic-note { text-align: center; font-style: italic; font-weight: bold; font-size: 9px; line-height: 1.3; margin: 12px 30px 0; }
+        .fsic-posted { text-align: center; font-weight: bold; font-size: 13px; letter-spacing: 0.5px; margin-top: 5px; }
+        .fsic-paalala { text-align: center; color: #c11212; font-weight: bold; font-size: 8px; line-height: 1.4; margin: 3px 20px 0; }
+        table.fsic-last { margin-top: 4px; }
+        table.fsic-last td { vertical-align: middle; }
+        .fsic-copy-cell { width: 170px; }
+        .fsic-copy { border: 1px solid #2b2b2b; padding: 2px 6px; font-size: 9.5px; font-weight: bold; font-style: italic; }
+        .fsic-motto { font-weight: bold; font-size: 13px; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : '') }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : '')) }}">
 <div class="sheet">
+@if($is_fsic ?? false)
+    @include('pdf.fsic')
+@else
     {{-- Header: city block left, verification QR right. --}}
     <table class="row">
         <tr>
@@ -455,6 +521,7 @@
             Verify authenticity with code <span class="verify-code">{{ $permit_number }}</span> at {{ $verify_url }}
         </div>
     @endif
+@endif
 </div>
 </body>
 </html>
