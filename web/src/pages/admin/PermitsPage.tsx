@@ -241,6 +241,25 @@ function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
   return value === null || value.trim() === '' ? '—' : value
 }
 
+/*
+ * What BPLO reads on another office's tab: enough to know WHICH permit, for
+ * WHICH business, and whether it is in force — then the certificate itself in
+ * the last column. No office-sheet answers, no uploads, and not the columns
+ * that are constant within one office's tab (its certificate name and office).
+ * Valid-from and issued-on are left off too: on a clearance they are the same
+ * date. Issued-by is left off because it names the OTHER office's officer,
+ * which BPLO has no use for — and without these the certificate column fits.
+ */
+const PERMIT_ONLY_KEYS = new Set([
+  'tracking_id',
+  'permit_number',
+  'business',
+  'owner_name',
+  'status',
+  'valid_until',
+  'days',
+])
+
 /** A permit's uploads: a count that expands into View/Download per file. */
 function UploadsCell({ permit }: { permit: PermitRegisterRow }) {
   const [open, setOpen] = useState(false)
@@ -300,7 +319,16 @@ const OFFICE_TAB_CODES: Record<OfficeCode, string> = {
   CEC: 'CENRO',
 }
 
-function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: OfficeChoice) => void }) {
+function OfficeTabs({
+  value,
+  onChange,
+  includeAll = true,
+}: {
+  value: OfficeChoice
+  onChange: (v: OfficeChoice) => void
+  /** ALL is the super admin's; BPLO is shown its own office and the five others. */
+  includeAll?: boolean
+}) {
   const tabs: { value: OfficeChoice; short: string; sub: string; full: string }[] = [
     // "ALL", and no "Other offices" tab [client, 4 October 2026]. The OTHER
     // view still exists behind the choice type — a link can open it — but it
@@ -308,6 +336,8 @@ function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: Of
     { value: '', short: 'ALL', sub: 'Every permit', full: 'All offices, every permit' },
     ...OFFICES.map((o) => ({ value: o.code as OfficeChoice, short: OFFICE_TAB_CODES[o.code], sub: o.name, full: `${o.office} — ${o.name}` })),
   ]
+
+  const shown = includeAll ? tabs : tabs.filter((t) => t.value !== '')
 
   return (
     // Wraps rather than scrolls: at 1440px a one-line strip cut CENRO in half
@@ -321,8 +351,8 @@ function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: Of
         as one control. Below `md` it scrolls sideways instead of squeezing
         seven columns into a phone.
       */}
-      <div className="grid min-w-[44rem] grid-cols-7 gap-2">
-        {tabs.map((t) => {
+      <div className="grid min-w-[44rem] gap-2" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
+        {shown.map((t) => {
           const active = t.value === value
           return (
             <button
@@ -375,6 +405,22 @@ export function PermitsPage() {
   const department = useAuth((s) => s.user?.department?.code)
 
   const readsEveryOffice = permissions?.includes('application.view_any_office') ?? false
+  /*
+   * ── BPLO reads every office's PERMITS, not every office's files ─────────
+   *
+   * [Client, 4 October 2026: "sa bplo side, bat nakikita nya lahat? dapat yung
+   * permit nya lang … at mga mismong permit sa other offices, no need sa ibang
+   * fields".] BPLO and the super admin both hold `application.view_any_office`,
+   * so this screen treated them alike. They are not alike: the super admin
+   * audits everything; BPLO issues the Mayor's Permit and needs to SEE that the
+   * other offices' permits exist, not to read their sheets and uploads.
+   *
+   * So for BPLO: its own tab carries everything, and another office's tab is
+   * the permits alone — the shared columns and the certificate, no office-sheet
+   * columns, no requirements. `user.manage` is what marks the super admin.
+   */
+  const isSuperAdmin = permissions?.includes('user.manage') ?? false
+  const bploView = readsEveryOffice && !isSuperAdmin
   const canRevoke = permissions?.includes('permit.revoke') ?? false
   const ownOffice = permitCodeForDepartment(department)
 
@@ -553,7 +599,18 @@ export function PermitsPage() {
    * issued first — the menu's first entry, and a true description rather than
    * a selection the page had to invent on arrival.
    */
-  const columns = useMemo(() => columnsFor(office), [office])
+  const permitOnly = bploView && office !== 'BUSINESS'
+  const columns = useMemo(
+    () =>
+      permitOnly
+        ? columnsFor(office).filter(
+            // The certificate type only on the mixed list the Business Map links to
+            // (?office=all); on one office's tab every row is the same type.
+            (c) => PERMIT_ONLY_KEYS.has(c.key) || (office === '' && c.key === 'permit_type'),
+          )
+        : columnsFor(office),
+    [office, permitOnly],
+  )
 
   /*
    * Only the orderings whose column is on screen. BPLO's own table has no
@@ -802,7 +859,7 @@ export function PermitsPage() {
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
       ) : (
       <>
-      {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} />}
+      {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} includeAll={!bploView} />}
 
 
       {/*
@@ -871,7 +928,7 @@ export function PermitsPage() {
             role="region"
             aria-label={`Issued permits for ${officeLabel}, scrolls sideways`}
           >
-            <table className="w-max text-left text-sm">
+            <table className={`${permitOnly ? "w-full" : "w-max"} text-left text-sm`}>
               <thead>
                 <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
                   {columns.map((column) => {
@@ -948,9 +1005,11 @@ export function PermitsPage() {
                     The last heading is visible now. It was a hidden "Actions",
                     which named the buttons rather than the thing they open.
                   */}
-                  <th scope="col" className="whitespace-nowrap px-4 py-3">
-                    Requirements Submitted
-                  </th>
+                  {!permitOnly && (
+                    <th scope="col" className="whitespace-nowrap px-4 py-3">
+                      Requirements Submitted
+                    </th>
+                  )}
                   <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
                     Permit
                   </th>
@@ -965,7 +1024,9 @@ export function PermitsPage() {
                         <td
                           key={column.key}
                           className={[
-                            'whitespace-nowrap px-4 py-3.5',
+                            // The permit-only view fits the card: names may wrap there rather than
+                            // push the certificate column off the edge.
+                            permitOnly && (column.key === 'business' || column.key === 'owner_name') ? 'px-4 py-3.5' : 'whitespace-nowrap px-4 py-3.5',
                             column.tnum ? 'tnum' : '',
                             // The lead identifier carries the row, so it is
                             // the one drawn in full ink.
@@ -1006,9 +1067,11 @@ export function PermitsPage() {
                       eye down. The count says there IS something; the toggle
                       shows it.
                     */}
-                    <td className="px-4 py-3.5">
-                      <UploadsCell permit={permit} />
-                    </td>
+                    {!permitOnly && (
+                      <td className="px-4 py-3.5">
+                        <UploadsCell permit={permit} />
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-4 py-3.5 text-right">
                       <button
                         type="button"
