@@ -138,7 +138,7 @@ interface MapMeta {
   permit_type?: { code: string; name: string } | null
 }
 
-type PermitState = 'active' | 'expired' | 'suspended' | 'revoked' | 'none'
+type PermitState = 'active' | 'expired' | 'suspended' | 'revoked' | 'retired' | 'rejected' | 'none'
 
 /*
  * The client asked "is the permit still active", and checklist item 16 asks
@@ -208,6 +208,17 @@ const STATES: Record<PermitState, { label: string; description: (permit: string,
     description: (p) => `The issuing office revoked the ${p}. The business may not rely on it.`,
     svg: '<path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#fff" stroke-width="6" stroke-linecap="round" /><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#14171d" stroke-width="3" stroke-linecap="round" />',
   },
+  // Added with Change status [client, 5 October 2026].
+  retired: {
+    label: 'Permit retired',
+    description: (p) => `The ${p} was retired — the business no longer operates under it.`,
+    svg: '<rect x="3.5" y="3.5" width="11" height="11" rx="2" fill="#9aa1ad" stroke="#fff" stroke-width="2" /><path d="M6 9h6" stroke="#fff" stroke-width="2" stroke-linecap="round" />',
+  },
+  rejected: {
+    label: 'Permit rejected',
+    description: (p) => `The issuing office rejected the ${p}. It is not valid.`,
+    svg: '<path d="M9 2.5 16 15.5H2Z" fill="#c11212" stroke="#fff" stroke-width="2" stroke-linejoin="round" /><path d="M9 7v4" stroke="#fff" stroke-width="1.75" stroke-linecap="round" /><circle cx="9" cy="13" r="1" fill="#fff" />',
+  },
   none: {
     label: 'No permit on file',
     description: (p) => `No ${p} has ever been issued to this business.`,
@@ -215,7 +226,7 @@ const STATES: Record<PermitState, { label: string; description: (permit: string,
   },
 }
 
-const STATE_ORDER: PermitState[] = ['active', 'expired', 'suspended', 'revoked', 'none']
+const STATE_ORDER: PermitState[] = ['active', 'expired', 'suspended', 'revoked', 'retired', 'rejected', 'none']
 
 /*
  * One glyph definition, drawn in two places.
@@ -245,6 +256,8 @@ const MARKER_ICONS: Record<PermitState, L.DivIcon> = {
   expired: divIconFor('expired'),
   suspended: divIconFor('suspended'),
   revoked: divIconFor('revoked'),
+  retired: divIconFor('retired'),
+  rejected: divIconFor('rejected'),
   none: divIconFor('none'),
 }
 
@@ -472,7 +485,14 @@ export function BusinessMapPage({
   const permitName = meta.permit_type?.name ?? 'Mayor’s Permit'
   const mayors = (meta.permit_type?.code ?? 'BUSINESS') === 'BUSINESS'
   // An office maps only businesses holding its certificate, so "never held one" cannot occur there.
-  const order = mayors ? STATE_ORDER : STATE_ORDER.filter((s) => s !== 'none')
+  /*
+   * Only the states this map can hold. An office maps only businesses holding
+   * its certificate, so "never held one" cannot occur there; and a Mayor's
+   * Permit is never Rejected, nor a clearance Retired.
+   */
+  const order = STATE_ORDER.filter((s) =>
+    mayors ? s !== 'rejected' : s !== 'none' && s !== 'retired',
+  )
 
   const statePills = [
     { value: 'all' as const, label: `All ${meta.plotted}` },

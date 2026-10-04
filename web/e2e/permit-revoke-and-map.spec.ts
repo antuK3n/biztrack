@@ -43,9 +43,10 @@ test.describe('BPLO revokes a permit', () => {
     await page.getByRole('option', { name: 'Active', exact: true }).click()
     await page.keyboard.press('Escape')
 
-    const revoke = page.getByRole('button', { name: /^Revoke / }).first()
+    // Revoked from Change status in the Actions column [client, 5 October 2026].
+    const revoke = page.getByRole('button', { name: /^Change status of / }).first()
     await expect(revoke).toBeVisible({ timeout: 30_000 })
-    const permitNumber = ((await revoke.getAttribute('aria-label')) ?? '').replace(/^Revoke /, '')
+    const permitNumber = ((await revoke.getAttribute('aria-label')) ?? '').replace(/^Change status of /, '')
     expect(permitNumber).toMatch(/\S+-\d{4}-\d+/)
 
     // Before: the public page vouches for it.
@@ -56,13 +57,12 @@ test.describe('BPLO revokes a permit', () => {
     await shot(verify, 'verify-valid-mobile')
 
     await revoke.click()
-    const dialog = page.getByRole('dialog', { name: `Revoke ${permitNumber}?` })
+    const dialog = page.getByRole('dialog', { name: `Change status — ${permitNumber}` })
     await expect(dialog).toBeVisible()
-    await dialog
-      .getByRole('textbox', { name: 'Reason for revoking' })
-      .fill('Closure order from the Mayor, e2e check.')
+    await dialog.getByRole('radio', { name: /Revoked/ }).check()
+    await dialog.getByRole('textbox', { name: 'Reason' }).fill('Closure order from the Mayor, e2e check.')
     await shot(page, 'revoke-dialog')
-    await dialog.getByRole('button', { name: 'Revoke permit' }).click()
+    await dialog.getByRole('button', { name: 'Save status' }).click()
     await expect(dialog).toHaveCount(0)
 
     // The server's answer, not the page's: search it back out under Revoked.
@@ -75,14 +75,12 @@ test.describe('BPLO revokes a permit', () => {
     await expect(row).toHaveCount(1, { timeout: 20_000 })
     await expect(row).toContainText('Revoked')
     await expect(row).toContainText('Closure order from the Mayor, e2e check.')
-    // Nothing left to revoke on it.
-    await expect(page.getByRole('button', { name: `Revoke ${permitNumber}` })).toHaveCount(0)
     await shot(page, 'register-revoked-row')
 
     // After: the QR page says Revoked, with a date and without the reason.
     await verify.reload()
     await expect(verify.getByRole('heading', { name: 'Revoked', level: 1 })).toBeVisible({ timeout: 20_000 })
-    await expect(verify.getByText(/The City revoked this permit on /)).toBeVisible()
+    await expect(verify.getByText(/The issuing office revoked this permit on /)).toBeVisible()
     await expect(verify.locator('body')).not.toContainText('Closure order from the Mayor')
     await expect(verify.getByText(permitNumber, { exact: true })).toBeVisible()
     await shot(verify, 'verify-revoked-mobile')
@@ -101,11 +99,11 @@ test.describe('an office revokes its own certificates, and maps them', () => {
     await page.goto('/staff/admin/permits')
     await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
 
-    // Every Revoke on its table is on one of its own certificates.
-    for (const label of await page.getByRole('button', { name: /^Revoke / }).evaluateAll((els) =>
+    // Every Change status on its table is on one of its own certificates.
+    for (const label of await page.getByRole('button', { name: /^Change status of / }).evaluateAll((els) =>
       els.map((e) => e.getAttribute('aria-label') ?? ''),
     )) {
-      expect(label).toMatch(/^Revoke FSIC-/)
+      expect(label).toMatch(/^Change status of FSIC-/)
     }
 
     await page.getByRole('group', { name: 'Permits view' }).getByRole('button', { name: 'Map' }).click()

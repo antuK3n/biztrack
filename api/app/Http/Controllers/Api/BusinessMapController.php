@@ -205,6 +205,9 @@ class BusinessMapController extends Controller
                 $live !== null => 'active',
                 $latest === null => 'none',
                 $latest->status === PermitStatus::Revoked => 'revoked',
+                // Added with Change status [client, 5 October 2026].
+                $latest->status === PermitStatus::Retired => 'retired',
+                $latest->status === PermitStatus::Rejected => 'rejected',
                 $latest->status === PermitStatus::Suspended
                     && $latest->valid_until !== null
                     && $latest->valid_until->greaterThanOrEqualTo($today) => 'suspended',
@@ -261,6 +264,8 @@ class BusinessMapController extends Controller
                     'expired' => $counts->get('expired', 0),
                     'suspended' => $counts->get('suspended', 0),
                     'revoked' => $counts->get('revoked', 0),
+                    'retired' => $counts->get('retired', 0),
+                    'rejected' => $counts->get('rejected', 0),
                     'none' => $counts->get('none', 0),
                 ],
                 'truncated' => $truncated,

@@ -68,7 +68,24 @@ function verdictFor(data: VerifyResult): Verdict {
     case 'revoked':
       return {
         word: 'Revoked',
-        sentence: `The City revoked this permit${data.revoked_at ? ` on ${formatDate(data.revoked_at)}` : ''}. It is no longer valid.`,
+        sentence: `The issuing office revoked this permit${data.revoked_at ? ` on ${formatDate(data.revoked_at)}` : ''}. It is no longer valid.`,
+        icon: XCircleIcon,
+        tone: 'bg-s-red-tint',
+        iconTone: 'text-s-red',
+      }
+    // Retired and Rejected [client, 5 October 2026]: neither may be read as merely expired.
+    case 'retired':
+      return {
+        word: 'Retired',
+        sentence: 'This permit was retired — the business is recorded as no longer operating under it. It is not valid.',
+        icon: XCircleIcon,
+        tone: 'bg-canvas',
+        iconTone: 'text-ink-secondary',
+      }
+    case 'rejected':
+      return {
+        word: 'Rejected',
+        sentence: 'The office that issued this permit has rejected it. It is no longer valid.',
         icon: XCircleIcon,
         tone: 'bg-s-red-tint',
         iconTone: 'text-s-red',

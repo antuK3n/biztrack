@@ -1646,6 +1646,32 @@ export interface TimelineEntry {
 
 /* ── Notifications ────────────────────────────────────────────────────── */
 
+/** GET /permits/{id}/status-options — what Change status may offer. */
+export interface PermitStatusOptions {
+  current: string
+  current_label: string
+  /** True only for the office that issued the permit. */
+  can_change: boolean
+  /** Expired, superseded, revoked or retired: nothing can change it now. */
+  final: boolean
+  options: { value: string; label: string }[]
+  /** A Mayor's Permit held suspended by rejected permits: why, one line each. */
+  locked: string[]
+}
+
+/** One entry of GET /permits/{id}/history, newest first. */
+export interface PermitHistoryEntry {
+  at: string | null
+  action: string
+  label: string
+  from: string | null
+  to: string | null
+  to_label: string | null
+  reason: string | null
+  by: string | null
+  by_office: string | null
+}
+
 export interface Notification {
   id: number
   type: string

@@ -266,8 +266,9 @@ it('says revoked and suspended rather than folding them into expired', function 
         // The popup opens the certificate, so the id travels with the number.
         ->and($rows[$revoked->id]['permit_id'])->not->toBeNull();
 
-    // The legend's counts are the five states and nothing else, and they add up.
-    expect(array_keys($body['meta']['counts']))->toEqualCanonicalizing(['active', 'expired', 'suspended', 'revoked', 'none'])
+    // The legend's counts are the states and nothing else, and they add up. Retired
+    // and Rejected joined them with Change status [client, 5 October 2026].
+    expect(array_keys($body['meta']['counts']))->toEqualCanonicalizing(['active', 'expired', 'suspended', 'revoked', 'retired', 'rejected', 'none'])
         ->and(array_sum($body['meta']['counts']))->toBe($body['meta']['plotted'])
         ->and($body['meta']['truncated'])->toBeFalse();
 });
