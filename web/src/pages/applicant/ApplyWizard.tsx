@@ -2459,7 +2459,14 @@ function IdentifyFilingModal({
                */
               'This business has no current business permit to amend.'
             : permits.length > 0
-              ? `Tick every permit you are ${verb}.`
+              ? /*
+                 * Held, with no sentence. "Tick every permit you are
+                 * renewing." outlived the ticks: the list is one radio group
+                 * since renewals carry one permit (owner-drafts 21), and Ken
+                 * had the line removed, not reworded. An empty string still
+                 * greys Continue (`!== null`) and describes nothing.
+                 */
+                ''
               : `This business has no permit to renew. File a New Application instead.`
           : /*
              * ── Nothing else is asked HERE ──────────────────────────────────
@@ -2497,7 +2504,7 @@ function IdentifyFilingModal({
      * has to work out that it is dead. The reason is still on the button's
      * `aria-describedby`, which is how the greyed control explains itself.
      */
-    if (confirming || blocked) return
+    if (confirming || blocked !== null) return
     if (businessId === null || !prefill) return
     onConfirm({
       businessId,

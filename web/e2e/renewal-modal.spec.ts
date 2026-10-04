@@ -466,22 +466,48 @@ test('Continue is never disabled — it says what is still missing', async ({ pa
   await expect(modal).toBeVisible()
   await expect(page.locator(`[id="${first}"]`)).toBeVisible()
 
-  // With a business chosen, the reason moves on to the permits — and asks for
-  // EVERY one this filing covers, because one tick is no longer the whole
-  // answer. Both ways out are named, because both are answers.
+  // With a business chosen, Continue is still held until a permit is picked,
+  // and says nothing more. "Tick every permit you are renewing." outlived the
+  // ticks — the list is one radio group since renewals carry one permit — and
+  // was removed on 5 October 2026, not reworded.
   await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
   await expect(permitRows(page)).toHaveCount(2, { timeout: WIZARD_PAINT_MS })
-  const second = await proceed.getAttribute('aria-describedby')
-  expect(second).toBeTruthy()
-  await expect(page.locator(`[id="${second}"]`)).toHaveText(
-    /tick every permit you are renewing.*none issued through biztrack/i,
-  )
+  await expect(proceed).toHaveAttribute('aria-disabled', 'true')
+  await expect(proceed).not.toHaveAttribute('aria-describedby', /.+/)
+  await expect(modal.getByText(/tick every permit/i)).toHaveCount(0)
 
   // Answered, there is nothing left to describe. One tick is enough to answer
   // the question even though more are allowed — "which permits" is satisfied
   // by a set of one, and demanding a second would invent a rule.
   await tickOf(permitRows(page).first()).check()
   await expect(proceed).not.toHaveAttribute('aria-describedby', /.+/)
+})
+
+test('a business with permits holds Continue until one is picked, and says nothing stale', async ({ page }) => {
+  /*
+   * "Tick every permit you are renewing." sat under the permit list after it
+   * became one radio group, since renewals carry one permit (owner-drafts 21).
+   * Removed on 5 October 2026 and not replaced: Continue stays held until a
+   * permit is picked, and describes nothing while it waits.
+   */
+  await page.goto('/apply?type=renewal')
+  const modal = dialog(page)
+  await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
+  const proceed = modal.getByRole('button', { name: /continue/i })
+
+  // The select is named by its question, not "Business" — see `businessSelect`.
+  const select = modal.getByRole('combobox', { name: /which business are you renewing/i })
+  await expect(select.locator(`option[value="${TWO_PERMIT_BUSINESS_ID}"]`)).toHaveCount(1)
+  await select.selectOption({ value: String(TWO_PERMIT_BUSINESS_ID) })
+  const permits = modal.getByRole('radio')
+  await expect(permits.first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
+
+  await expect(proceed).toHaveAttribute('aria-disabled', 'true')
+  await expect(proceed).not.toHaveAttribute('aria-describedby', /.+/)
+  await expect(modal.getByText(/tick every permit/i)).toHaveCount(0)
+
+  await permits.first().check()
+  await expect(proceed).not.toHaveAttribute('aria-disabled', 'true')
 })
 
 test('a business whose permits are on paper is not trapped, but must say so', async ({ page }) => {
