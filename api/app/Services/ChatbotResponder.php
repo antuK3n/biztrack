@@ -741,12 +741,18 @@ class ChatbotResponder
             ? "Your applications covering the {$type->name}:"
             : 'Your most recent applications:'];
 
+        /*
+         * statusLabel(), not status->label(): a paid filing still gathering its
+         * other permits sits at `approved` with no decision yet, and the bare
+         * label called it "Completed" while every screen of the owner's own
+         * said "Approved" (Application::statusLabel).
+         */
         foreach ($applications as $application) {
             $label = $application->tracking_id ?: 'Draft (no tracking number yet)';
             $business = $application->business?->name;
             $lines[] = $business
-                ? "• {$label} ({$business}): {$application->status->label()}"
-                : "• {$label}: {$application->status->label()}";
+                ? "• {$label} ({$business}): {$application->statusLabel()}"
+                : "• {$label}: {$application->statusLabel()}";
         }
         $lines[] = 'Open one in My Applications for its timeline, or send me a tracking number for a single application.';
 
@@ -764,7 +770,7 @@ class ChatbotResponder
                 .'Double-check the tracking number under My Applications. I can only look up applications filed under your account.';
         }
 
-        return "Application {$trackingId} is currently: {$application->status->label()}. "
+        return "Application {$trackingId} is currently: {$application->statusLabel()}. "
             .'Open it in My Applications for the full timeline and next steps.';
     }
 

@@ -317,6 +317,25 @@ it('lists only the asker\'s own applications for a status question', function ()
     expect($body)->toContain($own)->not->toContain($foreign);
 });
 
+it('calls a paid filing still gathering its other permits Approved, not Completed', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $application = Application::where('applicant_user_id', $owner->id)
+        ->whereNotNull('tracking_id')->orderByDesc('id')->firstOrFail();
+
+    // Paid, and waiting on its clearances: `approved` with no decision yet.
+    $application->forceFill(['status' => 'approved', 'decided_at' => null])->save();
+    $label = "{$application->tracking_id} (".$application->business?->name.')';
+
+    expect(ask($application->tracking_id))->toContain('is currently: Approved.');
+    expect(ask('what is the status of my application?'))
+        ->toContain("{$label}: Approved")
+        ->not->toContain("{$label}: Completed");
+
+    // Once the last permit is granted it has ended, and says so.
+    $application->forceFill(['decided_at' => now()])->save();
+    expect(ask($application->tracking_id))->toContain('is currently: Completed.');
+});
+
 it('reads its own starter "Where is my application?" as a status question', function () {
     // One of the four buttons the bubble shows every owner on first open; it
     // used to come back as "Sorry, I did not quite get that".
