@@ -12,6 +12,7 @@ use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Ra11032;
+use App\Support\RequiredDocuments;
 use App\Support\SheetRequirements;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -232,6 +233,7 @@ function scopedAssignmentFiling(string $name): int
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);
@@ -311,6 +313,7 @@ function filingWithoutTin(string $tin = ''): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return Application::findOrFail($appId)->fresh();
@@ -337,6 +340,7 @@ function filingReturnedAbout(string $targets): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $app = Application::findOrFail($appId);
@@ -419,4 +423,38 @@ function homeAddress(array $overrides = []): array
         'home_province' => 'Metro Manila',
         'home_postal_code' => '1472',
     ], $overrides);
+}
+
+/**
+ * Upload every Documentary Requirement this filing must carry to submit.
+ *
+ * `ApplicationController::submit` refuses a filing missing a required document
+ * since 5 October 2026 (`App\Support\RequiredDocuments`), and a fixture that
+ * submits is modelling an applicant who went through the Documents step. Like
+ * `satisfyChecklist`, the rule runs and these rows satisfy it — the list is
+ * asked of the same class the gate asks, so a fixture cannot drift from it.
+ *
+ * Call it AFTER the filing's permit types, business answers and (for an
+ * amendment) requested changes are in place: the list depends on them.
+ */
+function attachRequiredDocuments(Application|int $application): ?Application
+{
+    // A test submitting an id that does not exist is testing the 404.
+    $application = $application instanceof Application ? $application : Application::find($application);
+    if ($application === null) {
+        return null;
+    }
+
+    foreach (RequiredDocuments::missingFor($application) as $type) {
+        ApplicationDocument::create([
+            'application_id' => $application->id,
+            'document_type_id' => $type->id,
+            'original_filename' => strtolower($type->code).'.pdf',
+            'stored_path' => 'private/documents/test/'.strtolower($type->code).'.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+        ]);
+    }
+
+    return $application->fresh();
 }

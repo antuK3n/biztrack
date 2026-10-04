@@ -2,6 +2,10 @@
 
 namespace App\Support;
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
+use App\Enums\PermitStatus;
+use App\Models\Application;
 use App\Models\Permit;
 use App\Models\PermitType;
 use Carbon\CarbonImmutable;
@@ -103,9 +107,18 @@ final class RenewalWindow
      * wait, and too late is "file a new application", which is a different
      * form. A single "outside the renewal window" would leave both of them
      * guessing which.
+     *
+     * Asks `claimRefusal` first. `$for` is the filing asking, so a submitted
+     * renewal is never refused for being the renewal already filed.
      */
-    public static function refusalFor(Permit $prior, ?CarbonImmutable $filedAt = null): ?string
+    public static function refusalFor(Permit $prior, ?CarbonImmutable $filedAt = null, ?Application $for = null): ?string
     {
+        // Whether this is still the permit to renew comes before WHEN it may
+        // be renewed: a replaced permit is not "renewable from 1 January".
+        if ($refusal = self::claimRefusal($prior, $for)) {
+            return $refusal;
+        }
+
         if ($prior->valid_until === null) {
             return null;
         }
@@ -163,6 +176,60 @@ final class RenewalWindow
                     $closes,
                 );
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why this permit is not the one to renew any more, or null if it is.
+     *
+     * ── Two holes browser testing found (5 October 2026) ─────────────────
+     *
+     * Nothing asked whether the permit named was still the business's
+     * CURRENT one, or whether somebody had already filed to renew it. So:
+     *
+     *  - a permit already replaced by a renewal could be renewed again. Only
+     *    an early renewal marks its predecessor `superseded`; one renewed
+     *    after it lapsed stays `expired`, and the picker offers every expired
+     *    permit — so last year's certificate was offered beside this year's;
+     *  - the same permit could be renewed twice at once, two filings in
+     *    flight each promising to replace it, each billed for the year.
+     *
+     * A successor is any permit whose `prior_permit_id` names this one, or
+     * this one's status saying it was superseded: the chain is written at
+     * issuance by `Permit::booted`, so it is the register's own answer.
+     *
+     * "Already filed" counts a SUBMITTED filing that is not yet decided. A
+     * draft does not count: drafts autosave and are abandoned all the time,
+     * and a forgotten draft holding a permit hostage would be a refusal the
+     * applicant cannot see the cause of. The filing asking (`$for`) is never
+     * counted against itself.
+     *
+     * Asked by the picker (`PermitResource::renewal_blocked_reason`), at
+     * create, when the prior permit is set, and again at submit — the same
+     * sentence at every door.
+     */
+    public static function claimRefusal(Permit $prior, ?Application $for = null): ?string
+    {
+        if ($prior->status === PermitStatus::Superseded || $prior->renewals()->exists()) {
+            return 'Already replaced by a newer permit.';
+        }
+
+        $filed = Application::query()
+            ->where('application_type', ApplicationType::Renewal->value)
+            ->where('status', '!=', ApplicationStatus::Draft->value)
+            ->notDecided()
+            ->when($for?->id !== null, fn ($q) => $q->whereKeyNot($for->id))
+            ->where(fn ($q) => $q
+                ->where('prior_permit_id', $prior->id)
+                ->orWhereHas('priorPermits', fn ($p) => $p->whereKey($prior->id)))
+            ->first(['id', 'tracking_id']);
+
+        if ($filed !== null) {
+            // Every submitted filing carries a tracking ID; the fallback is
+            // for a row written around submit(), so the refusal still stands.
+            return sprintf('A renewal of this permit is already filed (%s).', $filed->tracking_id ?? '#'.$filed->id);
         }
 
         return null;

@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { debugFilings } from './api'
 import type {
   DebugAdvanceTarget,
+  DebugFiling,
   DebugFilingHit,
   DebugFilingStep,
   DebugStepResult,
@@ -233,7 +234,15 @@ function MoveFiling({ id, onMoved }: { id: number; onMoved: () => void }) {
   if (filing.loading && !filing.data) return <SkeletonList rows={4} />
   if (filing.error && !filing.data) return <ErrorState error={filing.error} onRetry={filing.reload} />
   const f = filing.data
+  /*
+   * Whether the city has FINISHED with it, which `status` alone no longer
+   * says: a paid filing stands at `approved` while its other permits come in
+   * (Application::isDecided). This read `status === 'approved'` and called
+   * every one of those "Completed" (5 October 2026). `decided` is sent by
+   * FilingMover::describe; typed here until DebugFiling in ./api carries it.
+   */
   if (!f) return null
+  const decided = (f as DebugFiling & { decided?: boolean }).decided === true
 
   const takesNote = f.steps.some((step) => step.note !== null)
   const ahead = f.targets.filter((target) => !target.reached)
@@ -307,7 +316,7 @@ function MoveFiling({ id, onMoved }: { id: number; onMoved: () => void }) {
 
         {f.steps.length === 0 && ahead.length === 0 ? (
           <p className="text-sm text-ink-secondary">
-            {f.status === 'approved' ? 'Completed. There is nothing left to move.' : 'Nothing on this page can move it from here.'}
+            {decided ? 'Completed. There is nothing left to move.' : 'Nothing on this page can move it from here.'}
           </p>
         ) : (
           <>

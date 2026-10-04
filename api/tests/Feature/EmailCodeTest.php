@@ -96,6 +96,7 @@ it('lets an unconfirmed owner file while mail is off', function () {
     $draft = Application::where('applicant_user_id', $owner->id)->firstOrFail();
 
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($draft->id);
     $response = $this->postJson("/api/v1/applications/{$draft->id}/submit");
 
     expect($response->status())->not->toBe(403);
@@ -327,6 +328,7 @@ it('refuses to file until the address is confirmed, then lets it through', funct
     $draft = Application::where('applicant_user_id', $owner->id)->firstOrFail();
 
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($draft->id);
     $this->postJson("/api/v1/applications/{$draft->id}/submit")
         ->assertStatus(403)
         ->assertJsonPath('reason', 'email_unconfirmed');
@@ -336,6 +338,7 @@ it('refuses to file until the address is confirmed, then lets it through', funct
         ->assertOk()
         ->assertJsonPath('data.email_verification_required', false);
 
+    attachRequiredDocuments($draft->id);
     $after = $this->postJson("/api/v1/applications/{$draft->id}/submit");
     expect($after->json('reason'))->toBeNull();
     expect($after->status())->not->toBe(403);

@@ -58,6 +58,7 @@ function certificateFiling(): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
     test()->withHeaders($owner)

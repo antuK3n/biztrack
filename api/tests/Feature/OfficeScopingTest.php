@@ -74,6 +74,7 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
         'permit_type_ids' => PermitType::whereIn('code', $permitCodes)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*

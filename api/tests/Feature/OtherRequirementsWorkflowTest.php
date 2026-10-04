@@ -71,6 +71,7 @@ function requirementFiling(string $businessName, string $registrationNumber, arr
     // Lands on For Approval, not Pending Payment: BPLO reads the main form
     // before any bill is raised. Nothing here needs a paid filing, so the
     // fixture stops at submit rather than driving it further.
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     foreach ($offices as $code) {
@@ -643,7 +644,7 @@ function filingWithClearancesSettled(string $name, string $registrationNumber): 
  * wrong thing has to close it by approving it. That is a real cost, and the
  * alternative is a permit issued over an unanswered question.
  */
-it('holds a filing out of Final Approval while a requirement is still open', function () {
+it('holds a filing open while a requirement is still open', function () {
     // Clearances settled, so the requirement is the only thing left that can
     // hold it — otherwise this passes for the wrong reason.
     $appId = filingWithClearancesSettled('ABC Store', 'DTI-94030');
@@ -653,7 +654,7 @@ it('holds a filing out of Final Approval while a requirement is still open', fun
         ->assertCreated()->json('data.id');
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
+    expect(Application::findOrFail($appId)->isDecided())->toBeFalse();
 
     // The applicant answers — and it STILL waits, because the office has not
     // accepted the answer yet.
@@ -663,14 +664,18 @@ it('holds a filing out of Final Approval while a requirement is still open', fun
         ])->assertOk();
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
+    expect(Application::findOrFail($appId)->isDecided())->toBeFalse();
 
-    // The office accepts it, and the filing is free to move.
+    // The office accepts it, and the filing closes. It went to Final Approval
+    // until 5 October 2026, when the client had a ready filing close itself
+    // ("No, close it automatically") — see WorkflowService::refreshReadiness.
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/requests/{$requirementId}/close", ['outcome' => 'fulfilled'])
         ->assertOk();
 
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::ForFinalApproval);
+    $closed = Application::findOrFail($appId);
+    expect($closed->status)->toBe(ApplicationStatus::Approved)
+        ->and($closed->isDecided())->toBeTrue();
 });
 
 it('pulls a filing back out of Final Approval when a new requirement is raised', function () {
@@ -739,7 +744,8 @@ it('does not let a post-issuance obligation hold the filing', function () {
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
 
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::ForFinalApproval);
+    // Closed, not held: the system's own obligation does not count.
+    expect(Application::findOrFail($appId)->isDecided())->toBeTrue();
 });
 
 it('still lets an office’s own request hold it, beside a system one', function () {

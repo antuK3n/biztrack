@@ -92,6 +92,7 @@ function legalityFiling(array $openCodes, string $name): Application
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that, and
     // `bploApprovesForm` also settles the RA 11032 category the offices need.
@@ -148,6 +149,7 @@ function legalityFilingForApproval(string $name): Application
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return Application::findOrFail($appId);
@@ -338,7 +340,7 @@ it('will not issue a second set of permits for a filing already approved', funct
 
         $lastVisit = test()->withHeaders(authAs($email))
             ->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", [
-                'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+                'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
             ])->assertCreated()->json('data.id');
 
         test()->withHeaders(authAs($email))

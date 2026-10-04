@@ -78,6 +78,7 @@ function unpaidFiling(): Application
         ->assertCreated()
         ->json('data');
 
+    attachRequiredDocuments($draft['id']);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$draft['id']}/submit")
         ->assertOk()

@@ -62,6 +62,7 @@ function requirementApplication(string $businessName, string $registrationNumber
     // Lands on For Approval, not Pending Payment: BPLO reads the main form
     // before any bill is raised. Requirements are raised by an assigned office
     // and do not wait on payment, so the fixture stops here.
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*

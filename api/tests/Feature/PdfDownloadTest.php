@@ -59,6 +59,7 @@ function paidReceiptPayment(): Payment
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);

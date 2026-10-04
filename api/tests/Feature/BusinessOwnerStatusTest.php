@@ -169,6 +169,7 @@ it('stops a draft started before the suspension from being submitted after it', 
      * one refuses earlier, and says the account is restricted rather than
      * naming a field the sender could correct.
      */
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")
         ->assertForbidden();
@@ -193,6 +194,7 @@ it('lets the filing through again once the business is restored', function () {
 
     // 403: the account is barred outright while the finding stands. See the
     // note on the test above for why this stopped being a 422.
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertForbidden();
 
@@ -202,6 +204,7 @@ it('lets the filing through again once the business is restored', function () {
         ])->assertOk();
 
     // The block is a state, not a mark on the filing.
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 });
@@ -216,6 +219,7 @@ it('leaves a flagged business able to file', function () {
 
     // Flagged is a note to the LGU, not a penalty on the citizen — only
     // suspended and blacklisted bar a filing (Business::isBlockedFromApplying).
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 });
@@ -336,6 +340,7 @@ function filedOn(int $businessId, string $type): array
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($id);
     return test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$id}/submit")->assertOk()->json('data');
 }

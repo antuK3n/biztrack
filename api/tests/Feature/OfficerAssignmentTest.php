@@ -81,6 +81,7 @@ function assignmentHeldBy(User $officer, string $registrationNumber): Applicatio
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $assignment = ApplicationAssignment::firstOrCreate(

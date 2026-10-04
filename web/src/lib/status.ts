@@ -740,9 +740,8 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
  * seventh until the client asked what separated it from Approved; see
  * GUIDE_OMITTED, which is worth reading next to this.
  *
- * The status still exists and is still reached — a renewal stops there so BPLO
- * can read the certificate copies the applicant uploaded, which is real
- * evidence rather than a re-reading of our own records.
+ * The status still exists, for the filings already standing at it; since
+ * 5 October 2026 no new or renewal filing is sent there (see OMITTED_BY_TYPE).
  *
  * Dropping it from this array first moved it under "If something interrupts
  * it", because the detours were derived as "not in the flow" and there was only
@@ -858,12 +857,13 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    */
   amendment: ['for_final_approval'],
   /*
-   * A NEW filing can still reach For Final Approval, but only when it becomes
-   * ready with no confirmed RA 11032 processing category and falls back to BPLO
-   * (`WorkflowService::refreshReadiness`). That is an internal data problem the
-   * applicant cannot act on and did not cause, so naming it in their guide
-   * explains nothing and worries everyone. The badge still has a label if they
-   * ever see it — this only keeps it out of the list of things to expect.
+   * A NEW filing no longer reaches For Final Approval at all. It did until
+   * 5 October 2026, when it became ready with no confirmed RA 11032
+   * processing category and fell back to BPLO; the client had that closed
+   * automatically instead (*"No, close it automatically."*), so the last
+   * clearance issued completes the filing (`WorkflowService::refreshReadiness`).
+   * Listed so the status does not reappear under "If something interrupts
+   * it"; the badge keeps its label for the filings that already stand there.
    */
   new: ['draft', 'for_final_approval'],
   /*

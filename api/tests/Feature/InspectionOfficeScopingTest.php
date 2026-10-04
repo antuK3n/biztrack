@@ -86,6 +86,7 @@ function filingWithOneOfficesVisitWrittenUp(): array
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     // BPLO reads the form, which is what raises the bill. Classification comes
@@ -148,7 +149,7 @@ function filingWithOneOfficesVisitWrittenUp(): array
         authAs($email);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
         test()->postJson("/api/v1/applications/{$appId}/permits/{$permit}/inspection", [
-            'scheduled_at' => now()->addWeekdays(2)->toDateString(),
+            'scheduled_at' => now()->toDateString(), // today: no result before the booked day
         ])->assertCreated();
     }
 
