@@ -591,7 +591,8 @@ class PermitController extends Controller
          * The clearances stay on portrait A4. They are a single column of
          * fields, and landscape would strand them in the left third.
          */
-        if ($cert['is_business_permit'] ?? false) {
+        // CENRO's certificate is landscape too, as its issued sheet is.
+        if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false)) {
             $pdf->setPaper('letter', 'landscape');
         }
 
@@ -644,9 +645,10 @@ class PermitController extends Controller
             'business.address.barangay',
             'business.owner',
             'business.lines.psicCode',
-            // `payments` for the receipt line the paper form prints — see the
-            // Mayor's Permit block below.
+            // `payments` for the receipt line the paper forms print, and the
+            // assessment for CENRO's share of it — see the sheet blocks below.
             'application.payments',
+            'application.feeAssessment',
             // For the signatory fallback on permits frozen before the face
             // carried one — see PermitFace::forPrinting.
             'issuedBy',
@@ -717,6 +719,30 @@ class PermitController extends Controller
         }
 
         /*
+         * ── CENRO's certificate signs once ──────────────────────────────────
+         *
+         * The Certificate of Environment Clearance the office issues carries
+         * one signature: the Chief, CENRO [client, 4 October 2026]. Not the
+         * Mayor, not the reviewing officer, not the Evaluator the office also
+         * keeps on file for its application form. So this sheet keeps only
+         * the Chief's row and drops the rest.
+         *
+         * Falls back to whatever the block held when no Chief row exists —
+         * a certificate with no signature line at all is worse than one
+         * signed by the officer who reviewed it.
+         */
+        if ($permit->permitType?->code === 'CEC') {
+            $chief = array_values(array_filter(
+                $signatories,
+                fn (array $s) => str_contains(strtolower($s['role']), 'chief'),
+            ));
+
+            if ($chief !== []) {
+                $signatories = $chief;
+            }
+        }
+
+        /*
          * ── The Mayor's Permit is a different sheet ─────────────────────────
          *
          * The City's own form, photographed at the BPLO counter [client,
@@ -736,25 +762,27 @@ class PermitController extends Controller
          * the system does not know; a certificate that silently drops a row is
          * harder to read against the paper than one with an empty line.
          */
-        $isBusinessPermit = $permit->permitType?->code === PermitType::OUTCOME_CODE;
+        $code = $permit->permitType?->code;
+        $isBusinessPermit = $code === PermitType::OUTCOME_CODE;
+        $isCenroCertificate = $code === 'CEC';
 
-        $mayorsPermitFields = [];
+        /*
+         * The settled payment, not the latest. A filing can carry an
+         * abandoned online order beside the one that actually paid, and the
+         * OR number on a certificate has to be the one the money arrived
+         * under. Both office sheets print it, so it is found once.
+         */
+        $paid = $permit->application?->payments
+            ?->whereNotNull('paid_at')
+            ->sortBy('paid_at')
+            ->last();
+
+        $sheetFields = [];
 
         if ($isBusinessPermit) {
             $profile = $permit->application?->fee_profile ?? [];
 
-            /*
-             * The settled payment, not the latest. A filing can carry an
-             * abandoned online order beside the one that actually paid, and
-             * the OR number on the certificate has to be the one the money
-             * arrived under.
-             */
-            $paid = $permit->application?->payments
-                ?->whereNotNull('paid_at')
-                ->sortBy('paid_at')
-                ->last();
-
-            $mayorsPermitFields = [
+            $sheetFields = [
                 'ban' => $permit->business?->ban,
                 'area_sqm' => isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
                     ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
@@ -768,11 +796,47 @@ class PermitController extends Controller
             ];
         }
 
+        /*
+         * ── CENRO's Certificate of Environment Clearance ────────────────────
+         *
+         * Laid out from the sheet the office issues [client, 4 October 2026].
+         * Besides the face it prints a receipt block — Official Receipt,
+         * Amount Paid, Date Paid, Application Control No. — and its own
+         * letterhead.
+         *
+         * AMOUNT PAID here is CENRO's share, not the filing's total. The
+         * assessment is one bill across every office on the filing, and each
+         * line carries the office it is charged for; the certificate for one
+         * office should state what that office charged. Summing the CENRO
+         * lines does that. It can be ₱0.00 — the environmental fee schedules
+         * in A10-2016 bill per trip and per unit, and a filing with none of
+         * those owes CENRO nothing — and ₱0.00 is the honest figure, where
+         * the filing total would attribute the business permit's fees to a
+         * clearance that did not charge them.
+         *
+         * Application Control No. is the tracking ID: it is the one number
+         * the applicant, the office and this system all call the filing by.
+         */
+        if ($isCenroCertificate) {
+            $lines = collect($permit->application?->feeAssessment?->line_items ?? []);
+            $cenroShare = $lines
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'CENRO')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'office_amount_paid' => $paid ? '₱'.number_format($cenroShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'letterhead' => config('biztrack.letterheads.CENRO'),
+            ];
+        }
+
         return [
-            // Which sheet to draw. The views branch on this rather than on the
+            // Which sheet to draw. The views branch on these rather than on the
             // permit type's name, which is a label and may be reworded.
             'is_business_permit' => $isBusinessPermit,
-            ...$mayorsPermitFields,
+            'is_cenro_certificate' => $isCenroCertificate,
+            ...$sheetFields,
             'permit_number' => $permit->permit_number,
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',
             'department_name' => $permit->permitType?->department?->name,
