@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -232,4 +233,25 @@ it('finds the traced file the map draws for every barangay', function () {
         expect($layers->get($barangay->name))->not->toBeNull("{$barangay->name} has no layer on the map");
         expect(is_file(base_path(PinZone::DIRECTORY.'/'.$layers->get($barangay->name).'.geojson')))->toBeTrue();
     }
+});
+
+it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is unknown', function () {
+    // Read as CPDO reads it, through its assignment: the application
+    // endpoint does not load the office sheets at all.
+    $sheets = function (int $id): array {
+        $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
+        $department = assignOffice($id, 'CPDO');
+        $assignment = ApplicationAssignment::where('application_id', $id)->where('department_id', $department)->value('id');
+        authAs('zoning@biztrack.local');
+
+        return collect($this->getJson("/api/v1/assignments/{$assignment}")->assertOk()->json('data.application.office_forms'))
+            ->mapWithKeys(fn ($form) => [$form['permit_type_code'] => $form['zone_at_pin'] ?? null])
+            ->all();
+    };
+
+    $pinned = $sheets(pzDraft('Longos', [14.659117, 120.957631], '47111'));
+    expect($pinned['ZONING'])->toBe(['codes' => ['R-2-BASIC', 'R-2-MAX'], 'name' => 'R-2 Basic or R-2 Max'])
+        ->and(collect($pinned)->except('ZONING')->filter()->all())->toBe([]);
+
+    expect($sheets(pzDraft('Catmon', [14.669393, 120.959980], '47111'))['ZONING'])->toBeNull();
 });

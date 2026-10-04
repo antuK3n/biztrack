@@ -3104,6 +3104,12 @@ export interface OfficeForm {
    */
   requirements?: OfficeFormRequirement[] | null
   /**
+   * The zone the traced map puts the filing's pin in — on CPDD's sheet only,
+   * null on the other four and wherever the zone is unknown. `name` is the
+   * sheet's own ("R-2 Basic or R-2 Max"); lib/zoningNames.ts says it plainly.
+   */
+  zone_at_pin?: { codes: string[]; name: string } | null
+  /**
    * What the applicant changed on the rows this office last returned.
    *
    * Includes rows that did NOT change — the resubmit gate lets a file

@@ -54,6 +54,7 @@ import {
   reference,
 } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
+import { zoneLabel } from '../../lib/zoningNames'
 import { useAuth } from '../../stores/auth'
 import type {
   AdminUser,
@@ -5681,6 +5682,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     rows={form.requirements}
                     corrections={form.corrections ?? []}
                   />
+                )}
+                {/*
+                  The zone the traced map puts the pin in, in place of the
+                  rule-by-rule checklist (Ken, 5 October 2026), named as this
+                  officer's own map key names it, code and all. No verdict, and
+                  nothing at all when the zone is unknown.
+                */}
+                {form.permit_type_code === 'ZONING' && form.zone_at_pin && (
+                  <p className="mt-4 text-sm text-ink">
+                    Zone at the pin:{' '}
+                    {zoneLabel(form.zone_at_pin.codes, form.zone_at_pin.name, { withCode: true })}
+                  </p>
                 )}
                 <p className="mt-3 text-xs text-ink-muted">
                   The applicant’s own filing — address, line of business, uploaded requirements and

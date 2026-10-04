@@ -14,6 +14,7 @@ use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
+use App\Support\Zoning\PinZone;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -383,6 +384,18 @@ class ApplicationResource extends JsonResource
                              * cannot is half a feature. Both doors, one builder.
                              */
                             'requirements' => SheetRequirements::for($this->resource, $type->code),
+                            /*
+                             * The zone the traced map puts the filing's pin in
+                             * (an amendment's new pin when it moves), on
+                             * CPDD's sheet alone. Ken, 5 October 2026: one
+                             * line in place of the rule-by-rule checklist, and
+                             * nothing when the zone is unknown. No verdict:
+                             * whatever reached CPDO passed the pin rule or was
+                             * unclear (App\Support\Zoning\PinZone).
+                             */
+                            'zone_at_pin' => $type->code === 'ZONING'
+                                ? PinZone::forApplication($this->resource)
+                                : null,
                             /*
                              * What the applicant changed on the rows this
                              * office last asked about — was and now.

@@ -9,9 +9,9 @@ import { mergedStorageState, sessionFor } from './helpers'
  * needed answered. Ken removed it on 5 October 2026, from the applicant's
  * Location & Zoning step, from Review and from CPDO's review sheet. What is
  * left to prove in a browser is that it is gone, that a line of business the
- * zone under the pin clearly does not allow stops the owner with a popup, and
- * that the note under the map still reads a trade against the ordinance's own
- * words.
+ * zone under the pin clearly does not allow stops the owner with a popup, that
+ * CPDO reads the zone at the pin instead, and that the note under the map
+ * still reads a trade against the ordinance's own words.
  *
  * Screenshots go to E2E_SHOTS_DIR when it is set, for review by eye.
  */
@@ -268,7 +268,13 @@ async function filingAtCpdo(page: Page): Promise<number> {
 test.describe('the zoning officer', () => {
   test.use({ storageState: sessionFor('zoning') })
 
-  test('reads no rule checklist on the review sheet', async ({ page, browser }) => {
+  /*
+   * Ken, 5 October 2026: CPDD's sheet carries one line in place of the
+   * checklist, the zone the traced map puts the pin in, named as the officer's
+   * own map key names it. The filing is pinned at City Hall, in Longos, on
+   * the area the sheet draws as R-2 Basic or R-2 Max.
+   */
+  test('reads the zone at the pin on the review sheet, and no rule checklist', async ({ page, browser }) => {
     // The filing, built from a second browser holding the owner's and BPLO's sessions.
     const builder = await browser.newContext({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
     const builderPage = await builder.newPage()
@@ -295,6 +301,12 @@ test.describe('the zoning officer', () => {
     await expect(page.getByText(/show the application as filed/i).first()).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('zoning-rules-officer')).toHaveCount(0)
     await expect(page.getByText('City Ordinance No. 24-2018')).toHaveCount(0)
+    const line = page.getByText('Zone at the pin: Homes and apartments, some small shops (R-2 Basic or R-2 Max)', {
+      exact: true,
+    })
+    await expect(line).toBeVisible()
+    await line.scrollIntoViewIfNeeded()
+    await shot(page, 'officer-review-zone-at-pin', line.locator('xpath=ancestor::section[1]'))
     await shot(page, 'officer-review-sheet')
   })
 })
