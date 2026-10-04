@@ -1302,6 +1302,7 @@ test('the chosen line of business and Products / Services are shown large and pl
 test('the zoning note under the map is loud, green when listed and amber with an appeal when not', async ({
   page,
 }) => {
+  await allowEveryPin(page)
   /*
    * Zoning 8: the note was being overlooked — 14px in a pale box, read as a
    * caption. Zoning 13: when the trade is not on the list, say where the owner
@@ -1892,11 +1893,16 @@ async function pinAtMapCentre(page: Page) {
    * (see the <select>'s onChange), so "the first option, unless that is the one
    * already chosen" is what actually forces one.
    */
-  const values = await barangay
-    .locator('option[value]:not([value=""])')
-    .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
+  /*
+   * Baritan, and Tonsuya when Baritan is already chosen: the middle of each is
+   * homes and small shops, where the sari-sari store these tests file passes
+   * the zone rule (5 October 2026). This took the first option until then,
+   * Acacia, whose middle is Industrial-2 — where the step now stops a shop with
+   * a popup, which is zoning-rules.spec.ts's subject, not this helper's.
+   */
   const current = await barangay.inputValue()
-  await barangay.selectOption(current === values[0] ? values[1] : values[0])
+  const baritan = await barangay.locator('option', { hasText: /^Baritan$/ }).getAttribute('value')
+  await barangay.selectOption({ label: current === baritan ? 'Tonsuya' : 'Baritan' })
   await expect(page.getByText(/pin placed/i)).toBeHidden()
 
   await map.click()
@@ -1984,9 +1990,26 @@ function insightsPanel(page: Page) {
   return page.getByRole('region', { name: /business location insights/i })
 }
 
+/**
+ * Let every pin through the zone rule, for a test whose subject is not it.
+ *
+ * The tests that call this pin a sari-sari store at the middle of Longos and
+ * name Longos in what they assert. That point is in Longos' traced
+ * Institutional zone, whose list has no shop, so since 5 October 2026 the step
+ * stops the store there with a popup — zoning-rules.spec.ts proves that. These
+ * are about the note, the insights and the ring, so the zone check answers
+ * that it has nothing to say.
+ */
+async function allowEveryPin(page: Page) {
+  await page.route('**/api/v1/zone-at-pin**', (route) =>
+    route.fulfill({ json: { data: { zone: null, refusal: null } } }),
+  )
+}
+
 test('Business Location Insights is two rows on the step, and Next opens no dialog', async ({
   page,
 }) => {
+  await allowEveryPin(page)
   /*
    * Two rules from the client's feedback of 23 September 2026.
    *
@@ -2090,6 +2113,7 @@ test('the zoning step warns that the pin must be accurate, and asks block, lot a
 })
 
 test('the pin is ringed at the radius the figures were measured over', async ({ page }) => {
+  await allowEveryPin(page)
   /*
    * "Show a circle so the user knows how big 500 meters is." A distance is
    * abstract until it is drawn over the streets it covers.
@@ -2262,6 +2286,7 @@ test('moving the pin does not stampede the lookup, and never shows the old point
 })
 
 test('a failed insights lookup never blocks the filing', async ({ page }) => {
+  await allowEveryPin(page)
   /*
    * The panel says these figures are not part of the application, and that
    * promise has to be true in the gate as well as in the copy. It matters more

@@ -20,11 +20,15 @@ import { zoneLabel } from '../lib/zoningNames'
  *
  * ── What it must not become ─────────────────────────────────────────────────
  *
- * A verdict. The tracing is approximate three times over (sheet placement
- * ±10 m, coarse barangay polygons, the trace itself), so nothing reads a zone
- * back out for the pin: no "your lot is C-2", no colour on the pin, no blocked
- * step. CPDO decides, and the barangay card beside the map says so once. See
- * BarangayZoningMap.tsx for why a better geometry would not change that.
+ * A verdict on the map. The tracing is approximate three times over (sheet
+ * placement ±10 m, coarse barangay polygons, the trace itself), so the map
+ * itself says nothing about the pin: no "your lot is C-2", no colour on the pin.
+ *
+ * The zone under the pin IS read now, on the server and from these same files
+ * (App\Support\Zoning\PinZone), for one purpose Ken set on 5 October 2026: a
+ * line of business the zone CLEARLY does not allow holds the Location & Zoning
+ * step, with a popup. Everything unclear — and the tracing is why so much is —
+ * passes in silence, and CPDO decides it.
  *
  * Each zone used to say "approximate" on hover, and the key carried "Traced
  * from CPDO's sheet, so approximate." Both went on the client's lead's

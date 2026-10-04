@@ -19,7 +19,12 @@ import { plainOverlay, plainZoneName } from '../../lib/zoningNames'
  * simplified to ~100 m (lib/malabonGeo.data.ts), and the trace itself rounds.
  * On a street of 6 m lots that straddles zone lines, so reading "your lot is
  * C-2" off it would tell an applicant their site conforms when the city may say
- * it does not. Nothing reads a zone back out for the pin, and CPDO decides.
+ * it does not. So this card names no zone for the pin, and CPDO decides.
+ *
+ * The one thing that does read the zone under the pin is a refusal (Ken, 5
+ * October 2026): a line of business the traced zone clearly does not allow
+ * holds the step, with a popup (App\Support\Zoning\PinZone). It never says
+ * the reverse — that a pin conforms — which is the claim this card avoids.
  *
  * And even exact zone polygons would not make a verdict follow: the ordinance
  * itself cannot be resolved into one (`docs/zoning-ordinance/README.md` sets
@@ -27,9 +32,9 @@ import { plainOverlay, plainZoneName } from '../../lib/zoningNames'
  * to inheritance chains that omit a zone). Better geometry moves this no
  * closer to a verdict.
  *
- * So: no verdict, no "your zone is", no conforming/non-conforming, no colour
- * that reads as a pass. CPDO confirms which zone covers a specific location,
- * and the step says so once, in ZoningConformanceNote.
+ * So: no verdict here, no "your zone is", no conforming/non-conforming, no
+ * colour that reads as a pass. CPDO confirms which zone covers a specific
+ * location, and the step says so once, in ZoningConformanceNote.
  *
  * The sheet itself used to be shown here as a large image. It went when the
  * map started drawing the zones: the same picture twice, the second one too

@@ -8,8 +8,10 @@ import { mergedStorageState, sessionFor } from './helpers'
  * page and a met / not met / CPDO checks status, and the questions those rules
  * needed answered. Ken removed it on 5 October 2026, from the applicant's
  * Location & Zoning step, from Review and from CPDO's review sheet. What is
- * left to prove in a browser is that it is gone, and that the note under the
- * map still reads a trade against the ordinance's own words.
+ * left to prove in a browser is that it is gone, that a line of business the
+ * zone under the pin clearly does not allow stops the owner with a popup, and
+ * that the note under the map still reads a trade against the ordinance's own
+ * words.
  *
  * Screenshots go to E2E_SHOTS_DIR when it is set, for review by eye.
  */
@@ -50,6 +52,63 @@ test.describe('the applicant', () => {
     await expect(page.getByTestId('zoning-rules-applicant')).toHaveCount(0)
     await expect(page.getByText('What the zoning rules say about this filing')).toHaveCount(0)
     await shot(page, 'applicant-location-zoning-step')
+  })
+
+  /*
+   * Ken, 5 October 2026: a line of business the zone under the pin clearly
+   * does not allow stops the owner on Location & Zoning, with a popup that
+   * says why, and Next stays held. A sari-sari store at the middle of Acacia
+   * lands in its Industrial-2 zone, whose list has no shop and no home
+   * business; at the middle of Baritan it lands among homes and small shops,
+   * and passes without a word.
+   */
+  test('a pin where the line of business is not allowed holds the step with a popup, and an allowed pin does not', async ({
+    page,
+  }) => {
+    await page.getByRole('checkbox').first().check()
+    await page.getByRole('button', { name: /next/i }).click()
+    await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+    const search = page.getByLabel(/search for the one line of business/i)
+    await search.click()
+    await search.fill('sari-sari')
+    await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+    await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
+    await page.getByRole('textbox', { name: /products \/ services/i }).first().fill('rice, canned goods')
+    await page.getByLabel(/^street/i).fill('Rizal Street')
+    await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+    await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+
+    const barangay = page.getByLabel(/barangay name/i)
+    const map = page.locator('.leaflet-container')
+    const next = page.getByRole('button', { name: /^next$/i })
+    const popup = page.getByRole('dialog', { name: 'Not allowed at this location' })
+
+    await barangay.selectOption({ label: 'Acacia' })
+    await map.scrollIntoViewIfNeeded()
+    await shot(page, 'applicant-zone-before-pin')
+    await map.click()
+    await expect(page.getByText(/pin placed/i)).toBeVisible()
+
+    await expect(popup).toBeVisible({ timeout: 20_000 })
+    await expect(popup).toContainText(
+      "Retail sale in non-specialized stores (sari-sari store) isn't allowed in the Industry zone where your pin is. To petition this, visit the Business Permits and Licensing Office (BPLO) at Malabon City Hall.",
+    )
+    await expect(popup.getByRole('button')).toHaveText(['OK'])
+    await shot(page, 'applicant-zone-blocked-popup')
+    await popup.getByRole('button', { name: 'OK' }).click()
+    await expect(popup).toBeHidden()
+    await expect(next).toBeDisabled()
+
+    // The same line in Baritan, among homes and small shops: no popup, and on.
+    await barangay.selectOption({ label: 'Baritan' })
+    await map.click()
+    await expect(page.getByText(/pin placed/i)).toBeVisible()
+    await expect(next).toBeEnabled({ timeout: 20_000 })
+    await expect(popup).toBeHidden()
+    await shot(page, 'applicant-zone-allowed-pin')
+    await next.click()
+    await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
   })
 
   /*

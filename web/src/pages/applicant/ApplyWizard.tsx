@@ -90,6 +90,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * paragraph above warns about.
  */
 import BarangayZoningMap from './BarangayZoningMap'
+import { useZoneAtPin, type ZoneAtPinQuery } from '../../lib/zoneAtPin'
 import {
   LocationInsightsPanel,
   ZoningConformanceNote,
@@ -4896,6 +4897,47 @@ export function ApplyWizard() {
   const isLast = stepIndex === sequence.length - 1
 
   /*
+   * ── A line of business the zone under the pin clearly does not allow ─────
+   *
+   * Ken, 5 October 2026: the lot's zone comes from the pin, and an owner whose
+   * line of business is clearly not allowed in it cannot continue. Location &
+   * Zoning is the one step that holds both the pin and the line, so Next stays
+   * held there, and Submit on Review, which draws that section again. A popup
+   * says why, once per pin and line: moving the pin or changing the line asks
+   * again, and a new refusal opens it again.
+   *
+   * The server decides (App\Support\Zoning\PinZone, `GET zone-at-pin`) and
+   * refuses the same filing at submit with the same sentence. Only a new
+   * filing is asked here: a renewal carries no Location & Zoning step, and an
+   * amendment that moves or changes its line meets the rule at submit.
+   *
+   * Held while the question is in flight, too, so a quick press cannot slip
+   * past a refusal that has not landed yet. A failed lookup holds nothing.
+   */
+  const zoneAtPinQuery = useMemo<ZoneAtPinQuery | null>(() => {
+    const psicCodeIds = form.lines.map((l) => l.psic_code_id).filter((id) => Boolean(id))
+    return applicationType === 'new'
+      && sequence.includes('address')
+      && form.latitude !== null
+      && form.longitude !== null
+      && form.barangay_id
+      && psicCodeIds.length > 0
+      ? {
+          latitude: form.latitude,
+          longitude: form.longitude,
+          barangayId: Number(form.barangay_id),
+          psicCodeIds,
+        }
+      : null
+  }, [applicationType, sequence, form.latitude, form.longitude, form.barangay_id, form.lines])
+  const zoneAtPin = useZoneAtPin(zoneAtPinQuery)
+  const zoneHeldHere = phase === 'address' || phase === 'review'
+  const zoneRefusal = zoneHeldHere ? (zoneAtPin.data?.refusal ?? null) : null
+  const zoneHolds = zoneHeldHere && (zoneRefusal !== null || zoneAtPin.pending)
+  // The question whose refusal the owner has already closed with OK.
+  const [zoneRefusalSeen, setZoneRefusalSeen] = useState<string | null>(null)
+
+  /*
    * ── What this filing is FOR ─────────────────────────────────────────────
    *
    * On a NEW application or an amendment: the Mayor's / Business Permit,
@@ -7252,7 +7294,7 @@ export function ApplyWizard() {
     if (applicationType === 'amendment' && phase === 'amendments') {
       const rows = await flushAmendments()
       if (!rows.some((r) => r.requested)) return
-    } else if (stepMissing.length > 0) {
+    } else if (stepMissing.length > 0 || zoneHolds) {
       return
     }
     // Location & Zoning used to stop here for the zoning dialog; the answer is
@@ -9650,20 +9692,21 @@ export function ApplyWizard() {
 
       {/* ── Zoning clearance — Selecting Business Location (p27) ───────── */}
       {/*
-       * This step is location CAPTURE for the zoning / locational clearance,
-       * not a zoning decision: the system has no city zone polygons, so
+       * This step is location CAPTURE for the zoning / locational clearance;
        * conformance is evaluated by the Zoning Office (CPDO) during
        * processing. The copy here says "zoning clearance", never "Mayor's
        * permit" (user-testing feedback).
        *
-       * The two things it does decide: a pin outside Malabon is refused
+       * The three things it does decide: a pin outside Malabon is refused
        * outright, because no amount of CPDO review makes a business in another
-       * city licensable here; and a pin that contradicts the barangay chosen
-       * from the dropdown is refused, because one of the two is then wrong and
-       * neither the applicant nor CPDO gains from storing both. Those are
-       * geometry checks against the city and barangay polygons — see
-       * `lib/malabonGeo.ts` — and nothing more. They say where the premises
-       * are, never whether the trade is allowed there.
+       * city licensable here; a pin that contradicts the barangay chosen from
+       * the dropdown is refused, because one of the two is then wrong and
+       * neither the applicant nor CPDO gains from storing both — geometry
+       * checks against the city and barangay polygons, `lib/malabonGeo.ts`;
+       * and, since 5 October 2026 (Ken), a line of business the traced zone
+       * under the pin CLEARLY does not allow holds the step, with a popup
+       * that says so (`zoneAtPin`, above). Anything less than clear is left
+       * to CPDO, as before.
        */}
       <WizardSection
         name="address"
@@ -13128,7 +13171,7 @@ export function ApplyWizard() {
             {!isLast ? (
               <PillButton
                 onClick={() => void next()}
-                disabled={saving || stepMissing.length > 0}
+                disabled={saving || stepMissing.length > 0 || zoneHolds}
                 className="min-w-28"
               >
                 {saving ? 'Saving…' : 'Next'}
@@ -13145,7 +13188,7 @@ export function ApplyWizard() {
                  * into a refusal from the API, or into a return from BPLO days
                  * later, was the alternative.
                  */
-                disabled={saving || !consent || stepMissing.length > 0}
+                disabled={saving || !consent || stepMissing.length > 0 || zoneHolds}
                 className="min-w-28"
               >
                 {/*
@@ -13259,7 +13302,21 @@ export function ApplyWizard() {
         ZoningConformanceNote under the map carries the answer and Next just
         moves on. CPDO's final say — the line this dialog existed to keep — is
         in that note.
+
+        The one popup zoning has now is a refusal, below, and it is Ken's
+        (5 October 2026): it opens only when the zone under the pin clearly
+        does not allow the line of business, and the step will not move on.
       */}
+      {zoneRefusal !== null && zoneRefusalSeen !== zoneAtPin.key && (
+        <ProtoModal
+          title="Not allowed at this location"
+          tone="red"
+          cancelLabel="OK"
+          onCancel={() => setZoneRefusalSeen(zoneAtPin.key)}
+        >
+          <p className="text-center text-base">{zoneRefusal}</p>
+        </ProtoModal>
+      )}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}
       {showConfirm && (
