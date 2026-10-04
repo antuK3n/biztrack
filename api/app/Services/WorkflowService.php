@@ -3059,7 +3059,18 @@ class WorkflowService
      */
     private function suspendOutcomePermit(Application $app, PermitType $refused, string $reason): void
     {
-        $permit = $this->outcomePermitFor($app);
+        /*
+         * ── A renewal that carries no Business Permit of its own ─────────────
+         *
+         * A renewal carries one permit since 5 October 2026, so a Sanitary (or
+         * FSIC, Zoning, Occupancy, Environmental) renewal is a filing of its
+         * own with no Business Permit on it, and a refusal there found nothing
+         * to suspend (owner-renew 35). Ken: it suspends the business's live
+         * Business Permit, the same as a refusal on one filing always did.
+         * `reconsiderSuspension` brings it back when that permit passes again.
+         */
+        $permit = $this->outcomePermitFor($app)
+            ?? ($this->carriesBusinessPermit($app) ? null : $app->business?->currentBusinessPermit);
         if ($permit === null) {
             return;
         }
@@ -3149,19 +3160,98 @@ class WorkflowService
          */
         $suspended = $app->permits()
             ->where('status', PermitStatus::Suspended->value)
+            ->with('permitType')
             ->get();
 
         foreach ($suspended as $permit) {
-            $permit->update(['status' => PermitStatus::Active]);
+            /*
+             * The Business Permit can also be held from ANOTHER filing: a
+             * renewal of one of the other permits refused on its own (see
+             * `suspendOutcomePermit`). Nothing on this filing answers for
+             * that one, so it is asked separately.
+             */
+            if ($permit->permitType?->code === PermitType::OUTCOME_CODE
+                && $this->businessPermitHeldByARenewal($app->business, $app)) {
+                continue;
+            }
 
-            Audit::log('permit.reinstated', $permit, [
-                'application_id' => $app->id,
-                'business_id' => $app->business_id,
-                'reason' => 'Nothing on this application is refused, and its business is active.',
-            ]);
-
-            $this->notify->outcomePermitReinstated($app, $permit);
+            $this->reinstate($app, $permit);
         }
+
+        /*
+         * The other direction: this IS such a renewal, passing again, and the
+         * Business Permit its refusal suspended lives on another filing. That
+         * filing is asked the same question, so a refusal or a rejection of
+         * its own still keeps the certificate suspended.
+         *
+         * A Business Permit issued on paper has no filing to ask. Only this
+         * kind of refusal reaches one from here — a business whose permit was
+         * already suspended cannot file the renewal (`isBlockedFromApplying`)
+         * — so it comes back once no renewal refusal holds it.
+         */
+        if (! $this->carriesBusinessPermit($app) && $app->business !== null) {
+            $held = $app->business->permits()
+                ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+                ->where('status', PermitStatus::Suspended->value)
+                ->with('application')
+                ->latest('valid_until')
+                ->latest('id')
+                ->first();
+
+            if ($held !== null && $held->application_id !== $app->id) {
+                if ($held->application !== null) {
+                    $this->reconsiderSuspension($held->application);
+                } elseif (! $this->businessPermitHeldByARenewal($app->business, $app)) {
+                    $this->reinstate($app, $held);
+                }
+            }
+        }
+    }
+
+    /** Put a suspended certificate back in force, and tell its owner. */
+    private function reinstate(Application $app, Permit $permit): void
+    {
+        $permit->update(['status' => PermitStatus::Active]);
+
+        Audit::log('permit.reinstated', $permit, [
+            'application_id' => $app->id,
+            'business_id' => $app->business_id,
+            'reason' => 'Nothing on this application is refused, and its business is active.',
+        ]);
+
+        $this->notify->outcomePermitReinstated($app, $permit);
+    }
+
+    /** Does this filing carry the Business Permit itself? */
+    private function carriesBusinessPermit(Application $app): bool
+    {
+        $app->loadMissing('permitTypes');
+
+        return $app->permitTypes->contains(fn (PermitType $pt) => $pt->code === PermitType::OUTCOME_CODE);
+    }
+
+    /**
+     * Is a refusal on another of this business's open renewals still holding
+     * its Business Permit suspended?
+     *
+     * Open filings that carry no Business Permit — the one-permit renewals
+     * `suspendOutcomePermit` reaches across from — with a permit still at
+     * Rejected. Re-applying moves that row on, and the filing passing it is
+     * what reinstates (`reconsiderSuspension`). A cancelled or decided
+     * renewal no longer holds it.
+     */
+    private function businessPermitHeldByARenewal(?Business $business, Application $except): bool
+    {
+        if ($business === null) {
+            return false;
+        }
+
+        return $business->applications()
+            ->whereKeyNot($except->id)
+            ->notDecided()
+            ->whereDoesntHave('permitTypes', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->whereHas('permitTypes', fn ($q) => $q->where('application_permit_types.status', ClearanceStatus::Rejected->value))
+            ->exists();
     }
 
     /**
