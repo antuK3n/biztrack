@@ -72,14 +72,28 @@ it('lets BPLO revoke a permit, recording when and why', function () {
         ->and($permit->revoked_reason)->toBe('Operating a business not covered by the permit.');
 });
 
-it('lets the super admin revoke a permit too', function () {
+it('refuses the super admin, who oversees the register and does not act on it', function () {
+    // Client, 4 October 2026: "paki tanggal ang revoke sa super admin".
     $permit = revocablePermit();
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Closure order from the Mayor.'])
-        ->assertOk();
+        ->assertForbidden();
 
-    expect($permit->fresh()->status)->toBe(PermitStatus::Revoked);
+    expect($permit->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('refuses BPLO on another office’s permit — it revokes the Mayor’s Permit only', function () {
+    // "dapat sa bplo ayon lang kaya nyang i revoke".
+    foreach (['SANITARY', 'FSIC'] as $code) {
+        $permit = revocablePermit($code);
+
+        test()->withHeaders(authAs('bplo@biztrack.local'))
+            ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Not BPLO’s to take back.'])
+            ->assertForbidden();
+
+        expect($permit->fresh()->status)->toBe(PermitStatus::Active);
+    }
 });
 
 it('refuses every other office, and the owner', function () {

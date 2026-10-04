@@ -555,8 +555,14 @@ class PermitController extends Controller
 
     /**
      * Revoke a permit (checklist item 23). Behind `permit.revoke` on the
-     * route — BPLO and the super admin. See `WorkflowService::revokePermit`
+     * route, which BPLO alone holds. See `WorkflowService::revokePermit`
      * for what may be revoked and what the act writes.
+     *
+     * And the Mayor's Permit only [client, 4 October 2026: "paki tanggal ang
+     * revoke sa super admin, at bplo, dapat sa bplo ayon lang kaya nyang i
+     * revoke"]. BPLO reads every office's certificates, but a Sanitary Permit
+     * or an FSIC is the issuing office's to take back, not BPLO's. Refused
+     * here rather than only hidden on screen, so a direct request is refused too.
      *
      * Answers with the register row rather than the contracted payload, so the
      * table that sent the request can redraw the row with its revocation
@@ -569,6 +575,12 @@ class PermitController extends Controller
         ], [
             'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
         ]);
+
+        abort_unless(
+            $permit->permitType?->code === PermitType::OUTCOME_CODE,
+            403,
+            'Only the Mayor\x27s / Business Permit can be revoked here. Another office\x27s permit is that office\x27s to revoke.',
+        );
 
         $this->workflow->revokePermit($permit, $data['reason']);
 
