@@ -196,7 +196,7 @@ test.describe('paying a different way', () => {
     test.skip(!switched.ok, switched.reason)
   })
 
-  test('set aside after a warning, pay another way, and a late first payment shows as paid twice', async ({
+  test('set aside after a warning, pay another way, and a late first payment shows as due for a refund', async ({
     page,
     context,
   }) => {
@@ -237,14 +237,14 @@ test.describe('paying a different way', () => {
     await page.getByRole('button', { name: /^Pay / }).click()
     await expect(page.getByText('Paid', { exact: true })).toBeVisible({ timeout: 30_000 })
 
-    // Then the Maya payment goes through after all: history says paid twice.
+    // Then the Maya payment goes through after all: history says a refund is coming.
     const late = await context.newPage()
     await late.goto(firstPaymentPage)
     await late.getByRole('button', { name: /^Pay / }).click()
     await late.close()
 
     await page.goto('/profile?tab=payments')
-    await expect(page.getByText(/paid twice, BPLO will contact you about a refund/)).toBeVisible({
+    await expect(page.getByText(/BPLO will contact you about a refund/)).toBeVisible({
       timeout: 30_000,
     })
   })

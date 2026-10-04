@@ -298,7 +298,7 @@ export function PaymentHistory() {
                           */}
                         {p.status === 'completed'
                           ? p.refund_review
-                            ? `Paid: ${formatDate(p.paid_at)} · paid twice, BPLO will contact you about a refund`
+                            ? `Paid: ${formatDate(p.paid_at)} · BPLO will contact you about a refund`
                             : `Paid: ${formatDate(p.paid_at)}`
                           : p.status === 'pending'
                             ? p.set_aside

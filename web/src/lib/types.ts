@@ -852,7 +852,7 @@ export interface Payment {
    * service (it may yet be paid), but no longer the payment being waited on.
    */
   set_aside?: boolean
-  /** Paid twice for one bill; staff are reviewing a refund of this one. */
+  /** Marked for a refund (paid twice, or paid after the filing closed); staff are reviewing it. */
   refund_review?: boolean
   /** Present in the owner's cross-application payment history. */
   application?: { id: number; tracking_id: string }
