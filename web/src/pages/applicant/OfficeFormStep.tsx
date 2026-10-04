@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
 import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
@@ -1138,7 +1138,9 @@ function CarriedTag({ field }: { field: string }) {
         ? 'From your account’s home address — check this is still right'
         : source === 'application'
           ? 'Suggested from your line of business — change it if it is wrong'
-          : 'From your previous application — check this is still right'}
+          : source === 'business'
+            ? 'From your Business Permit application — change it if it is wrong'
+            : 'From your previous application — check this is still right'}
     </span>
   )
 }
@@ -2969,7 +2971,7 @@ function FsicFields({
           <label className="block grow basis-[16rem]">
             <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
             <input
-              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              value={get(data, 'occupancy_type')}
               onChange={(e) => set('occupancy_type', e.target.value)}
               readOnly={ro}
               placeholder="e.g. Mercantile, Assembly, Business"
@@ -3267,7 +3269,7 @@ function OccupancyFields({
           <label className="block grow basis-[14rem]">
             <FieldLabel required>Name of Project</FieldLabel>
             <input
-              value={get(data, 'project_name') || business.name}
+              value={get(data, 'project_name')}
               onChange={(e) => set('project_name', e.target.value)}
               readOnly={ro}
               className={inputCls}
@@ -3303,7 +3305,7 @@ function OccupancyFields({
           <label className="block grow basis-[16rem]">
             <FieldLabel required>Use / Character of Occupancy</FieldLabel>
             <input
-              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              value={get(data, 'occupancy_type')}
               onChange={(e) => set('occupancy_type', e.target.value)}
               readOnly={ro}
               placeholder="e.g. Mercantile, Assembly, Business"
@@ -3447,10 +3449,56 @@ export function OfficeFormSheet({
   const meta = OFFICE_FORM_META[code]
   const set = (key: string, value: string) => onChange({ ...data, [key]: value })
 
+  /*
+   * ── Shown is answered ─────────────────────────────────────────────────
+   *
+   * Three boxes used to DISPLAY a value from the Business Permit
+   * application when empty — `value={answer || business.lineOfBusiness}` —
+   * without it ever becoming the answer. The required-field check then
+   * read the box as blank and refused "Next" over a field that looked
+   * filled in. Client, 5 October 2026: *"Why is this auto-filled, but not
+   * considered an answer"*.
+   *
+   * So the value is written into the sheet as its answer, ONCE per field
+   * per opening: an applicant who clears the box to type their own is not
+   * refilled under their cursor. Flagged "From your Business Permit
+   * application" while it still reads as seeded, so it is visibly not the
+   * applicant's own words, and editable like any answer.
+   */
+  const seeds: Record<string, string> =
+    code === 'FSIC'
+      ? { occupancy_type: business.lineOfBusiness }
+      : code === 'OCCUPANCY'
+        ? { project_name: business.name, occupancy_type: business.lineOfBusiness }
+        : {}
+  const seededOnce = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    /*
+     * Not before the saved sheet has arrived. A sheet read from the server
+     * always carries its derived answers (the application date at least),
+     * so an empty one is still loading — and seeding it would race the
+     * saved answers, which the caller will not merge over an edit.
+     */
+    if (readOnly || Object.keys(data).length === 0) return
+    const fill: OfficeFormData = {}
+    for (const [key, value] of Object.entries(seeds)) {
+      if (seededOnce.current.has(key) || !value.trim()) continue
+      seededOnce.current.add(key)
+      if (!get(data, key).trim()) fill[key] = value
+    }
+    if (Object.keys(fill).length > 0) onChange({ ...data, ...fill })
+    // Keyed on the seed values: `seeds` is a fresh object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, code, business.name, business.lineOfBusiness, data])
+  const carriedShown: Record<string, CarriedSource> = { ...carried }
+  for (const [key, value] of Object.entries(seeds)) {
+    if (!carriedShown[key] && value.trim() && get(data, key) === value) carriedShown[key] = 'business'
+  }
+
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       {/* Which answers are still last year’s; see CarriedTag. */}
-      <CarriedContext.Provider value={carried}>
+      <CarriedContext.Provider value={carriedShown}>
     <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
       {readOnly && (
         <div className="mb-4 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">
