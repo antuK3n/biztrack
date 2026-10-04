@@ -566,8 +566,23 @@ class AuthController extends Controller
          * 403 with a message the sign-in page can act on: this one names a real
          * condition of the reader's OWN account, reached only with the correct
          * password, so it tells a stranger nothing they did not already have.
+         *
+         * ── Owners only, and a way through while mail works ────────────────
+         *
+         * Ken, 5 October 2026: the gate is on, for owners. Refusing outright
+         * was a dead end — "check your inbox for the link" to people whose
+         * link was written to a log while mail went nowhere, and who cannot
+         * ask for another without being signed in. So with a real mailer the
+         * right password earns the sign-in code instead, whether or not codes
+         * are switched on for everyone: typing it proves the inbox, and
+         * `verifySignInCode` confirms the address as it signs them in. Staff
+         * accounts are not gated; City Hall vouches for those.
          */
-        if (config('auth.verification.required_at_login') && ! $user->hasVerifiedEmail()) {
+        if (config('auth.verification.required_at_login') && $belongs === 'public' && ! $user->hasVerifiedEmail()) {
+            if (EmailSwitch::on()) {
+                return $this->startSignInCode($user, $portal);
+            }
+
             RateLimiter::clear($key);
 
             return response()->json([

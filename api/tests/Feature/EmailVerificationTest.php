@@ -1,7 +1,10 @@
 <?php
 
+use App\Mail\OneTimeCode;
 use App\Models\User;
 use App\Notifications\VerifyEmailAddress;
+use App\Support\SystemSwitches;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\URL;
 
@@ -225,6 +228,65 @@ it('blocks an unverified sign-in once the LGU turns enforcement on', function ()
         'password' => 'biztrack1',
         'portal' => 'public',
     ])->assertStatus(403);
+});
+
+it('emails an unverified owner the sign-in code once enforcement is on and mail works, and the code confirms them', function () {
+    config(['auth.verification.required_at_login' => true, 'mail.default' => 'smtp']);
+    Mail::fake();
+
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $owner->forceFill(['email_verified_at' => null])->save();
+
+    $challenge = $this->postJson('/api/v1/auth/login', [
+        'email' => 'owner@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'public',
+    ])->assertOk()->assertJsonPath('data.code_required', true)->json('data.challenge');
+
+    $code = null;
+    Mail::assertSent(OneTimeCode::class, function (OneTimeCode $mail) use (&$code) {
+        $code = $mail->code;
+
+        return $mail->hasTo('owner@biztrack.local');
+    });
+
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => $code])
+        ->assertOk()
+        ->assertJsonPath('data.user.email_verification_required', false);
+
+    expect($owner->fresh()->email_verified_at)->not->toBeNull();
+});
+
+it('emails the code to an unverified owner even with sign-in codes switched off for everyone', function () {
+    config(['auth.verification.required_at_login' => true, 'mail.default' => 'smtp']);
+    Mail::fake();
+    SystemSwitches::set('sign_in_codes', 'off');
+
+    User::where('email', 'owner@biztrack.local')->firstOrFail()
+        ->forceFill(['email_verified_at' => null])->save();
+
+    $this->postJson('/api/v1/auth/login', [
+        'email' => 'owner@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'public',
+    ])->assertOk()->assertJsonPath('data.code_required', true);
+});
+
+it('does not gate an unverified staff account', function () {
+    config(['auth.verification.required_at_login' => true, 'mail.default' => 'smtp']);
+    Mail::fake();
+    SystemSwitches::set('sign_in_codes', 'off');
+
+    User::where('email', 'bplo@biztrack.local')->firstOrFail()
+        ->forceFill(['email_verified_at' => null])->save();
+
+    $this->postJson('/api/v1/auth/login', [
+        'email' => 'bplo@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'staff',
+    ])->assertOk()->assertJsonPath('data.code_required', null);
+
+    Mail::assertNothingSent();
 });
 
 it('lets a verified account in with enforcement on', function () {
