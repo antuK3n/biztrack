@@ -81,6 +81,14 @@ class PurgeAbandonedApplications extends Command
          */
         $stale = Application::query()
             ->where('updated_at', '<', $cutoff)
+            /*
+             * Not one whose KwikPay order is still open. The order can be paid
+             * at any time, and the money needs a filing to land on: removing
+             * it left a payment that settled onto a filing nobody could see
+             * (scenario run, expiry-and-lapse 32). Once KwikPay settles or
+             * fails the order, the filing is judged like any other.
+             */
+            ->whereDoesntHave('payments', fn ($q) => $q->awaitingKwikPay())
             ->get()
             ->filter(fn (Application $a) => $a->status?->awaitsApplicant() === true);
 

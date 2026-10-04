@@ -1,9 +1,13 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\PaymentMethod;
+use App\Enums\PaymentStatus;
 use App\Models\Application;
 use App\Models\Business;
+use App\Models\Payment;
 use App\Models\User;
+use App\Services\WorkflowService;
 use Illuminate\Support\Carbon;
 
 /*
@@ -101,6 +105,39 @@ it('leaves one at the clearance stage, where the wait may be an office’s', fun
     $this->artisan('applications:purge-abandoned')->assertSuccessful();
 
     expect(Application::find($app->id))->not->toBeNull();
+});
+
+it('leaves one whose KwikPay payment is still open, and removes one whose payment failed', function () {
+    /*
+     * An open order can still be paid, and the money needs a filing to land
+     * on. The purge removed a Pending Payment filing while its KwikPay order
+     * was open, and the owner's payment then settled onto a removed filing
+     * (scenario run, expiry-and-lapse 32, system-scheduler 29).
+     */
+    $open = staleFiling(ApplicationStatus::PendingPayment, 45);
+    $failed = staleFiling(ApplicationStatus::PendingPayment, 45);
+
+    foreach ([[$open, PaymentStatus::Pending], [$failed, PaymentStatus::Failed]] as [$app, $status]) {
+        $ref = 'PAY-PURGE-'.$app->id;
+        Payment::create([
+            'application_id' => $app->id,
+            'fee_assessment_id' => app(WorkflowService::class)->assessFees($app)->id,
+            'reference_number' => $ref,
+            'amount' => 100,
+            'method' => PaymentMethod::Gcash,
+            'status' => $status,
+            'gateway' => Payment::GATEWAY_KWIKPAY,
+            'gateway_order_id' => $ref.'-ORDER',
+        ]);
+        Application::withoutTimestamps(fn () => $app->fresh()->forceFill([
+            'updated_at' => Carbon::now()->subDays(45),
+        ])->save());
+    }
+
+    $this->artisan('applications:purge-abandoned')->assertSuccessful();
+
+    expect(Application::find($open->id))->not->toBeNull()
+        ->and(Application::find($failed->id))->toBeNull();
 });
 
 it('leaves one touched inside the window', function () {
