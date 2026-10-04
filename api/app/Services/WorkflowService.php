@@ -2864,6 +2864,17 @@ class WorkflowService
             return;
         }
 
+        /*
+         * Nor on a filing BPLO rejected. `rejectApplication` suspends its
+         * certificate because the FILING was refused, and no clearance row
+         * records that — so the test below read "nothing here is refused"
+         * and reinstating the business revived the permit of a rejected
+         * filing (scenario run, permit-suspend-revoke 21).
+         */
+        if ($app->status === ApplicationStatus::Rejected) {
+            return;
+        }
+
         $app->load('permitTypes');
         $stillRefused = $app->permitTypes->contains(
             fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected,
@@ -2982,12 +2993,15 @@ class WorkflowService
      * `suspended_cause` column was the obvious first answer and would have
      * meant a migration against the live register.
      *
-     * A permit is suspended for exactly one of two reasons: this business was
-     * sanctioned, or a clearance on its filing was refused. The second is
-     * DERIVABLE — the refusal is still sitting on the pivot row — so "no
-     * clearance on this filing is rejected" is precisely "the cause must have
-     * been the business status", and `reconsiderSuspension` already asks that
-     * question for the other half of this feature.
+     * A permit is suspended for one of three reasons: this business was
+     * sanctioned, a clearance on its filing was refused, or BPLO rejected the
+     * filing itself. The last two are DERIVABLE — the refusal is still sitting
+     * on the pivot row, the rejection on the filing's status — so "no
+     * clearance on this filing is rejected, and the filing is not" is
+     * precisely "the cause must have been the business status", and
+     * `reconsiderSuspension` already asks that question for the other half of
+     * this feature. (It asked only about the clearances until the scenario
+     * run found a rejected filing's permit revived this way.)
      *
      * So the two rules cannot disagree, and the overlap falls out correctly
      * without a special case: a permit suspended for violations ON a filing

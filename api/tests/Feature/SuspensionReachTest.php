@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PermitStatus;
+use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Permit;
@@ -130,6 +131,29 @@ it('brings the permits back when the business is reinstated', function () {
 
     setBusinessStatus($business, 'active', 'Inspection passed; the finding is closed.');
     expect($permit->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('does not bring back the permit of a filing BPLO rejected when the business is reinstated', function () {
+    /*
+     * BPLO rejecting a paid filing suspends its Business Permit, and no
+     * clearance on the filing records why. Reinstating the business read
+     * "nothing here is refused" as "nothing holds this permit" and revived
+     * it (scenario run, permit-suspend-revoke 21).
+     */
+    $app = Application::findOrFail(scopedAssignmentFiling('Rejected Then Reinstated'));
+    $permit = Permit::where('application_id', $app->id)
+        ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+        ->firstOrFail();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'False declarations.'])
+        ->assertOk();
+    expect($permit->fresh()->status)->toBe(PermitStatus::Suspended);
+
+    setBusinessStatus($app->business, 'suspended', 'Investigation.');
+    setBusinessStatus($app->business->fresh(), 'active', 'Investigation closed.');
+
+    expect($permit->fresh()->status)->toBe(PermitStatus::Suspended);
 });
 
 it('bars the whole account while one of its businesses is suspended', function () {
