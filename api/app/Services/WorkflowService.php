@@ -920,6 +920,9 @@ class WorkflowService
      */
     public function approveMainForm(Application $app, ?string $remarks = null): void
     {
+        // Suspended or blacklisted: nothing moves toward a permit (refuseWhileOnHold).
+        $this->refuseWhileOnHold($app->business);
+
         if ($app->status !== ApplicationStatus::ForApproval) {
             throw ValidationException::withMessages([
                 'status' => ['Only an application that is For Approval can be approved by BPLO. This one is '.($app->status?->label() ?? 'in no state').'.'],
@@ -1733,6 +1736,26 @@ class WorkflowService
         }
 
         /*
+         * ── Money that lands while the business is suspended is held ───────
+         *
+         * An online order opened before the super admin suspended or
+         * blacklisted the business can still be paid after it, and the payment
+         * is real: it stays Completed. The filing does not move and nothing is
+         * issued (Ken's decision after the October 2026 scenario run — the
+         * callback had been minting an Active permit for a suspended business,
+         * owner-pay 19). Returning rather than refusing, because the money has
+         * already arrived and refusing it would lose the record of it.
+         */
+        if ($this->onHold($app)) {
+            Audit::log('payment.held', $payment, [
+                'application_id' => $app->id,
+                'business_id' => $app->business_id,
+            ]);
+
+            return;
+        }
+
+        /*
          * ── A renewal has nothing to gather, so it skips the gathering ────────
          *
          * Client's decision, 17 September 2026: *"For the business permit, there
@@ -2423,6 +2446,9 @@ class WorkflowService
      */
     public function approveClearance(ApplicationPermitType $row, ?string $remarks = null): void
     {
+        // Suspended or blacklisted: nothing moves toward a permit (refuseWhileOnHold).
+        $this->refuseWhileOnHold($row->application?->business);
+
         /*
          * ── An office may not approve past a requirement it raised ───────
          *
@@ -2823,6 +2849,16 @@ class WorkflowService
      */
     public function reconsiderSuspension(Application $app): void
     {
+        /*
+         * A business the super admin has suspended or blacklisted keeps every
+         * permit suspended, whatever its clearances say. An office passing a
+         * visit used to bring the Business Permit back here while the
+         * business stayed barred (scenario run, owner-clearances 41).
+         */
+        if ($this->onHold($app)) {
+            return;
+        }
+
         $app->load('permitTypes');
         $stillRefused = $app->permitTypes->contains(
             fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected,
@@ -2861,6 +2897,35 @@ class WorkflowService
 
             $this->notify->outcomePermitReinstated($app, $permit);
         }
+    }
+
+    /**
+     * Refuse while the business is suspended or blacklisted.
+     *
+     * The one refusal behind every act that moves a filing toward a permit:
+     * BPLO's approvals and its counter payment, an office's approval and a
+     * passing inspection, the Debug panel's versions of those, BPLO lifting a
+     * permit's suspension, and the minting itself in `issuePermitFor`.
+     * Return, Reject, messages and reading stay open — none of them hands the
+     * business anything. See `Business::filingsOnHoldReason`
+     * for what is on hold and why.
+     *
+     * Thrown before anything is written, so the officer reads the sentence
+     * instead of finding half of an action done.
+     */
+    public function refuseWhileOnHold(?Business $business): void
+    {
+        $reason = $business?->filingsOnHoldReason();
+
+        if ($reason !== null) {
+            throw ValidationException::withMessages(['status' => [$reason]]);
+        }
+    }
+
+    /** Is this filing's business suspended or blacklisted? */
+    private function onHold(Application $app): bool
+    {
+        return $app->business?->filingsOnHoldReason() !== null;
     }
 
     /**
@@ -2987,6 +3052,14 @@ class WorkflowService
                 ],
             ]);
         }
+
+        /*
+         * Not while the super admin has the business suspended or blacklisted.
+         * That sanction is theirs to lift, on Owner Status; a lift here made
+         * the certificate Active and /verify valid while the business stayed
+         * barred (scenario run, admin-records-permits-map 22).
+         */
+        $this->refuseWhileOnHold($permit->business);
 
         $permit->update(['status' => PermitStatus::Active]);
 
@@ -3203,6 +3276,15 @@ class WorkflowService
             ]);
         }
 
+        /*
+         * A pass grants and issues, so it is refused while the business is
+         * suspended or blacklisted — before the visit is written, for the
+         * reason above. A failed visit moves nothing and is still recorded.
+         */
+        if ($result->progresses()) {
+            $this->refuseWhileOnHold($inspection->application?->business);
+        }
+
         $inspection->update([
             'status' => InspectionStatus::Completed,
             'result' => $result,
@@ -3337,6 +3419,17 @@ class WorkflowService
     public function refreshReadiness(Application $app): void
     {
         /*
+         * ── Nothing moves forward while the business is on hold ─────────────
+         *
+         * Every forward move below closes the filing or puts it in front of
+         * BPLO, and this runs inside OTHER acts — an office closing a
+         * requirement it raised, say — so it waits quietly rather than
+         * refusing them. The one backward move, out of Final Approval, still
+         * happens: a refusal on a held filing is allowed.
+         */
+        $held = $this->onHold($app);
+
+        /*
          * ── A clearance-only renewal closes itself ───────────────────────────
          *
          * Client's decision, 17 September 2026: it closes the moment its last
@@ -3355,7 +3448,7 @@ class WorkflowService
          * left outstanding is still outstanding — where on a new filing an
          * optional permit must never block the business permit.
          */
-        if ($app->status === ApplicationStatus::ForApproval && $app->defersPayment()) {
+        if (! $held && $app->status === ApplicationStatus::ForApproval && $app->defersPayment()) {
             $app->load('permitTypes');
 
             $allGranted = $app->permitTypes->every(
@@ -3433,7 +3526,7 @@ class WorkflowService
 
         $ready = $outstanding->isEmpty() && $openRequirements === 0;
 
-        if ($ready && $app->status === ApplicationStatus::AwaitingOtherPermits) {
+        if ($ready && ! $held && $app->status === ApplicationStatus::AwaitingOtherPermits) {
             /*
              * ── No filing type stops for BPLO to re-read the permits ─────────
              *
@@ -3537,6 +3630,9 @@ class WorkflowService
      */
     public function approveOverall(Application $app, ?string $remarks = null): void
     {
+        // Suspended or blacklisted: nothing moves toward a permit (refuseWhileOnHold).
+        $this->refuseWhileOnHold($app->business);
+
         /*
          * The processing-category gate stood here until 27 September 2026.
          *
@@ -3751,6 +3847,9 @@ class WorkflowService
      */
     public function approveAmendment(Application $app, ?string $remarks = null): void
     {
+        // Suspended or blacklisted: nothing moves toward a permit (refuseWhileOnHold).
+        $this->refuseWhileOnHold($app->business);
+
         if ($app->application_type !== ApplicationType::Amendment) {
             throw ValidationException::withMessages([
                 'application_type' => ['This is not an amendment, so there are no changes to apply.'],
@@ -3922,6 +4021,9 @@ class WorkflowService
      */
     private function reissueAmendedPermit(Application $app): ?Permit
     {
+        // Never an Active certificate for a suspended business (refuseWhileOnHold).
+        $this->refuseWhileOnHold($app->business);
+
         $type = PermitType::where('code', PermitType::OUTCOME_CODE)->first();
         if ($type === null || $app->business_id === null) {
             return null;
@@ -4724,6 +4826,17 @@ class WorkflowService
      */
     private function issuePermitFor(Application $app, PermitType $type): Permit
     {
+        /*
+         * ── Never for a business that is suspended or blacklisted ───────────
+         *
+         * Every certificate passes through here, so this is the last door: an
+         * action above that forgot to ask still cannot mint an Active permit
+         * that /verify would call valid for a business the super admin has
+         * suspended (scenario run, owner-permits-verify 37). Each caller
+         * refuses earlier, before it writes anything; this is the backstop.
+         */
+        $this->refuseWhileOnHold($app->business);
+
         /*
          * ── A renewal continues the term; it does not restart it ─────────────
          *

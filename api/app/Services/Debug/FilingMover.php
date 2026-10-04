@@ -510,6 +510,9 @@ final class FilingMover
      */
     private function pay(Application $app): string
     {
+        // BPLO's counter payment refuses a suspended or blacklisted business; so does this.
+        $this->workflow->refuseWhileOnHold($app->business);
+
         $closed = in_array($app->status, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true);
 
         if (! $closed && ! $app->status?->isBillable()) {

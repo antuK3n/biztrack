@@ -115,6 +115,15 @@ class InspectionController extends Controller
             'photos.*' => ['string'],
         ]);
 
+        /*
+         * A pass on a suspended or blacklisted business is refused by the
+         * service; asked here as well so the refusal comes before this officer
+         * is written onto the visit below.
+         */
+        if (InspectionResult::from($data['result'])->progresses()) {
+            $this->workflow->refuseWhileOnHold($inspection->application?->business);
+        }
+
         if (! $inspection->inspector_user_id) {
             $inspection->update(['inspector_user_id' => $request->user()->id]);
         }

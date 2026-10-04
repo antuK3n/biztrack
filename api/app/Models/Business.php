@@ -273,6 +273,42 @@ class Business extends Model
     }
 
     /**
+     * Why this business's filings are on hold, or null when they are not.
+     *
+     * ── What "on hold" means, and why it exists ──────────────────────────
+     *
+     * While the super admin has a business Suspended or Blacklisted, nothing
+     * moves one of its filings toward a permit: no payment moves it, no office
+     * approves it, BPLO does not sign it off or lift its permit's suspension.
+     * The suspension used to reach the permits the business already held and
+     * stop there, so a filing in progress went on moving and the next step
+     * minted a fresh Active permit that /verify called valid (Ken's decision
+     * after the October 2026 scenario run, account-restriction 25).
+     *
+     * The owner's own blacklisting counts as the business's. The cascade sets
+     * every business they hold to blacklisted anyway; one registered after it
+     * is the gap `ownerIsBlacklisted()` exists to close, here as there.
+     *
+     * Flagged is not on hold. It is a watch marker, not a sanction, the same
+     * reading `isBlockedFromApplying` gives it.
+     *
+     * The two sentences are Ken's, word for word; they are the refusal staff
+     * read wherever one of those actions is pressed.
+     */
+    public function filingsOnHoldReason(): ?string
+    {
+        if ($this->status === self::STATUS_BLACKLISTED || $this->ownerIsBlacklisted()) {
+            return 'This business is blacklisted, so its filings are on hold until the super admin lifts the blacklisting.';
+        }
+
+        if ($this->status === 'suspended') {
+            return 'This business is suspended, so its filings are on hold until the super admin lifts the suspension.';
+        }
+
+        return null;
+    }
+
+    /**
      * Is any certificate this business holds suspended?
      *
      * Its own method so the refusal above can say WHICH cause applies: "your

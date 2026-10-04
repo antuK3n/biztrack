@@ -322,6 +322,14 @@ class PaymentController extends Controller
     {
         $this->authorizeBploStaff($request);
 
+        /*
+         * Not for a business the super admin has suspended or blacklisted:
+         * marking it paid released an Active Business Permit to a barred
+         * business (scenario run, bplo-counter-payment 17). Refused before
+         * anything is assessed or recorded.
+         */
+        $this->workflow->refuseWhileOnHold($application->business);
+
         $closed = in_array(
             $application->status,
             [ApplicationStatus::Rejected, ApplicationStatus::Cancelled],
