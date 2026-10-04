@@ -457,9 +457,6 @@ export function AppShell() {
     <div className="min-h-dvh bg-canvas">
       {restriction && !restrictionSeen && (
         <AccountRestrictedModal
-          variant={restriction.kind}
-          referenceId={restriction.reference_id}
-          businessName={restriction.business_name}
           covers={restriction.covers}
           to={restrictionDestination(restriction)}
           onClose={() => setRestrictionSeen(true)}

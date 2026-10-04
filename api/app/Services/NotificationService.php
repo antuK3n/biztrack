@@ -810,9 +810,11 @@ class NotificationService
          * file's own opening note records what happens then: the reader is
          * bounced to the sign-in redirect and the notification is worse than
          * useless. The owner dashboard is also the right destination on its
-         * merits, because it already raises AccountRestrictedModal for exactly
-         * these two statuses, so following the link lands on an explanation
-         * rather than somewhere the reader has to go looking.
+         * merits: for a blacklisting the shell raises AccountRestrictedModal
+         * there, so following the link lands on an explanation rather than
+         * somewhere the reader has to go looking. A suspension raises nothing
+         * since 5 October 2026 — it no longer bars the account, only the one
+         * business, which is what this notice's own body says.
          */
         $this->push($business->owner, 'account_status', $title, $body, '/dashboard', $business);
         $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");

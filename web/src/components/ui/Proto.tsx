@@ -221,10 +221,16 @@ export function ProtoModal({
 }
 
 /**
- * Account restricted modal (p006) — red header, informational body, bold
- * Reference ID, over a red-tint footer. Purely informational as far as filing
- * goes: 422s already block that. Variant flips the copy for suspended vs.
- * blacklisted accounts.
+ * Account restricted modal (p006) — red header, informational body, over a
+ * red-tint footer. Purely informational as far as filing goes: 422s already
+ * block that.
+ *
+ * A blacklisting only. A suspension had its own variant, naming the business
+ * and its Reference ID, until 5 October 2026, when Ken took suspensions off
+ * the account: *"business suspension should never affect the entirety of the
+ * account."* A suspended business holds its own filings and raises nothing
+ * here. Bringing the variant back means the server sending `kind: 'suspended'`
+ * on the session's `restriction` again, and copy that says what it holds.
  *
  * The footer carries the appeal, not just the dismissal. The body has always
  * told the owner to get in touch if the restriction is wrong — and so does the
@@ -235,32 +241,21 @@ export function ProtoModal({
  * them filing anything, so this is the moment they most need a person.
  */
 export function AccountRestrictedModal({
-  variant,
-  referenceId,
-  businessName,
   covers,
   to,
   onClose,
 }: {
-  variant: 'blacklisted' | 'suspended'
-  referenceId?: string | null
-  /** The business a SUSPENSION is about; a blacklisting is about the reader. */
-  businessName?: string | null
   /** How many businesses the reader holds, for a bar that reaches all of them. */
   covers?: number
   /**
-   * The conversation to open.
-   *
-   * A suspension goes to the suspended business's own filing; a blacklisting
-   * to the general enquiry, because the finding is against the person and not
-   * against any one shopfront [client, 30 September 2026]. Worked out on the
-   * server, which is the only side that knows which filing that is.
+   * The conversation to open: the general enquiry, because the finding is
+   * against the person and not against any one shopfront [client,
+   * 30 September 2026].
    */
   to?: string
   onClose: () => void
 }) {
-  const title = variant === 'suspended' ? 'Business Suspended' : 'Account Blacklisted'
-  const word = variant === 'suspended' ? 'suspended' : 'blacklisted'
+  const title = 'Account Blacklisted'
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -272,41 +267,19 @@ export function AccountRestrictedModal({
         <div className="bg-s-red px-6 py-3.5 text-lg font-bold tracking-wide text-white">{title}</div>
         <div className="space-y-4 px-7 py-7 text-ink">
           {/*
-            -- Which of the two this is, and how far it reaches -------------
+            -- How far it reaches --------------------------------------------
 
-            It read "This account has been suspended" for both. A suspension
-            is about ONE premises - the reader's other businesses carry on
-            trading - and saying "this account" told them their whole
-            livelihood had stopped. A blacklisting genuinely is about the
-            account, and there the old wording was true but silent about
-            scope: somebody with three shops had no way to learn from this
-            screen that all three were barred [client, 27 September 2026].
+            A blacklisting is about the account, and the old wording was true
+            but silent about scope: somebody with three shops had no way to
+            learn from this screen that all three were barred [client,
+            27 September 2026].
           */}
-          {variant === 'suspended' ? (
-            /*
-              ---- "Your other businesses are not affected" is gone ---------
-
-              It was true when a suspension barred one premises, and the client
-              asked for that wording on 27 September. It stopped being true on
-              30 September, when they asked for a suspension to bar the whole
-              account until it is settled — so the sentence now had to go, or
-              the modal would be telling an owner their other shops were fine
-              while the system refused to let them file for those shops.
-            */
-            <p className="text-base leading-relaxed">
-              <span className="font-bold">{businessName ?? 'One of your businesses'}</span> has been
-              suspended, and this account is restricted while it stands. Nothing can be filed,
-              renewed or amended — for this business or any other — and its permits are not valid
-              at the counter.
-            </p>
-          ) : (
-            <p className="text-base leading-relaxed">
-              This account has been {word}.{' '}
-              {covers && covers > 1
-                ? `All ${covers} of your businesses are barred from filing and renewing, and their permits are suspended.`
-                : 'Your businesses are barred from filing and renewing, and their permits are suspended.'}
-            </p>
-          )}
+          <p className="text-base leading-relaxed">
+            This account has been blacklisted.{' '}
+            {covers && covers > 1
+              ? `All ${covers} of your businesses are barred from filing and renewing, and their permits are suspended.`
+              : 'Your businesses are barred from filing and renewing, and their permits are suspended.'}
+          </p>
           <p className="text-base leading-relaxed">
             {/*
               A destination, not "contact support". There is no support desk;
@@ -318,11 +291,6 @@ export function AccountRestrictedModal({
             BPLO below to ask what is needed to have it lifted — your notifications carry the
             reason that was recorded.
           </p>
-          {referenceId && (
-            <p className="text-base">
-              <span className="font-bold">Reference ID:</span> {referenceId}
-            </p>
-          )}
         </div>
         <div className="grid grid-cols-2">
           <button

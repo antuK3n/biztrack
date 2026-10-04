@@ -12,6 +12,12 @@ import { sessionFor } from './helpers'
  * iba pa sa system, kundi messages part na lang at pag view ng notif"
  * [client, 30 September 2026].
  *
+ * The suspension half went on 5 October 2026. Ken: *"business suspension
+ * should never affect the entirety of the account."* A suspended business holds
+ * its own filings; the session carries no restriction for it, so there is no
+ * warning to raise and no conversation to send it to. Only a blacklisting is
+ * stubbed here now.
+ *
  * ── Stubbed, not seeded ──────────────────────────────────────────────────
  *
  * Writing a finding onto a live tester's account is not something a test may
@@ -28,7 +34,7 @@ import { sessionFor } from './helpers'
 test.use({ storageState: sessionFor('owner') })
 
 type Finding = {
-  kind: 'blacklisted' | 'suspended'
+  kind: 'blacklisted'
   business_name: string | null
   reference_id: string | null
   covers: number
@@ -41,14 +47,6 @@ const BLACKLISTED: Finding = {
   reference_id: null,
   covers: 3,
   conversation: { application_id: null },
-}
-
-const SUSPENDED: Finding = {
-  kind: 'suspended',
-  business_name: 'Nena’s Sari-Sari Store',
-  reference_id: 'BAN-2026-0007',
-  covers: 3,
-  conversation: { application_id: 4101 },
 }
 
 /*
@@ -138,21 +136,6 @@ test('sends a blacklisting to the general enquiry', async ({ page }) => {
   await expect(page).toHaveURL(/\/messages\?application=general/)
 })
 
-test('sends a suspension to that business’s own conversation', async ({ page }) => {
-  await serveRestriction(page, SUSPENDED)
-  await page.goto('/messages')
-
-  const notice = page.getByRole('alertdialog', { name: /Business Suspended/i })
-  await expect(notice).toBeVisible({ timeout: 20000 })
-
-  // The business is named, and so is its reference, for the reader to quote.
-  await expect(notice).toContainText('Nena’s Sari-Sari Store')
-  await expect(notice).toContainText('BAN-2026-0007')
-
-  await notice.getByRole('link', { name: /Message the City BPLO/ }).click()
-  await expect(page).toHaveURL(/\/messages\?application=4101/)
-})
-
 test('offers nothing in the rail but Messages', async ({ page }) => {
   await serveRestriction(page, BLACKLISTED)
   await page.goto('/messages')
@@ -172,7 +155,7 @@ test('offers nothing in the rail but Messages', async ({ page }) => {
 })
 
 test('turns a typed path back to the conversation', async ({ page }) => {
-  await serveRestriction(page, SUSPENDED)
+  await serveRestriction(page, BLACKLISTED)
 
   /*
    * The rail offers none of these while a restriction stands, so in ordinary
@@ -181,7 +164,7 @@ test('turns a typed path back to the conversation', async ({ page }) => {
    * rather than on a refusal, which is the same instruction the modal gives.
    */
   await page.goto('/permits')
-  await expect(page).toHaveURL(/\/messages\?application=4101/, { timeout: 20000 })
+  await expect(page).toHaveURL(/\/messages\?application=general/, { timeout: 20000 })
 })
 
 test('leaves the notifications reachable', async ({ page }) => {

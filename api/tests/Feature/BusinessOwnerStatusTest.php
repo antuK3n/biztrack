@@ -162,16 +162,16 @@ it('stops a draft started before the suspension from being submitted after it', 
      * Without a gate at submit this filing reached an office queue and was
      * worked as though the business were in good standing.
      *
-     * 403 rather than the 422 this asserted until 30 September 2026. A
-     * suspension now bars the whole account until it is settled, so
-     * `EnforceAccountRestriction` answers in front of the route and never
-     * reaches the controller's own check on `business_id`. Both refuse; this
-     * one refuses earlier, and says the account is restricted rather than
-     * naming a field the sender could correct.
+     * 422 against `business_id` again, as it was until 30 September 2026.
+     * From then until 5 October a suspension barred the whole account and
+     * `EnforceAccountRestriction` answered 403 in front of the route; it now
+     * holds only the business (Ken: *"business suspension should never affect
+     * the entirety of the account"*), so the controller's own check refuses.
      */
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")
-        ->assertForbidden();
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('business_id');
 
     expect(Application::find($appId)->status->value)->toBe('draft');
 });

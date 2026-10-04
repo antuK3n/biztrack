@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Application;
 use App\Models\Business;
 use App\Models\User;
 
@@ -21,6 +20,10 @@ use App\Models\User;
  * e2e/account-restriction.spec.ts. This file holds the half that is actually a
  * lock: a browser is the reader's own, so a restriction only a screen enforces
  * is a suggestion.
+ *
+ * Only a blacklisting since 5 October 2026. Ken: *"business suspension should
+ * never affect the entirety of the account."* A suspended business holds its
+ * own filings and nothing else; the owner keeps the account.
  */
 
 function restrictedOwner(): User
@@ -96,37 +99,17 @@ it('names a blacklisting and sends it to the general enquiry', function () {
         ->and($restriction['conversation']['application_id'])->toBeNull();
 });
 
-it('names a suspension and sends it to that business’s own filing', function () {
-    $business = suspendOneBusiness();
+it('does not restrict the account while one of its businesses is suspended', function () {
+    suspendOneBusiness();
 
-    $expected = Application::where('business_id', $business->id)
-        ->where('status', '!=', 'draft')
-        ->latest('id')
-        ->value('id');
-
-    $restriction = meAsOwner()['restriction'];
-
-    expect($restriction['kind'])->toBe('suspended')
-        ->and($restriction['business_name'])->toBe($business->name)
-        ->and($restriction['reference_id'])->toBe($business->ban)
-        /*
-         * "Sa business na acc nya, diba may kanya kanyang convo kada business."
-         * A conversation belongs to an APPLICATION, so this business's
-         * conversation is its newest filed one.
-         */
-        ->and($restriction['conversation']['application_id'])->toBe($expected);
+    expect(meAsOwner()['restriction'])->toBeNull();
 });
 
 it('reports the blacklisting when both findings stand', function () {
     suspendOneBusiness();
     blacklistOwner();
 
-    /*
-     * The heavier finding wins, and the advice differs: a suspension points at
-     * one shopfront's conversation, a blacklisting at the general enquiry
-     * because the finding is not about any one business. Reporting the
-     * suspension would send the reader to argue about a shop.
-     */
+    // The suspension adds nothing to it: the blacklisting is the finding.
     expect(meAsOwner()['restriction']['kind'])->toBe('blacklisted');
 });
 
@@ -152,19 +135,19 @@ it('refuses a blacklisted account the rest of the system', function (string $ver
     test()->withToken($token)->json(strtoupper($verb), $path)->assertForbidden();
 })->with('barred endpoints');
 
-it('refuses a suspended account the rest of the system too', function (string $verb, string $path) {
+it('leaves a suspended business’s owner the rest of the system', function (string $verb, string $path) {
     /*
-     * The client asked for a suspension to bar the whole account, which is a
-     * change from the 27 September position that it leaves the owner's other
-     * businesses alone: "di accessible dapat maayos muna yung pagka suspend o
-     * blacklisted nya" [30 September 2026].
+     * The client asked on 30 September 2026 for a suspension to bar the whole
+     * account; Ken took that back on 5 October: *"business suspension should
+     * never affect the entirety of the account."* Each of these answers as it
+     * would for any owner — a write sent empty is a 422, never the bar's 403.
      */
     suspendOneBusiness();
 
     $token = loginToken('owner@biztrack.local');
     app('auth')->forgetGuards();
 
-    test()->withToken($token)->json(strtoupper($verb), $path)->assertForbidden();
+    expect(test()->withToken($token)->json(strtoupper($verb), $path)->status())->not->toBe(403);
 })->with('barred endpoints');
 
 it('leaves the messages and the notices open', function () {

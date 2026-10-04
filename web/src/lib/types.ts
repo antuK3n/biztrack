@@ -77,26 +77,26 @@ export interface User {
   restriction: AccountRestriction | null
 }
 
-/** A suspension or a blacklisting, and where its owner takes it. */
+/** A blacklisting, and where its owner takes it. */
 export interface AccountRestriction {
   /**
-   * A blacklisting is against the PERSON and reaches everything they hold; a
-   * suspension is against one premises. Both bar the account outright
-   * [client, 30 September 2026], and this says which finding to name.
+   * A blacklisting is against the PERSON and reaches everything they hold. A
+   * suspension barred the account too from 30 September until 5 October 2026,
+   * when Ken took it off: *"business suspension should never affect the
+   * entirety of the account."* It now holds only its own business, and the
+   * server never sends it here (`App\Support\AccountRestriction`).
    */
-  kind: 'blacklisted' | 'suspended'
-  /** The business a suspension is about. Null on a blacklisting. */
+  kind: 'blacklisted'
+  /** Null: a blacklisting names no one business. */
   business_name: string | null
-  /** That business's BAN, for the reader to quote. Null on a blacklisting. */
+  /** Null, for the same reason. */
   reference_id: string | null
   /** How many businesses the reader holds, for copy that reaches all of them. */
   covers: number
   /**
-   * The conversation to open.
-   *
-   * A suspension points at the suspended business's own filing; a blacklisting
-   * has no one business to point at, so `application_id` is null and the
-   * reader goes to the general enquiry with BPLO instead.
+   * The conversation to open. A blacklisting has no one business to point
+   * at, so `application_id` is null and the reader goes to the general
+   * enquiry with BPLO.
    */
   conversation: { application_id: number | null }
 }

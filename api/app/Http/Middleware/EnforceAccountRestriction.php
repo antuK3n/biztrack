@@ -10,6 +10,10 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * A barred account reaches its messages and its notices, and nothing else.
  *
+ * Barred means blacklisted. A suspension held the whole account too until
+ * 5 October 2026; it now holds only the business it is about — see
+ * `AccountRestriction`.
+ *
  * ── Why this is a gate and not a screen ──────────────────────────────────
  *
  * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
@@ -59,11 +63,13 @@ class EnforceAccountRestriction
          * 403 and not 422: this is not a fault in what was sent, and no
          * correction to the request would be accepted. The body carries the
          * finding so a client that meets this without having read /auth/me —
-         * a stale tab, a second window — can still say which of the two it is
-         * and where to take it, rather than printing a bare refusal.
+         * a stale tab, a second window — can still say what it is and where
+         * to take it, rather than printing a bare refusal.
+         *
+         * One sentence since 5 October 2026: a suspended business no longer
+         * bars the account (see `AccountRestriction`), so a blacklisting is
+         * the only finding that reaches here.
          */
-        abort(403, $restriction['kind'] === 'blacklisted'
-            ? 'This account is blacklisted. Message the City BPLO to ask what is needed to have it lifted.'
-            : 'This account is restricted while one of its businesses is suspended. Message the City BPLO about it.');
+        abort(403, 'This account is blacklisted. Message the City BPLO to ask what is needed to have it lifted.');
     }
 }

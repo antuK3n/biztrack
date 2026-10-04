@@ -44,9 +44,11 @@ Route::get('verify/{permit_number}', [VerifyController::class, 'show']);
  * ---- `unrestricted`, and why it is on the whole file --------------------
  *
  * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
- * pag view ng notif" [client, 30 September 2026]. A suspended or blacklisted
- * owner reaches their messages and their notices; everything else refuses
- * them until the finding is settled.
+ * pag view ng notif" [client, 30 September 2026]. A blacklisted owner
+ * reaches their messages and their notices; everything else refuses them until
+ * the finding is settled. A suspended business no longer bars its owner's
+ * account (Ken, 5 October 2026); it holds only its own filings — see
+ * `AccountRestriction`.
  *
  * Attached here and lifted OFF the two that stay open, rather than added to
  * each group that closes. The instruction is an allow-list - two screens - so

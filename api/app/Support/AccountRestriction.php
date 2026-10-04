@@ -19,22 +19,19 @@ use App\Models\User;
  * for itself what "restricted" means — which is how the dashboard came to show
  * a suspension pop-up over a system that let the same owner file anyway.
  *
- * ── The two findings, and which one wins ─────────────────────────────────
+ * ── One finding bars the account: a blacklisting ─────────────────────────
  *
  * A BLACKLISTING is against the person. It reaches every business they hold
  * and every business they register afterwards.
  *
- * A SUSPENSION is against one premises. The client has asked for it to bar the
- * whole account all the same [30 September 2026: *"di accessible dapat maayos
- * muna yung pagka suspend o blacklisted nya"*], which is a change from the
- * 27 September position that a suspension leaves the owner's other businesses
- * alone. The wider reading is the one implemented; the copy that told them
- * otherwise has gone with it.
- *
- * Blacklisting is reported when both are true. It is the heavier finding, and
- * the advice differs: a suspension points at one shopfront's own conversation,
- * a blacklisting at the general enquiry, because the finding is not about any
- * one business.
+ * A SUSPENSION is against one premises, and holds that premises only. Ken,
+ * 5 October 2026: *"business suspension should never affect the entirety of
+ * the account."* From 30 September until then a suspension barred the whole
+ * account [client: *"di accessible dapat maayos muna yung pagka suspend o
+ * blacklisted nya"*], so an owner with one suspended shop could not work on
+ * the others. What it still holds is the business's own: its filings stay on
+ * hold (`Business::filingsOnHoldReason`) and it cannot start a new one
+ * (`Business::isBlockedFromApplying`). Neither of those reads the user.
  *
  * ── What is deliberately NOT a restriction ───────────────────────────────
  *
@@ -42,13 +39,10 @@ use App\Models\User;
  * office refused a clearance. That has a fix the owner can make themselves,
  * two screens away, and `isBlockedFromApplying()` already stops the filing it
  * should stop. Locking the account for it would shut the door the owner is
- * meant to walk out through.
+ * meant to walk out through. A suspended business is not one either, now.
  */
 final class AccountRestriction
 {
-    /** The statuses on a BUSINESS that bar its owner. */
-    private const BARRED = ['suspended', Business::STATUS_BLACKLISTED];
-
     /**
      * The restriction on this account, or null when there is none.
      *
@@ -70,39 +64,35 @@ final class AccountRestriction
             return null;
         }
 
-        $businesses = $user->businesses()->get(['id', 'name', 'ban', 'status']);
+        /*
+         * A business standing at `blacklisted` still bars its holder, as it
+         * did before suspensions were taken out: blacklisting one business
+         * blacklists its owner (`BusinessStatusController::carryToTheOwner`),
+         * so the status is the person's finding wherever it is found.
+         */
+        $businesses = $user->businesses()->get(['id', 'status']);
+        $blacklisted = $user->isBlacklisted()
+            || $businesses->contains(fn (Business $b) => $b->status === Business::STATUS_BLACKLISTED);
 
-        if ($user->isBlacklisted()) {
-            return [
-                'kind' => 'blacklisted',
-                'business_name' => null,
-                // A blacklisting is not about one shopfront, so quoting one
-                // business's number would invite a call about that shop and an
-                // answer that the finding is not against it.
-                'reference_id' => null,
-                'covers' => $businesses->count(),
-                /*
-                 * The general enquiry: the conversation that exists without a
-                 * filing behind it. It is the right one precisely because the
-                 * finding is against the person, and because a blacklisted
-                 * owner may have no filing to hang the question on.
-                 */
-                'conversation' => ['application_id' => null],
-            ];
-        }
-
-        $suspended = $businesses->first(fn (Business $b) => in_array($b->status, self::BARRED, true));
-
-        if ($suspended === null) {
+        if (! $blacklisted) {
             return null;
         }
 
         return [
-            'kind' => 'suspended',
-            'business_name' => $suspended->name,
-            'reference_id' => $suspended->ban,
+            'kind' => 'blacklisted',
+            'business_name' => null,
+            // A blacklisting is not about one shopfront, so quoting one
+            // business's number would invite a call about that shop and an
+            // answer that the finding is not against it.
+            'reference_id' => null,
             'covers' => $businesses->count(),
-            'conversation' => ['application_id' => self::conversationFor($suspended)],
+            /*
+             * The general enquiry: the conversation that exists without a
+             * filing behind it. It is the right one precisely because the
+             * finding is against the person, and because a blacklisted
+             * owner may have no filing to hang the question on.
+             */
+            'conversation' => ['application_id' => null],
         ];
     }
 
@@ -110,29 +100,5 @@ final class AccountRestriction
     public static function bars(?User $user): bool
     {
         return self::for($user) !== null;
-    }
-
-    /**
-     * The filing whose conversation a suspended business's owner is sent to.
-     *
-     * "Sa business na acc nya diba may kanya kanyang convo kada business"
-     * [client, 30 September 2026] — each business has its own conversation, and
-     * that is the one to open, not the general enquiry a blacklisting opens.
-     *
-     * A conversation belongs to an APPLICATION rather than to a business, so
-     * "this business's conversation" is its newest filed application: the one
-     * whose offices are currently reviewing it, and the one the suspension is
-     * most likely to concern.
-     *
-     * Null when the business has never filed. There is then no conversation to
-     * open, and the caller falls back to the general enquiry — a door that is
-     * always there, which is why it exists.
-     */
-    private static function conversationFor(Business $business): ?int
-    {
-        return $business->applications()
-            ->where('status', '!=', 'draft')
-            ->latest('id')
-            ->value('id');
     }
 }

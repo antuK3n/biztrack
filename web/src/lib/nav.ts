@@ -340,7 +340,8 @@ export function navItemsFor(user: User, portal: Portal): NavItem[] {
 }
 
 /**
- * The destinations a SUSPENDED or BLACKLISTED account may still reach.
+ * The destinations a BLACKLISTED account may still reach. (A suspended
+ * business stopped barring its owner's account on 5 October 2026.)
  *
  * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
  * pag view ng notif" [client, 30 September 2026].
@@ -405,14 +406,11 @@ export const BPLO_ENQUIRY = '/messages?application=general'
  * pag account is blacklisted ma-direct naman dapat sa general inquiry ng
  * BPLO" [client, 30 September 2026].
  *
- * So the two findings go to two different places, and the server has already
- * worked out which: a suspension carries the suspended business's own filing,
- * a blacklisting carries null because the finding is against the person and
- * belongs in the conversation that needs no filing behind it.
- *
- * Null also arrives for a suspended business that has never filed. There is no
- * conversation to open then, and the general enquiry is the honest fallback —
- * a door that is always there, which is the reason it exists.
+ * Only the second half applies since 5 October 2026, when a suspension stopped
+ * restricting the account. A blacklisting carries null because the finding is
+ * against the person and belongs in the conversation that needs no filing
+ * behind it. The filing branch is kept because it costs nothing and the
+ * payload still carries the field.
  */
 export function restrictionDestination(restriction: AccountRestriction): string {
   const id = restriction.conversation.application_id
