@@ -67,6 +67,15 @@ class PermitController extends Controller
         'application.business.lines.psicCode',
         'application.business.address.barangay',
         'application.business.owner',
+        /*
+         * What the applicant uploaded, and which document types each permit
+         * type asks for — together they say which uploads belong to THIS
+         * permit's office [client, 4 October 2026: every requirement
+         * submitted must show on the office's table]. Loaded here, not per
+         * row, so a 25-row page is two queries rather than fifty.
+         */
+        'application.documents.documentType.permitTypes',
+        'permitType.documentTypes',
     ];
 
     /**

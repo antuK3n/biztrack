@@ -351,13 +351,33 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
     { key: 's_water', label: 'Water Source', value: (r) => answer(r, 'water_source') },
   ],
 
+  /*
+   * ── Every field the sheet asks, checked against the form ────────────────
+   *
+   * Swept against `FsicFields` and `OccupancyFields` in OfficeFormStep on the
+   * client's instruction [4 October 2026: "lahat ng fields na nilagay o
+   * kailangan sa permit ng kada offices dat andon sa table"]. Zoning, Sanitary
+   * and CEC already carried their whole sheets; these two did not — FSIC was
+   * showing two of its five answers and Occupancy five of its twelve. The
+   * labels are the form's own, so a reader can hold the sheet beside the row.
+   */
   FSIC: [
     { key: 'f_certificate', label: 'Certificate Applied For', value: (r) => answer(r, 'certificate_applied_for') },
+    { key: 'f_occupancy', label: 'Type of Occupancy / Business Nature', value: (r) => answer(r, 'occupancy_type') },
+    { key: 'f_storeys', label: 'No. of Storey of Building', tnum: true, value: (r) => answer(r, 'building_storeys') },
     { key: 'f_rep', label: 'Authorized Representative', value: (r) => answer(r, 'authorized_representative') },
+    { key: 'f_certified', label: 'Certification', value: (r) => (answer(r, 'certified') === 'yes' ? 'Certified' : null) },
   ],
 
   OCCUPANCY: [
     { key: 'o_application_type', label: 'Application Type', value: (r) => answer(r, 'application_type') },
+    { key: 'o_project', label: 'Name of Project', value: (r) => answer(r, 'project_name') },
+    { key: 'o_owner_address', label: 'Owner’s Address', value: (r) => answer(r, 'owner_address') },
+    { key: 'o_zip', label: 'ZIP Code', tnum: true, value: (r) => answer(r, 'owner_zip') },
+    { key: 'o_occupancy', label: 'Type of Occupancy / Business Nature', value: (r) => answer(r, 'occupancy_type') },
+    { key: 'o_storeys', label: 'No. of Storey of Building', tnum: true, value: (r) => answer(r, 'building_storeys') },
+    { key: 'o_units', label: 'No. of Units', tnum: true, value: (r) => answer(r, 'building_units') },
+    { key: 'o_completion', label: 'Date of Completion', tnum: true, value: (r) => answerDate(r, 'completion_date') },
     { key: 'o_building_permit', label: 'Building Permit No.', tnum: true, value: (r) => answer(r, 'building_permit_no') },
     /*
      * The two issuance dates the OFFICE writes, never the applicant —

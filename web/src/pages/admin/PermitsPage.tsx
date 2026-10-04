@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primit
 import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
+import { DocumentActions } from '../../components/DocumentActions'
 import { useAuth } from '../../stores/auth'
 import {
   OFFICES,
@@ -839,8 +840,24 @@ export function PermitsPage() {
                     accessible name is announced as blank. The word is there and
                     hidden.
                   */}
-                  <th scope="col" className="px-4 py-3 text-right">
-                    <span className="sr-only">Actions</span>
+                  {/*
+                    ── The office's uploads, then the permit itself, last ──────
+
+                    [Client, 4 October 2026: "lahat ng requirements na pinasa,
+                    inupload lahat makikita rin dapat doon … tas pang last ang
+                    mismong permit nya".] The row now reads in the order the
+                    filing happened: who and what (shared columns), what the
+                    office's own sheet asked, what was uploaded for it, and
+                    finally the certificate it produced.
+
+                    The last heading is visible now. It was a hidden "Actions",
+                    which named the buttons rather than the thing they open.
+                  */}
+                  <th scope="col" className="whitespace-nowrap px-4 py-3">
+                    Requirements Submitted
+                  </th>
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
+                    Permit
                   </th>
                 </tr>
               </thead>
@@ -879,7 +896,35 @@ export function PermitsPage() {
                         </td>
                       )
                     })}
-                    <td className="px-4 py-3.5 text-right">
+                    {/*
+                      Each upload with its own View and Download, through
+                      DocumentActions — the endpoint is authenticated, so a bare
+                      link would fetch the login page. Named by what the document
+                      IS, not its filename, so a screen reader hears "Barangay
+                      Business Clearance" rather than "scan_003.pdf".
+                    */}
+                    <td className="px-4 py-3.5 align-top">
+                      {permit.documents && permit.documents.length > 0 ? (
+                        <ul className="space-y-2">
+                          {permit.documents.map((d) => (
+                            <li key={d.id} className="min-w-[16rem]">
+                              <p className="text-xs font-semibold text-ink">{d.name}</p>
+                              <p className="truncate text-[11px] text-ink-muted" title={d.filename}>
+                                {d.filename}
+                              </p>
+                              <div className="mt-1">
+                                <DocumentActions id={d.id} filename={d.filename} label={d.name} />
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-xs text-ink-muted">
+                          {permit.documents ? 'None uploaded' : '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top">
                       <button
                         type="button"
                         onClick={() => view(permit)}
