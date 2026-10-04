@@ -114,11 +114,22 @@ function InfoModal({
   title,
   subtitle,
   onClose,
+  actions,
   children,
 }: {
   title: string
   subtitle?: ReactNode
   onClose: () => void
+  /**
+   * What the reader can DO from here, above the Close.
+   *
+   * "View Officer Details — every time the Super Admin manages an officer,
+   * viewing their details happens automatically as the base screen", and the
+   * optional tasks extend FROM that screen [client use case, 1 October 2026].
+   * Details was a dead end: it showed the account and its activity log and
+   * offered no way to act on either.
+   */
+  actions?: ReactNode
   children: ReactNode
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -140,6 +151,14 @@ function InfoModal({
         <div className="bg-royal px-5 py-3 text-base font-bold tracking-wide text-white">{title}</div>
         {subtitle && <div className="border-b border-line px-5 py-3">{subtitle}</div>}
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {actions && (
+          /*
+            Above the Close and separated from the reading, because they are a
+            different kind of thing: everything above is what IS, and this row
+            is what you may do about it.
+          */
+          <div className="flex flex-wrap gap-2 border-t border-line bg-canvas px-5 py-3">{actions}</div>
+        )}
         <button
           ref={closeRef}
           type="button"
@@ -181,7 +200,23 @@ function humanizeAction(action: string): string {
  * another's work the moment two people share a name. The trail stores the actor
  * id; it is now filtered on that, server-side.
  */
-function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+function DetailsModal({
+  user,
+  canReassign,
+  canDeactivate,
+  onEdit,
+  onSetStatus,
+  onClose,
+}: {
+  user: AdminUser
+  /** The super admin holds no caseload, so there is nothing to hand on. */
+  canReassign: boolean
+  /** Nobody deactivates the seat they are signed in on. */
+  canDeactivate: boolean
+  onEdit: () => void
+  onSetStatus: () => void
+  onClose: () => void
+}) {
   const { data, loading } = useAsync(
     () => admin.auditLogs({ user_id: user.id, per_page: 50 }),
     [user.id],
@@ -193,6 +228,56 @@ function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void 
     <InfoModal
       title="Details"
       onClose={onClose}
+      /*
+        ---- The base screen became the hub it was described as -------------
+
+        "View Officer Details … happens automatically as the base screen", and
+        Edit, Set Account Status, View Activity Log and Reassign all extend
+        FROM it [client use case, 1 October 2026].
+
+        Three of the four were only on the table row and the fourth — the
+        activity log — was only in here, so neither place held the task the
+        use case describes. The log stays where it is, and the other three now
+        start here too. The row keeps them as shortcuts, because an
+        administrator working down a list should not have to open each officer
+        to deactivate one.
+      */
+      actions={
+        <>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+          >
+            Edit details
+          </button>
+          {canReassign && (
+            <Link
+              to={`${user.id}/reassign`}
+              onClick={onClose}
+              className="whitespace-nowrap rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+            >
+              Reassign caseload
+            </Link>
+          )}
+          {/*
+            Named for the TASK, not for the one direction it happens to be
+            going: the use case calls this "Set Officer Account Status", and a
+            reader looking for that should not have to work out that
+            "Deactivate" is where it lives. The verb follows in the dialog,
+            which is the place that acts.
+          */}
+          {canDeactivate && (
+            <button
+              type="button"
+              onClick={onSetStatus}
+              className="whitespace-nowrap rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+            >
+              Set account status
+            </button>
+          )}
+        </>
+      }
       subtitle={
         <div className="flex items-center gap-3">
           <Avatar user={user} size="lg" />
@@ -221,11 +306,28 @@ function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void 
           <p className="mt-0.5 text-sm font-bold text-ink">{user.is_active ? 'Active' : 'Inactive'}</p>
         </div>
       </div>
-      <p className="mt-2 border-b border-line pb-4 text-xs text-ink-secondary">
-        {loading
-          ? 'Reading the audit trail…'
-          : `Showing the ${Math.min(entries.length, total).toLocaleString()} most recent of ${total.toLocaleString()}.`}
-      </p>
+      {/*
+        ---- The activity log, said out loud ---------------------------------
+
+        The timeline below has always been the officer's activity log, and
+        nothing on the screen said so: the dialog is headed "Details", the
+        counts sit above it, and then a list of events simply began. The client
+        went looking for "View Officer Activity Log" — one of the four tasks
+        their use case names — and could not find it [1 October 2026].
+
+        It was never missing. It was unlabelled, which on a screen somebody is
+        scanning for a named task is the same thing.
+      */}
+      <div className="mt-4 border-t border-line pt-4">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-ink-muted">Activity log</h3>
+        <p className="mt-1 text-xs text-ink-secondary">
+          {loading
+            ? 'Reading the audit trail…'
+            : total === 0
+              ? 'Nothing recorded against this account yet.'
+              : `What this officer has done, newest first — showing the ${Math.min(entries.length, total).toLocaleString()} most recent of ${total.toLocaleString()}.`}
+        </p>
+      </div>
 
       <ul className="mt-4 space-y-0">
         {loading ? (
@@ -1572,11 +1674,27 @@ export function UsersPage() {
         that used to sit here: 81 staff across seven offices is not a list you
         scroll to find the Fire inspector in.
       */}
+      {/*
+        ── The widths live on the LABELS ────────────────────────────────────
+
+        Each select carried `inputCls` plus a `w-52` / `w-40`, which never
+        took: `inputCls` begins `w-full`, and two width utilities on one
+        element are settled by the order Tailwind emits them in, not the order
+        they are written. So every box fell back to shrink-to-fit inside the
+        flex row and was sized by its longest option — Office, holding
+        "CPDD — City Planning and Development Office", came out more than twice
+        as wide as Status beside it, and the three read as a ragged row rather
+        than one set of controls.
+
+        The width is on the label, which owns no competing one, and the select
+        stays `w-full` of it. Three equal columns, so the row reads as three
+        questions of the same kind.
+      */}
       <div className="mb-5 flex flex-wrap items-end gap-3">
-        <label className="block">
+        <label className="block w-56">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Office</span>
           <select
-            className={`${inputCls} w-52`}
+            className={inputCls}
             value={office}
             onChange={(e) => {
               setOffice(e.target.value)
@@ -1591,10 +1709,10 @@ export function UsersPage() {
             ))}
           </select>
         </label>
-        <label className="block">
+        <label className="block w-56">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Role</span>
           <select
-            className={`${inputCls} w-52`}
+            className={inputCls}
             value={role}
             onChange={(e) => {
               setRole(e.target.value)
@@ -1609,10 +1727,10 @@ export function UsersPage() {
             ))}
           </select>
         </label>
-        <label className="block">
+        <label className="block w-56">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Status</span>
           <select
-            className={`${inputCls} w-40`}
+            className={inputCls}
             value={active}
             onChange={(e) => {
               setActive(e.target.value as ActiveFilter)
@@ -1669,13 +1787,33 @@ export function UsersPage() {
         />
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[52rem] text-left text-sm">
+          {/*
+            Focusable and labelled, because it scrolls. A region that scrolls
+            but cannot be reached by keyboard hides every column past the fold
+            from a reader who does not use a mouse — the same treatment the
+            Permits register's wider table already carries. `tabIndex={0}` on a
+            scroll container is the one case where that is correct rather than
+            a stray tab stop.
+          */}
+          <div
+            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
+            tabIndex={0}
+            role="region"
+            aria-label="Officer accounts, scrolls sideways"
+          >
+            {/*
+              64rem, not 56. Four controls sit in Actions and the column was
+              being squeezed under their intrinsic width, so every row wrapped
+              its buttons onto a second line — rows 98px tall, wrapping at a
+              different point depending on how many controls that account was
+              offered, and a right edge that never lined up twice.
+            */}
+            <table className="w-full min-w-[64rem] text-left text-sm">
               <thead>
                 <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  <th className="px-5 py-3">Officer</th>
-                  <th className="px-5 py-3">Role</th>
-                  <th className="px-5 py-3">Office</th>
+                  <th className="px-4 py-3">Officer</th>
+                  <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Office</th>
                   {/*
                     What each officer is carrying, so the directory answers
                     "who has work" without the reader opening every row in turn
@@ -1700,38 +1838,89 @@ export function UsersPage() {
                     It moved to the page header, beside "View all assignments",
                     where the rest of this screen's navigation already is.
                   */}
-                  <th className="px-5 py-3">Holding</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Actions</th>
+                  <th className="px-4 py-3">Holding</th>
+                  <th className="px-4 py-3">Status</th>
+                  {/*
+                    Right, with its cells. The controls are the last thing in
+                    the row and they are now a fixed set on one line, so
+                    anchoring them to the table's edge gives every row the same
+                    right margin — left-aligned, each row's buttons started
+                    where the previous row's happened to end.
+                  */}
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((user) => (
                   <tr key={user.id} className="border-t border-line">
-                    <td className="px-5 py-3.5">
+                    <td className="px-4 py-3.5">
+                      {/*
+                        ---- The way in, and it has to look like one ----------
+
+                        This was the officer's name in plain black with nothing
+                        but `hover:underline` to say it did anything. It opens
+                        the DETAILS view — which the use case calls the base
+                        screen every other task extends from [client, 1 October
+                        2026] — so it was the most important control on the row
+                        and the only one with no affordance at all, sitting
+                        beside three buttons that shouted.
+
+                        Royal and underlined on hover, with the name saying
+                        where it goes. The avatar stays decorative: it is
+                        inside the control, so a second announcement of the
+                        same person is noise.
+                      */}
                       <button
                         type="button"
                         onClick={() => setModal({ kind: 'details', user })}
-                        className="flex items-center gap-3 text-left hover:underline"
+                        aria-label={`Open ${fullName(user)}’s details`}
+                        className="group flex items-center gap-3 text-left"
                       >
                         <Avatar user={user} />
                         <span className="min-w-0">
-                          <span className="block font-bold text-ink">{fullName(user)}</span>
+                          <span className="block font-bold text-royal underline-offset-2 group-hover:underline">
+                            {fullName(user)}
+                          </span>
                           <span className="block truncate text-xs text-ink-muted">{user.email}</span>
                         </span>
                       </button>
                     </td>
                     {/* The thing this screen is named after, and it was not shown. */}
-                    <td className="px-5 py-3.5 text-ink-secondary">{roleLabel(user, roleList)}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{user.department?.code ?? '—'}</td>
-                    <td className="px-5 py-3.5">{holding(user)}</td>
-                    <td className="px-5 py-3.5">
+                    <td className="whitespace-nowrap px-4 py-3.5 text-ink-secondary">{roleLabel(user, roleList)}</td>
+                    <td className="px-4 py-3.5 text-ink-secondary">{user.department?.code ?? '—'}</td>
+                    <td className="px-4 py-3.5">{holding(user)}</td>
+                    <td className="px-4 py-3.5">
                       <StatusChip tone={user.is_active ? 'tint-green' : 'tint-gray'}>
                         {user.is_active ? 'Active' : 'Inactive'}
                       </StatusChip>
                     </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
+                    {/*
+                      ── Four controls, one line, inside 1072px ──────────────
+
+                      `flex-nowrap` is what makes the column ask the table for
+                      the width it needs instead of folding to fit whatever is
+                      left: with `flex-wrap` the cell could always shrink, so
+                      it always did, and every row's buttons wrapped onto a
+                      second line.
+
+                      Asking is not the same as getting. The admin shell caps
+                      its content at `max-w-6xl`, which leaves 1072px, and four
+                      pills at their old `px-4` wanted 1154 — so the first fix
+                      stopped the wrapping and pushed Deactivate off the right
+                      edge instead, behind a sideways scroll, which is worse:
+                      a control you cannot see is worse than one you can see on
+                      the second line.
+
+                      So the row was measured rather than guessed at, and the
+                      padding came in to `px-3` here and `px-4` on the cell.
+                      Nothing was removed. The alternative was folding Edit and
+                      Deactivate into the details view, and this screen is
+                      named for assigning officers — the client has twice had
+                      to ask where a control went [1 October 2026], which is
+                      twice more than a directory should cost anyone.
+                    */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex flex-nowrap items-center justify-end gap-1.5">
                         {/*
                           * Not on an account with NO OFFICE.
                           *
@@ -1773,15 +1962,41 @@ export function UsersPage() {
                             // Transparent border, not no border: the outlined
                             // buttons beside it carry a 1px one, so without this
                             // the filled button stands 2px shorter than its row.
-                            className="rounded-full border border-transparent bg-royal-deep px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                            className="whitespace-nowrap rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
                           >
                             Reassign
                           </Link>
                         )}
+                        {/*
+                          ---- The activity log, where somebody looks for it ---
+
+                          It has always been in the details view, and the client
+                          could not find it twice over: "nasan na ang view
+                          officer activity log?", then "bat di ko pa rin
+                          makita?" [1 October 2026]. Labelling the section
+                          inside the dialog did not help, because the dialog
+                          only opens by pressing the officer's NAME — and
+                          somebody hunting for a named task reads the Actions
+                          column, not the first cell.
+
+                          Twice asked is twice too many for a feature that was
+                          already built. It opens the same details view the
+                          name does, scrolled to the same place; what it adds
+                          is a control that says the words the reader is
+                          looking for.
+                        */}
+                        <button
+                          type="button"
+                          onClick={() => setModal({ kind: 'details', user })}
+                          aria-label={`Activity log for ${fullName(user)}`}
+                          className="whitespace-nowrap rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                        >
+                          Activity log
+                        </button>
                         <button
                           type="button"
                           onClick={() => setModal({ kind: 'edit', user })}
-                          className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                          className="whitespace-nowrap rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
                         >
                           Edit
                         </button>
@@ -1793,16 +2008,32 @@ export function UsersPage() {
                           that always fails is worse than not offering one, so
                           the reason is stated where the control would be.
                         */}
+                        {/*
+                          `aria-disabled`, never the native attribute
+                          (AGENTS.md §6.2). A disabled control leaves the tab
+                          order, so a keyboard reader arriving at the super
+                          admin's row simply finds one fewer button than every
+                          other row and is told nothing about why — and `title`
+                          is not announced on an element that cannot be
+                          focused, so the explanation went with it.
+
+                          Refused in the handler instead, which is where the
+                          guarantee belongs: the API refuses it too, and this
+                          is the reason stated where the control is.
+                        */}
                         <button
                           type="button"
-                          onClick={() => setModal({ kind: 'deactivate', user })}
-                          disabled={busyId === user.id || isSuperAdmin(user, roleList)}
+                          onClick={() => {
+                            if (busyId === user.id || isSuperAdmin(user, roleList)) return
+                            setModal({ kind: 'deactivate', user })
+                          }}
+                          aria-disabled={busyId === user.id || isSuperAdmin(user, roleList) || undefined}
                           title={
                             isSuperAdmin(user, roleList)
                               ? 'The only super admin cannot be deactivated — no other account can manage accounts.'
                               : undefined
                           }
-                          className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
+                          className="whitespace-nowrap rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-white"
                         >
                           {user.is_active ? 'Deactivate' : 'Activate'}
                         </button>
@@ -1814,7 +2045,7 @@ export function UsersPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
+          <div className="flex items-center justify-between gap-4 border-t border-line px-4 py-3.5">
             <p className="text-sm text-ink-muted">
               Showing {rows.length.toLocaleString()} of {total.toLocaleString()} accounts
               {filtersApplied && ' matching these filters'}
@@ -1853,7 +2084,21 @@ export function UsersPage() {
         </ProtoCard>
       )}
 
-      {modal?.kind === 'details' && <DetailsModal user={modal.user} onClose={() => setModal(null)} />}
+      {modal?.kind === 'details' && (
+        <DetailsModal
+          user={modal.user}
+          /*
+            The same two guards the row applies, read from the same place: a
+            details view offering an action the row refuses would be two
+            screens disagreeing about one rule.
+          */
+          canReassign={!isSuperAdmin(modal.user, roleList)}
+          canDeactivate={!isSuperAdmin(modal.user, roleList)}
+          onEdit={() => setModal({ kind: 'edit', user: modal.user })}
+          onSetStatus={() => setModal({ kind: 'deactivate', user: modal.user })}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal?.kind === 'edit' && (
         <EditModal
           user={modal.user}

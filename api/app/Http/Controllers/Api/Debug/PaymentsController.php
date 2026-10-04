@@ -36,11 +36,13 @@ class PaymentsController extends Controller
     public function update(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'mode' => ['required_without:charge', Rule::in(PaymentMode::MODES)],
-            'charge' => ['required_without:mode', Rule::in(PaymentMode::CHARGES)],
+            'mode' => ['required_without_all:charge,confirm', Rule::in(PaymentMode::MODES)],
+            'charge' => ['required_without_all:mode,confirm', Rule::in(PaymentMode::CHARGES)],
+            'confirm' => ['required_without_all:mode,charge', Rule::in(PaymentMode::CONFIRMS)],
         ], [
-            'mode.required_without' => 'Say which way owners pay, or what KwikPay collects.',
-            'charge.required_without' => 'Say which way owners pay, or what KwikPay collects.',
+            'mode.required_without_all' => 'Say which way owners pay, what KwikPay collects, or what marks a payment paid.',
+            'charge.required_without_all' => 'Say which way owners pay, what KwikPay collects, or what marks a payment paid.',
+            'confirm.required_without_all' => 'Say which way owners pay, what KwikPay collects, or what marks a payment paid.',
         ]);
 
         $before = self::switches();
@@ -57,6 +59,9 @@ class PaymentsController extends Controller
         if (isset($data['charge'])) {
             PaymentMode::setCharge($data['charge']);
         }
+        if (isset($data['confirm'])) {
+            PaymentMode::setConfirm($data['confirm']);
+        }
 
         DebugPanel::audit('payments', $before, self::switches(), actorId: $request->user()->id);
 
@@ -68,13 +73,14 @@ class PaymentsController extends Controller
         return response()->json(['data' => $gateway->testConnection()]);
     }
 
-    /** @return array{mode: string, charge: string, test_amount: string} */
+    /** @return array{mode: string, charge: string, test_amount: string, confirm: string} */
     private static function switches(): array
     {
         return [
             'mode' => PaymentMode::current(),
             'charge' => PaymentMode::charge(),
             'test_amount' => number_format(PaymentMode::testAmount(), 2, '.', ''),
+            'confirm' => PaymentMode::confirm(),
         ];
     }
 }

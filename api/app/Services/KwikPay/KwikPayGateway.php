@@ -170,7 +170,13 @@ class KwikPayGateway
         $ok = ! $result->noAnswer && $result->httpStatus >= 200 && $result->httpStatus < 300;
         $echoed = (string) ($result->body['order_id'] ?? $payment->gateway_order_id);
 
-        if ($ok && $echoed === $payment->gateway_order_id) {
+        /*
+         * Only when the switch says so does the answer settle anything. By
+         * default the signed callback alone marks a payment paid (PaymentMode,
+         * "What marks a KwikPay payment paid"), and this call just keeps the
+         * note above current.
+         */
+        if ($ok && $echoed === $payment->gateway_order_id && PaymentMode::trustsQuery()) {
             if ($result->status() === '5') {
                 $reported = $result->body['amount'] ?? null;
                 if ($reported !== null && (float) $reported > 0 && ! self::sameAmount($reported, $payment)) {

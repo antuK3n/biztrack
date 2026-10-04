@@ -82,6 +82,32 @@ class PaymentMode
 
     private const CHARGE_KEY = 'kwikpay_charge';
 
+    /*
+     * ── What marks a KwikPay payment paid ───────────────────────────────────
+     *
+     * A third switch, stored like the other two (`kwikpay_confirm`).
+     *
+     * `callback`: only KwikPay's signed callback (status 5) completes a
+     * payment. Asking /api/query still happens, for the note it leaves on the
+     * payment, but its answer completes and fails nothing.
+     *
+     * `query`: a "5" or "3" from /api/query also settles the payment, which is
+     * what KwikPay's merchant docs allow.
+     *
+     * `callback` is the default [Ken, 4 October 2026] because the gateway at
+     * payment-gateway-kwgu.onrender.com answered
+     * {"status":"5","message":"Transaction is waiting to be processed"} for an
+     * order its payment page reported expired, and BizTrack credited ₱8,150
+     * nobody paid.
+     */
+    public const CONFIRM_CALLBACK = 'callback';
+
+    public const CONFIRM_QUERY = 'query';
+
+    public const CONFIRMS = [self::CONFIRM_CALLBACK, self::CONFIRM_QUERY];
+
+    private const CONFIRM_KEY = 'kwikpay_confirm';
+
     public static function current(): string
     {
         $stored = self::stored();
@@ -163,6 +189,51 @@ class PaymentMode
         Audit::log('payment_gateway.switched', null, ['from' => $before, 'to' => $mode, 'via' => $via], actorId: $actorId);
 
         return ['from' => $before, 'to' => $mode];
+    }
+
+    /** `callback` or `query`: what may mark a KwikPay payment paid (see CONFIRM_*). */
+    public static function confirm(): string
+    {
+        $stored = self::stored(self::CONFIRM_KEY);
+
+        return $stored !== null && in_array($stored, self::CONFIRMS, true) ? $stored : self::CONFIRM_CALLBACK;
+    }
+
+    /** Whether a status answer from /api/query may complete or fail a payment. */
+    public static function trustsQuery(): bool
+    {
+        return self::confirm() === self::CONFIRM_QUERY;
+    }
+
+    /**
+     * Change what marks a payment paid, without an audit row (the caller
+     * writes its own). Returns what it was before.
+     *
+     * @throws \InvalidArgumentException when the value is unknown
+     */
+    public static function setConfirm(string $confirm): string
+    {
+        if (! in_array($confirm, self::CONFIRMS, true)) {
+            throw new \InvalidArgumentException("Unknown setting: {$confirm}. Use callback or query.");
+        }
+
+        $before = self::confirm();
+        Setting::write(self::CONFIRM_KEY, $confirm);
+
+        return $before;
+    }
+
+    /**
+     * Change what marks a payment paid and write it to the audit log.
+     *
+     * @return array{from: string, to: string}
+     */
+    public static function switchConfirm(string $confirm, string $via, ?int $actorId = null): array
+    {
+        $before = self::setConfirm($confirm);
+        Audit::log('payment_gateway.confirm_switched', null, ['from' => $before, 'to' => $confirm, 'via' => $via], actorId: $actorId);
+
+        return ['from' => $before, 'to' => $confirm];
     }
 
     /** `test` or `full`: what KwikPay is asked to collect for a NEW payment. */
@@ -278,6 +349,7 @@ class PaymentMode
             // switch set (the env's say), and the amount `test` means.
             'charge' => self::charge(),
             'default_charge' => self::defaultCharge(),
+            'confirm' => self::confirm(),
             'test_amount' => self::money(self::testAmount()),
             'kwikpay' => [
                 'configured' => self::kwikPayConfigured(),

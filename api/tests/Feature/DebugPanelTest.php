@@ -185,7 +185,7 @@ it('refuses a panel switch the way the admin API does, and changes neither half 
     authAs('admin@biztrack.local');
 
     $this->putJson('/api/v1/debug/payments', [])->assertStatus(422)
-        ->assertJsonPath('errors.mode.0', 'Say which way owners pay, or what KwikPay collects.');
+        ->assertJsonPath('errors.mode.0', 'Say which way owners pay, what KwikPay collects, or what marks a payment paid.');
     $this->putJson('/api/v1/debug/payments', ['charge' => 'half'])->assertStatus(422)->assertJsonValidationErrors('charge');
 
     config(['payments.kwikpay.key' => null]);

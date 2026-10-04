@@ -748,11 +748,16 @@ export function ApplicationDetailPage() {
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
-              <span className="text-4xl font-medium">For Final Approval</span>
+              {/*
+                "With BPLO", matching the chip — see `applicationStatusMeta`.
+                The old heading named a stage that is on no guide the
+                applicant can read, and the sentence under it described a
+                wait for copies nobody uploads any more.
+              */}
+              <span className="text-4xl font-medium">With BPLO</span>
             </div>
             <p className="mt-2 text-sm italic text-ink-secondary">
-              Every other permit is in. BPLO is approving your application and releasing your
-              Business Permit.
+              BPLO is finishing your application. Nothing is needed from you.
             </p>
           </StatusCard>
         )}

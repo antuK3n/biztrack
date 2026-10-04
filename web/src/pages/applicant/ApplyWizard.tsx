@@ -53,7 +53,7 @@ import {
   ProtoModal,
   inputCls,
 } from '../../components/ui/Proto'
-import { formatBytes, formatDate, formatMoney } from '../../lib/format'
+import { formatBytes, formatDate, formatMoney, tradeName } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import {
   applications,
@@ -61,6 +61,7 @@ import {
   documents,
   officeForms,
   payments,
+  permits as permitsApi,
   reference,
 } from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
@@ -89,6 +90,13 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * paragraph above warns about.
  */
 import BarangayZoningMap from './BarangayZoningMap'
+import { ZoningRuleChecklist } from '../../components/ZoningRuleChecklist'
+import {
+  fetchZoningCheck,
+  useZoningCheck,
+  type ZoningCheckQuery,
+  type ZoningFactValues,
+} from '../../lib/zoningCheck'
 import {
   LocationInsightsPanel,
   ZoningConformanceNote,
@@ -461,7 +469,15 @@ const AUTOSAVE_DELAY_MS = 1200
  * localStorage is on the effects that use this, and it is about a shared
  * terminal at City Hall rather than about storage.
  */
-const DRAFT_BACKUP_KEY = 'biztrack:apply:pre-draft'
+/*
+ * The tab's own copy, one slot PER FILING TYPE.
+ *
+ * It was a single key while only a new permit was backed up. With renewals
+ * and amendments backed up too (3 October 2026) one key would mean a renewal
+ * started in one tab overwriting the new permit half-typed in another, and
+ * whichever was reopened first would silently take the other's answers.
+ */
+const draftBackupKey = (type: ApplicationType) => `biztrack:apply:pre-draft:${type}`
 /*
  * Bumped whenever `FormState` or `FeeProfileDraft` changes shape. A backup
  * from an older build would restore fields that have moved or gone, which is
@@ -478,6 +494,41 @@ type DraftBackup = {
   form: FormState
   feeDraft: FeeProfileDraft
   consent: boolean
+  /**
+   * What the entry dialog was told, on a renewal or an amendment.
+   *
+   * A new permit has no such answer — the form IS the filing. A renewal
+   * begins by naming a business and the permits it carries forward, and an
+   * amendment by naming the record it changes, and none of that lives in
+   * `form`. Without it here a resumed renewal would come back with every
+   * field filled in and no idea what it was a renewal OF, and the dialog
+   * would open over the restored answers asking again.
+   *
+   * Optional, because a backup written before 3 October 2026 has none and
+   * a new permit never will. Absent means "ask", which is the old
+   * behaviour and the safe one.
+   */
+  identity?: {
+    businessId: number | null
+    priorPermitId: number | null
+    priorPermitIds: number[]
+    amendment: AmendmentState
+  }
+  /**
+   * Whether the applicant named this filing themselves.
+   *
+   * Carried because restoring `title` alone is not enough to keep it. The
+   * suggestion effect replaces the title with the business name whenever
+   * `titleEdited` is false — so a resumed draft came back with the applicant's
+   * own name in the box for an instant, and then had it overwritten the moment
+   * the business loaded. Observed as "Nena's Sari-Sari Store" where
+   * "E2E Renewal Draft …" had been saved.
+   *
+   * Optional, because a backup written before 4 October 2026 has none. Absent
+   * reads as false, which is the old behaviour and the safe direction: a title
+   * nobody chose goes on tracking the business name.
+   */
+  titleEdited?: boolean
 }
 
 /*
@@ -2119,6 +2170,66 @@ function IdentifyFilingModal({
       ? ownedBusinesses.filter((b) => b.current_business_permit)
       : ownedBusinesses
   const withheldBusinesses = ownedBusinesses.length - choosableBusinesses.length
+
+  /**
+   * How many permits each business could renew today.
+   *
+   * ── The dropdown knew nothing until something was picked ────────
+   *
+   * Permits were loaded only AFTER a business was chosen, so an owner with
+   * fourteen shops and four things due had to open each one to find them.
+   * Client, 3 October 2026, having just been told by the Home badge that
+   * four were due: *"it is NOT APPARENT which to renew."*
+   *
+   * One call answers it for every business at once — `/permits` already
+   * returns the owner's own rows with the business attached, which is the
+   * same list the Home tile counts. Loaded once here rather than per
+   * business, and it is the badge's own source, so the tile and this list
+   * cannot disagree about what is due.
+   *
+   * `renewal_blocked_reason === null` is the server's answer to "may this
+   * be renewed now", not a date this screen works out: a Mayor's Permit six
+   * weeks from expiry is NOT due (it waits for January) and one that lapsed
+   * in March IS (late, with a surcharge). `status === 'active'` drops the
+   * superseded certificates the list also carries.
+   */
+  const { data: ownPermits } = useAsync(
+    () =>
+      applicationType === 'renewal'
+        ? permitsApi.list({ per_page: 100 })
+        : Promise.resolve([] as Permit[]),
+    [applicationType],
+  )
+  const dueByBusiness = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const p of ownPermits ?? []) {
+      if (p.status !== 'active' || (p.renewal_blocked_reason ?? null) !== null) continue
+      const id = p.business?.id
+      if (id === undefined) continue
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+
+    return counts
+  }, [ownPermits])
+
+  /*
+   * Split, not sorted. Two headed groups say "these are the ones" in a way
+   * an ordering cannot — a list that merely puts four at the top still
+   * looks like one list.
+   *
+   * Both halves are offered. A business with nothing due is still a legal
+   * filing: the window opens 30 days out, and an applicant who means to
+   * check or who is early should not find their own shop missing — the
+   * objection that keeps this chooser unfiltered in the first place.
+   *
+   * Only on a RENEWAL. An amendment has nothing to be due, and heading a
+   * group "Nothing due" there would answer a question it never asked.
+   */
+  const groupByDue = applicationType === 'renewal' && dueByBusiness.size > 0
+  const businessesDue = choosableBusinesses.filter((b) => (dueByBusiness.get(b.id) ?? 0) > 0)
+  const businessesNotDue = choosableBusinesses.filter(
+    (b) => (dueByBusiness.get(b.id) ?? 0) === 0,
+  )
   const [businessId, setBusinessId] = useState<number | null>(initial.businessId)
   /*
    * The ticked permits, primary first. Order is the answer's own: the first
@@ -2241,6 +2352,55 @@ function IdentifyFilingModal({
       : allPermits
 
   /*
+   * Is the Mayor’s / Business Permit among the ticks?
+   *
+   * It decides what the note under the picker says, and it is the same
+   * question the tick handler asks and that `RenewalScope` asks on the
+   * API: a filing carrying the business permit may carry whatever else is
+   * due with it, and one that does not carries a single permit.
+   */
+  const carriesBusinessPermitTick = permits.some(
+    (p) => permitIds.includes(p.id) && p.permit_type?.code === BUSINESS_PERMIT_CODE,
+  )
+
+  /*
+   * The permits this filing may actually carry, and the rest.
+   *
+   * Split on the SERVER's own refusal (`renewal_blocked_reason`) rather
+   * than on a date computed here, so the list cannot offer a row the API
+   * would reject — the window lives in `App\Support\RenewalWindow` and
+   * this is the half of it the applicant can see.
+   *
+   * A row already TICKED stays in the top list whatever its reason says.
+   * A draft left over a month-end can hold a permit whose window closed
+   * under it, and moving that tick into a section headed "Not due yet"
+   * would hide the one row blocking submission in the one place the
+   * applicant is not looking.
+   */
+  const renewableNow = permits.filter(
+    (p) => (p.renewal_blocked_reason ?? null) === null || permitIds.includes(p.id),
+  )
+  /*
+   * The blocked permits, split by WHY — and they are opposite states.
+   *
+   * Both were drawn under one heading reading "Still valid — nothing to
+   * do", which filed a certificate that lapsed in 2023 among the ones in
+   * force and told the applicant it was fine. Caught by the client on a
+   * screenshot, 3 October 2026.
+   *
+   * `renewal_blocked_reason` says a permit cannot be renewed TODAY and
+   * says nothing about which side of its term that is — too early and too
+   * late are one field, which is exactly why `RenewalWindow` returns the
+   * sentence rather than a flag. The expiry date is what tells them
+   * apart, so the split is on that and not on the wording.
+   */
+  const blockedRows = permits.filter(
+    (p) => (p.renewal_blocked_reason ?? null) !== null && !permitIds.includes(p.id),
+  )
+  const notDueYet = blockedRows.filter((p) => (p.days_until_expiry ?? 0) >= 0)
+  const noLongerRenewable = blockedRows.filter((p) => (p.days_until_expiry ?? 0) < 0)
+
+  /*
    * Why Confirm will not get you out of here yet — in the order the questions
    * are asked, so the sentence always names the topmost thing still blank.
    *
@@ -2342,7 +2502,7 @@ function IdentifyFilingModal({
     <ProtoModal
       title={
         applicationType === 'renewal'
-          ? 'WHICH PERMITS ARE YOU RENEWING?'
+          ? 'WHICH PERMIT ARE YOU RENEWING?'
           : 'WHICH BUSINESS ARE YOU AMENDING?'
       }
       wide
@@ -2380,14 +2540,15 @@ function IdentifyFilingModal({
     >
       <p className="text-sm leading-relaxed text-ink-secondary">
         {applicationType === 'renewal'
-          ? 'Tick the permits you are renewing. We fill in the rest from them.'
-          : 'Say which record you are amending. We fill in the rest from it.'}
+          ? 'We fill in the rest of the form from it.'
+          : 'We fill in the rest of the form from it.'}
       </p>
 
       {/* ── 1. Which business ────────────────────────────────────────────── */}
       <label className="mt-3 block">
         <FieldLabel required>Business</FieldLabel>
         <select
+          aria-label={`Which business are you ${verb}?`}
           className={inputCls}
           value={businessId ?? ''}
           onChange={(e) => setBusinessId(e.target.value ? Number(e.target.value) : null)}
@@ -2398,13 +2559,42 @@ function IdentifyFilingModal({
           <option value="">
             {businessesLoading ? 'Loading your businesses…' : 'Select a business…'}
           </option>
-          {choosableBusinesses.map((b) => (
-            <option key={b.id} value={b.id}>
-              {applicationType === 'amendment' && b.current_business_permit
-                ? `${b.name} — ${b.current_business_permit.permit_number}`
-                : b.name}
-            </option>
-          ))}
+          {groupByDue ? (
+            <>
+              {/*
+                `optgroup`, not a styled list. It is native, so it survives
+                a phone's own select UI and reads as a group to a screen
+                reader — neither of which a div pretending to be a dropdown
+                does without a great deal of work.
+              */}
+              {businessesDue.length > 0 && (
+                <optgroup label="Due for renewal">
+                  {businessesDue.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({dueByBusiness.get(b.id)} due)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {businessesNotDue.length > 0 && (
+                <optgroup label="Nothing due">
+                  {businessesNotDue.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </>
+          ) : (
+            choosableBusinesses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {applicationType === 'amendment' && b.current_business_permit
+                  ? `${b.name} — ${b.current_business_permit.permit_number}`
+                  : b.name}
+              </option>
+            ))
+          )}
         </select>
       </label>
       {!businessesLoading && ownedBusinesses.length === 0 && (
@@ -2442,7 +2632,8 @@ function IdentifyFilingModal({
       */}
       {businessId !== null && applicationType !== 'amendment' && (
         <div className="mt-3">
-          <FieldLabel required>Permits</FieldLabel>
+          {/* The list below carries the full question as its own name. */}
+          <FieldLabel required>Permit</FieldLabel>
           {/*
             One bill, said where the ticking happens.
 
@@ -2478,8 +2669,23 @@ function IdentifyFilingModal({
             worked, this sentence becomes a lie about money and must go with
             it.
           */}
+          {/*
+            Two sentences, and which one shows depends on the answer so far.
+
+            The fee line earns its place for the reason item #79 gave: nothing
+            in this picker said what a second tick costs, and the fear of a
+            second bill is what makes someone untick a permit that is due.
+
+            The other line is new on 3 October 2026 and has to come FIRST in
+            the reader's day, not after: ticking a second clearance will drop
+            the first, and a control that rearranges itself without warning is
+            read as a bug. It is also why the rule is phrased as what to do —
+            file them separately — rather than as what is forbidden.
+          */}
           <p className="mb-2 text-xs text-ink-secondary">
-            Choose as many as you need — one payment for this filing, not one per permit.
+            {carriesBusinessPermitTick
+              ? 'As many as you need — one payment, not one per permit.'
+              : 'Choose your Mayor’s / Business Permit to renew several at once.'}
           </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
@@ -2492,13 +2698,18 @@ function IdentifyFilingModal({
             // business holding nothing drew an empty bordered box above the
             // note explaining that it holds nothing, which reads as a list that
             // failed to load rather than one with no rows to show.
-            permits.length > 0 && (
+            renewableNow.length > 0 && (
               <ul
-                aria-label={`Which permits are you ${verb}?`}
-
+                aria-label={`Which permit are you ${verb}?`}
+                /*
+                 * A radiogroup while one answer is allowed, a plain list
+                 * once the Mayor's Permit has opened it to several. The
+                 * inputs below switch with it.
+                 */
+                role={carriesBusinessPermitTick ? undefined : 'radiogroup'}
                 className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
               >
-                {permits.map((p) => {
+                {renewableNow.map((p) => {
                   const chosen = permitIds.includes(p.id)
                   const days = p.days_until_expiry
                   // Never colour alone: the word says expired or not.
@@ -2556,22 +2767,9 @@ function IdentifyFilingModal({
                   const reason =
                     blockedReason !== null
                       ? { text: blockedReason, cls: 'text-s-red font-semibold' }
-                      : chosen || days === null
-                      ? null
-                      : days < 0
-                        ? {
-                            text: 'Tick it to renew — this office has no valid copy on file.',
-                            cls: 'text-s-red',
-                          }
-                        : days <= 60
-                          ? {
-                              text: `${days} ${days === 1 ? 'day' : 'days'} left — tick it to renew now and save a second filing.`,
-                              cls: 'text-ink',
-                            }
-                          : {
-                              text: 'No renewal needed — BizTrack uses the copy it holds.',
-                              cls: 'text-ink-secondary',
-                            }
+                      : chosen || days === null || days >= 0
+                        ? null
+                        : { text: 'No valid copy on file.', cls: 'text-s-red' }
                   return (
                     // Presentational so the radios are the radiogroup's own
                     // children, not list items wrapping them.
@@ -2586,7 +2784,13 @@ function IdentifyFilingModal({
                         }`}
                       >
                         <input
-                          type="checkbox"
+                          /*
+                           * One answer or several — see the note on the
+                           * list above. A radio in a group named by the
+                           * same `aria-label`, so the two never disagree.
+                           */
+                          type={carriesBusinessPermitTick ? 'checkbox' : 'radio'}
+                          name={carriesBusinessPermitTick ? undefined : 'renewal-permit'}
                           /*
                            * Disabled, not hidden. A permit the business
                            * holds and cannot renew is a fact the applicant
@@ -2604,12 +2808,38 @@ function IdentifyFilingModal({
                              * Untick-and-retick is how you change which is
                              * primary, which is the only honest way to say it
                              * without a second control asking the same thing.
+                             *
+                             * ── One filing, or one other permit ───────────
+                             *
+                             * Client, 3 October 2026, on the other permits
+                             * being independent of each other. Ticking a
+                             * second one with no Mayor's Permit in the set
+                             * REPLACES the first rather than refusing it:
+                             * the applicant is telling us which permit they
+                             * mean, and answering a changed mind with an
+                             * error is answering it with an obstacle. The
+                             * note under the list says it will happen before
+                             * it does.
+                             *
+                             * `RenewalScope` on the API refuses the set this
+                             * cannot produce, on both endpoints that write
+                             * it — the UI keeping a shape off the screen is
+                             * not the same as the server refusing it.
                              */
-                            setPermitIds((current) =>
-                              current.includes(p.id)
-                                ? current.filter((id) => id !== p.id)
-                                : [...current, p.id],
-                            )
+                            setPermitIds((current) => {
+                              if (current.includes(p.id)) {
+                                return current.filter((id) => id !== p.id)
+                              }
+
+                              const next = [...current, p.id]
+                              const carriesBusinessPermit = permits.some(
+                                (q) =>
+                                  next.includes(q.id) &&
+                                  q.permit_type?.code === BUSINESS_PERMIT_CODE,
+                              )
+
+                              return carriesBusinessPermit ? next : [p.id]
+                            })
                           }}
                           className="h-4 w-4 shrink-0 accent-royal"
                         />
@@ -2659,6 +2889,125 @@ function IdentifyFilingModal({
                 })}
               </ul>
             )
+          )}
+
+          {/*
+            ── The permits this filing may NOT carry yet ───────────
+
+            Shown, and not as rows. Client, 3 October 2026, on five of
+            these drawn as blocked checkboxes above the one that was
+            pickable: *"so much texts appear."* They each carried a
+            paragraph naming the permit and restating its dates, both of
+            which the row above already printed.
+
+            Kept rather than filtered away, because a permit the applicant
+            can see in My Permits and cannot find here reads as lost — the
+            same objection the amendment chooser answers with a count and a
+            reason instead of a silent filter.
+
+            But not as part of the QUESTION. "Which permits are you
+            renewing" takes its answer from the permits that are due; one
+            that is not is context, and one line of it is enough: the name,
+            and the date it can be renewed from, which is the only fact the
+            applicant cannot work out for themselves.
+          */}
+          {/*
+            ── Stacked, not two columns ────────────────────────
+
+            The name sat left and the dates were pushed right, so every row
+            was a short label against a long run of text with a gap between
+            them, and the one row whose sentence was longer wrapped while
+            the rest did not. Client, 3 October 2026: *"Text is too
+            compacted. Adjust the layout."*
+
+            The name leads its own line and the dates sit under it. Both
+            read left to right from the same edge, a longer sentence makes
+            the row taller instead of crushing the column beside it, and it
+            is the shape the pickable rows above already use.
+          */}
+          {notDueYet.length > 0 && (
+            <div className="mt-3">
+              {/*
+                ── The heading says the GOOD news first ──────────────
+
+                It read "Not due yet", which states the one thing these
+                permits cannot do and never says they are fine. Client,
+                3 October 2026: *"Can you put something in them that
+                explains clearly that they are still valid."*
+
+                A list of six certificates under a negative heading, each
+                line naming a future date, reads as six problems. Every one
+                of them is a permit in force that the applicant need do
+                nothing about, and that is the message.
+              */}
+              <h4 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">
+                Still valid — nothing to do
+              </h4>
+              <ul className="mt-1 divide-y divide-line rounded-lg border border-line bg-line/20">
+                {notDueYet.map((p) => (
+                  <li key={p.id} className="px-3 py-2">
+                    <span className="block text-xs font-semibold text-ink-secondary">
+                      {p.permit_type?.name ?? 'Permit'}
+                    </span>
+                    {/*
+                      Two facts, in the order they are wanted: how long the
+                      permit covers them, then when they may renew it.
+
+                      The validity was dropped when these rows were
+                      compacted, on the reasoning that the renewal date was
+                      the only thing the applicant could not work out. That
+                      was wrong in one direction: they could not work out
+                      the expiry either, because this group is the one place
+                      the dates are no longer printed.
+                    */}
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      {p.valid_until && (
+                        <span className="font-medium text-ink-secondary">
+                          Valid to {formatDate(p.valid_until)}
+                        </span>
+                      )}
+                      {p.valid_until ? ' · ' : ''}
+                      {/* The server's own sentence, already short — see RenewalWindow. */}
+                      {p.renewal_blocked_reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/*
+            ── Lapsed past the cap: a different answer, under its own heading ─
+
+            These were drawn above, among the permits in force, under a
+            heading promising there was nothing to do. There is: the term
+            ran out more than 36 months ago (`RenewalWindow`), renewal no
+            longer deters anything past Sec. 8A.05's interest cap, and what
+            the business needs is a New Application with its own inspection.
+
+            Red, and said in the row rather than only in the sentence: a
+            certificate that lapsed years ago is the one thing on this
+            screen the applicant most needs to notice, and it had been
+            filed under reassurance.
+          */}
+          {noLongerRenewable.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-s-red">
+                Lapsed — cannot be renewed
+              </h4>
+              <ul className="mt-1 divide-y divide-s-red/20 rounded-lg border border-s-red/40 bg-s-red/5">
+                {noLongerRenewable.map((p) => (
+                  <li key={p.id} className="px-3 py-2">
+                    <span className="block text-xs font-semibold text-ink">
+                      {p.permit_type?.name ?? 'Permit'}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-s-red">
+                      {p.renewal_blocked_reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/*
@@ -2991,6 +3340,22 @@ export function ApplyWizard() {
   const [needsEmailCode, setNeedsEmailCode] = useState(false)
   /* Autosave bookkeeping — see the autosave effect below. */
   const [dirty, setDirty] = useState(false)
+  /**
+   * The snapshot the SCRATCH draft on the server currently holds.
+   *
+   * `dirty` above only ever knew about the real `applications` draft, so the
+   * indicator spoke only for that one. Before a real draft exists the wizard
+   * still saves everything to a `wizardDrafts` row — it is how the filing
+   * reaches the Drafts list — and the applicant was told "Not saved yet"
+   * while their answers sat safely on the server and visibly in that list
+   * (client, 4 October 2026: *"this part seems misleading"*).
+   *
+   * Null until the first scratch write lands. Compared against `snapshot`
+   * rather than kept as a boolean, because "there is a row" and "that row has
+   * what is on screen" are different claims and only the second one may say
+   * All Changes Saved.
+   */
+  const [scratchSavedSnapshot, setScratchSavedSnapshot] = useState<string | null>(null)
   const [autosaveNonce, setAutosaveNonce] = useState(0)
   const savedSnapshotRef = useRef<string | null>(null)
 
@@ -3031,11 +3396,20 @@ export function ApplyWizard() {
 
   function readBackup(): DraftBackup | null {
     try {
-      const raw = sessionStorage.getItem(DRAFT_BACKUP_KEY)
+      const raw = sessionStorage.getItem(draftBackupKey(applicationType))
       if (!raw) return null
       const parsed = JSON.parse(raw) as DraftBackup
       // A backup written by an older build describes a different form.
-      return parsed.v === DRAFT_BACKUP_VERSION ? parsed : null
+      if (parsed.v !== DRAFT_BACKUP_VERSION) return null
+
+      /*
+       * And one written for a different KIND of filing describes a
+       * different set of questions. The key is per type now, so this can
+       * only fire on a slot left by the single-key build — but restoring a
+       * new permit's answers into a renewal would put a form on screen
+       * that no dialog had ever been asked about.
+       */
+      return parsed.applicationType === applicationType ? parsed : null
     } catch {
       return null
     }
@@ -3043,7 +3417,7 @@ export function ApplyWizard() {
 
   function clearBackup(): void {
     try {
-      sessionStorage.removeItem(DRAFT_BACKUP_KEY)
+      sessionStorage.removeItem(draftBackupKey(applicationType))
     } catch {
       /* Nothing to do, and nothing worth telling the applicant. */
     }
@@ -3145,6 +3519,18 @@ export function ApplyWizard() {
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
+  /*
+   * The same value, readable from inside an awaited callback.
+   *
+   * The debounced scratch save closes over `applicationId` as it stood when
+   * the timer was set, and a real draft can appear during the await — see the
+   * discard in that save for what that cost. A ref is the only way to ask
+   * "has one arrived since?" from in there.
+   */
+  const applicationIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    applicationIdRef.current = applicationId
+  }, [applicationId])
   /**
    * The wizard steps a returned filing is allowed to show.
    *
@@ -3324,7 +3710,11 @@ export function ApplyWizard() {
   })
   const toggleSection = (name: ReviewSectionName) =>
     setSectionOpen((s) => ({ ...s, [name]: !s[name] }))
-  const allSectionsOpen = REVIEW_SECTIONS.every((name) => sectionOpen[name])
+  /*
+   * `allSectionsOpen` stood here and asked all four, which is the wrong
+   * question for a filing that draws fewer — see `allReviewSectionsOpen`,
+   * declared once `sequence` is known.
+   */
   const setAllSections = (open: boolean) =>
     setSectionOpen({
       address: open,
@@ -3392,6 +3782,15 @@ export function ApplyWizard() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
   /*
+   * The answers City Ordinance No. 24-2018 needs that nothing else on the
+   * form asks: whether the business is run from a home, how far it is from
+   * the nearest school, whether the lot is beside a creek. Asked inside the
+   * zoning checklist, under the rule that needs each one, never as a block of
+   * their own. Saved with the draft like the consent tick, for the same reason
+   * that one is: an answer that is not watched by `snapshot` is never saved.
+   */
+  const [zoningFacts, setZoningFacts] = useState<ZoningFactValues>({})
+  /*
    * Defaults to annual, which is both the Code's ordinary case and what the
    * server has always written when the key is absent. A renewal that never
    * reaches the picker therefore records what it would have recorded before
@@ -3399,21 +3798,48 @@ export function ApplyWizard() {
    */
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('annual')
 
-  const refs = useAsync(
-    async () => ({
-      barangays: await reference.barangays(),
-      psic: await reference.psicCodes(),
-      permitTypes: await reference.permitTypes(),
-      documentTypes: await reference.documentTypes(),
+  /*
+   * ── All five at once, not one after another ────────────────────
+   *
+   * This was an object literal of five `await`s, which JavaScript
+   * evaluates in order: every call waited for the one before it, so the
+   * wizard's skeleton stayed on screen for the SUM of five round trips
+   * when none of them depends on another.
+   *
+   * Found on 4 October 2026 while chasing something else. Against the
+   * E2E stack — `php artisan serve`, one request at a time — the five
+   * took over a minute end to end, and `renewal-modal.spec.ts` had been
+   * reported as a BROKEN renewal path on that evidence. It was not
+   * broken; it was slow, and the specs' 30-second wait expired before
+   * the dialog could paint. A wrong diagnosis is the second thing this
+   * cost, and the reason the note is this long.
+   *
+   * `Promise.all` is the whole fix. It helps a real deployment most,
+   * where the five are served concurrently and the wait becomes the
+   * slowest one rather than their total — and it still helps against a
+   * single-process server, which no longer sits idle between them.
+   *
+   * `Promise.all` and not `allSettled`: the wizard cannot be drawn
+   * without any one of these, so a partial answer is not a lesser
+   * success. The first rejection is the error `useAsync` reports, which
+   * is what the sequential version did too.
+   */
+  const refs = useAsync(async () => {
+    const [barangays, psic, permitTypes, documentTypes, amendableFields] = await Promise.all([
+      reference.barangays(),
+      reference.psicCodes(),
+      reference.permitTypes(),
+      reference.documentTypes(),
       /*
-       * The amendment form's four boxes. Here rather than on the step so it
-       * is in hand before the wizard paints — see the endpoint's note on why
-       * the definitions stopped travelling with the values.
+       * The amendment form's four boxes. Here rather than on the step so
+       * it is in hand before the wizard paints — see the endpoint's note
+       * on why the definitions stopped travelling with the values.
        */
-      amendableFields: await reference.amendableFields(),
-    }),
-    [],
-  )
+      reference.amendableFields(),
+    ])
+
+    return { barangays, psic, permitTypes, documentTypes, amendableFields }
+  }, [])
 
   const draftIdParam = searchParams.get('draft')
   /*
@@ -3452,9 +3878,16 @@ export function ApplyWizard() {
    * draft — that one already answered this, and the hydration effect below
    * reopens it only in the one case where the saved draft is missing the
    * answer AND there are permits it could have named.
+   *
+   * Nor for a RESUMED scratch draft (`?resume=`), since 3 October 2026 —
+   * same reasoning, different kind of draft. Its answer arrives with the
+   * restore a moment later, and opening on the way would put the dialog
+   * over the form for as long as that read takes and then snatch it away.
+   * The restore opens it itself when the saved copy names no business,
+   * which is what a filing abandoned ON the dialog looks like.
    */
   const [identify, setIdentify] = useState<'entry' | 'change' | null>(
-    isReuse && !draftIdParam ? 'entry' : null,
+    isReuse && !draftIdParam && resumeParam === null ? 'entry' : null,
   )
   const [confirmingIdentity, setConfirmingIdentity] = useState(false)
   const [identifyError, setIdentifyError] = useState<string | null>(null)
@@ -3509,6 +3942,28 @@ export function ApplyWizard() {
         preloaded ??
         (await businesses.prefill(selectedId, applicationType as 'renewal' | 'amendment'))
       const b = result.business
+      /*
+       * ── The address may not be there, and a blank page is not the answer ─
+       *
+       * `business.address` is a `hasOne`, so it is null for any business
+       * whose address row was never written ─ and twelve fields below read
+       * straight through it. The first, `b.address.telephone`, threw inside
+       * this very updater, which React runs while reducing the queued state:
+       * the whole wizard unmounted and the applicant was left on a blank
+       * screen with no message, no nav and nothing to go back to (client's
+       * screenshot, 4 October 2026, pressing Continue in the renewal dialog).
+       *
+       * A missing address is a thin record, not a broken one. Every field
+       * below already falls back to '' for a null VALUE; this makes a null
+       * ADDRESS mean the same thing, so the applicant gets the form with
+       * those boxes empty and fills them in — which is what the wizard is
+       * for.
+       *
+       * Read once into a local rather than sprinkling `?.` twelve times:
+       * one name says the thing is optional, and a thirteenth field added
+       * later cannot forget the question mark.
+       */
+      const addr = b.address ?? null
       setForm((f) => ({
         name: b.name,
         trade_name: b.trade_name ?? '',
@@ -3518,25 +3973,25 @@ export function ApplyWizard() {
         registration_type: normalizeRegistrationType(b.registration_type),
         registration_number: b.registration_number ?? '',
         tin: b.tin ?? '',
-        telephone: b.address.telephone ?? '',
-        website: b.address.website ?? '',
-        mobile_number: b.address.mobile_number || account?.mobile_number || '',
-        email: b.address.email || account?.email || '',
+        telephone: addr?.telephone ?? '',
+        website: addr?.website ?? '',
+        mobile_number: addr?.mobile_number || account?.mobile_number || '',
+        email: addr?.email || account?.email || '',
         owner_surname: b.owner?.surname || account?.last_name || '',
         owner_given_name: b.owner?.given_name || account?.first_name || '',
         owner_middle_name: b.owner?.middle_name || account?.middle_name || '',
         owner_suffix: b.owner?.suffix || account?.suffix || '',
         owner_gender: b.owner?.gender || account?.gender || '',
-        house_bldg_no: b.address.house_bldg_no ?? '',
+        house_bldg_no: addr?.house_bldg_no ?? '',
         // Falls back to the whole line for a business saved before the split,
         // so its street is editable rather than silently empty.
-        street: b.address.street ?? b.address.line1 ?? '',
-        block: b.address.block ?? '',
-        lot: b.address.lot ?? '',
-        lot_area_sqm: b.address.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
-        line1: b.address.line1 ?? '',
-        line2: b.address.line2 ?? '',
-        barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
+        street: addr?.street ?? addr?.line1 ?? '',
+        block: addr?.block ?? '',
+        lot: addr?.lot ?? '',
+        lot_area_sqm: addr?.lot_area_sqm != null ? String(addr.lot_area_sqm) : '',
+        line1: addr?.line1 ?? '',
+        line2: addr?.line2 ?? '',
+        barangay_id: addr?.barangay ? String(addr.barangay.id) : '',
         is_rented: b.is_rented ?? false,
         lessor_name: b.lessor_name ?? '',
         lessor_address: b.lessor_address ?? '',
@@ -3551,8 +4006,8 @@ export function ApplyWizard() {
         capital_participation_filipino: percentToInput(b.capital_participation_filipino),
         capital_investment: formatAmountInput(String(b.capital_investment ?? '')),
         has_tax_incentives: b.has_tax_incentives ?? false,
-        latitude: b.address.latitude ?? null,
-        longitude: b.address.longitude ?? null,
+        latitude: addr?.latitude ?? null,
+        longitude: addr?.longitude ?? null,
         /*
          * `l.capitalization` is deliberately not read. A renewal is assessed on
          * gross sales, not capital, so this wizard never asks the business's
@@ -3724,8 +4179,31 @@ export function ApplyWizard() {
    *
    * From `entry` there is nothing to go back TO — the wizard behind is blank
    * and unsaved, and leaving the dialog up over an empty form the applicant
-   * cannot use would be a dead end. So it leaves, to wherever they can pick
-   * this up again: drafts if there is a draft, the applications list if not.
+   * cannot use would be a dead end. So it leaves; the question is where to.
+   *
+   * ── Home, not Track ───────────────────────────────
+   *
+   * It was the applications list, on the reasoning that it is "wherever
+   * they can pick this up again". Half right: a DRAFT can be picked up,
+   * and that arm is kept. A filing that was never started cannot, and
+   * Track is a list of filings the applicant already has — which answers a
+   * different question from the one they just asked by pressing Not now.
+   *
+   * Client, 3 October 2026: *"If I click 'Not now' in the renewal modal,
+   * why does it transport me to the Track page? Would it be better if it
+   * is Home page instead."* Yes — Home is where the New, Renew and Amend
+   * actions are, so it is both where they came from and where they would
+   * start again if they change their mind back.
+   *
+   * ── `resumeParam`, which the old line missed ─────────────────
+   *
+   * There are two kinds of draft. `draftIdParam` is a real filing the API
+   * holds; `resumeParam` is a scratch row in `wizardDrafts`, and since
+   * 3 October a renewal has those too — before that date only a new permit
+   * did, which is why this line never had to think about them. Both come
+   * from a card on the Drafts page, and sending the second to Home would
+   * drop the applicant somewhere other than the list they clicked from,
+   * with their draft still sitting in it.
    */
   function cancelIdentity() {
     if (identify === 'change') {
@@ -3733,7 +4211,9 @@ export function ApplyWizard() {
       setIdentify(null)
       return
     }
-    navigate(draftIdParam ? '/drafts' : '/applications')
+
+    const cameFromDrafts = draftIdParam !== null || resumeParam !== null
+    navigate(cameFromDrafts ? '/drafts' : '/dashboard')
   }
 
   /** Apply an OCR suggestion into the matching form fields (suggestions only). */
@@ -3797,6 +4277,27 @@ export function ApplyWizard() {
     () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
     [amendRows],
   )
+  /**
+   * Whether this amendment needs a NEW locational clearance — a move, or
+   * either of the two changes City Ordinance No. 24-2018 Art. IX §8 names:
+   * "any change in the activity or expansion of the area". The same rule as
+   * `WorkflowService::amendmentNeedsLocationalClearance`, which decides
+   * whether the filing carries ZONING; this decides whether the zoning step
+   * and the warning appear. A floor area with no earlier figure to compare is
+   * not counted, there as here.
+   */
+  const amendNeedsZoning = useMemo(() => {
+    if (amendMovesPremises) return true
+    return amendRows.some((r) => {
+      if (!r.requested) return false
+      if (r.field === 'line_of_business') return true
+      if (r.field !== 'business_area_sqm') return false
+      const before = Number(r.current_value)
+      const after = Number(r.new_value)
+      return r.current_value !== null && r.current_value !== '' && Number.isFinite(before)
+        && Number.isFinite(after) && after > before
+    })
+  }, [amendMovesPremises, amendRows])
   /*
    * The Mayor's / Business Permit rides along on every application (it is what
    * the application is for), so BPLO always ends up in the routing. The picker
@@ -4245,6 +4746,67 @@ export function ApplyWizard() {
   const insightsRadiusM = insights.data?.radius_m ?? null
 
   /*
+   * ── City Ordinance No. 24-2018, rule by rule, for what is on screen ───────
+   *
+   * Asked from the answers as they are typed — barangay, trade, street, floor
+   * and lot area, headcount, capital — plus the zoning questions the checklist
+   * itself asks. Keyed on the barangay rather than the pin, as the zoning note
+   * above is, because the ordinance's zones are written per barangay and the
+   * pin cannot say which of a barangay's zones the lot is in (that is CPDO's
+   * to record, and the checklist says where it matters).
+   *
+   * An amendment is asked from the SAVED filing instead (`fetchZoningCheck`):
+   * what CPDO assesses there is the requested change — the new trade, the new
+   * address — which only the server holds, and the answer refreshes each time
+   * the draft finishes saving.
+   */
+  const numberOrNull = (raw: string) => {
+    const n = Number(plainAmount(raw))
+    return raw.trim() !== '' && Number.isFinite(n) ? n : null
+  }
+  const zoningQuery = useMemo<ZoningCheckQuery | null>(
+    () =>
+      form.barangay_id && applicationType !== 'amendment'
+        ? {
+            barangay_id: Number(form.barangay_id),
+            application_type: applicationType,
+            lines: form.lines
+              .filter((l) => l.psic_code_id)
+              .map((l) => ({
+                psic_code_id: l.psic_code_id,
+                description: [l.line_of_business, l.products_services].filter(Boolean).join(' '),
+              })),
+            floor_area_sqm: numberOrNull(feeDraft.floor_area_sqm),
+            lot_area_sqm: numberOrNull(form.lot_area_sqm),
+            employees: numberOrNull(feeDraft.employees),
+            capitalization: numberOrNull(form.capital_investment),
+            street: form.street.trim() || null,
+            is_rented: form.is_rented,
+            storeys: numberOrNull(feeDraft.storeys),
+            zoning_facts: zoningFacts,
+          }
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [form.barangay_id, applicationType, form.lines, feeDraft.floor_area_sqm, form.lot_area_sqm,
+      feeDraft.employees, form.capital_investment, form.street, form.is_rented, feeDraft.storeys, zoningFacts],
+  )
+  const zoningPreview = useZoningCheck(zoningQuery)
+  const zoningStored = useAsync(
+    async () =>
+      applicationType === 'amendment' && applicationId !== null && !dirty
+        ? fetchZoningCheck(applicationId)
+        : null,
+    [applicationType, applicationId, dirty],
+  )
+  const zoningCheck = applicationType === 'amendment' ? zoningStored : zoningPreview
+  const zoningLoading = applicationType === 'amendment' ? zoningStored.loading : zoningPreview.stale
+  const answerZoning = useCallback(
+    (key: string, value: ZoningFactValues[string]) =>
+      setZoningFacts((facts) => ({ ...facts, [key]: value })),
+    [],
+  )
+
+  /*
    * `carriedOverBusiness` is gone from this file.
    *
    * It was the business as every office sheet carries it — the name, address
@@ -4316,13 +4878,14 @@ export function ApplyWizard() {
    *
    * ── The one step that comes and goes ──────────────────────────────────
    *
-   * An amendment that moves the premises applies for a fresh Zoning
-   * Clearance, so CPDD's sheet joins the wizard as its own step — between
-   * the changes and the documents, which is where it falls in the filing.
-   * Move the pin back and the step leaves again.
+   * An amendment that moves the premises, changes the line of business or
+   * enlarges the floor area applies for a fresh Zoning Clearance (City
+   * Ordinance No. 24-2018, Art. IX §8), so CPDD's sheet joins the wizard as
+   * its own step — between the changes and the documents, which is where it
+   * falls in the filing. Withdraw the change and the step leaves again.
    *
-   * Keyed on `amendMovesPremises`, the same value the warning and the
-   * server's `WorkflowService::amendmentMovesPremises` read, so a step
+   * Keyed on `amendNeedsZoning`, the same rule the server's
+   * `WorkflowService::amendmentNeedsLocationalClearance` applies, so a step
    * cannot appear for a clearance the filing will not carry.
    *
    * `stepIndex` is clamped against this array's length on every render, so a
@@ -4385,6 +4948,25 @@ export function ApplyWizard() {
     [applicationType, permitTypes, form.permit_type_ids],
   )
 
+  /**
+   * A renewal of the other permits alone — no Mayor's Permit on it.
+   *
+   * Its Review screen was written for a NEW business permit application and
+   * said so in every line: BPLO reviewing the form, a Tax Order of Payment
+   * to settle, five clearances opening after it, a Business Permit released
+   * at the end. None of that happens here — BPLO is never routed
+   * (`WorkflowService::submit`), nothing is billed because the fee joins the
+   * next January renewal (`Application::defersPayment`), and the one permit
+   * on the filing is issued by its own office.
+   *
+   * The client read the whole panel on a Sanitary renewal, 4 October 2026.
+   * The only true line on it was the permit number at the foot.
+   *
+   * Keyed on carrying no business permit rather than on `officeSteps`,
+   * which is also empty for a permit that happens to have no office sheet.
+   */
+  const clearanceOnlyRenewal = applicationType === 'renewal' && !renewsBusinessPermit
+
   const sequence: Phase[] = useMemo(() => {
     /*
      * ── A returned filing shows only what it was returned about ───────
@@ -4404,7 +4986,7 @@ export function ApplyWizard() {
     }
 
     if (applicationType === 'amendment') {
-      if (!amendMovesPremises) return AMENDMENT_PHASES
+      if (!amendNeedsZoning) return AMENDMENT_PHASES
 
       return AMENDMENT_PHASES.flatMap((p) => (p === 'documents' ? ['zoning', p] : [p]))
     }
@@ -4424,9 +5006,28 @@ export function ApplyWizard() {
     if (renewsBusinessPermit) return RENEWAL_PHASES
 
     return BASE_PHASES
-  }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit, returnedPhases])
+  }, [applicationType, amendNeedsZoning, officeSteps, renewsBusinessPermit, returnedPhases])
 
   const totalParts = sequence.length
+
+  /**
+   * The sections this filing's Review actually draws.
+   *
+   * `REVIEW_SECTIONS` is the full set a NEW application has. A section that is
+   * not in this filing's sequence is not drawn on its Review either — see
+   * `inSequence` on `WizardSection` — so for a clearance-only renewal, whose
+   * sequence is Privacy, the office sheet and Review, the answer is none of
+   * them.
+   *
+   * Which is how "Collapse all" came to do nothing at all: it toggled four
+   * sections that were not on the screen (client, 4 October 2026). The office
+   * sheet is NOT among them — it renders only while it is the current step,
+   * never on Review — so there was genuinely nothing to collapse.
+   */
+  const reviewSections = REVIEW_SECTIONS.filter((name) => sequence.includes(name))
+  const reviewHasSections = reviewSections.length > 0
+  /* Asked of the sections on screen, not of all four. */
+  const allReviewSectionsOpen = reviewSections.every((name) => sectionOpen[name])
   const stepIndex = Math.min(step, sequence.length - 1)
   const phase: Phase = sequence[stepIndex]
 
@@ -4486,7 +5087,7 @@ export function ApplyWizard() {
        * submits is a clearance CPDO would be routed for no reason.
        */
       const zoningTypeId =
-        applicationType === 'amendment' && amendMovesPremises
+        applicationType === 'amendment' && amendNeedsZoning
           ? (permitTypes.find((pt) => pt.code === 'ZONING')?.id ?? null)
           : null
 
@@ -4513,7 +5114,7 @@ export function ApplyWizard() {
         ? f
         : { ...f, permit_type_ids: next },
     )
-  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes])
+  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes, amendNeedsZoning])
 
   /**
    * The answers each section contributed, for the review summary.
@@ -4554,7 +5155,17 @@ export function ApplyWizard() {
     /* The trades declared, each with the class the Revenue Code taxes it under. */
     const trades = form.lines.map((line, i) => {
       const code = psic.find((c) => c.id === line.psic_code_id)
-      const name = code?.code === OTHER_PSIC_CODE ? line.line_of_business : (code?.title ?? '')
+      /*
+       * The same precedence the rest of the system now reads by — see
+       * `tradeName`. It was "the typed text, but only on the catch-all code",
+       * which agreed with the shared rule on the line that matters and
+       * disagreed with it on a classified line carrying a description.
+       */
+      const name =
+        tradeName({
+          line_of_business: line.line_of_business,
+          psic_code: code ? { title: code.title } : null,
+        }) ?? ''
 
       return {
         label: form.lines.length > 1 ? `Line of Business ${i + 1}` : 'Line of Business',
@@ -4804,6 +5415,39 @@ export function ApplyWizard() {
     () => renewablePermits.find((p) => p.id === priorPermitId) ?? null,
     [renewablePermits, priorPermitId],
   )
+
+  /**
+   * The office that issues the permit being renewed, named from the register.
+   *
+   * Read off `permit_types.department` rather than from a code-to-office table
+   * written here: the pairing is a fact the API already holds, and a second
+   * copy of it in the browser is one that can fall out of step with the first.
+   *
+   * Null until the permit is known, and the sentence that uses it falls back
+   * to "The issuing office" — true, and better than naming the wrong one.
+   */
+  const renewingOffice: string | null = useMemo(() => {
+    const code = priorPermitChoice?.permit_type?.code
+    if (code === undefined) return null
+
+    return permitTypes.find((pt) => pt.code === code)?.department?.name ?? null
+  }, [priorPermitChoice, permitTypes])
+
+  /**
+   * Who receives this filing when Submit is pressed.
+   *
+   * BPLO for a new application and an amendment, both of which go to its
+   * counter first. For a clearance-only renewal it is the permit's OWN
+   * office: BPLO is never routed one of those at all
+   * (`WorkflowService::submit`), so naming it in the confirmation told the
+   * applicant their papers were going somewhere they were not — at the one
+   * moment they are committing.
+   *
+   * `renewingOffice` reads `permit_types.department`, so CHO, BFP, OBO,
+   * CENRO and CPDD each name themselves without a table in the browser that
+   * could fall out of step with the register.
+   */
+  const submitOffice = (clearanceOnlyRenewal ? renewingOffice : null) ?? 'BPLO'
 
   /*
    * Item 110 — the two lines the Business Information summary prints back.
@@ -5129,7 +5773,12 @@ export function ApplyWizard() {
     const address = chosen.address
     const line = chosen.lines?.[0]
     const owner = chosen.owner
-    const trade = asked('line_of_business') ?? line?.line_of_business?.trim() ?? line?.psic_code?.title ?? '—'
+    /*
+     * `??` down this chain let an EMPTY typed line win over the PSIC title and
+     * print nothing. `tradeName` falls through on blank, which is what the
+     * fallback was there for.
+     */
+    const trade = asked('line_of_business') ?? tradeName(line) ?? '—'
 
     /*
      * Composed the way the register composes it, so the preview and the
@@ -5806,6 +6455,27 @@ export function ApplyWizard() {
       uploaded,
       consent,
       feeDraft,
+      /*
+       * ── The office sheets' own answers ────────────────────────────────
+       *
+       * Read at the top of this callback (`officeFormMissing(officeCode,
+       * officeData[officeCode] …)`) and missing from here, so the gate kept
+       * a closure over whatever `officeData` held when it was last built.
+       *
+       * What that looked like: on a clearance-only renewal the applicant
+       * picked a Sanitary Classification, the chip filled in — the sheet
+       * reads `officeData` straight from render, so it showed the answer —
+       * and the footer went on saying "Still needed on this part: Sanitary
+       * Classification" with Next greyed behind it. An answer visibly given
+       * and visibly not counted (client, 4 October 2026).
+       *
+       * The comments further down this array make the same argument twice
+       * for `barangayName` and `touched.barangay_id`: anything this callback
+       * READS belongs here, whether or not it happens to move in step with
+       * something already listed. `officeData` moves on its own, on every
+       * keystroke of every office sheet, and was the one reader left out.
+       */
+      officeData,
       applicationType,
       feeLines,
       psic,
@@ -7428,6 +8098,7 @@ export function ApplyWizard() {
            * reaches it would otherwise keep the default for good.
            */
           payment_mode: paymentMode,
+          zoning_facts: zoningFacts,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -7438,7 +8109,7 @@ export function ApplyWizard() {
           await applications.setPriorPermit(id, priorPermitId, priorPermitIds)
         }
       } else {
-        await applications.update(id, { fee_profile: feeProfile })
+        await applications.update(id, { fee_profile: feeProfile, zoning_facts: zoningFacts })
       }
       // The office sheets used to be flushed here alongside everything else.
       // They are not this wizard's to save any more — <ClearanceStage> saves
@@ -7520,8 +8191,9 @@ export function ApplyWizard() {
          * triggers a save.
          */
         consent,
+        zoningFacts,
       }),
-    [title, form, feeDraft, applicationType, priorPermitId, amendment, consent],
+    [title, form, feeDraft, applicationType, priorPermitId, amendment, consent, zoningFacts],
   )
   const syncedRef = useRef(false)
 
@@ -7560,9 +8232,22 @@ export function ApplyWizard() {
   /*
    * ── Give back what was typed before the draft could exist ─────────
    *
-   * Once, on a fresh `new` filing that has nothing in it yet. Not for a
+   * Once, on a fresh filing that has nothing in it yet. Not for a
    * reopened draft — that one has a server copy, which outranks this —
    * and not while the hydration of one is still running.
+   *
+   * ── Every filing type, since 3 October 2026 ──────────────────────
+   *
+   * This and its saving twin were both gated on `applicationType ===
+   * 'new'`, which is the whole of the client's report: a renewal or an
+   * amendment was never written to `wizardDrafts` at all, so it never
+   * reached the Drafts list, ticking Data Privacy saved nothing, and
+   * there was no row to reopen at the furthest section. Every rule the
+   * new permit has about drafts was a rule only the new permit had.
+   *
+   * Nothing here was specific to a new filing; the gate was the scope
+   * the feature was built in. What a renewal needs ON TOP is the entry
+   * dialog's answer, which `DraftBackup.identity` now carries.
    */
   useEffect(() => {
     if (backupRestoredRef.current) return
@@ -7581,7 +8266,7 @@ export function ApplyWizard() {
 
       return
     }
-    if (draftIdParam || applicationId || hydrating || applicationType !== 'new') return
+    if (draftIdParam || applicationId || hydrating) return
     backupRestoredRef.current = true
 
     /*
@@ -7613,9 +8298,64 @@ export function ApplyWizard() {
 
     const apply = (backup: DraftBackup) => {
       setTitle(typeof backup.title === 'string' ? backup.title : '')
+      /*
+       * And whether that title was the applicant's own choice.
+       *
+       * Without this the name came back and was then taken away again: the
+       * suggestion effect overwrites the title while `titleEdited` is false,
+       * and the business name arrives a moment after the restore. The box
+       * showed the saved name, then the shop's.
+       */
+      setTitleEdited(backup.titleEdited === true)
       setForm(rebuild(EMPTY, backup.form))
       setFeeDraft(rebuild(EMPTY_FEE_PROFILE, backup.feeDraft))
       setConsent(backup.consent === true)
+
+      /*
+       * ── And what the filing is a renewal OF ────────────────────────
+       *
+       * Only when the saved copy names a business. A renewal resumed
+       * without one has not answered the entry dialog yet — it was
+       * abandoned on the dialog itself, or written by a build before
+       * this field existed — and `identify` below keeps the dialog up
+       * for exactly that case. Writing a null here instead would close
+       * the dialog over a renewal that names no permit, which is the
+       * one state the entry dialog exists to prevent.
+       */
+      const saved = backup.identity
+      if (saved && saved.businessId !== null) {
+        setPrefillBusinessId(saved.businessId)
+        setPriorPermitId(saved.priorPermitId ?? null)
+        setPriorPermitIds(Array.isArray(saved.priorPermitIds) ? saved.priorPermitIds : [])
+        setAmendment(rebuild(EMPTY_AMENDMENT, saved.amendment))
+        setIdentify(null)
+
+        /*
+         * The permit list, which is not in the payload and is not derived
+         * from it. The summary on Business Information names the permits
+         * this filing carries forward by reading `renewablePermits`, and
+         * the Change dialog lists them from the same place — so without
+         * this a resumed renewal shows its ticked ids against nothing and
+         * reads as a filing that has lost its permits.
+         *
+         * `loadRenewablePermits` and not the full prefill: that one would
+         * pull the registry's copy of the business back over the answers
+         * being restored in the lines above. It is the same call a
+         * reopened server draft makes, for the same reason.
+         *
+         * Not awaited and its failure is swallowed there: the list feeds
+         * the body of the form, where empty reads as "not chosen yet" and
+         * the applicant is told to press Change.
+         */
+        void loadRenewablePermits(saved.businessId, applicationType as 'renewal' | 'amendment')
+      } else if (isReuse) {
+        /*
+         * Resumed, but the saved copy names no business — abandoned on the
+         * dialog itself, or written before `identity` existed. Ask again,
+         * because a renewal that names no permit is renewing nothing.
+         */
+        setIdentify('entry')
+      }
     }
 
     let cancelled = false
@@ -7640,7 +8380,14 @@ export function ApplyWizard() {
       try {
         const saved = resumeParam === null ? null : await wizardDrafts.get(resumeParam)
         const payload = saved?.payload as DraftBackup | undefined
-        if (!cancelled && saved && payload && payload.v === DRAFT_BACKUP_VERSION) {
+        /*
+         * The id comes off the URL, so `?type=renewal&resume=<a new
+         * permit's id>` is a link anyone can type or an old bookmark can
+         * hold. Reading the row's own type rather than trusting the query
+         * keeps a new permit's answers out of a renewal form.
+         */
+        const sameKind = saved?.application_type === applicationType
+        if (!cancelled && saved && sameKind && payload && payload.v === DRAFT_BACKUP_VERSION) {
           apply(payload)
           /*
            * Adopted, so every later save goes back to the row this form was
@@ -7659,14 +8406,26 @@ export function ApplyWizard() {
       }
 
       if (!cancelled && from === null) {
+        /* `readBackup` already refuses a slot of another type. */
         const backup = readBackup()
-        if (backup && backup.applicationType === 'new') {
+        if (backup) {
           apply(backup)
           from = 'tab'
         }
       }
 
       if (cancelled) return
+
+      /*
+       * Nothing came back at all — a `resume` id that is gone, or a row
+       * belonging to somebody else. On a renewal or an amendment that
+       * leaves a form with no business behind it and, since the dialog no
+       * longer opens on the way in, nothing on screen to fix that with.
+       * So it opens here, which is the state a fresh /apply?type=renewal
+       * would have been in.
+       */
+      if (isReuse && from === null) setIdentify('entry')
+
       done = true
       /*
        * Nothing is said about `from`. Which copy the answers came back
@@ -7704,7 +8463,7 @@ export function ApplyWizard() {
    * restored OVER newer work.
    */
   useEffect(() => {
-    if (applicationType !== 'new' || hydrating || hydrateFailed) return
+    if (hydrating || hydrateFailed) return
     if (applicationId) {
       /*
        * There is a real draft now, so both scratch copies are not just
@@ -7750,9 +8509,23 @@ export function ApplyWizard() {
     }
     if (openedSnapshotRef.current === snapshot) return
 
+    /*
+     * What the entry dialog was told. Undefined on a new permit, which has
+     * no such dialog and no such answer — an empty object there would be a
+     * claim that one was asked and answered with nothing.
+     */
+    const savedIdentity: DraftBackup['identity'] = isReuse
+      ? {
+          businessId: prefillBusinessId,
+          priorPermitId,
+          priorPermitIds,
+          amendment,
+        }
+      : undefined
+
     try {
       sessionStorage.setItem(
-        DRAFT_BACKUP_KEY,
+        draftBackupKey(applicationType),
         JSON.stringify({
           v: DRAFT_BACKUP_VERSION,
           at: new Date().toISOString(),
@@ -7761,6 +8534,8 @@ export function ApplyWizard() {
           form,
           feeDraft,
           consent,
+          identity: savedIdentity,
+          titleEdited,
         } satisfies DraftBackup),
       )
     } catch {
@@ -7799,6 +8574,8 @@ export function ApplyWizard() {
           form,
           feeDraft,
           consent,
+          identity: savedIdentity,
+          titleEdited,
         } satisfies DraftBackup as unknown as Record<string, unknown>,
       }
 
@@ -7815,10 +8592,48 @@ export function ApplyWizard() {
               application_type: applicationType,
               ...body,
             })
+
+            /*
+             * ── The real draft may have arrived while this was in flight ──
+             *
+             * The effect above throws the scratch row away the moment
+             * `applicationId` appears. If that happened DURING this create,
+             * it read `scratchIdRef.current` as null, found nothing to
+             * discard, and returned — and the line below would then store
+             * the id of a row nobody will ever clean up.
+             *
+             * It is not hypothetical and it is not rare on a renewal, where
+             * the business already exists so the real draft is created early
+             * while this sits out an 800ms debounce. Both rows then show on
+             * the Drafts page under one name, and the page numbers them
+             * "(1)" having noticed the clash: one filing, drawn twice, and
+             * the applicant cannot tell which is theirs. Caught by
+             * `renewal-drafts.spec.ts`, whose locator matched two cards.
+             *
+             * `applicationIdRef` and not `applicationId`: this closure was
+             * built before the await and holds whatever the state was then,
+             * which is exactly the value that is out of date.
+             */
+            if (applicationIdRef.current !== null) {
+              void wizardDrafts.discard(created.id).catch(() => {})
+
+              return
+            }
+
             scratchIdRef.current = created.id
           } else {
             await wizardDrafts.save(id, body)
           }
+
+          /*
+           * The server now holds exactly what `snapshot` described when this
+           * timer was set. That is what lets the indicator stop saying "Not
+           * saved yet" over answers that are demonstrably saved — and why it
+           * records the snapshot rather than a flag: by the time this
+           * resolves the applicant may have typed more, and those keystrokes
+           * are genuinely not saved.
+           */
+          setScratchSavedSnapshot(snapshot)
         } catch {
           /*
            * Swallowed on purpose. The tab copy has already landed, the
@@ -7831,7 +8646,32 @@ export function ApplyWizard() {
 
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, applicationId, applicationType, hydrating, hydrateFailed, restoreSettled])
+  }, [
+    snapshot,
+    applicationId,
+    applicationType,
+    hydrating,
+    hydrateFailed,
+    restoreSettled,
+    /*
+     * The entry dialog's answer is not in `snapshot`, so without these a
+     * renewal whose ticked permits changed and whose form did not would
+     * save the old set — and resume against the wrong permits.
+     */
+    isReuse,
+    prefillBusinessId,
+    priorPermitId,
+    priorPermitIds,
+    amendment,
+    /*
+     * Nor is this. It moves with `title` today, which is in `snapshot`, so
+     * leaving it out would work by luck — the same luck the note on
+     * `barangayName` in `missingFor` declines to rely on, and for the same
+     * reason: a reader who later sets the flag from somewhere else would
+     * have no way to know this depended on it.
+     */
+    titleEdited,
+  ])
 
   /* Closing the tab mid-form should not silently take the answers with it. */
   useEffect(() => {
@@ -8357,6 +9197,7 @@ export function ApplyWizard() {
          * safe direction to be wrong in.
          */
         setConsent(app.data_privacy_consent ?? false)
+        setZoningFacts(app.zoning_facts ?? {})
         setFeeDraft(feeProfileToDraft(app.fee_profile, lineIds))
         // Restore uploaded documents by document-type code.
         const codeToId = new Map<string, number>()
@@ -8594,10 +9435,20 @@ export function ApplyWizard() {
          * a filing that sits still with no explanation is the state testers
          * report as broken.
          */}
+        {/*
+          Same correction as the submit confirmation above it: this named BPLO,
+          a Tax Order of Payment and five clearances on every filing, and a
+          clearance-only renewal has none of the three. It goes to the permit's
+          own office, is never billed at submission, and carries one permit.
+        */}
         <p className="mt-4 text-sm text-ink-secondary">
-          BPLO is now reviewing your form. No action needed from you right now — we will tell you
-          when your Tax Order of Payment is ready, and your five LGU clearances open once it is
-          paid.
+          {clearanceOnlyRenewal
+            ? `${submitOffice} is now reviewing your application and will arrange an ` +
+              'inspection. No action needed from you right now — nothing is due today, and ' +
+              'the fee joins your next business permit renewal in January.'
+            : 'BPLO is now reviewing your form. No action needed from you right now — we will ' +
+              'tell you when your Tax Order of Payment is ready, and your five LGU clearances ' +
+              'open once it is paid.'}
         </p>
         <div className="mt-3 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
@@ -8649,6 +9500,21 @@ export function ApplyWizard() {
 
   const part = stepIndex + 1
 
+  /*
+   * What the save indicator is allowed to claim.
+   *
+   * Two places hold this filing: the real `applications` draft once one
+   * exists, and the `wizardDrafts` scratch row before that. The indicator
+   * knew only about the first, so it spoke for half the filing's life.
+   *
+   * The scratch row is only consulted while there is no real draft — after
+   * that it is discarded, and `dirty` is the one true answer.
+   */
+  const scratchUpToDate = applicationId === null && scratchSavedSnapshot === snapshot
+  const savedOnServer = (applicationId !== null && !dirty) || scratchUpToDate
+  /* Only before anything at all has reached the server. */
+  const neverSaved = applicationId === null && scratchSavedSnapshot === null
+
   return (
     <div className="mx-auto max-w-5xl pb-4">
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
@@ -8683,16 +9549,32 @@ export function ApplyWizard() {
           />
         </label>
         <span className="flex shrink-0 items-center gap-2">
+          {/*
+            ── Three states, and "Not saved yet" is the rarest ───────────────
+            *
+            * It used to be the default, and was wrong for most of the time it
+            * showed. The condition only ever asked about the real
+            * `applications` draft, so everything saved to the scratch row —
+            * which is every keystroke before a business exists, and the whole
+            * of a filing that reaches the Drafts list — was reported as not
+            * saved. The applicant could see the draft in their own list while
+            * this called it unsaved.
+            *
+            * `scratchUpToDate` is ignored once there is a real draft: from
+            * that point the scratch row is discarded and `dirty` is the only
+            * honest answer. Without that guard a stale scratch snapshot could
+            * claim All Changes Saved over an application draft that is behind.
+            */}
           {saving ? (
             <span className="text-xs italic text-ink-muted">Saving…</span>
-          ) : applicationId && !dirty ? (
+          ) : savedOnServer ? (
             <>
               <CloudSavedIcon />
               <span className="text-xs italic text-ink-muted">All Changes Saved</span>
             </>
           ) : (
             <span className="text-xs italic text-ink-muted">
-              {dirty && (applicationId || canCreateDraft) ? 'Unsaved changes' : 'Not saved yet'}
+              {neverSaved ? 'Not saved yet' : 'Unsaved changes'}
             </span>
           )}
         </span>
@@ -8814,10 +9696,26 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">Review &amp; Submit</h1>
           <div className="mb-3 h-px bg-ink/40" />
-          <p className="text-sm text-ink">
-            Here is everything you entered. Read it over, and press{' '}
-            <span className="font-semibold">Change</span> on any answer you need to correct.
-          </p>
+          {/*
+            Only when there is something to read over.
+            *
+            * On a clearance-only renewal this promised "everything you
+            * entered" above an empty screen: that filing's sequence carries
+            * none of the four review sections, and the office sheet draws
+            * only while it is the current step. The sentence named a thing
+            * the page did not contain.
+            */}
+          {reviewHasSections ? (
+            <p className="text-sm text-ink">
+              Here is everything you entered. Read it over, and press{' '}
+              <span className="font-semibold">Change</span> on any answer you need to correct.
+            </p>
+          ) : (
+            <p className="text-sm text-ink">
+              Check the details below, then submit. Press{' '}
+              <span className="font-semibold">Back</span> to change any answer.
+            </p>
+          )}
           {/*
             ── One control for all four, and what it is NOT ──────────────────
 
@@ -8832,21 +9730,28 @@ export function ApplyWizard() {
             asked for and planted the idea that something might have been lost.
             It says what the button does instead.
           */}
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setAllSections(!allSectionsOpen)}
-              aria-expanded={allSectionsOpen}
-              className="rounded-md border border-royal bg-royal-tint px-4 py-2 text-sm font-semibold text-royal transition-colors hover:bg-royal/10"
-            >
-              {allSectionsOpen ? 'Collapse all' : 'Expand all'}
-            </button>
-            <p className="text-xs text-ink-muted">
-              {allSectionsOpen
-                ? 'Collapse them to bring the Submit button within reach.'
-                : 'Expand them to read your answers again.'}
-            </p>
-          </div>
+          {/*
+            Hidden when this Review draws no sections, because a control that
+            cannot do anything is worse than no control: it is read as broken,
+            which is exactly how it was reported.
+          */}
+          {reviewHasSections && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAllSections(!allReviewSectionsOpen)}
+                aria-expanded={allReviewSectionsOpen}
+                className="rounded-md border border-royal bg-royal-tint px-4 py-2 text-sm font-semibold text-royal transition-colors hover:bg-royal/10"
+              >
+                {allReviewSectionsOpen ? 'Collapse all' : 'Expand all'}
+              </button>
+              <p className="text-xs text-ink-muted">
+                {allReviewSectionsOpen
+                  ? 'Collapse them to bring the Submit button within reach.'
+                  : 'Expand them to read your answers again.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -9298,6 +10203,22 @@ export function ApplyWizard() {
                     <ZoningConformanceNote
                       zoning={insights.data?.zoning ?? null}
                       barangayName={barangayName ?? null}
+                    />
+                  )}
+                  {/*
+                    Every other rule the ordinance applies to this filing,
+                    each with its article and page, and the few questions those
+                    rules need answered — asked here, under the rule, rather
+                    than as a block of their own. The note above stays the
+                    headline; this is what it rests on.
+                  */}
+                  {form.barangay_id && (
+                    <ZoningRuleChecklist
+                      variant="applicant"
+                      result={zoningCheck.data}
+                      loading={zoningLoading}
+                      values={zoningFacts}
+                      onAnswer={answerZoning}
                     />
                   )}
                 </div>
@@ -11791,6 +12712,23 @@ export function ApplyWizard() {
                       </p>
                     )}
 
+                    {/*
+                      The other two changes that cost a Zoning Clearance (Art.
+                      IX §8). Said where the change is made, as the move's
+                      warning is under the address — not discovered when a
+                      step appears in the bar.
+                    */}
+                    {group.key === 'other' && amendNeedsZoning && !amendMovesPremises && (
+                      <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
+                        <span className="font-semibold text-ink">
+                          This needs a new Zoning Clearance.
+                        </span>{' '}
+                        The zoning rules ask for one whenever the line of business changes or the
+                        floor area grows, so it is applied for as part of this amendment and the
+                        City Planning Office checks it.
+                      </p>
+                    )}
+
                     {group.key === 'address' && amendMovesPremises && (
                       <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
@@ -12130,7 +13068,9 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
             <p className="text-lg font-medium text-royal">
-              Your Business Permit application is ready to submit
+              {clearanceOnlyRenewal
+                ? `Your ${priorPermitChoice?.permit_type?.name ?? 'permit'} renewal is ready to submit`
+                : 'Your Business Permit application is ready to submit'}
             </p>
             {/*
               What happens next, said here rather than discovered later.
@@ -12149,9 +13089,13 @@ export function ApplyWizard() {
               prevent.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              BPLO reviews this form first. If they accept it, we raise your Tax Order of Payment
-              and you pay — and once that is settled, your five LGU clearances open. Your Business
-              Permit is released after all of them are approved.
+              {clearanceOnlyRenewal
+                ? `${renewingOffice ?? 'The issuing office'} reviews this and inspects your ` +
+                  'premises. Nothing to pay now — the fee joins your next business permit ' +
+                  'renewal in January.'
+                : 'BPLO reviews this form first. If they accept it, we raise your Tax Order of '
+                  + 'Payment and you pay — and once that is settled, your five LGU clearances '
+                  + 'open. Your Business Permit is released after all of them are approved.'}
             </p>
             {/*
               ── The summary of payment, on the step that asks for a decision ──
@@ -12168,6 +13112,33 @@ export function ApplyWizard() {
               accepts the form, so a total here that read as a bill would
               promise a debt nobody has incurred.
             */}
+            {/*
+              ── A clearance-only renewal is not billed, so it gets no estimate ──
+
+              The panel below quotes a figure, explains that BPLO will assess
+              the real one, and tells the applicant to fill in a tax
+              classification and gross sales "above". None of the three is true
+              here: this filing is never billed at submission — its fee joins
+              the next January business permit renewal
+              (`Application::defersPayment`) — BPLO never sees it, and the step
+              that asks for gross sales is not in this sequence at all.
+
+              So it is replaced rather than left to print an estimate of
+              nothing. The one fact worth carrying over is WHEN the money is
+              due, which is the half an applicant would otherwise be surprised
+              by in January.
+            */}
+            {clearanceOnlyRenewal ? (
+              <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
+                <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
+                  Nothing to pay now
+                </h2>
+                <p className="mt-2 text-sm text-ink-secondary">
+                  This permit&rsquo;s fee is added to your next business permit renewal in
+                  January. You will see it on that Tax Order of Payment.
+                </p>
+              </div>
+            ) : (
             <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
@@ -12226,6 +13197,24 @@ export function ApplyWizard() {
                 Payment after it approves this form.
               </p>
             </div>
+            )}
+            {/*
+              The zoning rules again, at the point of committing — and the only
+              place a renewal or an amendment meets them, since neither walks
+              through Location & Zoning. Answerable here too: a question
+              skipped on the map step is not a reason to go back.
+            */}
+            {form.barangay_id && (
+              <div className="mt-6 w-full">
+                <ZoningRuleChecklist
+                  variant="applicant"
+                  result={zoningCheck.data}
+                  loading={zoningLoading}
+                  values={zoningFacts}
+                  onAnswer={answerZoning}
+                />
+              </div>
+            )}
             {/*
               Named as well as numbered. This said "Renewing MCB-2026-000003"
               and nothing else — the one line on the confirmation page that
@@ -12439,7 +13428,27 @@ export function ApplyWizard() {
            * under-describes it, and this one would have promised a debit that
            * the API now refuses at this stage.
            */}
-          <p className="pt-4 text-center text-lg">Submit this application to BPLO for approval?</p>
+          {/*
+            ── Named, because BPLO is not always who receives it ─────────────
+            *
+            * This said BPLO on every filing. On a clearance-only renewal BPLO
+            * is never routed it at all (`WorkflowService::submit`) — the
+            * permit's own office reads it and inspects the premises — so the
+            * confirmation named the wrong recipient at the moment the
+            * applicant commits, which is the worst moment to be wrong about
+            * who is receiving their papers.
+            *
+            * Reported on a Sanitary renewal, 4 October 2026. The same was true
+            * of every other clearance: CHO, BFP, OBO, CENRO and CPDD each read
+            * their own.
+            *
+            * `submitOffice` falls back to BPLO, which is right for the filings
+            * BPLO really does read — a new application and an amendment both
+            * go to its counter first.
+            */}
+          <p className="pt-4 text-center text-lg">
+            Submit this application to {submitOffice} for approval?
+          </p>
           {/*
             ── What the press costs, said before it is pressed ────────────────
             *
@@ -12462,8 +13471,9 @@ export function ApplyWizard() {
           <div className="mb-2 rounded-lg border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm text-amber-900">
             <p className="font-bold">Please check your answers first.</p>
             <p className="mt-1">
-              Once you submit, you will not be able to change your answers yourself. If BPLO needs a
-              correction, they will return the application to you with a note saying what to fix.
+              Once you submit, you will not be able to change your answers yourself. If{' '}
+              {submitOffice} needs a correction, they will return the application to you with a
+              note saying what to fix.
             </p>
             <p className="mt-2">
               Press <span className="font-semibold">Cancel</span> if you would like to look over

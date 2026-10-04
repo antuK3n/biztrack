@@ -51,9 +51,24 @@ Route::prefix('auth')->group(function () {
         ->name('verification.verify');
 
     Route::middleware('auth:sanctum')->group(function () {
+        /*
+         * ---- The session, and the account's own details --------------
+         *
+         * `logout`, `me` and the photo READ stay open to a suspended or
+         * blacklisted owner, because they are not "the system" - they are how
+         * the two screens that stay open are drawn at all. `me` in particular
+         * carries the restriction itself, so barring it would lock away the
+         * explanation along with everything else.
+         *
+         * Changing details is another matter and is barred with the rest:
+         * see `unrestricted` on the writes below [client, 30 September 2026].
+         */
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
-        Route::put('profile', [AuthController::class, 'updateProfile']);
+        Route::get('profile/photo', [AuthController::class, 'showPhoto']);
+
+        Route::put('profile', [AuthController::class, 'updateProfile'])
+            ->middleware('unrestricted');
         /*
          * POST rather than PUT for the upload: PHP populates $_FILES from a
          * multipart body only on POST, so a PUT arrives with the file missing
@@ -61,10 +76,12 @@ Route::prefix('auth')->group(function () {
          * picked. The path carries no user id — showPhoto reads the signed-in
          * row, so nobody can ask for another account's photo.
          */
-        Route::post('profile/photo', [AuthController::class, 'updatePhoto']);
-        Route::get('profile/photo', [AuthController::class, 'showPhoto']);
-        Route::delete('profile/photo', [AuthController::class, 'destroyPhoto']);
-        Route::put('password', [AuthController::class, 'updatePassword']);
+        Route::post('profile/photo', [AuthController::class, 'updatePhoto'])
+            ->middleware('unrestricted');
+        Route::delete('profile/photo', [AuthController::class, 'destroyPhoto'])
+            ->middleware('unrestricted');
+        Route::put('password', [AuthController::class, 'updatePassword'])
+            ->middleware('unrestricted');
         /*
          * The code a password change needs while mail is on [checklist
          * 2026-09-27, Edit Settings]. The first code and every resend; the
@@ -72,14 +89,14 @@ Route::prefix('auth')->group(function () {
          * method, this limiter caps password guesses against the session.
          */
         Route::post('password/code', [AuthController::class, 'requestPasswordCode'])
-            ->middleware('throttle:6,1');
+            ->middleware(['throttle:6,1', 'unrestricted']);
         // Laravel's own convention for this endpoint. The per-account limiter
         // inside the method is the tighter of the two — see the note there.
         Route::post('email/resend', [AuthController::class, 'resendVerification'])
-            ->middleware('throttle:6,1');
+            ->middleware(['throttle:6,1', 'unrestricted']);
         // The code from the confirmation e-mail, when mail is on [Register 1].
         Route::post('email/verify-code', [AuthController::class, 'verifyEmailCode'])
-            ->middleware('throttle:10,1');
+            ->middleware(['throttle:10,1', 'unrestricted']);
     });
 });
 

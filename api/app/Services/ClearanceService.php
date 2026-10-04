@@ -566,6 +566,27 @@ class ClearanceService
     public function isUnlocked(Application $application): bool
     {
         /*
+         * ── A DECIDED filing opens nothing, whatever it owes ─────────────
+         *
+         * Checked first, and it has to be: the deferral below is an answer
+         * to "is there a bill", not to "is this filing still alive", and on
+         * its own it said yes to both. So a rejected or cancelled AMENDMENT
+         * — which always defers (client, 19 September 2026: amendment fees
+         * join the January renewal) — and a rejected clearance-only renewal
+         * each kept an open clearance stage, offering an applicant permits
+         * to apply for under a filing the city had already closed.
+         *
+         * `lockedReason` has had its Rejected and Cancelled sentences all
+         * along; for these two types nothing could reach them. That is the
+         * evidence this was an oversight rather than a decision — found
+         * 3 October 2026 when a held-copy test moved onto an amendment and
+         * the stage would not shut behind a rejection.
+         */
+        if ($application->status?->isTerminal() ?? false) {
+            return false;
+        }
+
+        /*
          * Paid, OR nothing to pay — see `Application::defersPayment`. A
          * clearance-only renewal has no bill and never will, so the payment
          * gate would hold its stage shut for ever.

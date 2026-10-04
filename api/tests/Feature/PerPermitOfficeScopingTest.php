@@ -249,17 +249,18 @@ it('does not show one office a permit copy handed in for another office', functi
     Storage::fake('local');
 
     /*
-     * A RENEWAL, because this case hands in a certificate the business
-     * already holds. `startClearance` has refused that on a new filing
-     * since 29 September 2026 — the LGU's rule, relayed by the client:
-     * a business cannot hold these before it applies to BPLO.
+     * An AMENDMENT, because this case hands in a certificate the business
+     * already holds and that is now the only type allowed to. A new filing
+     * has been refused since 29 September 2026 — a business cannot hold
+     * these before it applies to BPLO — and a renewal since 3 October,
+     * when the client removed BPLO's re-reading of uploaded permits.
      *
      * The case is about who may SEE the copy, not about who may upload
      * one, so the filing type is a detail of the fixture rather than of
      * the rule under test.
      */
     $app = paidFilingForScoping();
-    $app->update(['application_type' => ApplicationType::Renewal]);
+    $app->update(['application_type' => ApplicationType::Amendment]);
     $app->refresh();
 
     // CHO has to be ON the filing, or this proves only that a stranger is kept

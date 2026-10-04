@@ -683,7 +683,7 @@ final class LguReports
         $bplo = $scope !== null && FilingClock::bplo($scope);
         $decidedNote = match (true) {
             $scope === null => 'Working days from submission to decision, leaving out the time a filing waited on its applicant to pay or to resubmit.',
-            $bplo => 'Working days the filings decided in the period spent at BPLO’s desk (For Approval and For Final Approval) — BPLO’s own time, not the other offices’. Filings handled before September 2026, when every office reviewed at once, cannot show BPLO’s own days and are left out.',
+            $bplo => 'Working days the filings decided in the period spent at BPLO’s desk (For Approval and With BPLO) — BPLO’s own time, not the other offices’. Filings handled before September 2026, when every office reviewed at once, cannot show BPLO’s own days and are left out.',
             default => 'This office’s reviews finished in the period: working days from the filing reaching the office to the office finishing it, leaving out time the filing waited on its applicant.',
         };
 
@@ -711,7 +711,7 @@ final class LguReports
             ], $pendingRows,
                 match (true) {
                     $scope === null => 'Filings submitted and not yet decided on the last day of the period, aged from submission. Rejected and cancelled filings are left out, and so are filings waiting on their applicant to pay or to resubmit; that time is also left out of the age.',
-                    $bplo => 'Filings at BPLO’s desk (For Approval or For Final Approval) on the last day of the period, aged by the working days they have spent there.',
+                    $bplo => 'Filings at BPLO’s desk (For Approval or With BPLO) on the last day of the period, aged by the working days they have spent there.',
                     default => 'This office’s reviews not yet finished on the last day of the period, aged from when the filing reached the office. Rejected and cancelled filings are left out, and so are filings waiting on their applicant; that time is also left out of the age.',
                 },
                 $pendingTotal),
