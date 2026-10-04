@@ -141,7 +141,87 @@ class PermitRegisterResource extends PermitResource
              * office does not ask for one.
              */
             'office_form' => $this->officeForm(),
+
+            /*
+             * The requirements submitted for THIS permit, so an office reads
+             * its own uploads on the same row as its own form [client,
+             * 4 October 2026]. See requirementDocuments().
+             */
+            'documents' => $this->requirementDocuments(),
         ]);
+    }
+
+    /**
+     * The uploads on the filing that belong to this permit's office.
+     *
+     * A document belongs here when its type is one this permit type asks for
+     * (`permit_type_requirements`), or when it was uploaded against this
+     * permit type directly — a held copy of an existing certificate carries
+     * `permit_type_id`. Anything else on the filing is another office's, and
+     * an office reading every upload on a six-clearance filing would be back
+     * to hunting for its own among the rest.
+     *
+     * Null when the relations were not loaded (the list payload elsewhere),
+     * [] when they were and nothing was uploaded — "not fetched" and "none"
+     * are different answers and the table says each differently.
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    private function requirementDocuments(): ?array
+    {
+        if (! $this->relationLoaded('application') || $this->application === null
+            || ! $this->application->relationLoaded('documents')
+            || ! $this->relationLoaded('permitType') || $this->permitType === null
+            || ! $this->permitType->relationLoaded('documentTypes')) {
+            return null;
+        }
+
+        $wanted = $this->permitType->documentTypes->pluck('id')->all();
+        $code = $this->permitType->code;
+
+        /*
+         * Four ways a document belongs to this permit, in the order they are
+         * checked:
+         *
+         *   1. its type is one this permit type requires (the pivot);
+         *   2. it was uploaded against this permit type directly (a held copy);
+         *   3. its code carries this permit's prefix — `ZONING_REQ_*` — which is
+         *      how the zoning-ordinance rules name the requirements they add,
+         *      outside the pivot;
+         *   4. on the Mayor's Permit only: nobody else claims it. BPLO receives
+         *      every filing at intake, so an upload no office's list names —
+         *      the Cedula, for one — is BPLO's to read rather than nobody's.
+         */
+        $belongs = function ($d) use ($wanted, $code): bool {
+            $type = $d->documentType;
+            $typeCode = (string) ($type?->code ?? '');
+
+            if (in_array($d->document_type_id, $wanted, true) || $d->permit_type_id === $this->permit_type_id) {
+                return true;
+            }
+
+            if ($typeCode !== '' && str_starts_with($typeCode, $code.'_REQ_')) {
+                return true;
+            }
+
+            return $code === PermitType::OUTCOME_CODE
+                && $d->permit_type_id === null
+                && ! str_contains($typeCode, '_REQ_')
+                && ($type?->relationLoaded('permitTypes') ? $type->permitTypes->isEmpty() : false);
+        };
+
+        return $this->application->documents
+            ->filter($belongs)
+            ->sortBy('created_at')
+            ->map(fn ($d) => [
+                'id' => $d->id,
+                'name' => $d->documentType?->name ?? 'Document',
+                'filename' => $d->original_filename,
+                'status' => $d->verification_status,
+                'download_url' => '/documents/'.$d->id.'/download',
+            ])
+            ->values()
+            ->all();
     }
 
     /**
