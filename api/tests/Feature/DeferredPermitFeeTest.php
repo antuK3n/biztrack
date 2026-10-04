@@ -307,3 +307,68 @@ it('bills every clearance on a multi-permit renewal, and stacks what it billed',
     expect(round(collect($assessment->line_items)->sum(fn ($i) => (float) $i['amount']), 2))
         ->toBe(round((float) $assessment->total_amount, 2));
 });
+
+/*
+ * ── A clearance renewed separately joins the business permit bill still open ──
+ *
+ * Since 5 October 2026 every renewal carries one permit (`RenewalScope`).
+ * Client: *"The applicant should not be allowed to renew multiple permits at
+ * the same time."* That split the January filer's Mayor's Permit and expiring
+ * Sanitary Permit into two filings, and without this the sanitary fee would
+ * wait a full year for the next business permit bill. It joins the open one.
+ */
+it('adds a separately renewed clearance’s fee to the open, unpaid business permit bill', function () {
+    [$business, $permits] = deferBusinessHolding(['BUSINESS', 'SANITARY']);
+
+    // January: the business permit first. Submitted, assessed, not yet paid.
+    $january = deferRenewal(['BUSINESS'], $permits, $business);
+    $before = (float) $january->feeAssessment()->firstOrFail()->total_amount;
+
+    // Then the Sanitary Permit, on its own filing, issued while that bill is open.
+    $sanitary = deferRenewal(['SANITARY'], $permits, $business);
+    issueClearanceOnRenewal($sanitary, 'SANITARY');
+
+    $fee = UnbilledPermitFee::where('application_id', $sanitary->id)->firstOrFail();
+    $bill = $january->feeAssessment()->firstOrFail();
+
+    expect($fee->billed_on_application_id)->toBe($january->id)
+        ->and((float) $bill->total_amount)->toBe(round($before + (float) $fee->amount
+            + (float) $fee->surcharge + (float) $fee->interest, 2))
+        ->and(collect($bill->line_items)->pluck('label')->implode(' | '))->toContain('unbilled until now');
+
+    // Paying that bill collects it, exactly as a swept fee is collected.
+    $workflow = app(WorkflowService::class);
+    $workflow->approveMainForm($january->fresh());
+    $workflow->onPaymentCompleted(Payment::create([
+        'application_id' => $january->id,
+        'fee_assessment_id' => $bill->id,
+        'amount' => $bill->total_amount,
+        'method' => 'gcash',
+        'status' => 'completed',
+        'reference' => 'FOLD-JAN-1',
+        'paid_at' => now(),
+    ]));
+    expect($fee->fresh()->billed_at)->not->toBeNull();
+});
+
+it('leaves the fee deferred when the business permit bill already has a payment in flight', function () {
+    [$business, $permits] = deferBusinessHolding(['BUSINESS', 'SANITARY']);
+    $january = deferRenewal(['BUSINESS'], $permits, $business);
+    app(WorkflowService::class)->approveMainForm($january->fresh());
+    $bill = $january->feeAssessment()->firstOrFail();
+    Payment::create([
+        'application_id' => $january->id,
+        'fee_assessment_id' => $bill->id,
+        'amount' => $bill->total_amount,
+        'method' => 'gcash',
+        'status' => 'pending',
+        'reference' => 'FOLD-PENDING-1',
+    ]);
+    $before = (float) $bill->total_amount;
+
+    $sanitary = deferRenewal(['SANITARY'], $permits, $business);
+    issueClearanceOnRenewal($sanitary, 'SANITARY');
+
+    expect(UnbilledPermitFee::where('application_id', $sanitary->id)->firstOrFail()->billed_on_application_id)->toBeNull()
+        ->and((float) $bill->fresh()->total_amount)->toBe($before);
+});

@@ -2352,16 +2352,16 @@ function IdentifyFilingModal({
       : allPermits
 
   /*
-   * Is the Mayor’s / Business Permit among the ticks?
+   * ── One permit per filing, always ─────────────────────────────────────
    *
-   * It decides what the note under the picker says, and it is the same
-   * question the tick handler asks and that `RenewalScope` asks on the
-   * API: a filing carrying the business permit may carry whatever else is
-   * due with it, and one that does not carries a single permit.
+   * Client, 5 October 2026, on Zoning and the Mayor's Permit ticked
+   * together: *"The applicant should not be allowed to renew multiple
+   * permits at the same time."* Until then the Mayor's Permit opened the
+   * list to several. It does not any more; `RenewalScope` on the API
+   * refuses two of anything, and a clearance renewed separately while the
+   * business permit bill is still open joins that bill
+   * (`WorkflowService::foldIntoOpenBusinessPermitBill`).
    */
-  const carriesBusinessPermitTick = permits.some(
-    (p) => permitIds.includes(p.id) && p.permit_type?.code === BUSINESS_PERMIT_CODE,
-  )
 
   /*
    * The permits this filing may actually carry, and the rest.
@@ -2683,9 +2683,7 @@ function IdentifyFilingModal({
             file them separately — rather than as what is forbidden.
           */}
           <p className="mb-2 text-xs text-ink-secondary">
-            {carriesBusinessPermitTick
-              ? 'As many as you need — one payment, not one per permit.'
-              : 'Choose your Mayor’s / Business Permit to renew several at once.'}
+            One permit per application. Renew the others separately.
           </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
@@ -2706,7 +2704,7 @@ function IdentifyFilingModal({
                  * once the Mayor's Permit has opened it to several. The
                  * inputs below switch with it.
                  */
-                role={carriesBusinessPermitTick ? undefined : 'radiogroup'}
+                role="radiogroup"
                 className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
               >
                 {renewableNow.map((p) => {
@@ -2789,8 +2787,8 @@ function IdentifyFilingModal({
                            * list above. A radio in a group named by the
                            * same `aria-label`, so the two never disagree.
                            */
-                          type={carriesBusinessPermitTick ? 'checkbox' : 'radio'}
-                          name={carriesBusinessPermitTick ? undefined : 'renewal-permit'}
+                          type="radio"
+                          name="renewal-permit"
                           /*
                            * Disabled, not hidden. A permit the business
                            * holds and cannot renew is a fact the applicant
@@ -2826,20 +2824,7 @@ function IdentifyFilingModal({
                              * it — the UI keeping a shape off the screen is
                              * not the same as the server refusing it.
                              */
-                            setPermitIds((current) => {
-                              if (current.includes(p.id)) {
-                                return current.filter((id) => id !== p.id)
-                              }
-
-                              const next = [...current, p.id]
-                              const carriesBusinessPermit = permits.some(
-                                (q) =>
-                                  next.includes(q.id) &&
-                                  q.permit_type?.code === BUSINESS_PERMIT_CODE,
-                              )
-
-                              return carriesBusinessPermit ? next : [p.id]
-                            })
+                            setPermitIds([p.id])
                           }}
                           className="h-4 w-4 shrink-0 accent-royal"
                         />
