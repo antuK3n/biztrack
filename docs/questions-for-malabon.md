@@ -734,6 +734,36 @@ an unchanged, conforming business renewing its zoning clearance every January is
 the City's practice, not the ordinance's — which may be right, but should be
 confirmed. The zoning checklist says this to a renewal rather than hiding it.
 
+## A29. What does a business owe for the special permits the Revenue Code names, beyond the fee?
+
+**The question.** The Code says a business must *secure* a Liquor Permit
+(Art. T), a Mayor's Permit to sell tobacco (Art. U), a storage permit for
+flammables (Art. O), an inspection of engines and machinery (Art. N), a
+lumberyard Special Permit (Art. AC) and Health Certificates for food handlers
+(Art. 4D). It gives the fee for each. It does not say what the applicant hands
+in to get one. Three things we need to know:
+
+1. For the **Liquor Permit**, does BPLO ask for documents (barangay clearance,
+   police clearance, a sketch for the Sec. 3T.04 distance rule) or only the
+   fee and the distance check?
+2. Who inspects under **Art. O and Art. N** — BFP or BPLO? And is the fee
+   assessed from the applicant's declared quantities, or from the inspection?
+3. Do **Health Certificates** gate the release of the Sanitary Permit, or are
+   they collected afterwards?
+
+**Why it matters.** Since 5 October 2026 the system raises an "Other
+Requirement" for each of these when the business declares the activity
+(`docs/other-requirement-rules-2026-10.md`). A requirement that asks for the
+wrong thing is worse than none: the applicant answers it and the office still
+cannot act.
+
+**What we assumed meanwhile.** Each row asks only for what the Code itself
+makes the office need — the nearest school or church and its distance for
+liquor, the kinds and quantities stored for flammables, each machine's
+horsepower — and asks nothing for tobacco and lumberyards, where the Code
+wants only the fee. Health Certificates are asked for as documents, to the
+City Health Office, and do not block anything yet. All of it is a table in
+`OtherRequirementRules`; an answer here changes a row.
 ---
 
 # B. For MISD — systems, data, hosting, accounts

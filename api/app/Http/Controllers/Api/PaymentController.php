@@ -16,6 +16,7 @@ use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\OtherRequirementRules;
 use App\Support\PaymentMode;
 use App\Support\PdfFile;
 use App\Support\PermitFees;
@@ -122,12 +123,22 @@ class PaymentController extends Controller
             PermitType::whereIn('id', WorkflowService::permitTypeIdsAtSubmission($application))->get(),
         );
 
-        $assessed = app(FeeCalculator::class)->assess($application);
+        $calculator = app(FeeCalculator::class);
+        $assessed = $calculator->assess($application);
 
         return response()->json([
             'data' => [
                 'line_items' => $assessed['items'],
                 'total_amount' => $assessed['total'],
+                /*
+                 * What the business's nature commits the filing to beyond the
+                 * fees — the Liquor Permit behind the liquor filing fee, the
+                 * Health Certificates behind the sanitary one. Read off the
+                 * profile the estimate was just priced from, so the two lists
+                 * cannot describe different businesses. `WorkflowService::
+                 * submit` raises the rows that ask for something.
+                 */
+                'other_requirements' => OtherRequirementRules::preview($calculator->facts($application)),
             ],
         ]);
     }

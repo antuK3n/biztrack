@@ -262,7 +262,33 @@ const BUSINESS_FLAGS: { value: string; label: string; hint: string }[] = [
     hint: 'Any sign displayed at the premises. Adds the signage fee.',
   },
   /*
-   * "Stores flammable materials" is gone. It added nothing and could not:
+   * ── Three that turn on a requirement, not a fee ───────────────────────────
+   *
+   * Added 5 October 2026 for `OtherRequirementRules`. Each is a permit the
+   * Revenue Code says the business must hold (Art. O storage of flammables,
+   * Art. N engines and machinery, Art. AC lumberyards), and ticking it tells
+   * the applicant so before they submit and raises the office's question
+   * after. None moves the estimate here — see the note below on why the
+   * flammables fee cannot be priced from a tick — which is said in the hint
+   * rather than left for the applicant to wonder about.
+   */
+  {
+    value: 'stores_flammables',
+    label: 'Stores flammable or combustible materials',
+    hint: 'Fuel, LPG, paint, thinner, chemicals, coal, tar. Needs a storage permit; BPLO prices it from the amounts you keep.',
+  },
+  {
+    value: 'operates_machinery',
+    label: 'Operates engines, generators or machinery',
+    hint: 'Each one is inspected yearly and the fee depends on its horsepower, which you give after filing.',
+  },
+  {
+    value: 'is_lumberyard',
+    label: 'Operates a lumberyard',
+    hint: 'Needs a Special Permit from the Mayor\'s Office through BPLO, with a flat annual fee.',
+  },
+  /*
+   * "Stores flammable materials" as a FEE flag is gone. It added nothing and could not:
    * its seven fire-code rules are each priced on a quantity no screen
    * collects — flammables_liters, film_units, celluloid_units, carbide_cases,
    * tar_kilos, coal_tons, other_combustibles_units — so ticking it moved the
@@ -270,7 +296,9 @@ const BUSINESS_FLAGS: { value: string; label: string; hint: string }[] = [
    * clearances. A question whose answer cannot reach a fee is a question that
    * only costs the applicant time. Removed 16 September 2026; if BFP wants
    * these fees, the quantities have to be asked for and that is its own
-   * decision.
+   * decision. The tick returned on 5 October as `stores_flammables` above,
+   * for a different reason: not to price the fee, but to tell the applicant
+   * the permit exists and to ask them for exactly those quantities.
    */
   {
     value: 'employees_need_health_certificates',

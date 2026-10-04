@@ -20,6 +20,7 @@ use App\Models\ApplicationStatusHistory;
 use App\Models\Business;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
+use App\Models\Department;
 use App\Models\OfficerRequest;
 use App\Models\Payment;
 use App\Models\Permit;
@@ -28,6 +29,7 @@ use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
 use App\Support\Audit;
+use App\Support\OtherRequirementRules;
 use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
@@ -846,6 +848,8 @@ class WorkflowService
                 $this->assessFees($app);
             }
 
+            $this->raiseOtherRequirements($app);
+
             /*
              * ── Who is waiting on it, and BPLO is not always the answer ──────
              *
@@ -1071,6 +1075,71 @@ class WorkflowService
      * write and a judgement they did not make. The DEPARTMENT is BPLO's,
      * because BPLO is the office that must close it.
      */
+    /**
+     * The Other Requirements the business's nature calls for, raised at submit.
+     *
+     * `OtherRequirementRules` holds the table; this is its one writer. Read
+     * against the same normalised profile the fee assessment just used, so a
+     * requirement is raised exactly where its fee was charged. Each row with
+     * something to ask becomes a system `OfficerRequest` — no requester, a
+     * `system_key`, and the department whose permit it serves — keyed on
+     * (application, system_key) so a draft returned and submitted again does
+     * not raise it twice.
+     *
+     * At SUBMIT rather than at BPLO approval, where the TIN is raised: the
+     * TIN is a gap an officer found in a form they were reading; these are
+     * facts of the business the applicant already declared, and the sooner
+     * they are told what the declaration commits them to, the sooner the
+     * answer is there for the office that needs it.
+     */
+    private function raiseOtherRequirements(Application $app): void
+    {
+        $profile = app(FeeCalculator::class)->facts($app);
+        $rows = OtherRequirementRules::raisable($profile);
+        if ($rows === []) {
+            return;
+        }
+
+        $departments = Department::whereIn('code', array_column($rows, 'department'))
+            ->pluck('id', 'code');
+
+        $raised = 0;
+        foreach ($rows as $row) {
+            $req = OfficerRequest::firstOrCreate(
+                [
+                    'application_id' => $app->id,
+                    'system_key' => OtherRequirementRules::systemKey($row['key']),
+                ],
+                [
+                    'requested_by_user_id' => null,
+                    'department_id' => $departments[$row['department']] ?? $this->bploDepartmentId(),
+                    'title' => $row['title'],
+                    'description' => $row['description'],
+                    'request_type' => $row['request_type'],
+                    'status' => OfficerRequestStatus::Pending,
+                ],
+            );
+            if (! $req->wasRecentlyCreated) {
+                continue;
+            }
+            $raised++;
+            Audit::log('request.raised_by_system', $req, [
+                'application_id' => $app->id,
+                'system_key' => $req->system_key,
+                'rule' => $row['article'],
+            ]);
+        }
+
+        if ($raised > 0) {
+            $this->notify->applicationNote(
+                $app,
+                $raised === 1
+                    ? 'Because of what your business does, one more requirement was added under Other Requirements.'
+                    : "Because of what your business does, {$raised} more requirements were added under Other Requirements.",
+            );
+        }
+    }
+
     private function raiseTinRequirement(Application $app): void
     {
         $business = $app->business;
