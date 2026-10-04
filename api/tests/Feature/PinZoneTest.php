@@ -107,17 +107,36 @@ it('reads the zone from the traced polygon under the pin, and nothing else', fun
         ->and(PinZone::at(14.667975, 120.969217, pzBarangay('Longos')))->toBeNull();
 });
 
-it('lets the small neighbourhood shops through every zone', function () {
+it('lets the small neighbourhood shops through every zone but the Mangrove Zone', function () {
     // Ken, 5 October 2026: a sari-sari store, a grocery, a carinderia or food
     // cart, a barber or beauty salon, a laundry, a tailor, a bakeshop and an
     // internet café pass ANYWHERE — Institutional, Industry, Parks included.
-    $everyZone = [...array_map(fn ($c) => [$c], array_keys(Ordinance::SECTION_FOR_CODE)), ['R-2-BASIC', 'R-2-MAX']];
+    // The Mangrove Zone is the one exception; see the test below.
+    $everyZone = [
+        ...array_map(fn ($c) => [$c], array_diff(array_keys(Ordinance::SECTION_FOR_CODE), [PinZone::MANGROVE])),
+        ['R-2-BASIC', 'R-2-MAX'],
+    ];
     foreach (PinZone::NEIGHBOURHOOD as $code) {
         foreach ($everyZone as $zone) {
             expect(PinZone::refuses($zone, pzPsic($code)))->toBeFalse("{$code} refused in ".implode('+', $zone));
         }
     }
     expect(PinZone::NEIGHBOURHOOD)->toEqualCanonicalizing(['47111', '47112', '56101', '56103', '96110', '96120', '96200', '14100', '10711', '93290']);
+});
+
+it('refuses every business in the Mangrove Zone, the neighbourhood shops too', function () {
+    /*
+     * Ken, 5 October 2026 (zoning-check 7): there every business gets the red
+     * box. A sari-sari store pinned in Dampalit's Mangrove Zone was passing on
+     * the neighbourhood rule; so was a trade the table has not read.
+     */
+    $unread = PsicCode::firstOrCreate(['code' => '99031'], ['title' => 'Manufacture of something new']);
+    foreach ([...array_map('pzPsic', PinZone::NEIGHBOURHOOD), pzPsic('47721'), pzPsic('00000'), $unread] as $psic) {
+        expect(PinZone::refuses([PinZone::MANGROVE], $psic))->toBeTrue($psic->code);
+    }
+
+    $sentence = PinZone::refusal(14.6940724, 120.9314046, pzBarangay('Dampalit'), [pzPsic('47111')]);
+    expect($sentence)->toBe(pzPsic('47111')->title." isn't allowed in the Mangroves".PZ_SENTENCE);
 });
 
 it('lets the home businesses through a residential zone, and stops a warehouse', function () {
