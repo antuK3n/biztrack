@@ -96,4 +96,25 @@ class UnbilledPermitFee extends Model
     {
         return $query->whereNull('billed_at');
     }
+
+    /**
+     * Hand back what an unpaid filing claimed, so the next bill sweeps it.
+     *
+     * The docblock above always said a cancelled filing gives the fee back,
+     * and nothing did: the claim stayed on the dead filing, `unclaimed` never
+     * offered the row again, and the fee was never billed (scenario run,
+     * owner-renew 37, owner-pay 30, expiry-and-lapse 31). Called wherever a
+     * filing ends without paying — cancelled, rejected, purged.
+     *
+     * `outstanding` only. A fee the filing's payment already collected stays
+     * settled by it, even if the filing is rejected afterwards: the money was
+     * taken, and releasing the row would bill it a second time.
+     */
+    public static function releaseClaimsOf(Application $application): int
+    {
+        return static::query()
+            ->where('billed_on_application_id', $application->id)
+            ->outstanding()
+            ->update(['billed_on_application_id' => null]);
+    }
 }

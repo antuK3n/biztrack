@@ -294,3 +294,94 @@ it('bills every clearance on a multi-permit renewal, and stacks what it billed',
     expect(round(collect($assessment->line_items)->sum(fn ($i) => (float) $i['amount']), 2))
         ->toBe(round((float) $assessment->total_amount, 2));
 });
+
+/*
+ * ── A filing that ends unpaid gives its claimed fees back ───────────────────
+ *
+ * The model's own docblock said a cancelled filing "has to give the fee back",
+ * and nothing did: `billed_on_application_id` stayed on the cancelled, rejected
+ * or purged filing, the next renewal swept only unclaimed rows, and the June
+ * fee was never billed again (scenario run, owner-renew 37, owner-pay 30,
+ * expiry-and-lapse 31). Ken, 5 October 2026: release them.
+ */
+
+/** A June sanitary fee, then a January renewal that claims it. */
+function deferClaimedByJanuary(): array
+{
+    [$business, $permits] = deferBusinessHolding(['SANITARY', 'BUSINESS']);
+    $june = deferRenewal(['SANITARY'], $permits, $business);
+    issueClearanceOnRenewal($june, 'SANITARY');
+
+    $january = deferRenewal(['BUSINESS'], $permits, $business);
+    $fee = UnbilledPermitFee::where('business_id', $business->id)->firstOrFail();
+    expect($fee->billed_on_application_id)->toBe($january->id);
+
+    return [$business, $permits, $january, $fee];
+}
+
+function deferNextBillLabels(array $permits, Business $business): string
+{
+    $next = deferRenewal(['BUSINESS'], $permits, $business);
+
+    return collect($next->feeAssessment->line_items)->pluck('label')->implode(' | ');
+}
+
+it('gives a claimed fee back when the renewal that claimed it is cancelled', function () {
+    [$business, $permits, $january, $fee] = deferClaimedByJanuary();
+
+    authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$january->id}/cancel")->assertOk();
+
+    expect($fee->fresh()->billed_on_application_id)->toBeNull()
+        ->and(deferNextBillLabels($permits, $business))->toContain('unbilled until now');
+});
+
+it('gives a claimed fee back when the renewal that claimed it is rejected', function () {
+    [$business, $permits, $january, $fee] = deferClaimedByJanuary();
+
+    app(WorkflowService::class)->rejectApplication($january->fresh(), 'Wrong business.');
+
+    expect($fee->fresh()->billed_on_application_id)->toBeNull()
+        ->and(deferNextBillLabels($permits, $business))->toContain('unbilled until now');
+});
+
+it('gives a claimed fee back when the renewal that claimed it is purged as abandoned', function () {
+    [$business, $permits, $january, $fee] = deferClaimedByJanuary();
+    app(WorkflowService::class)->approveMainForm($january->fresh());
+
+    $this->travel(31)->days();
+    $this->artisan('applications:purge-abandoned')->assertSuccessful();
+    expect(Application::find($january->id))->toBeNull();
+
+    expect($fee->fresh()->billed_on_application_id)->toBeNull()
+        ->and(deferNextBillLabels($permits, $business))->toContain('unbilled until now');
+});
+
+it('keeps a fee a paid filing collected, even when that filing is later rejected', function () {
+    [$business, $permits] = deferBusinessHolding(['SANITARY', 'BUSINESS', 'FSIC']);
+    $june = deferRenewal(['SANITARY'], $permits, $business);
+    issueClearanceOnRenewal($june, 'SANITARY');
+    $fee = UnbilledPermitFee::where('business_id', $business->id)->firstOrFail();
+
+    // Carrying the FSIC too, so payment leaves it open for BPLO to reject.
+    $january = deferRenewal(['BUSINESS', 'FSIC'], $permits, $business);
+    $workflow = app(WorkflowService::class);
+    $workflow->approveMainForm($january->fresh());
+    $assessment = $january->feeAssessment()->firstOrFail();
+    $workflow->onPaymentCompleted(Payment::create([
+        'application_id' => $january->id,
+        'fee_assessment_id' => $assessment->id,
+        'amount' => $assessment->total_amount,
+        'method' => 'gcash',
+        'status' => 'completed',
+        'reference' => 'DEFER-JAN-REJ',
+        'paid_at' => now(),
+    ]));
+
+    expect($january->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    $workflow->rejectApplication($january->fresh(), 'Fraudulent documents.');
+
+    // The money was taken; the fee stays settled by the bill that took it.
+    expect($fee->fresh()->billed_on_application_id)->toBe($january->id)
+        ->and($fee->fresh()->billed_at)->not->toBeNull();
+});

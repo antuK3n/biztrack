@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\ApplicationStatus;
 use App\Models\Application;
+use App\Models\UnbilledPermitFee;
 use App\Support\Audit;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -123,6 +124,10 @@ class PurgeAbandonedApplications extends Command
                 'status' => $app->status?->value,
                 'last_touched_at' => $app->updated_at?->toIso8601String(),
             ]);
+
+            // A soft delete fires no foreign key, so its claimed deferred
+            // fees are handed back by hand (UnbilledPermitFee::releaseClaimsOf).
+            UnbilledPermitFee::releaseClaimsOf($app);
 
             $app->delete();
         }

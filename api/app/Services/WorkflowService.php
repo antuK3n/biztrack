@@ -119,6 +119,9 @@ class WorkflowService
 
         if (in_array($to, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
             $this->closeOpenReviews($app);
+            // Deferred fees it claimed and never collected go back to the
+            // pile, here for the same reason the reviews close here.
+            UnbilledPermitFee::releaseClaimsOf($app);
         }
 
         $this->notify->applicationStatus($app, $to, $note);
