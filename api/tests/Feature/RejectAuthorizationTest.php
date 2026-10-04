@@ -32,9 +32,12 @@ use App\Models\User;
  */
 function firstOpenApplication(): Application
 {
+    // `notDecided()`: `approved` is on the list because a filing gathering its
+    // other permits is open and rejectable, but since 4 October 2026 it is
+    // also what a FINISHED filing wears, and rejecting one of those is refused.
     return Application::whereIn('status', [
         'for_approval', 'pending_payment', 'approved', 'for_final_approval', 'returned',
-    ])->firstOrFail();
+    ])->notDecided()->firstOrFail();
 }
 
 it('lets BPLO reject an application', function () {

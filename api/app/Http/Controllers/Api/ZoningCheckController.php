@@ -73,8 +73,15 @@ class ZoningCheckController extends Controller
     public function officerFacts(Request $request, Application $application): JsonResponse
     {
         ApplicationVisibility::authorize($request->user(), $application, 'You may not view this application.');
+        /*
+         * A draft, or a filing the city has finished with. Asked of the ROW
+         * since 4 October 2026: `approved` is now what a paid filing wears
+         * while CPDO and the other offices are still working it, so listing
+         * the status here refused the zoning officer the one window in which
+         * they actually record the lot's zone. See `Application::isDecided()`.
+         */
         abort_if(
-            in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Approved, ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true),
+            $application->status === ApplicationStatus::Draft || $application->isDecided(),
             422,
             'Zoning answers can be recorded only on a filing that is with the offices.',
         );

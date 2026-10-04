@@ -219,7 +219,14 @@ it('pays the assessed balance as a simulated payment even while owners pay throu
     expect($payment->gateway)->toBe(Payment::GATEWAY_SIMULATED)
         ->and((string) $payment->amount)->toBe($assessed)
         ->and($payment->method->value)->toBe('card')
-        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        /*
+         * Paid, and still OPEN. `awaiting_other_permits` said both in one
+         * word until it was removed on 4 October 2026; `approved` says the
+         * first and `decided_at` the second, so both are asserted or the
+         * test would pass on a filing the city had finished with.
+         */
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->fresh()->isDecided())->toBeFalse()
         ->and(Permit::where('application_id', $app->id)
             ->whereHas('permitType', fn ($q) => $q->where('code', 'BUSINESS'))->exists())->toBeTrue()
         ->and(AuditLog::where('action', 'payment.completed')->where('auditable_id', $payment->id)->exists())->toBeTrue();
@@ -348,7 +355,14 @@ it('advances a fresh filing to Paid by BPLO accepting the form and then the paym
         ->and(collect($res->json('data.results'))->pluck('ok')->unique()->all())->toBe([true])
         ->and($res->json('data.reached'))->toBeTrue()
         ->and($res->json('data.stopped'))->toBeNull()
-        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        /*
+         * Paid, and still OPEN. `awaiting_other_permits` said both in one
+         * word until it was removed on 4 October 2026; `approved` says the
+         * first and `decided_at` the second, so both are asserted or the
+         * test would pass on a filing the city had finished with.
+         */
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->fresh()->isDecided())->toBeFalse()
         ->and(moverAudits()->pluck('changes.via')->unique()->all())->toBe(['advance']);
 });
 

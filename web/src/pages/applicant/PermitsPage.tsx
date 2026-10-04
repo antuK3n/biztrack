@@ -43,7 +43,6 @@ export function PermitsPage() {
 
   const businesses = groups.length
   const permits = groups.reduce((n, g) => n + g.permits.length, 0)
-  const copies = groups.reduce((n, g) => n + g.held.length, 0)
   const nearing = groups.filter((g) => g.nearing).length
   const expired = groups.filter((g) => g.expired).length
 
@@ -77,9 +76,6 @@ export function PermitsPage() {
         <ProtoCard className="mb-6 flex flex-wrap items-stretch gap-x-8 gap-y-4 px-6 py-4">
           <Figure value={businesses} label={businesses === 1 ? 'business' : 'businesses'} />
           <Figure value={permits} label={permits === 1 ? 'issued permit' : 'issued permits'} />
-          {copies > 0 && (
-            <Figure value={copies} label={copies === 1 ? 'copy you submitted' : 'copies you submitted'} />
-          )}
           {nearing > 0 && (
             <Figure
               value={nearing}

@@ -130,6 +130,7 @@ class AssignmentResource extends JsonResource
              * the prose that is withheld, and none is exposed here.
              */
             'clearance' => $this->clearanceRow(),
+            'inspection' => $this->inspectionRow($request),
             'application' => $this->whenLoaded('application', fn () => [
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,
@@ -242,6 +243,77 @@ class AssignmentResource extends JsonResource
             'rejected_at' => optional($type->pivot?->rejected_at)->toISOString(),
             'rejection_note' => $type->pivot?->rejection_note,
             'rejection_remedy' => $type->pivot?->rejection_remedy,
+        ];
+    }
+
+    /**
+     * This office's current site visit, and WHO is holding it.
+     *
+     * ── Why this is not the officer above ───────────────────────────────────
+     *
+     * Client, 4 October 2026: *"the officer assigned on the For Approval is the
+     * same as the For Inspection. It should not be like that because it is
+     * possible that a new officer may be assigned in the For Inspection."*
+     *
+     * Right, and the register already agreed — `inspections.inspector_user_id`
+     * is its own column, `WorkflowService::leastLoadedInspector()` names
+     * somebody when the visit is booked, the admin user editor can move it, and
+     * `InspectionController::conduct()` claims it for whoever turns up. Two
+     * people, two columns. Only the queue was reading one of them twice,
+     * printing the reviewer's name over the inspection stage.
+     *
+     * They agree on the client's own register because these offices are small
+     * enough that the least-loaded inspector IS the reviewer. That is a fact
+     * about the staffing, not a rule, and the screen should not have made it
+     * look like one.
+     *
+     * Null where there is no visit, which is most rows: the collection arrives
+     * already narrowed to current visits (see the eager load in
+     * `AssignmentController::index`), so this picks its own department's and
+     * asks no question about which visit is the live one.
+     */
+    private function inspectionRow(Request $request): ?array
+    {
+        if (! $this->relationLoaded('application')
+            || $this->application === null
+            || ! $this->application->relationLoaded('inspections')) {
+            return null;
+        }
+
+        $visit = $this->application->inspections
+            ->firstWhere('department_id', $this->department_id);
+
+        if ($visit === null) {
+            return null;
+        }
+
+        $user = $request->user();
+        /*
+         * The same office test the review's own buttons use. An inspector from
+         * ANOTHER office can still be the holder — `authorizeDepartment` on
+         * InspectionController allows it, and a transfer can leave it that way
+         * — but they are not offered the buttons here, because this queue is
+         * scoped to one office's work.
+         */
+        $sameOffice = $user !== null
+            && $user->department_id !== null
+            && $user->department_id === $this->department_id;
+
+        return [
+            'id' => $visit->id,
+            'status' => $visit->status?->value,
+            'scheduled_at' => optional($visit->scheduled_at)->toISOString(),
+            'inspector' => $visit->relationLoaded('inspector') && $visit->inspector !== null
+                ? ['id' => $visit->inspector->id, 'name' => $visit->inspector->name]
+                : null,
+            'can_claim' => $sameOffice && $visit->inspector_user_id === null,
+            /*
+             * Unheld counts as actionable, mirroring `canAct` below and the
+             * server rule it mirrors: turning up to a visit nobody is named on
+             * claims it, so offering the button is honest.
+             */
+            'can_act' => $sameOffice
+                && ($visit->inspector_user_id === null || $visit->inspector_user_id === $user->id),
         ];
     }
 

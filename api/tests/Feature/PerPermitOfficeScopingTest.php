@@ -245,55 +245,6 @@ it('still lets the applicant read every word written on their own filing', funct
  * every office's business. It stopped being enough the moment half the evidence
  * on a filing became office-specific.
  */
-it('does not show one office a permit copy handed in for another office', function () {
-    Storage::fake('local');
-
-    /*
-     * An AMENDMENT, because this case hands in a certificate the business
-     * already holds and that is now the only type allowed to. A new filing
-     * has been refused since 29 September 2026 — a business cannot hold
-     * these before it applies to BPLO — and a renewal since 3 October,
-     * when the client removed BPLO's re-reading of uploaded permits.
-     *
-     * The case is about who may SEE the copy, not about who may upload
-     * one, so the filing type is a detail of the fixture rather than of
-     * the rule under test.
-     */
-    $app = paidFilingForScoping();
-    $app->update(['application_type' => ApplicationType::Amendment]);
-    $app->refresh();
-
-    // CHO has to be ON the filing, or this proves only that a stranger is kept
-    // out — which is `canView`'s job and a different rule.
-    officeWorksPermit($app, 'SANITARY', 'CHO working it.');
-
-    /*
-     * Through the clearance stage, which is the only door under this flow. The
-     * direct `POST /documents` path with `permit_type_id` is Draft/Returned
-     * only, and the stage does not open until the filing is paid — so the two
-     * windows are now disjoint rather than overlapping.
-     */
-    authAs('owner@biztrack.local');
-    $doc = test()->postJson("/api/v1/applications/{$app->id}/clearances/FSIC/held", [
-        'file' => UploadedFile::fake()->create('our-fsic.pdf', 40, 'application/pdf'),
-    ])->assertCreated()->json('data.held_document');
-
-    $sanitary = authAs('sanitary@biztrack.local');
-
-    $listed = test()->withHeaders($sanitary)
-        ->getJson("/api/v1/applications/{$app->id}")
-        ->assertOk()
-        ->json('data.documents');
-
-    expect(collect($listed)->pluck('id')->all())
-        // CHO was listed a fire-office permit copy.
-        ->not->toContain($doc['id']);
-
-    // And the id is typeable, so the list is not the boundary.
-    test()->withHeaders($sanitary)
-        ->get("/api/v1/documents/{$doc['id']}/download")
-        ->assertForbidden();
-});
 
 it('still shows every office the shared requirements the applicant uploaded', function () {
     Storage::fake('local');

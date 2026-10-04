@@ -41,7 +41,6 @@ import type {
   FeeAssessment,
   FeeLineItem,
   FeeProfile,
-  HeldClearance,
   Inspection,
   InspectionResult,
   LegacyImport,
@@ -567,20 +566,6 @@ export const clearances = {
     await api.delete(`/applications/${applicationId}/clearances/${code}/apply`)
     return clearances.list(applicationId)
   },
-  /** Submit the copy already held. Adds no fee: nothing is being issued. */
-  submitHeld: async (applicationId: number, code: string, file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    await api.post(`/applications/${applicationId}/clearances/${code}/held`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    return clearances.list(applicationId)
-  },
-  /** Take the uploaded copy back off. Its own labelled control, never Submit. */
-  removeHeld: async (applicationId: number, code: string) => {
-    await api.delete(`/applications/${applicationId}/clearances/${code}/held`)
-    return clearances.list(applicationId)
-  },
 }
 
 /* ── Per-office application forms (UI prototype Parts 4-7) ─────────────── */
@@ -1081,6 +1066,12 @@ export interface AssignmentFilters extends PageParams {
    */
   application_decided?: 0 | 1
   /**
+   * Whose holder `oic` is about: the review's officer in charge by default,
+   * the site visit's inspector, or either. The two are different columns and
+   * often different people — see `AssignmentResource::inspectionRow()`.
+   */
+  oic_on?: 'review' | 'inspection' | 'any'
+  /**
    * The state of THIS OFFICE'S own permit on the filing — the second machine.
    * Comma-separated, e.g. 'for_inspection'.
    *
@@ -1267,6 +1258,15 @@ export const inspections = {
     unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
   /**
+   * Become this visit's inspector, or stop being it.
+   *
+   * The twins of `assignments.claim` / `assignments.release`, and separate
+   * from them on purpose: the review and the visit are held by different
+   * people, so taking one must not take the other.
+   */
+  claim: (id: number) => unwrap<Inspection>(api.post(`/inspections/${id}/claim`)),
+  release: (id: number) => unwrap<Inspection>(api.post(`/inspections/${id}/release`)),
+  /**
    * Book the FIRST visit on one permit. Answers with the inspection it creates.
    *
    * Addressed by the permit's CODE and not by an inspection id, unlike every
@@ -1440,7 +1440,6 @@ export const permits = {
    * no validity and no verify link, and why rendering them like the issued list
    * would be a claim the City never made.
    */
-  held: () => unwrap<HeldClearance[]>(api.get('/permits/held')),
   verify: (permitNumber: string) =>
     unwrap<import('./types').VerifyResult>(api.get(`/verify/${permitNumber}`)),
   /** Download the rendered permit certificate PDF (Bearer blob; v2). */

@@ -16,8 +16,9 @@ use App\Models\OfficerRequest;
  */
 
 it('keeps a thousand-character rejection reason whole in the timeline and the applicant’s notice', function () {
+    // An OPEN filing — see RejectAuthorizationTest::firstOpenApplication.
     $app = Application::whereIn('status', ['for_approval', 'pending_payment', 'approved'])
-        ->whereNotNull('applicant_user_id')->firstOrFail();
+        ->notDecided()->whereNotNull('applicant_user_id')->firstOrFail();
     $reason = str_repeat('The lease on file names a different lot. ', 25);
     $reason = substr($reason, 0, 1000);
 
@@ -35,7 +36,7 @@ it('keeps a thousand-character rejection reason whole in the timeline and the ap
 });
 
 it('keeps a meeting link longer than 255 characters whole', function () {
-    $app = Application::whereIn('status', ['for_approval', 'pending_payment', 'approved'])->firstOrFail();
+    $app = Application::whereIn('status', ['for_approval', 'pending_payment', 'approved'])->notDecided()->firstOrFail();
     // A Teams invitation is this long in practice; the validator allows 500.
     $link = 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_'.str_repeat('Tm90QVJlYWxNZWV0aW5n', 20);
     expect(strlen($link))->toBeGreaterThan(255)->toBeLessThanOrEqual(500);

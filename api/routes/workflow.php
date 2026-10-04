@@ -191,18 +191,16 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      * because which clearances a business asks for is the applicant's own
      * decision and not something an office needs the chooser to see.
      *
-     * On `application.create` rather than `document.upload_own` even for the
-     * held upload: all four writes are the same decision about what this filing
-     * is asking for, and splitting them across two permissions would let a role
-     * hold half a stage. Both permissions sit on business_owner today, so this
-     * narrows nothing that exists.
+     * On `application.create`: both writes are the same decision about what
+     * this filing is asking for. There were four until 4 October 2026, when
+     * the client had the held-copy route removed — *"IT IS NOT POSSIBLE FOR
+     * THE USER TO SUBMIT A COPY OF AN OTHER PERMIT"* — and applying is the
+     * only way a clearance starts now.
      */
     Route::middleware('permission:application.create')->group(function () {
         Route::get('applications/{application}/clearances', [ClearanceController::class, 'index']);
         Route::post('applications/{application}/clearances/{code}/apply', [ClearanceController::class, 'apply']);
         Route::delete('applications/{application}/clearances/{code}/apply', [ClearanceController::class, 'unapply']);
-        Route::post('applications/{application}/clearances/{code}/held', [ClearanceController::class, 'storeHeld']);
-        Route::delete('applications/{application}/clearances/{code}/held', [ClearanceController::class, 'destroyHeld']);
     });
 
     // Documents
@@ -409,6 +407,14 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::post('inspections/{inspection}/conduct', [InspectionController::class, 'conduct']);
         Route::post('inspections/{inspection}/reschedule', [InspectionController::class, 'reschedule']);
         /*
+         * Who is going on the visit, said by the office rather than the admin.
+         * On `inspection.manage` with the rest because it is the same people
+         * and the same act: naming who turns up is part of running the visit,
+         * not a decision on the application.
+         */
+        Route::post('inspections/{inspection}/claim', [InspectionController::class, 'claim']);
+        Route::post('inspections/{inspection}/release', [InspectionController::class, 'release']);
+        /*
          * Re-inspection after a failure. On `inspection.manage` with the rest,
          * because it is the same act as scheduling the first visit and the same
          * people do it — the office that failed the premises, and BPLO/admin.
@@ -435,15 +441,6 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)
     Route::get('permits', [PermitController::class, 'index']);
-    /*
-     * The clearances the applicant submitted a copy of rather than applied for.
-     * Self-scoped in the controller, so no permission gate here.
-     *
-     * ABOVE `permits/{permit}`, and it has to stay there: route matching is
-     * first-come, so registered after it Laravel would bind "held" as a permit
-     * key and answer 404 on a request that is not asking for a permit at all.
-     */
-    Route::get('permits/held', [PermitController::class, 'held']);
     Route::get('permits/{permit}', [PermitController::class, 'show']);
     // Permit certificate PDF (owner-of or permit.view_all, enforced in controller)
     Route::get('permits/{permit}/pdf', [PermitController::class, 'pdf']);

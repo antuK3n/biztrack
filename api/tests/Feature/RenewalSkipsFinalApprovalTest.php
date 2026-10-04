@@ -76,7 +76,7 @@ it('refuses a handed-in copy on a renewal', function () {
     [$app, $type] = ffaFiling('renewal');
 
     expect(fn () => app(WorkflowService::class)
-        ->startClearance($app, $type, ApplicationPermitType::MODE_UPLOAD))
+        ->startClearance($app, $type, 'upload'))
         ->toThrow(ValidationException::class);
 });
 
@@ -89,7 +89,7 @@ it('still refuses a handed-in copy on a new filing', function () {
     [$app, $type] = ffaFiling('new');
 
     expect(fn () => app(WorkflowService::class)
-        ->startClearance($app, $type, ApplicationPermitType::MODE_UPLOAD))
+        ->startClearance($app, $type, 'upload'))
         ->toThrow(ValidationException::class);
 });
 
@@ -118,7 +118,7 @@ it('counts an unapproved clearance as outstanding whatever its mode', function (
     [$app, $type] = ffaFiling('renewal');
 
     $app->permitTypes()->updateExistingPivot($type->id, [
-        'mode' => ApplicationPermitType::MODE_UPLOAD,
+        'mode' => 'upload',
         'status' => ClearanceStatus::ForApproval->value,
     ]);
 
