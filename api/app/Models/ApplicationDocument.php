@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ApplicationDocument extends Model
 {
@@ -42,5 +43,15 @@ class ApplicationDocument extends Model
     public function permitType(): BelongsTo
     {
         return $this->belongsTo(PermitType::class);
+    }
+
+    /**
+     * The replies to an office's requirement that carried this file. Empty on
+     * an upload made at filing; set when the owner answered a request, and the
+     * request names the office that asked.
+     */
+    public function requestResponses(): HasMany
+    {
+        return $this->hasMany(OfficerRequestResponse::class);
     }
 }
