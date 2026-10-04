@@ -386,9 +386,27 @@ class WorkflowService
              * CPDO on the filing that states it: `application_amendments` holds
              * the proposed value, and the review sheet shows old → new.
              *
-             * Only for an address change. Amending a floor area or a trade name
-             * tells CPDO nothing it assessed, and attaching zoning to those
-             * would be the five-clearance mistake again in miniature.
+             * ── A change of activity or a larger area carries it too ─────────
+             *
+             * This said "only for an address change: amending a floor area or
+             * a trade name tells CPDO nothing it assessed". The ordinance says
+             * otherwise for two of the three. Art. IX §8: "Should there be any
+             * change in the activity or expansion of the area subject of the
+             * Locational Clearance, the owner/developer shall apply for a new
+             * Locational Clearance" — repeated word for word in §9. CPDO did
+             * assess the activity (it is item V on MCG-CPDD-FO-003) and the
+             * floor area (item VIII.A, and the processing fee is charged per
+             * square metre of it, §10.1(c)). So a new line of business, or a
+             * floor area larger than the register's, now carries ZONING as a
+             * move does. A smaller floor area does not (that is no expansion),
+             * and neither does a trade name or an owner: Annex A 63 says a
+             * change of tenant or proprietor is not a change of occupancy.
+             *
+             * A floor area with NO earlier figure on the register is not
+             * treated as an expansion — there is nothing to compare, and
+             * charging a fresh clearance on a guess is the five-clearance
+             * mistake again in miniature. The zoning checklist tells CPDO and
+             * BPLO it could not compare, so the call is a person's.
              *
              * ── And only when the PREMISES actually move ─────────────────────
              *
@@ -403,7 +421,7 @@ class WorkflowService
              */
             $codes = [PermitType::OUTCOME_CODE];
 
-            if (self::amendmentMovesPremises($app)) {
+            if (self::amendmentNeedsLocationalClearance($app) !== []) {
                 $codes[] = 'ZONING';
             }
 
@@ -454,6 +472,37 @@ class WorkflowService
             ->where('field', 'address_pin')
             ->whereNotNull('new_value')
             ->exists();
+    }
+
+    /**
+     * Why this amendment needs a new locational clearance, if it does.
+     *
+     * A move (the pin), a change of activity (the line of business) or an
+     * expansion of the area (a floor area larger than the register's) — City
+     * Ordinance No. 24-2018, Art. IX §§8-9. Empty when none applies. See the
+     * note in `permitTypeIdsAtSubmission` for what is deliberately left out.
+     *
+     * @return list<'moves'|'activity'|'area'>
+     */
+    public static function amendmentNeedsLocationalClearance(Application $app): array
+    {
+        $requested = $app->requestedChanges()->whereNotNull('new_value')->pluck('new_value', 'field');
+        $why = [];
+        if ($requested->has('address_pin')) {
+            $why[] = 'moves';
+        }
+        if ($requested->has('line_of_business')) {
+            $why[] = 'activity';
+        }
+        if ($requested->has('business_area_sqm')) {
+            $before = $app->business()->withTrashed()->value('business_area_sqm');
+            $after = $requested->get('business_area_sqm');
+            if (is_numeric($before) && is_numeric($after) && (float) $after > (float) $before) {
+                $why[] = 'area';
+            }
+        }
+
+        return $why;
     }
 
     /**
@@ -1732,36 +1781,95 @@ class WorkflowService
         /*
          * ── Where the money lands you depends on what you filed ──────────────
          *
-         * A NEW filing goes out to the five offices. A RENEWAL and an AMENDMENT
-         * both go back to BPLO, for different reasons that happen to need the
-         * same status:
+         * An AMENDMENT goes back to BPLO. Its last step is on the LGU's own
+         * paper, in as many words: *"AFTER PAYMENT, PLEASE RETURN THIS FORM
+         * AND OTHER REQUIREMENTS TO THE BPLO WINDOW FOR COMPLETION OF
+         * PROCESS."* The counter completes it, and that is also where the
+         * register is changed — a real act rather than a rubber stamp, and
+         * not a candidate for the automatic issuance new filings get.
          *
-         *  - a renewal's certificates are copies BPLO has to read (§5 of
-         *    docs/renewal-2026-09-17.md);
-         *  - an amendment's last step is on the LGU's own paper, in as many
-         *    words: *"AFTER PAYMENT, PLEASE RETURN THIS FORM AND OTHER
-         *    REQUIREMENTS TO THE BPLO WINDOW FOR COMPLETION OF PROCESS."* The
-         *    counter completes it, and that is also where the register is
-         *    changed — so it is a real act rather than a rubber stamp, and not
-         *    a candidate for the automatic issuance new filings now get.
+         * ── A RENEWAL joined the NEW filing's path on 3 October 2026 ─────────
+         *
+         * It went back to BPLO too, for one reason: *"a renewal's certificates
+         * are copies BPLO has to read"* (§5 of docs/renewal-2026-09-17.md).
+         * There are no such copies now — the client removed the upload on a
+         * renewal: *"an admin verifying an uploaded other permit will be
+         * useless if the system already tells them whether they are still
+         * valid or not."* With nothing to read, the stage was a wait with no
+         * work in it, and the RA 11032 clock ran through it.
+         *
+         * This is the FOURTH door to For Final Approval and the one that
+         * would have been missed: `refreshReadiness` stopped sending renewals
+         * there, but a renewal never reached `refreshReadiness` — it arrived
+         * at the stage straight from payment.
+         *
+         * Two consequences, both intended and both the new filing's existing
+         * behaviour rather than anything invented here:
+         *
+         *  - the renewed Mayor's Permit is released AT PAYMENT, by
+         *    `releaseOutcomePermit` below. That is the LGU's rule of
+         *    24 September 2026 — *"after payment, business permit is already
+         *    released, but can be suspended if the other permits applied to
+         *    were rejected"* — which was written about business permits and
+         *    had been applied to new filings alone. A business renewing in
+         *    January can trade on it while a clearance catches up.
+         *  - the filing waits at AwaitingOtherPermits for the permits it is
+         *    actually renewing. A renewal carries ONLY the ticked ones (see
+         *    `attachRequiredPermitTypes`), so one renewing nothing else has
+         *    nothing to wait for — `refreshReadiness` below closes it in the
+         *    same request, and the client's 17 September ask that a renewal
+         *    *"should no longer be Awaiting Other Permits"* still holds for
+         *    exactly the filings it was asked about.
          */
-        $backToBplo = in_array(
-            $app->application_type,
-            [ApplicationType::Renewal, ApplicationType::Amendment],
-            true,
-        );
+        $backToBplo = $app->application_type === ApplicationType::Amendment;
+
+        if ($backToBplo) {
+            $this->transition(
+                $app,
+                ApplicationStatus::ForFinalApproval,
+                'Payment received. Waiting for BPLO’s final approval.',
+            );
+
+            return;
+        }
+
+        /*
+         * ── Is there anything to gather? ────────────────────────────────────
+         *
+         * Asked BEFORE the filing is told where it is going, so one with
+         * nothing to wait for never records a wait. A status held for a
+         * millisecond is still a status an officer's queue could catch the
+         * filing in, and still a line in the history an auditor has to
+         * explain — which is the standard `RenewalSkipsGatheringTest` has
+         * held this path to since 17 September 2026.
+         *
+         * It never arose while this was the new filing's path alone: one of
+         * those always carries all five clearances. A renewal carries only
+         * the permits it is renewing, and the common January filing renews
+         * the Mayor's Permit by itself.
+         *
+         * Officer requests are not counted, unlike in `refreshReadiness`:
+         * nobody has reviewed this filing yet, so there is no office that
+         * could have asked it for anything.
+         */
+        $app->load('permitTypes');
+        $nothingToGather = $this->outstandingClearances($app)->isEmpty();
 
         $this->transition(
             $app,
-            $backToBplo ? ApplicationStatus::ForFinalApproval : ApplicationStatus::AwaitingOtherPermits,
-            $backToBplo
-                ? 'Payment received. Waiting for BPLO’s final approval.'
+            $nothingToGather ? ApplicationStatus::Approved : ApplicationStatus::AwaitingOtherPermits,
+            $nothingToGather
+                ? 'Payment received. Your Business Permit has been released, and this filing '
+                    .'carries no other permit, so it is closed.'
                 : 'Payment received. Your Business Permit has been released. '
                     .'You can now apply for the other permits.',
         );
 
-        if (! $backToBplo) {
-            $this->releaseOutcomePermit($app);
+        $this->releaseOutcomePermit($app);
+
+        if ($nothingToGather) {
+            $app->update(['decided_at' => now()]);
+            $this->notify->permitsIssued($app->fresh());
         }
     }
 
@@ -1896,14 +2004,43 @@ class WorkflowService
          * a different thing would leave them believing a copy had been
          * accepted.
          *
-         * Renewals are untouched — see the note at the head of this
-         * method — and so are amendments.
+         * ── And a RENEWAL may no longer hand one in either ───────────
+         *
+         * Client, 3 October 2026: *"an admin verifying an uploaded other
+         * permit will be useless if the system already tells them whether
+         * they are still valid or not."*
+         *
+         * Which is the case. A renewal attaches only the permits the
+         * applicant TICKED in the entry dialog (see
+         * `attachRequiredPermitTypes`), so a certificate still in date is
+         * never on the filing at all — BizTrack holds it, says so on the
+         * row, and asks nothing. What could be uploaded was therefore a
+         * copy of a permit the applicant had just said needs renewing:
+         * an expired one, read by BPLO to confirm something the register
+         * already knew.
+         *
+         * The case the mode was built for — a current permit issued
+         * outside BizTrack — is the one the client ruled out on 18
+         * September 2026: no permit is ever renewed on a manual system.
+         * It has had no rows in the register since.
+         *
+         * This is the chokepoint for both doors: `ClearanceService::apply`
+         * and `submitHeld` are the only callers, and the upload endpoint
+         * reaches the second. Guarding here rather than in the controller
+         * is what stops the two drifting.
+         *
+         * An AMENDMENT keeps the mode, for the reason
+         * `attachRequiredPermitTypes` leaves it on the new-filing path:
+         * its shape is an open question the client will take separately,
+         * and answering it here by omission would be answering it.
          */
         if ($mode === ApplicationPermitType::MODE_UPLOAD
-            && $app->application_type === ApplicationType::New) {
+            && in_array($app->application_type, [ApplicationType::New, ApplicationType::Renewal], true)) {
             throw ValidationException::withMessages([
                 'mode' => [
-                    'A new business has no permits to hand in yet. Apply for this one instead.',
+                    $app->application_type === ApplicationType::Renewal
+                        ? 'BizTrack already holds this permit and knows whether it is valid. Apply to renew it instead.'
+                        : 'A new business has no permits to hand in yet. Apply for this one instead.',
                 ],
             ]);
         }
@@ -1973,7 +2110,7 @@ class WorkflowService
             );
 
             /*
-             * ── A renewal's uploaded copy routes NOBODY ──────────────────────
+             * ── A renewal's uploaded copy routed NOBODY, and is now refused ──
              *
              * Client's decision, 17 September 2026, asked directly: on a
              * business permit renewal the applicant uploads certificates those
@@ -1988,12 +2125,20 @@ class WorkflowService
              * itself last year, and each starting a service-time clock against
              * work nobody had handed over.
              *
-             * Narrow on purpose. An upload on a NEW filing still routes and is
-             * still inspected — `ClearanceService::submitHeld` carries the
-             * client's decision of 6 September, *"the LGU inspects the
-             * premises, not the paperwork"* — and that stands where it was
-             * made. What is new is the renewal case, where the visit behind the
-             * certificate already happened.
+             * KEPT AS A GUARD, not as a path. The mode is refused for renewals
+             * at the top of this method (client, 3 October 2026), so nothing
+             * should reach here in that combination. It stays because being
+             * wrong about that is silent and expensive: one renewal upload
+             * slipping through opens a queue item at CHO, BFP, OBO, CENRO and
+             * CPDO, each asking an office to read a certificate it issued
+             * itself last year, and each starting a service-time clock against
+             * work nobody handed over. Two lines are cheaper insurance.
+             *
+             * An upload on a NEW filing is refused at the top too. An
+             * AMENDMENT's still routes and is still inspected —
+             * `ClearanceService::submitHeld` carries the client's decision of
+             * 6 September, *"the LGU inspects the premises, not the
+             * paperwork"* — and that stands where it was made.
              */
             $renewalUpload = $mode === ApplicationPermitType::MODE_UPLOAD
                 && $app->application_type === ApplicationType::Renewal;
@@ -3159,59 +3304,34 @@ class WorkflowService
      * final approval and the other whether it is *allowed*. A rule split across
      * those two is a filing BPLO can see and cannot act on.
      *
-     * ── An uploaded copy on a RENEWAL is satisfied by being uploaded ─────────
+     * ── ONE rule for every filing type: its own office has to have approved ─
      *
-     * Client's decision, 17 September 2026, asked directly: on a business permit
-     * renewal the applicant uploads certificates the offices have ALREADY
-     * issued, and those offices are not involved — no assignment, no form, no
-     * inspection. So the requirement is met by the copy being in hand, and the
-     * pivot status has nobody left to move it.
+     * A renewal used to count an UPLOADED copy as satisfied on the strength of
+     * its mode alone (client's decision, 17 September 2026). That is what put
+     * such a filing in front of BPLO at Final Approval with copies to read.
      *
-     * Deliberately NOT true of a new filing. `ClearanceService::submitHeld`
-     * carries the client's decision of 6 September — *"the LGU inspects the
-     * premises, not the paperwork, so a business handing in last year's Fire
-     * Safety certificate is still visited"* — and that stands where it was
-     * made. The narrowing here is to renewals, where the permit being renewed
-     * is one the office issued and the visit behind it already happened.
+     * Both halves went on 3 October 2026, at the client's request: *"an admin
+     * verifying an uploaded other permit will be useless if the system already
+     * tells them whether they are still valid or not."* `startClearance` now
+     * refuses the mode on a renewal, and `refreshReadiness` no longer sends a
+     * ready renewal to BPLO.
      *
-     * An AMENDMENT is treated as a new filing, for the same reason
-     * `attachRequiredPermitTypes` leaves it on that path: its shape is an open
-     * question the client has said they will take separately, and answering it
-     * here by omission would be answering it.
+     * The exception is DELETED rather than left unreachable. Standing, it would
+     * be a second and quieter way for a renewal to be called satisfied with no
+     * office having approved anything — the very thing the client asked to
+     * remove, surviving in the one place nobody would think to look.
+     *
+     * The RETURNED carve-out went with it and is not missed: it existed only to
+     * stop a returned upload still counting as satisfied by its mode, and with
+     * no mode exception left, anything short of Approved is outstanding.
      *
      * @return Collection<int, PermitType>
      */
     public function outstandingClearances(Application $app): Collection
     {
-        $renewal = $app->application_type === ApplicationType::Renewal;
-
         return $app->permitTypes
             ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
-            ->reject(function (PermitType $pt) use ($renewal) {
-                if ($pt->pivot->status === ClearanceStatus::Approved) {
-                    return true;
-                }
-
-                /*
-                 * ── A RETURNED upload is not satisfied, whatever its mode ─────
-                 *
-                 * BPLO reads the uploaded copies at Final Approval and may send
-                 * one back — "your FSIC expired in March, upload the current
-                 * one" (client's decision, 17 September 2026: return that one
-                 * clearance and keep the filing on BPLO's desk).
-                 *
-                 * Without this exclusion the return would be cosmetic: the
-                 * permit would still count as satisfied on the strength of its
-                 * mode, and BPLO could approve the renewal on the very copy it
-                 * had just rejected. The status is what carries the refusal, so
-                 * the status has to be able to override the mode.
-                 */
-                if ($pt->pivot->status === ClearanceStatus::Returned) {
-                    return false;
-                }
-
-                return $renewal && $pt->pivot->mode === ApplicationPermitType::MODE_UPLOAD;
-            });
+            ->reject(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Approved);
     }
 
     public function refreshReadiness(Application $app): void
@@ -3315,36 +3435,29 @@ class WorkflowService
 
         if ($ready && $app->status === ApplicationStatus::AwaitingOtherPermits) {
             /*
-             * ── A RENEWAL still stops for BPLO; a NEW filing does not ────────
+             * ── No filing type stops for BPLO to re-read the permits ─────────
              *
-             * Client's decision, 18 September 2026, for the NEW application
-             * process only — they were explicit that renewals were not in
-             * scope: *"what is the purpose of the BPLO checking if all other
-             * permits are legit, when those permits are APPLIED DIRECTLY in
-             * BizTrack itself?"*
+             * The client's question of 18 September 2026 — *"what is the purpose
+             * of the BPLO checking if all other permits are legit, when those
+             * permits are APPLIED DIRECTLY in BizTrack itself?"* — was answered
+             * for new filings then, and renewals were explicitly out of scope.
+             * On 3 October 2026 the client put them in scope: *"an admin
+             * verifying an uploaded other permit will be useless if the system
+             * already tells them whether they are still valid or not."*
              *
-             * Nothing, on this path. Every clearance was applied for here,
-             * approved by its own office here, and inspected against a pivot row
-             * here. The stage had no evidence to weigh that the system had not
-             * already recorded — and the RA 11032 deadline ran while it waited,
-             * so it spent statutory days on a button press.
+             * The stage's one remaining job on a renewal was reading those
+             * uploads, and `startClearance` no longer accepts them. So a
+             * renewal now stands on the same ground the new-filing case stood
+             * on: every clearance applied for here and approved by its own
+             * office here, no evidence to weigh that the register does not
+             * already hold, and the RA 11032 clock running while it waited.
              *
-             * A renewal is the opposite case and keeps the stage: BPLO reads
-             * certificate copies the applicant uploaded, which is real evidence
-             * of unknown provenance. A renewal only reaches this branch by being
-             * walked BACK here from ForFinalApproval (below) when a permit
-             * stopped qualifying, so without this test it would silently lose
-             * the stage on its way forward again.
+             * NOT removed: the processing-category branch below. It is not
+             * about uploads — it holds a filing nobody has classified so that
+             * an officer sets the RA 11032 tier before a permit is issued
+             * against its deadline — and it applies to every filing type. That
+             * is the only route to For Final Approval left.
              */
-            if ($app->application_type === ApplicationType::Renewal) {
-                $this->transition(
-                    $app,
-                    ApplicationStatus::ForFinalApproval,
-                    'Every other permit has been approved. Waiting for BPLO’s final approval.',
-                );
-
-                return;
-            }
 
             /*
              * ── The one case where BPLO still has something real to do ───────
@@ -3669,18 +3782,34 @@ class WorkflowService
          * `permitTypeIdsAtSubmission`), so the question "is anything still
          * outstanding" already has one answer.
          *
-         * Only an address amendment ever carries a clearance, so for every
-         * other kind this is empty and costs nothing.
+         * Only an amendment that moves, changes the activity or enlarges the
+         * area carries a clearance (Art. IX §8), so for every other kind this
+         * is empty and costs nothing.
          */
         $app->load('permitTypes');
         $outstanding = $this->outstandingClearances($app);
 
         if ($outstanding->isNotEmpty()) {
+            /*
+             * Named by what the amendment does, because BPLO cannot clear it
+             * themselves and needs to know what CPDO is assessing. A move
+             * keeps its original words ("for the new address") — the
+             * register-wide refusal message tests read them.
+             */
+            $why = self::amendmentNeedsLocationalClearance($app);
+            $what = match (true) {
+                in_array('moves', $why, true) => 'moves the premises',
+                in_array('activity', $why, true) => 'changes the line of business',
+                in_array('area', $why, true) => 'enlarges the floor area',
+                default => 'needs other permits',
+            };
             throw ValidationException::withMessages([
                 'permits' => [
-                    'This amendment moves the premises, so it cannot be approved until '
+                    "This amendment {$what}, so it cannot be approved until "
                     .$outstanding->pluck('name')->join(', ')
-                    .' has been issued for the new address.',
+                    .(in_array('moves', $why, true)
+                        ? ' has been issued for the new address.'
+                        : ' has been issued for it (City Ordinance No. 24-2018, Art. IX §8).'),
                 ],
             ]);
         }
@@ -4595,8 +4724,6 @@ class WorkflowService
      */
     private function issuePermitFor(Application $app, PermitType $type): Permit
     {
-        $validityDays = (int) ($type->validity_days ?: 365);
-
         /*
          * ── A renewal continues the term; it does not restart it ─────────────
          *
@@ -4645,9 +4772,47 @@ class WorkflowService
          * future permit type will read; zeroing it to signal "anchored instead"
          * would make the column mean two things.
          */
+        /*
+         * ---- Two anchors, and `validity_days` is now read by neither -------
+         *
+         * The business permit ends on 20 January, per Sec. 2N above. Every
+         * other certificate ends on 31 December of the year it was issued:
+         * *"ang expiration ay always end of a year, so laging December 31,
+         * 202X"* [client, 1 October 2026].
+         *
+         * That replaces continue-the-term for the five clearances — the
+         * `addDays($validityDays)` this used to be — which came from the
+         * 9 September reasoning that anchoring punishes renewing early. The
+         * client has overruled it for the look of the certificate, and the cost
+         * is real and small: a clearance issued in November runs about seven
+         * weeks rather than a year.
+         *
+         * `validity_days` stays on the row, now read by nothing. It is left
+         * rather than zeroed for the reason the note below already gives about
+         * the business permit: a column that means "the term" on some rows and
+         * "ignore me" on others means nothing on any of them, and a future
+         * permit type that does run a rolling term will want it back.
+         */
         $validUntil = $type->code === PermitType::OUTCOME_CODE
             ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
-            : CarbonImmutable::parse($validFrom)->addDays($validityDays);
+            : RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom));
+
+        /*
+         * Who signs it, with one addition only this moment can make.
+         *
+         * `officerInChargeFor` answers from the record — the assignment, then
+         * the classifier — and is the only thing print time may use. At issue
+         * there is one more candidate it cannot see: the person performing the
+         * act. An officer approving their office's clearance IS that office's
+         * signatory even on a filing nobody formally claimed.
+         *
+         * Guarded on the department, which is what keeps the Business Permit
+         * right: released at payment, its acting user is the applicant, who
+         * belongs to no office and so is never written here.
+         */
+        $acting = Auth::user();
+        $officer = PermitFace::officerInChargeFor($app, $type)
+            ?? ($acting?->department_id === $type->issuing_department_id ? $acting : null);
 
         $permit = Permit::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
@@ -4676,9 +4841,23 @@ class WorkflowService
                  * because the relation was not on the model would be worse than
                  * no snapshot at all, since it prints as blank on the paper.
                  */
+                /*
+                 * The signatories are frozen with the rest of the face, and
+                 * for the same reason [client, 1 October 2026: put the Mayor
+                 * and the officer in charge on every permit].
+                 *
+                 * A certificate names the people who signed it. Reading them
+                 * live would have a new mayor retroactively re-signing every
+                 * permit the city has ever issued, and an officer moving office
+                 * rewriting the clearances they granted in the old one.
+                 *
+                 * The officer is resolved above, from the record rather than
+                 * from the session — on the Business Permit the acting user is
+                 * the applicant who just paid.
+                 */
                 'issued_details' => PermitFace::capture(
                     $app->business?->loadMissing(['address.barangay', 'owner', 'lines.psicCode'])
-                ),
+                ) + PermitFace::captureSignatories($officer),
             ],
         );
 

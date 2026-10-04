@@ -112,7 +112,27 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
         // the reasoning is on the enum. BPLO's QUEUE TAB keeps the old words,
         // which is a different string in QueuePage and not this one.
         ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Approved')
-        ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')
+        /*
+         * ── A DEPARTURE from the spec wording, taken deliberately ─────
+         *
+         * §4–5 calls this stage "For Final Approval" and that is what this
+         * line asserted. The client overrode it on 3 October 2026, having
+         * removed the stage from every applicant-facing guide: *"completely
+         * wipe out all of this For Final Approval instances."*
+         *
+         * The words were worth keeping while the stage was a step the
+         * applicant was walked through. It is not one now — it left the new
+         * rail on 18 September and the renewal rail on 3 October — and the
+         * one route left to it is an internal data problem (no confirmed
+         * RA 11032 category) that the applicant did not cause.
+         *
+         * Flagged rather than buried, because this test exists to make a
+         * rename deliberate: if the LGU wants its own vocabulary back, this
+         * line and the three it is kept in step with are where to start —
+         * `ApplicationStatus`, `web/src/lib/status.ts` and the queue filter
+         * in `QueuePage`.
+         */
+        ->and(ApplicationStatus::ForFinalApproval->label())->toBe('With BPLO')
         // Renamed the same day; the reasoning is on the enum. The CLEARANCE
         // below keeps "Approved", which is now the only thing that word means.
         ->and(ApplicationStatus::Approved->label())->toBe('Completed')

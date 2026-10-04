@@ -5,6 +5,7 @@ import { toApiError } from '../../../lib/api'
 import { formatDateTime, formatMoney } from '../../../lib/format'
 import type {
   PaymentGatewayCharge,
+  PaymentGatewayConfirm,
   PaymentGatewayMode,
   PaymentGatewayStatus,
   PaymentGatewayTestResult,
@@ -43,7 +44,11 @@ export function PaymentsSection() {
   const [said, setSaid] = useState<string | null>(null)
   const [confirmingFull, setConfirmingFull] = useState(false)
 
-  async function change(body: { mode?: PaymentGatewayMode; charge?: PaymentGatewayCharge }) {
+  async function change(body: {
+    mode?: PaymentGatewayMode
+    charge?: PaymentGatewayCharge
+    confirm?: PaymentGatewayConfirm
+  }) {
     if (busy) return
     setBusy(true)
     setError(null)
@@ -51,10 +56,15 @@ export function PaymentsSection() {
     try {
       const next = await debugPayments.update(body)
       status.setData(next)
-      setSaid(body.mode ? modeSaid(next) : chargeSaid(next))
+      setSaid(body.mode ? modeSaid(next) : body.confirm ? confirmSaid(next) : chargeSaid(next))
     } catch (err) {
       const apiError = toApiError(err)
-      setError(apiError.errors.mode?.[0] ?? apiError.errors.charge?.[0] ?? apiError.message)
+      setError(
+        apiError.errors.mode?.[0] ??
+          apiError.errors.charge?.[0] ??
+          apiError.errors.confirm?.[0] ??
+          apiError.message,
+      )
     } finally {
       setBusy(false)
     }
@@ -105,6 +115,29 @@ export function PaymentsSection() {
         </div>
       </SubCard>
 
+      <SubCard title="What marks a payment paid">
+        <p className="max-w-[70ch] text-sm text-ink-secondary">
+          KwikPay can tell BizTrack a payment went through in two ways: it posts a signed
+          confirmation to biztrack.page, or it answers when BizTrack asks about the order.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Choice
+            label="Only the signed confirmation"
+            description="A payment turns Paid only when KwikPay posts its signed confirmation. On a server KwikPay cannot reach, such as localhost, nothing turns Paid."
+            on={s.confirm === 'callback'}
+            busy={busy}
+            onChoose={() => change({ confirm: 'callback' })}
+          />
+          <Choice
+            label="Its answer when asked, too"
+            description="A payment also turns Paid when BizTrack asks KwikPay and it answers success. On 4 October this gateway answered success for an order nobody paid."
+            on={s.confirm === 'query'}
+            busy={busy}
+            onChoose={() => change({ confirm: 'query' })}
+          />
+        </div>
+      </SubCard>
+
       <StillWaiting status={s} loading={status.loading} onRefresh={status.reload} />
 
       {confirmingFull && (
@@ -138,6 +171,12 @@ function modeSaid(s: PaymentGatewayStatus): string {
   return s.mode === 'kwikpay'
     ? 'Switched: owners now pay through KwikPay.'
     : 'Switched: payments are simulated now. No money moves.'
+}
+
+function confirmSaid(s: PaymentGatewayStatus): string {
+  return s.confirm === 'callback'
+    ? 'Switched: only KwikPay’s signed confirmation marks a payment paid.'
+    : 'Switched: KwikPay’s answer when asked also marks a payment paid.'
 }
 
 function chargeSaid(s: PaymentGatewayStatus): string {

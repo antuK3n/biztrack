@@ -122,7 +122,13 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
    */
   { value: 'gathering', label: applicationStatusMeta('awaiting_other_permits').label },
   { value: 'inspection', label: 'For Inspection' },
-  { value: 'final', label: 'For Final Approval' },
+  /*
+   * "With BPLO" since 3 October 2026, matching the chip and the API
+   * label — see `ApplicationStatus::ForFinalApproval`. A filter naming a
+   * stage by one word while every row it returns carries another is a
+   * filter an officer has to learn rather than read.
+   */
+  { value: 'final', label: 'With BPLO' },
 ]
 
 /**

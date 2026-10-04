@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { sessionFor } from './helpers'
+import { sessionFor, WIZARD_PAINT_MS } from './helpers'
 
 /*
  * The apply wizard, from a business owner's side.
@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**://nominatim.openstreetmap.org/**', (route) => route.abort())
 
   await page.goto('/apply')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 })
 
 test('consent is the first thing asked, before any data is collected', async ({ page }) => {
@@ -231,7 +231,7 @@ test('line of business is asked once, and the one ask is the searchable picker',
 
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   // Search is the thing a <select> cannot do, and it is why this is the
   // control that was kept.
@@ -278,7 +278,7 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
@@ -365,7 +365,7 @@ test('the line of business step reads as one choice, and changing it is not an e
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   // 1. Nothing on the step invites a second trade.
   await expect(page.getByText(/add every line you trade in/i)).toHaveCount(0)
@@ -694,7 +694,7 @@ test('every line of business is reachable, and the count is stated', async ({ pa
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const total = await page.evaluate(async () => {
     const res = await fetch('/api/v1/reference/psic-codes', {
@@ -836,7 +836,7 @@ test('the map is locked until the line of business and the barangay are both ans
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
@@ -1021,7 +1021,7 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await expect(page.getByText(/pin placed/i)).toBeVisible()
   await expect(next).toBeEnabled()
   await next.click()
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 })
 
 test('the address suggests a pin, and placing one by hand overrules it', async ({ page }) => {
@@ -1304,8 +1304,10 @@ test('the zoning note under the map is loud, green when listed and amber with an
 }) => {
   /*
    * Zoning 8: the note was being overlooked — 14px in a pale box, read as a
-   * caption. Zoning 13: when the trade is not on the list, say the owner may
-   * appeal in person at the City's zoning office.
+   * caption. Zoning 13: when the trade is not on the list, say where the owner
+   * may appeal — the Local Zoning Board of Appeals, which is where City
+   * Ordinance No. 24-2018 Art. IX §16 sends appeals (it said "in person at that
+   * office" until the ordinance was read in full).
    *
    * The verdict comes from the ordinance lookup, which depends on the seeded
    * uses; so the real response is fetched and only its verdict is set, once
@@ -1337,8 +1339,8 @@ test('the zoning note under the map is loud, green when listed and amber with an
   // Said in words, not only in amber.
   await expect(note).toContainText(/not on the zoning list/i)
   await expect(note).toContainText(/not on the zoning rules’ list for longos/i)
-  // Zoning 13, in plain words.
-  await expect(note).toContainText(/you may appeal in person at that office/i)
+  // Zoning 13, in plain words, and to the body the ordinance names.
+  await expect(note).toContainText(/you may appeal to the local zoning board of appeals/i)
   await expect(note).toContainText(/the city’s zoning office \(cpdo\)/i)
 
   const loud = async () =>
@@ -1640,7 +1642,7 @@ test('the barangay’s zoning card lists the zones in plain words, links the Cit
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   // Nothing to show before a barangay is chosen — twenty-one maps and no
   // selection is a gallery, not an answer.
@@ -1747,9 +1749,9 @@ test('the barangay’s zoning card lists the zones in plain words, links the Cit
 async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
   // "permits", plural: a renewal now covers every permit the shop holds rather
   // than one picked from a list, and the dialog's heading says so.
-  const name = type === 'renewal' ? /which permits are you renewing/i : /what are you amending/i
+  const name = type === 'renewal' ? /which permits? are you renewing/i : /what are you amending/i
   const modal = page.getByRole('dialog', { name })
-  await expect(modal).toBeVisible({ timeout: 30_000 })
+  await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   await modal.getByRole('combobox', { name: /^business\b/i }).selectOption({ value: '1' })
 
@@ -1759,15 +1761,25 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
    * multi-select — and the first one ticked is the primary, which is what the
    * renewal chain is keyed on.
    */
-  const permits = modal.locator('ul[aria-label*="Which permits are you"]').getByRole('checkbox')
-  await expect(permits.first()).toBeVisible({ timeout: 20_000 })
+  /*
+   * By TAG, not by role, because the role moves with the rule.
+   *
+   * The picker is a radiogroup while a renewal may carry one permit and
+   * a checkbox list once the Mayor's Permit has opened it to several
+   * (client, 3 October 2026; see `App\Support\RenewalScope`). A helper
+   * that answers the dialog should not have to know which, and a locator
+   * that breaks when a control legitimately changes shape reports a
+   * redesign as a regression.
+   */
+  const permits = modal.locator('ul[aria-label*="are you renewing"] input')
+  await expect(permits.first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await permits.first().check()
 
   // An amendment must also say what it amends before the dialog will close.
   if (type === 'amendment') await modal.getByRole('checkbox').first().check()
 
   await modal.getByRole('button', { name: /continue/i }).click()
-  await expect(modal).toBeHidden({ timeout: 20_000 })
+  await expect(modal).toBeHidden({ timeout: WIZARD_PAINT_MS })
 }
 
 /**
@@ -1810,7 +1822,7 @@ async function pinCoords(page: Page): Promise<{ latitude: string | null; longitu
 async function goToZoningStep(page: Page) {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   /*
    * A trade is DECLARED only when the filing does not already carry one. A new
@@ -1933,7 +1945,7 @@ async function goToBusinessStep(page: Page) {
 
   // Straight to part 3 — the zoning answer is inline on the step, not a dialog.
   await page.getByRole('button', { name: /^next$/i }).click()
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 }
 
 /**
@@ -1962,7 +1974,7 @@ async function goToRenewalBusinessStep(page: Page) {
   // and that dialog's answer is where the prefill under test comes from.
   await page.goto('/apply?type=renewal')
   await answerIdentityDialog(page, 'renewal')
-  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   await goToBusinessStep(page)
 }
@@ -2040,7 +2052,7 @@ test('Business Location Insights is two rows on the step, and Next opens no dial
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
 
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
@@ -2292,7 +2304,7 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 })
 
 test('the business is reached on a +63 mobile and a grouped landline, never an 09 number', async ({
@@ -2508,7 +2520,7 @@ test('placeholders show a real example, never restate the label', async ({ page 
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
 
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   /*
    * "House No. and Street Name" as a placeholder is the label again in grey,
@@ -2530,7 +2542,7 @@ test('placeholders show a real example, never restate the label', async ({ page 
 test('no field is closed with `disabled`, which screen readers skip', async ({ page }) => {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   /*
    * A disabled input leaves the tab order and most screen readers pass over
@@ -2556,7 +2568,7 @@ test('no field is closed with `disabled`, which screen readers skip', async ({ p
 test('every input carries a real accessible name', async ({ page }) => {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
   // A placeholder is not a label: it vanishes on the first keystroke, which
   // is when a returning applicant most needs to know what the field wants.
@@ -3030,7 +3042,7 @@ test('the submit confirmation warns that answers cannot be changed afterwards', 
   }
 
   const submit = page.getByRole('button', { name: /^submit$/i })
-  await expect(submit).toBeVisible({ timeout: 20_000 })
+  await expect(submit).toBeVisible({ timeout: WIZARD_PAINT_MS })
   if (!(await submit.isEnabled())) {
     // Nothing to confirm while the form is incomplete, and that gate is the
     // subject of its own assertion above rather than a failure here.

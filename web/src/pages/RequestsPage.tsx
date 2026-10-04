@@ -16,7 +16,7 @@ import {
 import { toApiError } from '../lib/api'
 import { businessName, formatDate, formatDateTime } from '../lib/format'
 import { applications, documents, requests } from '../lib/resources'
-import { REQUIREMENT_CHIP_TONE } from '../lib/status'
+import { REQUIREMENT_CHIP_TONE, REQUIREMENT_ROW_TONE } from '../lib/status'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type {
@@ -69,7 +69,39 @@ import type {
  * was removed, which is usually why it stalled.
  */
 function senderName(request: OfficerRequest): string {
-  return request.created_by?.name ?? 'Officer removed from register'
+  /*
+   * ---- A missing author is usually not a missing person ---------------------
+   *
+   * This read "Officer removed from register" for every request with no
+   * `created_by`, on the note above that a null author means the officer has
+   * left. That is one of its two causes, and the rarer one.
+   *
+   * The other is that NOBODY wrote it. `WorkflowService` raises the DENR
+   * follow-ups the moment a City Environmental Certificate is issued, with
+   * `requested_by_user_id => null` set deliberately — the City requires the
+   * document, no officer typed the request. Those are every DENR requirement
+   * in the system, which is to say every requirement a CENRO applicant is
+   * likely to open.
+   *
+   * So an applicant chasing a CNC was told an officer had left the LGU, about
+   * a requirement no officer was ever assigned to. The office is the honest
+   * answer in BOTH cases: it is the body that requires the document whether or
+   * not the person who recorded it is still there, and it is already known —
+   * `department_id` is set on the same row.
+   *
+   * The literal survives only where nothing else is left to name.
+   */
+  return (
+    request.created_by?.name ??
+    request.from_office?.name ??
+    request.created_by?.department ??
+    'Officer removed from register'
+  )
+}
+
+/** Was this requirement raised by a person, or by the City itself? */
+function hasNamedAuthor(request: OfficerRequest): boolean {
+  return Boolean(request.created_by?.name)
 }
 
 const STATUS_DOT: Record<RequestStatus, string> = {
@@ -275,9 +307,26 @@ function LetterView({
                * `created_by.department` is the fallback for rows written before
                * the picker existed.
                */}
-              {(request.from_office?.name ?? request.created_by?.department) && (
+              {/*
+                Only when it is a SECOND fact. Where no officer is named the
+                line above is already the office, and repeating it under itself
+                reads as a stutter rather than as context.
+              */}
+              {hasNamedAuthor(request) &&
+                (request.from_office?.name ?? request.created_by?.department) && (
+                  <span className="block text-xs italic text-ink-muted">
+                    {request.from_office?.name ?? request.created_by?.department}
+                  </span>
+                )}
+              {/*
+                And where there is none, say which it is. "Requested
+                automatically" tells the applicant there is nobody at the other
+                end of this particular row to have chased it — the answer to
+                "who do I talk to" is the office named above, through Messages.
+              */}
+              {!hasNamedAuthor(request) && (
                 <span className="block text-xs italic text-ink-muted">
-                  {request.from_office?.name ?? request.created_by?.department}
+                  Requested automatically when your certificate was issued
                 </span>
               )}
             </div>
@@ -320,12 +369,28 @@ function LetterView({
               {request.application?.tracking_id || 'Draft — not yet filed'}
             </dd>
           </div>
-          <div>
-            <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Requesting office</dt>
-            <dd className="text-sm font-bold text-ink">
-              {request.from_office?.name ?? request.created_by?.department ?? '—'}
-            </dd>
-          </div>
+          {/*
+            Dropped when the header above IS the office — which is every
+            requirement the City raised for itself. Printing "City Environment
+            and Natural Resources Office" twice within two inches, once as who
+            is asking and once as the requesting office, is one fact wearing
+            two labels; the reader checks the second against the first, finds
+            it identical, and has learnt nothing for the trip.
+
+            It stays wherever an officer is named above, because there it
+            answers a question the name does not: which office they were
+            writing for.
+          */}
+          {hasNamedAuthor(request) && (
+            <div>
+              <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                Requesting office
+              </dt>
+              <dd className="text-sm font-bold text-ink">
+                {request.from_office?.name ?? request.created_by?.department ?? '—'}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Deadline</dt>
             <dd className="text-sm font-bold text-ink">
@@ -1275,7 +1340,7 @@ export function RequestsPage() {
                 </thead>
                 <tbody>
                   {list.map((r) => {
-                    const rowTone = REQUIREMENT_CHIP_TONE[r.status] ?? 'tint-gray'
+                    const rowTone = REQUIREMENT_ROW_TONE[r.status] ?? 'tint-gray'
                     const latest = r.responses?.[r.responses.length - 1]
                     return (
                       <tr
@@ -1322,7 +1387,7 @@ export function RequestsPage() {
                           )}
                         </td>
                         <td
-                          className="max-w-[10rem] truncate px-5 py-3.5 text-ink-secondary"
+                          className="whitespace-nowrap px-5 py-3.5 text-ink-secondary"
                           title={
                             isOfficer
                               ? undefined
@@ -1334,12 +1399,30 @@ export function RequestsPage() {
                             is asking me for this" — and for an office reading
                             its own queue it is always itself, so that side gets
                             the submission date instead.
+
+                            ---- The CODE, not the name ----------------------
+
+                            This printed the full name inside `max-w-[10rem]`,
+                            so every row read "City Environme…" — ten rows of
+                            the same eleven letters, naming nothing. Worse, the
+                            10rem it spent doing that came out of the
+                            Requirement column beside it, which was then also
+                            cut: both of the columns that carry the answer were
+                            truncated so that neither could be read.
+
+                            CENRO, BPLO, CHO — the codes are how the offices are
+                            named to applicants everywhere else in BizTrack
+                            (the admin register's own Office column, the
+                            clearance stages, the office picker in Messages),
+                            they never truncate, and the full name is on the
+                            cell for a pointer and in the requirement when it
+                            is opened.
                           */}
                           {isOfficer
                             ? latest
                               ? formatDate(latest.created_at)
                               : '—'
-                            : (r.from_office?.name ?? r.created_by?.department ?? '—')}
+                            : (r.from_office?.code ?? r.created_by?.department ?? '—')}
                         </td>
                         <td className="whitespace-nowrap px-5 py-3.5">
                           <StatusChip tone={rowTone}>{r.status_label}</StatusChip>

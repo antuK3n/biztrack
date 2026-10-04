@@ -104,7 +104,24 @@ enum ApplicationStatus: string
              * words, rather than one word doing both jobs badly.
              */
             self::AwaitingOtherPermits => 'Approved',
-            self::ForFinalApproval => 'For Final Approval',
+            /*
+             * "With BPLO", renamed 3 October 2026.
+             *
+             * The old label named an internal stage, and by then named one
+             * the applicant was told about nowhere: it left the new rail on
+             * 18 September and the renewal rail on 3 October, so the chip
+             * pointed at a step in no guide on the site.
+             *
+             * A filing reaches it now only by having no confirmed RA 11032
+             * category — an internal data problem the applicant did not
+             * cause and cannot act on. "With BPLO" is true, is the only
+             * part that concerns them, and asks nothing of them.
+             *
+             * `StatusLabelParityTest` holds this and `web/src/lib/status.ts`
+             * to the same string, and it is what caught this one: the web
+             * side was renamed first and the two drifted for one commit.
+             */
+            self::ForFinalApproval => 'With BPLO',
             /*
              * "Completed", renamed 24 September 2026.
              *
@@ -253,6 +270,22 @@ enum ApplicationStatus: string
             self::PendingPayment => [
                 self::AwaitingOtherPermits,
                 self::ForFinalApproval,
+                /*
+                 * ── Straight to Approved, for a filing with nothing left ──
+                 *
+                 * Added 3 October 2026, with the removal of For Final
+                 * Approval from renewals. A renewal carries only the permits
+                 * it is renewing, so the common January filing — the Mayor's
+                 * Permit by itself — has nothing outstanding the moment the
+                 * money lands. The certificate is released in that same
+                 * request and there is no office left to hear from.
+                 *
+                 * The alternative was a stop at AwaitingOtherPermits closed
+                 * a millisecond later, which is a wait in the history for a
+                 * wait that never happened, and a status an officer's queue
+                 * could have caught the filing in.
+                 */
+                self::Approved,
                 self::Cancelled,
                 self::Rejected,
             ],

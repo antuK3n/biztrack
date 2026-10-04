@@ -1,3 +1,5 @@
+import type { ZoningCheckResult, ZoningFactValues } from './zoningCheck'
+
 export interface Department {
   id: number
   code: string
@@ -61,6 +63,44 @@ export interface User {
   debug_panel?: boolean
   roles: string[]
   permissions: string[]
+  /**
+   * Why this account may reach nothing but its messages and its notices.
+   *
+   * Null for everybody who is not barred, which is almost everybody, and null
+   * for every officer always — a blacklisting is a finding against a business
+   * owner.
+   *
+   * It rides on the SESSION rather than being fetched by whichever screen
+   * cares, because it governs the whole session: the shell raises the warning,
+   * the navigation hides what is barred, and the router refuses the rest. The
+   * server refuses it too — see `EnforceAccountRestriction` — because none of
+   * those three is a lock.
+   */
+  restriction: AccountRestriction | null
+}
+
+/** A suspension or a blacklisting, and where its owner takes it. */
+export interface AccountRestriction {
+  /**
+   * A blacklisting is against the PERSON and reaches everything they hold; a
+   * suspension is against one premises. Both bar the account outright
+   * [client, 30 September 2026], and this says which finding to name.
+   */
+  kind: 'blacklisted' | 'suspended'
+  /** The business a suspension is about. Null on a blacklisting. */
+  business_name: string | null
+  /** That business's BAN, for the reader to quote. Null on a blacklisting. */
+  reference_id: string | null
+  /** How many businesses the reader holds, for copy that reaches all of them. */
+  covers: number
+  /**
+   * The conversation to open.
+   *
+   * A suspension points at the suspended business's own filing; a blacklisting
+   * has no one business to point at, so `application_id` is null and the
+   * reader goes to the general enquiry with BPLO instead.
+   */
+  conversation: { application_id: number | null }
 }
 
 /** Laravel error envelope: HTTP status + message, plus field errors on 422. */
@@ -832,6 +872,9 @@ export type PaymentGatewayMode = 'simulated' | 'kwikpay'
 /** `test`: the payment service collects `test_amount`. `full`: the bill. */
 export type PaymentGatewayCharge = 'test' | 'full'
 
+/** What may mark a KwikPay payment paid: its signed callback only, or its status answer too. */
+export type PaymentGatewayConfirm = 'callback' | 'query'
+
 /**
  * The super admin's view of both switches (GET /admin/payment-gateway). Names
  * of missing settings, never values; the merchant key is never sent.
@@ -845,6 +888,7 @@ export interface PaymentGatewayStatus {
   default_charge: PaymentGatewayCharge
   /** What the test charge collects, "1.00". */
   test_amount: string
+  confirm: PaymentGatewayConfirm
   kwikpay: {
     configured: boolean
     /** Env keys still needed, e.g. `KWIKPAY_KEY`. */
@@ -1333,6 +1377,12 @@ export interface ApplicationCorrection {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /**
+   * The applicant's answers to the zoning ordinance's questions (see
+   * lib/zoningCheck.ts). Optional and nullable: a filing nobody has asked
+   * them of carries none.
+   */
+  zoning_facts?: ZoningFactValues | null
   /**
    * What was corrected after a return, oldest first.
    *
@@ -2609,6 +2659,31 @@ export interface MessageOffice {
   can_message: boolean
 }
 
+/**
+ * A finding recorded against the person an office is talking to.
+ *
+ * `blacklisted` is against the PERSON and reaches everything they hold;
+ * `suspended` and `flagged` are against the business this conversation is
+ * about. The server decides which one applies — see counterpartyStanding().
+ */
+export interface CounterpartyStanding {
+  kind: 'blacklisted' | 'suspended' | 'flagged'
+  /** The finding in the API's own words, e.g. "Business suspended". */
+  label: string
+  /**
+   * How many of this person's businesses are suspended in all.
+   *
+   * The scale behind the finding: an officer answering about one suspended
+   * shopfront is better for knowing whether it is the only one or the third
+   * [client, 1 October 2026].
+   *
+   * It does not decide WHICH note is shown — that stays specific to the
+   * business this conversation is about. Zero on a blacklisting, where the
+   * cascade has set every business to `blacklisted` and none is suspended.
+   */
+  suspended_count: number
+}
+
 /** One conversation row in the Messages inbox (GET /message-threads). */
 export interface MessageThreadSummary {
   /*
@@ -2644,7 +2719,19 @@ export interface MessageThreadSummary {
   business_name: string | null
   status: string | null
   /** Whoever the reader is talking to: the applicant, or the officer/office. */
-  counterparty: { name: string; subtitle: string | null; is_officer: boolean }
+  counterparty: {
+    name: string
+    subtitle: string | null
+    is_officer: boolean
+    /**
+     * Where the person writing to this office currently stands, when a finding
+     * is recorded against them [client, 30 September 2026]. Null for anybody in
+     * good standing, and null on every row an APPLICANT reads — they are told
+     * about their own standing by the restriction notice, not by a chip on
+     * their own conversation.
+     */
+    standing?: CounterpartyStanding | null
+  }
   /**
    * The office answerable for this filing (checklist item 73) — one office, the
    * one this conversation belongs to, never the whole routing list. Null before
@@ -3003,6 +3090,12 @@ export interface OfficeForm {
    * is true of CHO, BFP, OBO and CENRO.
    */
   requirements?: OfficeFormRequirement[] | null
+  /**
+   * City Ordinance No. 24-2018 applied rule by rule — on CPDD's sheet only,
+   * null on the other four. The same evaluation the applicant's wizard reads,
+   * so the early warning and the officer's cited checklist cannot disagree.
+   */
+  zoning_check?: ZoningCheckResult | null
   /**
    * What the applicant changed on the rows this office last returned.
    *

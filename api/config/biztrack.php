@@ -72,23 +72,41 @@ return [
      */
     'renewal_window' => [
         /*
-         * No early bound, and that is a decision rather than a gap.
+         * 30 days — one month before a clearance expires.
          *
-         * 30 days was tried on 1 October 2026 and taken out the same day,
-         * because FullLifecycleThenRenewalTest refused a filing the system is
-         * built to accept: six permits expiring 15, 60, 105, 150, 195 and 240
-         * days out, renewed as one subset. Staggered expiries are the whole
-         * reason a subset renewal exists, and a 30-day window turns that one
-         * filing into five.
+         * ── It was tried once and reverted, and the reason has since gone ─
          *
-         * Nothing is protected by refusing an early renewal here. The term
-         * CONTINUES (`issuePermitFor`), so no paid-for day is lost and the
-         * city loses no revenue; the premises are inspected either way
-         * (`ClearanceService::submitHeld`); and the deferral scheme exists so
-         * the applicant makes ONE trip a year. An early bound only adds
-         * trips.
+         * Set to 30 on 1 October 2026 and taken out the same day, because
+         * FullLifecycleThenRenewalTest refused a filing the system was then
+         * built to accept: six permits expiring 15, 60, 105, 150, 195 and
+         * 240 days out, renewed as ONE subset. The note here read "a 30-day
+         * window turns that one filing into five", and that was true.
+         *
+         * It stopped being true on 3 October, when the client ruled that a
+         * renewal carries the business permit or ONE other permit (see
+         * `App\Support\RenewalScope`). Those six staggered clearances are
+         * five separate filings now whatever this value is, so the window
+         * costs the applicant nothing it was not already costing them.
+         *
+         * ── What it buys, which the old note was right to doubt ──────
+         *
+         * Not revenue and not safety: the term still CONTINUES
+         * (`issuePermitFor`) so no paid-for day is lost, and the premises
+         * are inspected either way. What it buys is the picker telling the
+         * truth. Client, 3 October 2026, on a screenshot of five permits
+         * valid for another year, every one of them tickable under a line
+         * reading "No renewal needed": *"valid permits should NOT BE
+         * RENEWED until their renewal time window is open."*
+         *
+         * 30 rather than 60 because `ScanPermits::THRESHOLDS` sends its
+         * first reminder at 30 days. One number, so the day the applicant
+         * is told to renew is the day they first can — today that reminder
+         * arrives long after renewal was already possible, which is
+         * backwards.
+         *
+         * Still an env override, so the LGU can move it without a deploy.
          */
-        'opens_days_before' => env('BIZTRACK_RENEWAL_OPENS_DAYS_BEFORE'),
+        'opens_days_before' => env('BIZTRACK_RENEWAL_OPENS_DAYS_BEFORE', 30),
         /*
          * 36 months, and the number is Sec. 8A.05's, not a round guess.
          *

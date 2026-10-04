@@ -17,7 +17,7 @@ import {
 } from '../components/icons'
 import { portalPath } from './api'
 import type { Portal } from './api'
-import type { User } from './types'
+import type { AccountRestriction, User } from './types'
 import { canUseDebug } from '../pages/admin/debug/access'
 
 export interface NavItem {
@@ -333,10 +333,29 @@ const NAV_ITEMS: NavItem[] = [
  * rail even though both sites are built from this one list.
  */
 export function navItemsFor(user: User, portal: Portal): NavItem[] {
-  return NAV_ITEMS.filter((item) => visibleTo(user, item)).map((item) => {
+  return NAV_ITEMS.filter((item) => visibleTo(user, item) && reachableBy(user, item)).map((item) => {
     const to = destinationFor(user, item)
     return to ? { ...item, to: portalPath(portal, to) } : item
   })
+}
+
+/**
+ * The destinations a SUSPENDED or BLACKLISTED account may still reach.
+ *
+ * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
+ * pag view ng notif" [client, 30 September 2026].
+ *
+ * Notifications are not a rail entry — they are the bell in the header — so
+ * this list is the one entry that survives. Everything else is removed rather
+ * than disabled: a greyed rail is a promise the page behind it will not keep,
+ * and the server refuses those paths anyway.
+ */
+const REACHABLE_WHILE_RESTRICTED = ['/messages']
+
+function reachableBy(user: User, item: NavItem): boolean {
+  if (!user.restriction) return true
+
+  return item.to !== undefined && REACHABLE_WHILE_RESTRICTED.includes(item.to)
 }
 
 /** No rule stated = everyone. Otherwise its own rule, the single claim, else any of them. */
@@ -377,3 +396,26 @@ function destinationFor(user: User, item: NavItem): string | undefined {
  * literal, which `Number()` reads as NaN and no filing can collide with.
  */
 export const BPLO_ENQUIRY = '/messages?application=general'
+
+/**
+ * Where a restriction's warning sends the reader.
+ *
+ * "Magdidirect sa kanya sa specific na chat sa BPLO pag business is suspended
+ * — sa business na acc nya, diba may kanya kanyang convo kada business — tas
+ * pag account is blacklisted ma-direct naman dapat sa general inquiry ng
+ * BPLO" [client, 30 September 2026].
+ *
+ * So the two findings go to two different places, and the server has already
+ * worked out which: a suspension carries the suspended business's own filing,
+ * a blacklisting carries null because the finding is against the person and
+ * belongs in the conversation that needs no filing behind it.
+ *
+ * Null also arrives for a suspended business that has never filed. There is no
+ * conversation to open then, and the general enquiry is the honest fallback —
+ * a door that is always there, which is the reason it exists.
+ */
+export function restrictionDestination(restriction: AccountRestriction): string {
+  const id = restriction.conversation.application_id
+
+  return id === null ? BPLO_ENQUIRY : `/messages?application=${id}`
+}

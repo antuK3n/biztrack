@@ -38,8 +38,26 @@ use Illuminate\Support\Facades\Route;
 // --- PUBLIC ------------------------------------------------------------------
 Route::get('verify/{permit_number}', [VerifyController::class, 'show']);
 
-// --- Authenticated -----------------------------------------------------------
-Route::middleware('auth:sanctum')->group(function () {
+/*
+ * --- Authenticated -----------------------------------------------------------
+ *
+ * ---- `unrestricted`, and why it is on the whole file --------------------
+ *
+ * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
+ * pag view ng notif" [client, 30 September 2026]. A suspended or blacklisted
+ * owner reaches their messages and their notices; everything else refuses
+ * them until the finding is settled.
+ *
+ * Attached here and lifted OFF the two that stay open, rather than added to
+ * each group that closes. The instruction is an allow-list - two screens - so
+ * the code is an allow-list too, and the default is the safe one: a route
+ * added next month is barred until somebody decides it should not be, instead
+ * of being open until somebody remembers to bar it.
+ *
+ * It costs officers nothing. AccountRestriction::for() answers null for any
+ * account without `business.manage_own`, so an officer never runs the query.
+ */
+Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
 
     // Reference lookups (auth only; power the wizard)
     Route::prefix('reference')->group(function () {
@@ -195,26 +213,36 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::get('documents/{document}/download', [DocumentController::class, 'download']);
 
-    // Messaging (per-application thread; participant check in controller)
-    Route::middleware('permission:message.participate')->group(function () {
-        // Inbox for the dedicated Messages page: one row per conversation.
-        Route::get('message-threads', [MessageController::class, 'threads']);
-        Route::get('applications/{application}/messages', [MessageController::class, 'index']);
-        Route::post('applications/{application}/messages', [MessageController::class, 'store']);
-        /*
-         * A question with no filing behind it, addressed to BPLO.
-         *
-         * No `{user}` means "mine", which is what an applicant always sends —
-         * someone who has registered no business has no application id to put
-         * in a path, and telling them to "contact the City BPLO" while giving
-         * them no way to do it is what this fixes. BPLO names the person whose
-         * enquiry it is opening; the office check is in the controller, so the
-         * two-segment form is not a way in for anybody else.
-         */
-        Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
-        Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
-        Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
-    });
+    /*
+     * Messaging (per-application thread; participant check in controller).
+     *
+     * `withoutMiddleware('unrestricted')`: this is one of the two things a
+     * barred account may still do, and it is the one the refusal everywhere
+     * else points AT. Locking it would leave an owner told to message the
+     * BPLO and refused when they tried - the dead end the restriction modal
+     * was built to close.
+     */
+    Route::middleware('permission:message.participate')
+        ->withoutMiddleware('unrestricted')
+        ->group(function () {
+            // Inbox for the dedicated Messages page: one row per conversation.
+            Route::get('message-threads', [MessageController::class, 'threads']);
+            Route::get('applications/{application}/messages', [MessageController::class, 'index']);
+            Route::post('applications/{application}/messages', [MessageController::class, 'store']);
+            /*
+             * A question with no filing behind it, addressed to BPLO.
+             *
+             * No `{user}` means "mine", which is what an applicant always sends —
+             * someone who has registered no business has no application id to put
+             * in a path, and telling them to "contact the City BPLO" while giving
+             * them no way to do it is what this fixes. BPLO names the person whose
+             * enquiry it is opening; the office check is in the controller, so the
+             * two-segment form is not a way in for anybody else.
+             */
+            Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
+            Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
+            Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
+        });
 
     /*
      * ── The office's line to the System Administrator ─────────────────────
@@ -448,10 +476,23 @@ Route::middleware('auth:sanctum')->group(function () {
      * seat, and an officer without that permission still has notifications.
      * The counts are scoped to the reader inside the controller.
      */
-    Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
-    Route::get('notifications', [NotificationController::class, 'index']);
-    Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
-    Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
+    /*
+     * The other half of what a barred account keeps: the badge that says
+     * something is waiting, and the notices themselves - which carry the
+     * reason the restriction was recorded, and are therefore the first thing
+     * such an owner is sent to read.
+     *
+     * Marking one read is a write and stays open with them. It changes
+     * nothing about the account's standing, and a list you may read but never
+     * clear would keep telling an owner they have unopened mail they have
+     * opened.
+     */
+    Route::withoutMiddleware('unrestricted')->group(function () {
+        Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
+        Route::get('notifications', [NotificationController::class, 'index']);
+        Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
+        Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
+    });
 
     // Analytics (analytics.view)
     Route::middleware('permission:analytics.view')->group(function () {

@@ -55,19 +55,19 @@ name.
 
 ## 2. Switching
 
-Two switches, three ways to reach them. Every change is written to the audit
+Three switches, three ways to reach them. Every change is written to the audit
 log, with who made it:
 
 | Door | Audit action | Recorded |
 |---|---|---|
-| Debug page (`/api/v1/debug/payments`) | `debug.payments` | both switches `before` and `after`, actor |
+| Debug page (`/api/v1/debug/payments`) | `debug.payments` | all three switches `before` and `after`, actor |
 | Admin API (`/api/v1/admin/payment-gateway`) | `payment_gateway.switched`, `payment_gateway.charge_switched` | `from`, `to`, `via: api`, actor (and `test_amount` for the charge) |
-| Terminal (artisan) | the same two | `from`, `to`, `via: artisan`, no actor |
+| Terminal (artisan) | the same two, plus `payment_gateway.confirm_switched` | `from`, `to`, `via: artisan`, no actor |
 
 ### From the Debug page (super admin)
 
 The **Payments** section of the Debug page (`/admin/debug`, or just `/debug`)
-shows both switches as two pairs of cards:
+shows the switches as pairs of cards:
 
 - **How owners pay:** Simulated or KwikPay. When KwikPay cannot be turned on,
   the page lists the settings missing on the server. **Test connection**
@@ -75,7 +75,21 @@ shows both switches as two pairs of cards:
 - **What KwikPay collects:** "₱1.00 test charge" or "The full bill". Switching
   to the full bill asks for confirmation first, because owners are then
   charged real money. Switching back to the test charge asks nothing.
+- **What marks a payment paid:** "Only the signed confirmation" (the
+  default) or "Its answer when asked, too". See below.
 - **Online payments still waiting**, and the ones flagged for staff.
+
+### What marks a payment paid
+
+KwikPay can say a payment went through in two ways: its signed callback, or
+its answer when BizTrack asks `/api/query`. The merchant docs allow both. The
+default is the **signed callback only**: on 4 October 2026 the gateway at
+`payment-gateway-kwgu.onrender.com` answered
+`{"status":"5","message":"Transaction is waiting to be processed"}` for an
+order whose payment page said it had expired unpaid, and BizTrack credited
+₱8,150 nobody paid. With the default, `/api/query` is still asked (its message
+is kept on the payment as a note) but its answer completes and fails nothing.
+On a server KwikPay cannot reach, such as localhost, nothing then turns Paid.
 
 The Debug page is closed by default. It opens only from the server, for a
 few hours at a time, and closes by itself after that:
@@ -101,6 +115,8 @@ php artisan biztrack:payment-gateway on           # → kwikpay (refused if cred
 php artisan biztrack:payment-gateway off          # → simulated
 php artisan biztrack:payment-gateway test-charge  # KwikPay collects the test amount (₱1.00)
 php artisan biztrack:payment-gateway full-charge  # KwikPay collects the full bill
+php artisan biztrack:payment-gateway callback-only  # only the signed callback marks a payment paid (default)
+php artisan biztrack:payment-gateway trust-query  # KwikPay's /api/query answer settles payments too
 ```
 
 ### Over the API (super admin only)
@@ -142,7 +158,8 @@ payments, never the switches themselves.
      exist at KwikPay. It is never retried automatically, and reconciliation
      settles it. The owner can start a new payment, because they were never
      given anywhere to pay the first one.
-3. **Only two things mark it paid** (KwikPay FAQ): a callback whose
+3. **Only two things can mark it paid** (KwikPay FAQ), and by default only the
+   first (see "What marks a payment paid" above): a callback whose
    signature is valid and that carries `status 5`, or `"5"` from
    `/api/query`. The application moves on at that moment and not before.
 4. **Callback** (`POST /api/v1/payments/kwikpay/callback`, public). It
