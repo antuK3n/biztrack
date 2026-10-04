@@ -998,6 +998,14 @@ export const payments = {
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
   /**
+   * BPLO marks this filing paid over the counter at City Hall. Nothing to
+   * send — the amount is the balance due, same as `pay` above, and the
+   * server refuses with a plain sentence if the filing is not actually
+   * waiting on payment. BPLO staff only.
+   */
+  markPaidAtCounter: (applicationId: number) =>
+    unwrap<Payment>(api.post(`/applications/${applicationId}/counter-payment`)),
+  /**
    * The mode, the methods it offers and any online payment already in flight.
    * The pay screen lists what this returns rather than its own list, because
    * the methods depend on a switch the super admin can flip at any time.

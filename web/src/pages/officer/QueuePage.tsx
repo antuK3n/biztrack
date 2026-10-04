@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { InboxIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
+import { PageTitle, ProtoModal, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { applications, assignments } from '../../lib/resources'
+import { applications, assignments, payments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
 import { TONE_CLASSES, applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
@@ -590,6 +590,13 @@ interface QueueItem {
    */
   key: string
   /**
+   * The filing itself, on every row regardless of which feed it came from.
+   * `assignmentId` addresses the office's own review of it; this is what
+   * "Mark as paid" needs, since a Pending Payment row has no assignment to
+   * address.
+   */
+  applicationId: number
+  /**
    * The review sheet, or null when there is nothing yet to open. A filing that
    * has not been paid has not been routed, so no assignment exists and
    * `/staff/queue/:id` has no id to be given. See PaymentQueueRow.
@@ -693,6 +700,7 @@ function fromAssignment(item: Assignment): QueueItem {
   const app = item.application
   return {
     key: `assignment:${item.id}`,
+    applicationId: app.id,
     href: `/staff/queue/${item.id}`,
     trackingId: app.tracking_id,
     ...nameOf(app.business, app.tracking_id),
@@ -725,6 +733,7 @@ function fromAssignment(item: Assignment): QueueItem {
 function fromApplication(app: ApplicationListItem): QueueItem {
   return {
     key: `application:${app.id}`,
+    applicationId: app.id,
     href: null,
     // No assignment exists yet on this tab, so there is nothing to hold and
     // nobody to hold it — the filing has not been routed to an office.
@@ -877,6 +886,8 @@ function QueueRow({
   onClaim,
   onRelease,
   claiming,
+  onMarkPaid,
+  markingPaid,
 }: {
   item: QueueItem
   /**
@@ -893,6 +904,13 @@ function QueueRow({
   onClaim?: (item: QueueItem) => void
   onRelease?: (item: QueueItem) => void
   claiming?: boolean
+  /**
+   * Opens the "mark as paid" confirmation for this row. Undefined for every
+   * reader but BPLO staff — the list decides who gets it, the same way it
+   * decides `ownPermit`, because only it knows the signed-in reader's seat.
+   */
+  onMarkPaid?: (item: QueueItem) => void
+  markingPaid?: boolean
 }) {
   /*
    * ── Which status the badge shows, which depends on the seat ────────────
@@ -1143,6 +1161,28 @@ function QueueRow({
           )}
         </div>
       )}
+      {/*
+        * "Mark as paid", for the one kind of row that has no assignment to
+        * hold open a footer of its own: Pending Payment.
+        *
+        * Outside the Link, same reasoning as Claim above — a button inside an
+        * anchor is invalid markup and would navigate on a keyboard press. Only
+        * BPLO sees it: `onMarkPaid` is undefined for every other reader, so
+        * nothing renders here for them even though the row itself is the same
+        * one the super admin and BPLO both see on this tab.
+        */}
+      {item.assignmentId === null && onMarkPaid && (
+        <div className="-mt-px flex items-center justify-end rounded-b-xl border-t border-line bg-white px-6 py-2.5">
+          <button
+            type="button"
+            onClick={() => onMarkPaid(item)}
+            aria-disabled={markingPaid || undefined}
+            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          >
+            {markingPaid ? 'Marking…' : 'Mark as paid'}
+          </button>
+        </div>
+      )}
     </li>
   )
 }
@@ -1160,6 +1200,14 @@ function QueueRow({
  */
 export function QueuePage() {
   const canReadEveryOffice = useAuth((s) => Boolean(s.user?.permissions.includes(ANY_OFFICE)))
+  /*
+   * "Mark as paid" is BPLO staff's alone — not the super admin's, even though
+   * the super admin shares `canReadEveryOffice` and sees this same tab. A
+   * department check rather than a permission, because Ken's decision names
+   * the office, and `application.review`/`application.view_any_office` both
+   * describe something wider than "is this reader BPLO".
+   */
+  const isBplo = useAuth((s) => s.user?.department?.code === 'BPLO')
   const [tab, setTab] = useState<Tab>('approval')
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<QueueItem[]>([])
@@ -1211,6 +1259,11 @@ export function QueuePage() {
    * what happened rather than a tick.
    */
   const [claimMessage, setClaimMessage] = useState<string | null>(null)
+
+  /** The application id being marked paid, so one press cannot be double-fired. */
+  const [markingPaidId, setMarkingPaidId] = useState<number | null>(null)
+  /** The row waiting on the "mark as paid" confirmation, or none. */
+  const [confirmPayItem, setConfirmPayItem] = useState<QueueItem | null>(null)
 
   /*
    * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
@@ -1490,6 +1543,30 @@ export function QueuePage() {
       setClaimError(toApiError(err).message)
     } finally {
       setClaimingId(null)
+    }
+  }
+
+  /*
+   * BPLO marks a filing paid at the counter, after the confirmation dialog.
+   *
+   * Re-read rather than patched, for the reason claim() gives: the row holds
+   * the balance due only implicitly (it is what the Pending Payment tab is),
+   * and once paid it belongs on a different stage entirely — so it has to
+   * LEAVE this list, which only a re-read can show reliably.
+   */
+  async function markPaid(item: QueueItem) {
+    setMarkingPaidId(item.applicationId)
+    setClaimError(null)
+    setClaimMessage(null)
+    try {
+      await payments.markPaidAtCounter(item.applicationId)
+      setClaimMessage(`${item.name} is marked paid at the counter.`)
+      restart()
+      reload()
+    } catch (err) {
+      setClaimError(toApiError(err).message)
+    } finally {
+      setMarkingPaidId(null)
     }
   }
 
@@ -1986,6 +2063,29 @@ export function QueuePage() {
       )}
 
       {/*
+        * "Mark as paid" is an owner's permit releasing, not a one-tap undo
+        * like Claim — so it asks first, the same way Approve asks on
+        * ReviewPage. One sentence of consequence, matching Ken's own wording.
+        */}
+      {confirmPayItem && (
+        <ProtoModal
+          title={`Mark ${confirmPayItem.trackingId} (${confirmPayItem.name}) as paid at the counter?`}
+          confirmLabel="Mark as paid"
+          onCancel={() => setConfirmPayItem(null)}
+          onConfirm={() => {
+            const item = confirmPayItem
+            setConfirmPayItem(null)
+            void markPaid(item)
+          }}
+        >
+          <p className="text-sm text-ink-secondary">
+            The owner’s Business Permit is released and their clearances open, the same as an
+            online payment.
+          </p>
+        </ProtoModal>
+      )}
+
+      {/*
         * Mounted unconditionally, not tucked inside the list branch: an
         * aria-live region only announces changes to text it already owns, so
         * one that is unmounted whenever the list is empty stays silent on the
@@ -2133,6 +2233,8 @@ export function QueuePage() {
                 onClaim={claim}
                 onRelease={release}
                 claiming={claimingId === item.assignmentId}
+                onMarkPaid={isBplo ? setConfirmPayItem : undefined}
+                markingPaid={markingPaidId === item.applicationId}
               />
             ))}
           </ul>

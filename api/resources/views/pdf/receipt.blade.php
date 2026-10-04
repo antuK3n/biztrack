@@ -46,7 +46,8 @@
             <tr><td class="label">Reference No.</td><td class="value">{{ $reference_number }}</td></tr>
             <tr><td class="label">Tracking ID</td><td class="value">{{ $tracking_id }}</td></tr>
             <tr><td class="label">Business</td><td class="value">{{ $business_name }}</td></tr>
-            <tr><td class="label">Method</td><td class="value">{{ strtoupper($method) }}</td></tr>
+            {{-- Paid at the counter is not a channel to shout in caps like the rest — it says what happened, plainly. --}}
+            <tr><td class="label">Method</td><td class="value">{{ $method === 'counter' ? 'Paid at the counter' : strtoupper($method) }}</td></tr>
             <tr><td class="label">Paid At</td><td class="value">{{ $paid_at }}</td></tr>
         </table>
 
