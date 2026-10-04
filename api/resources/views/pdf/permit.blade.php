@@ -123,11 +123,46 @@
         .sig-line { border-bottom: 1px solid #2b2b2b; width: 170px; margin: 0 auto; }
         .sig-role { font-size: 8.5px; font-weight: bold; letter-spacing: 0.6px; color: #555; text-transform: uppercase; padding-top: 3px; }
 
+        /*
+         * ── The Mayor's Permit at the City's own scale ──────────────────────
+         *
+         * Measured off the photographed pad [client, 4 October 2026]: on an
+         * 11-inch sheet the field captions are about 12pt, the title about
+         * 28pt, the fee line about 10pt, and the ruled rows sit nearly
+         * touching. Set at the clearance sizes the sheet read as a form
+         * shrunk to fit — "ang liliit ng font, ang lalaki ng spacing" — so
+         * these override only under body.mayors and leave the clearances at
+         * the scale their own screen uses.
+         */
+        /* Vertical rhythm pulled in so the expiry line clears the frame on
+         * Letter's 8.5-inch height; at the first pass it sat on the border. */
+        body.mayors .title { font-size: 28px; letter-spacing: 6px; margin-top: 14px; }
+        body.mayors table.fields { border-spacing: 0 5px; margin-top: 12px; }
+        body.mayors table.signatures { margin-top: 20px; }
+        body.mayors .rule { margin-top: 12px; }
+        body.mayors td.label { width: 150px; font-size: 11.5px; letter-spacing: 0.8px; color: #1a1a1a; }
+        body.mayors td.value.ruled { font-size: 13px; padding: 6px 9px; }
+        body.mayors table.fields.triple { margin-top: 6px; }
+        body.mayors .box-label { font-size: 9px; margin-top: 4px; }
+        body.mayors .box { font-size: 12.5px; padding: 5px 8px; }
+        body.mayors .number-cell { width: 170px; }
+        body.mayors .number-cell .box-label { font-size: 8px; }
+        body.mayors .number-cell .box { font-size: 11px; padding: 4px 6px; }
+        body.mayors .fee-line { font-size: 11px; margin-top: 8px; }
+        body.mayors .fee-label { font-size: 10px; }
+        body.mayors .remarks-box.ruled { height: 46px; }
+        body.mayors .sig-name { font-size: 12.5px; }
+        body.mayors .sig-role { font-size: 9.5px; color: #1a1a1a; }
+        body.mayors .enforcement { font-size: 9.5px; margin-top: 14px; }
+        body.mayors .expires { font-size: 9.5px; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
-<body>
+{{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
+     $mayors itself is only defined further down, so the raw flag is read here. --}}
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : '' }}">
 <div class="sheet">
     {{-- Header: city block left, verification QR right. --}}
     <table class="row">
