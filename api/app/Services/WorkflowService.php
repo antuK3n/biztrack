@@ -2449,6 +2449,35 @@ class WorkflowService
 
             if ($type->issuing_department_id !== null) {
                 $this->routeTo($app, $type->issuing_department_id);
+
+                /*
+                 * ── A refused permit's office has to be handed it back ───
+                 *
+                 * `rejectClearance` completes the office's assignment — it has
+                 * ruled — and `routeTo` is `firstOrCreate`, so on a
+                 * re-application it found that completed row and left it
+                 * alone. The permit went back to For Approval on no tab of the
+                 * office's queue, which lists open assignments only, while the
+                 * Business Permit stayed suspended waiting on it
+                 * (office-review row 23).
+                 *
+                 * So a sheet handed in reopens a completed assignment. The
+                 * officer who held the case keeps it, as `resubmit` keeps
+                 * BPLO's. `assigned_at` restarts: the earlier review was
+                 * finished at the refusal, and the time the applicant then
+                 * spent putting the premises right is not the office's to be
+                 * measured on — the refusal itself is kept in
+                 * `clearance_refusals`.
+                 */
+                ApplicationAssignment::where('application_id', $app->id)
+                    ->where('department_id', $type->issuing_department_id)
+                    ->where('status', AssignmentStatus::Completed->value)
+                    ->update([
+                        'status' => AssignmentStatus::Pending->value,
+                        'remarks' => null,
+                        'assigned_at' => now(),
+                        'completed_at' => null,
+                    ]);
             }
 
             $this->refreshReadiness($app);

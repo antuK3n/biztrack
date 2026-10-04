@@ -1,9 +1,11 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\AssignmentStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\PermitStatus;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -396,6 +398,48 @@ it('restores the permit once nothing on the filing is refused', function () {
     expect($app->fresh()->permitTypes->firstWhere('code', 'ZONING')->pivot->status)
         ->toBe(ClearanceStatus::Approved)
         ->and($permit->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+/*
+ * The re-application has to reach somebody (office-review row 23).
+ *
+ * The refusal completes the office's assignment, and handing the sheet in
+ * again only routed the office with `firstOrCreate` — which found the
+ * completed row and left it completed. The permit sat For Approval with the
+ * Business Permit suspended, on neither of the office's tabs, and the only
+ * way anyone found it was by already knowing its id.
+ */
+it('puts a permit applied for again after a refusal back in its office’s queue', function () {
+    $app = paidNewFiling();
+
+    $assignmentId = readyToRefuse($app, 'SANITARY');
+    test()->withHeaders(authAs(REFUSING_OFFICE['SANITARY']))
+        ->postJson("/api/v1/assignments/{$assignmentId}/reject", [
+            'reason' => 'No potable water connection.',
+            'remedy' => 'Connect to the mains, then apply again.',
+        ])
+        ->assertOk();
+    expect(ApplicationAssignment::find($assignmentId)->status)->toBe(AssignmentStatus::Completed);
+
+    authAs('owner@biztrack.local');
+    test()->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    test()->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+        'form_data' => [],
+        'submit' => true,
+    ])->assertSuccessful();
+
+    $assignment = ApplicationAssignment::find($assignmentId);
+    expect($app->fresh()->permitTypes->firstWhere('code', 'SANITARY')->pivot->status)
+        ->toBe(ClearanceStatus::ForApproval)
+        ->and($assignment->status)->toBe(AssignmentStatus::Pending)
+        ->and($assignment->completed_at)->toBeNull();
+
+    // The office's For Approval tab, as the queue screen asks for it.
+    $queue = test()->withHeaders(authAs(REFUSING_OFFICE['SANITARY']))
+        ->getJson('/api/v1/assignments?status=pending,in_progress,returned&per_page=200')
+        ->assertOk()
+        ->json('data');
+    expect(collect($queue)->pluck('id'))->toContain($assignmentId);
 });
 
 it('keeps the permit suspended while a SECOND refusal still stands', function () {

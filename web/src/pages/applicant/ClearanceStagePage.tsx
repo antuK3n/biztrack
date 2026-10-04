@@ -1142,7 +1142,10 @@ export function ClearanceStage({
     if (!formCode) return
     const row = rows?.find((r) => r.permit_type.code === formCode)
     const locked =
-      row !== undefined && row.state !== 'not_started' && row.state !== 'returned'
+      row !== undefined &&
+      row.state !== 'not_started' &&
+      row.state !== 'returned' &&
+      row.state !== 'rejected'
     if (locked) return
 
     const payload = JSON.stringify(officeData[formCode] ?? {})
@@ -1220,13 +1223,24 @@ export function ClearanceStage({
    * `returned` is deliberately editable. An office sending a sheet back is
    * asking for exactly that.
    *
+   * So is `rejected`, and leaving it out was a dead end. The refused card says
+   * "Apply for this permit again below"; Apply opened this sheet locked, under
+   * "It cannot be changed now that the office has it", with no Submit — while
+   * `ownerMayEdit` and `submitClearanceForm` had taken a refused sheet back
+   * since 24 September. A refused permit is not with the office; it has ruled,
+   * and applying again is the only way back to a reinstated Business Permit.
+   * The autosave above asks the same three states, for the same reason.
+   *
    * Declared above the autosave rather than beside the render it also feeds,
    * because the effect below must not fire on a locked sheet and a `const` is
    * in the temporal dead zone until its own line.
    */
   const openRow = formCode ? rows?.find((r) => r.permit_type.code === formCode) : undefined
   const formLocked =
-    openRow !== undefined && openRow.state !== 'not_started' && openRow.state !== 'returned'
+    openRow !== undefined &&
+    openRow.state !== 'not_started' &&
+    openRow.state !== 'returned' &&
+    openRow.state !== 'rejected'
 
   /** True while anything the applicant typed is not yet on the server. */
   const formDirty =
