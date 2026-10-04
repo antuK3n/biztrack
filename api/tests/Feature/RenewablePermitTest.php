@@ -140,3 +140,99 @@ it('refuses to switch a renewal draft onto a revoked permit through the prior-pe
 
     expect(Application::find($appId)->prior_permit_id)->toBe($permit->id);
 });
+
+/*
+ * ── One renewal in progress per permit (Ken, 5 October 2026) ────────────────
+ *
+ * While a renewal sat open the picker still offered its permit, and a second
+ * renewal of it submitted, billed and paid: ₱12,850 collected for one term and
+ * two Active business permits for 2027 (scenario run, owner-renew 20).
+ */
+
+it('refuses a second renewal of a permit while one is in progress', function () {
+    $businessId = rnpBusiness();
+    $permit = rnpPermit($businessId);
+    $first = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    rnpSubmit($first)->assertOk();
+
+    rnpRenew($businessId, $permit)
+        ->assertStatus(422)
+        ->assertJsonPath('errors.prior_permit_id.0', 'This permit already has a renewal in progress.');
+});
+
+it('lets two drafts of one permit coexist, and submits only the first', function () {
+    $businessId = rnpBusiness();
+    $permit = rnpPermit($businessId);
+    $first = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    $second = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+
+    rnpSubmit($first)->assertOk();
+
+    rnpSubmit($second)
+        ->assertStatus(422)
+        ->assertJsonPath('errors.prior_permit_id.0', 'This permit already has a renewal in progress.');
+});
+
+it('counts a permit carried in a renewal’s set, not only its primary', function () {
+    $businessId = rnpBusiness();
+    $permit = rnpPermit($businessId);
+    $sanitary = Permit::create([
+        'application_id' => $permit->application_id,
+        'business_id' => $businessId,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'permit_number' => 'RNP-SAN-'.random_int(100000, 999999),
+        'issued_at' => '2026-01-02',
+        'valid_from' => '2026-01-02',
+        'valid_until' => '2026-12-31',
+        'status' => PermitStatus::Expired,
+    ]);
+
+    authAs('owner@biztrack.local');
+    $first = $this->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'renewal',
+        'prior_permit_ids' => [$permit->id, $sanitary->id],
+    ])->assertCreated()->json('data.id');
+    rnpSubmit($first)->assertOk();
+
+    rnpRenew($businessId, $sanitary)
+        ->assertStatus(422)
+        ->assertJsonPath('errors.prior_permit_id.0', 'This permit already has a renewal in progress.');
+});
+
+it('frees the permit again once its renewal is cancelled', function () {
+    $businessId = rnpBusiness();
+    $permit = rnpPermit($businessId);
+    $first = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    rnpSubmit($first)->assertOk();
+
+    authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$first}/cancel")->assertOk();
+
+    $second = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    rnpSubmit($second)->assertOk();
+});
+
+it('tells the picker which permits already have a renewal in progress', function () {
+    $businessId = rnpBusiness();
+    $permit = rnpPermit($businessId);
+
+    authAs('owner@biztrack.local');
+    expect($this->getJson("/api/v1/businesses/{$businessId}/prefill?type=renewal")->assertOk()
+        ->json('data.renewal_in_progress_permit_ids'))->toBe([]);
+
+    // A draft is not a renewal in progress; a submitted one is.
+    $first = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    authAs('owner@biztrack.local');
+    expect($this->getJson("/api/v1/businesses/{$businessId}/prefill?type=renewal")
+        ->json('data.renewal_in_progress_permit_ids'))->toBe([]);
+
+    rnpSubmit($first)->assertOk();
+    authAs('owner@biztrack.local');
+    $prefill = $this->getJson("/api/v1/businesses/{$businessId}/prefill?type=renewal")->assertOk();
+
+    // Still listed, so the picker can show it greyed out rather than lose it.
+    expect(collect($prefill->json('data.renewable_permits'))->pluck('id')->all())->toContain($permit->id)
+        ->and($prefill->json('data.renewal_in_progress_permit_ids'))->toBe([$permit->id]);
+});

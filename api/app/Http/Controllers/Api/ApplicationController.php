@@ -295,8 +295,9 @@ class ApplicationController extends Controller
 
         /*
          * And each of them must still be renewable — not revoked, not already
-         * renewed. `RenewablePermit` says why. Renewals only: an amendment
-         * names its permit to alter it, which is a different question.
+         * renewed, not already being renewed. `RenewablePermit` says why.
+         * Renewals only: an amendment names its permit to alter it, which is a
+         * different question.
          */
         if (
             $data['application_type'] === ApplicationType::Renewal->value
@@ -642,12 +643,13 @@ class ApplicationController extends Controller
              * Before the window: a permit that was revoked or renewed while
              * this sat as a draft is not renewable in any season, and saying
              * "come back in January" about it would send the applicant back
-             * for nothing.
+             * for nothing. The same goes for one another filing submitted
+             * first — two drafts of one permit may exist, one may go in.
              */
             $refusal = RenewablePermit::refusal([
                 $application->prior_permit_id,
                 ...$application->priorPermits->pluck('id')->all(),
-            ]);
+            ], $application->id);
             if ($refusal !== null) {
                 throw ValidationException::withMessages([
                     'prior_permit_id' => [$refusal],

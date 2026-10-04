@@ -116,7 +116,7 @@ class PriorPermitController extends Controller
         // Still renewable, for the same reason: this is the other door.
         if (
             $application->application_type === ApplicationType::Renewal
-            && ($refusal = RenewablePermit::refusal($ids))
+            && ($refusal = RenewablePermit::refusal($ids, $application->id))
         ) {
             throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
         }

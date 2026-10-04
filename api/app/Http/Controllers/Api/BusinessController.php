@@ -15,6 +15,7 @@ use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\MalabonGeo;
 use App\Support\Numbering;
+use App\Support\RenewablePermit;
 use App\Support\Tin;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -482,6 +483,14 @@ class BusinessController extends Controller
                 // permit number, type and expiry from the same fields the
                 // Permits screen does rather than a second, thinner contract.
                 'renewable_permits' => PermitResource::collection($renewablePermits),
+                /*
+                 * The ones a submitted renewal is already carrying. Still in
+                 * the list above, so the picker can show them greyed out as
+                 * `Renewal in progress` rather than drop a permit the owner
+                 * can see on their own profile; the server refuses them
+                 * either way (`RenewablePermit`).
+                 */
+                'renewal_in_progress_permit_ids' => RenewablePermit::inProgress($renewablePermits->pluck('id')->all()),
                 'last_application' => $lastApplication ? [
                     'id' => $lastApplication->id,
                     'permit_type_ids' => $lastApplication->permitTypes->pluck('id')->values(),
