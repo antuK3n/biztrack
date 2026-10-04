@@ -317,6 +317,20 @@ it('lists only the asker\'s own applications for a status question', function ()
     expect($body)->toContain($own)->not->toContain($foreign);
 });
 
+it('reads its own starter "Where is my application?" as a status question', function () {
+    // One of the four buttons the bubble shows every owner on first open; it
+    // used to come back as "Sorry, I did not quite get that".
+    $own = ownedTrackingId('owner@biztrack.local');
+
+    expect(ask('Where is my application?'))
+        ->toContain('Your most recent applications:')
+        ->toContain($own)
+        ->not->toContain('did not quite get that');
+
+    // "where is" alone is not a status question: the office stays an office.
+    expect(ask('where is the cpdo'))->not->toContain('Your most recent applications');
+});
+
 // --- input it cannot classify ------------------------------------------------
 
 it('asks for a question instead of guessing on empty or junk input', function () {

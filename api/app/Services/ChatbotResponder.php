@@ -42,7 +42,13 @@ class ChatbotResponder
         'renewal' => ['renew', 'renewal', 'renewing', 'magrenew', 'deadline', 'expire', 'expires', 'expiry', 'expiration', 'january', 'enero', 'palugit', 'valid until', 'validity'],
         'payment' => ['how to pay', 'how do i pay', 'paano magbayad', 'pano magbayad', 'paano bayaran', 'magbayad', 'pay online', 'payment', 'payments', 'pay', 'gcash', 'maya', 'over the counter', 'receipt', 'resibo'],
         'fees' => ['fee', 'fees', 'bayad', 'babayaran', 'magkano', 'how much', 'cost', 'presyo', 'price', 'surcharge', 'penalty', 'multa', 'interest'],
-        'status' => ['status', 'asan', 'nasaan', 'saan na', 'track', 'tracking', 'progress', 'update', 'follow up', 'follow-up', 'kamusta na', 'approved na'],
+        /*
+         * "where is my" and not a bare "where is": the bubble's own starter
+         * "Where is my application?" fell through to "did not quite get that"
+         * until it was here, while "where is the cpdo" is about an office and
+         * has to stay one.
+         */
+        'status' => ['status', 'asan', 'nasaan', 'saan na', 'track', 'tracking', 'progress', 'update', 'follow up', 'follow-up', 'kamusta na', 'approved na', 'where is my', "where's my", 'wheres my', 'where are my'],
         'offices' => ['office', 'opisina', 'tanggapan', 'contact', 'department', 'bplo', 'sino', 'who reviews', 'who handles', 'who issues', 'which office', 'anong opisina', 'in charge'],
         'hours' => ['how long', 'gaano katagal', 'ilang araw', 'working day', 'working days', 'processing time', 'release', 'hours', 'kailan', 'tagal', 'matagal'],
         'greeting' => ['hello', 'hi', 'hey', 'kumusta', 'kamusta', 'musta', 'magandang', 'good morning', 'good afternoon', 'good evening', 'salamat', 'thanks', 'thank you'],
