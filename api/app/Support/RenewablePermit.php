@@ -74,13 +74,13 @@ final class RenewablePermit
             return null;
         }
 
-        $statuses = Permit::whereIn('id', $ids)->pluck('status');
+        $permits = Permit::whereIn('id', $ids)->withExists('renewals')->get(['id', 'status']);
 
-        if ($statuses->contains(PermitStatus::Revoked)) {
+        if ($permits->contains('status', PermitStatus::Revoked)) {
             return 'This permit was revoked, so it can’t be renewed.';
         }
 
-        if ($statuses->contains(PermitStatus::Superseded)) {
+        if ($permits->contains(fn (Permit $p) => self::alreadyRenewed($p))) {
             return 'This permit has already been renewed, so it can’t be renewed again.';
         }
 
@@ -89,6 +89,22 @@ final class RenewablePermit
         }
 
         return null;
+    }
+
+    /**
+     * Has a renewal already replaced this permit?
+     *
+     * Superseded says so for a permit renewed while still in force. One
+     * renewed AFTER it lapsed keeps `Expired` — its term ran out on its own,
+     * and the status says that truthfully (see PermitStatus::Superseded) — so
+     * the status alone let the same lapsed certificate be renewed again, and
+     * the picker kept offering it (Ken, 5 October 2026). The renewal chain
+     * answers for both: a permit some later permit names as its prior has
+     * been renewed. Expects `renewals_exists` (`withExists('renewals')`).
+     */
+    public static function alreadyRenewed(Permit $permit): bool
+    {
+        return $permit->status === PermitStatus::Superseded || (bool) $permit->renewals_exists;
     }
 
     /**

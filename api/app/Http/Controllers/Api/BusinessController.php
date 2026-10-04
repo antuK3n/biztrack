@@ -427,6 +427,13 @@ class BusinessController extends Controller
         $renewablePermits = $business->permits()
             ->with(['permitType', 'business:id,name', 'application:id,tracking_id'])
             ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+            /*
+             * And not one a renewal already replaced. A permit renewed after it
+             * lapsed stays Expired, so the status filter above kept offering
+             * it; the chain is what says it was renewed
+             * (`RenewablePermit::alreadyRenewed`).
+             */
+            ->whereDoesntHave('renewals')
             ->orderByRaw('valid_until is null, valid_until asc')
             ->orderBy('id')
             ->get();

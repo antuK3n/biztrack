@@ -236,3 +236,65 @@ it('tells the picker which permits already have a renewal in progress', function
     expect(collect($prefill->json('data.renewable_permits'))->pluck('id')->all())->toContain($permit->id)
         ->and($prefill->json('data.renewal_in_progress_permit_ids'))->toBe([$permit->id]);
 });
+
+/*
+ * ── An expired permit that was already renewed (Ken, 5 October 2026) ───────
+ *
+ * Renewing a permit that has already lapsed leaves it Expired, not Superseded
+ * — its term ran out on its own (see PermitStatus::Superseded) — so the
+ * superseded check above never saw it. The picker kept offering it and the
+ * API took it, and the business could renew the same lapsed certificate
+ * again. The renewal chain (`permits.prior_permit_id`) is what says it was
+ * renewed, and it is now read like the superseded status.
+ */
+
+/** A lapsed sanitary permit, renewed: the new one names it as its prior. */
+function rnpLapsedAndRenewed(int $businessId): Permit
+{
+    $type = PermitType::where('code', 'SANITARY')->value('id');
+    $lapsed = Permit::create([
+        'business_id' => $businessId,
+        'permit_type_id' => $type,
+        'permit_number' => 'RNP-OLD-'.random_int(100000, 999999),
+        'issued_at' => '2025-01-02', 'valid_from' => '2025-01-02', 'valid_until' => '2025-12-31',
+        'status' => PermitStatus::Expired,
+    ]);
+    Permit::create([
+        'business_id' => $businessId,
+        'permit_type_id' => $type,
+        'prior_permit_id' => $lapsed->id,
+        'permit_number' => 'RNP-NEW-'.random_int(100000, 999999),
+        'issued_at' => '2026-12-01', 'valid_from' => '2026-12-01', 'valid_until' => '2027-12-31',
+        'status' => PermitStatus::Active,
+    ]);
+
+    return $lapsed;
+}
+
+it('refuses to renew an expired permit a renewal already replaced', function () {
+    $businessId = rnpBusiness();
+    $lapsed = rnpLapsedAndRenewed($businessId);
+
+    rnpRenew($businessId, $lapsed)
+        ->assertStatus(422)
+        ->assertJsonPath('errors.prior_permit_id.0', 'This permit has already been renewed, so it can’t be renewed again.');
+});
+
+it('does not offer an expired permit a renewal already replaced, and still offers one that was not', function () {
+    $businessId = rnpBusiness();
+    $lapsed = rnpLapsedAndRenewed($businessId);
+    $neverRenewed = Permit::create([
+        'business_id' => $businessId,
+        'permit_type_id' => PermitType::where('code', 'FSIC')->value('id'),
+        'permit_number' => 'RNP-FSIC-'.random_int(100000, 999999),
+        'issued_at' => '2025-01-02', 'valid_from' => '2025-01-02', 'valid_until' => '2026-12-31',
+        'status' => PermitStatus::Expired,
+    ]);
+
+    authAs('owner@biztrack.local');
+    $offered = collect($this->getJson("/api/v1/businesses/{$businessId}/prefill?type=renewal")->assertOk()
+        ->json('data.renewable_permits'))->pluck('id');
+
+    expect($offered)->not->toContain($lapsed->id)
+        ->and($offered)->toContain($neverRenewed->id);
+});
