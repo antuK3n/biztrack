@@ -11,7 +11,7 @@ use Carbon\CarbonInterface;
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
  *
- * The app clock is UTC (config/app.php) and stays UTC for storage. The City
+ * The app clock is Asia/Manila since 5 October 2026 (config/app.php); this class still converts explicitly, so it holds whichever zone storage uses. The City
  * works in Asia/Manila, eight hours ahead, and every date a report or a
  * dashboard prints is a Manila date. Cutting days on the UTC clock was wrong
  * in two ways that both showed:

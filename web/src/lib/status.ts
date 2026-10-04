@@ -1031,7 +1031,13 @@ export const AMENDMENT_NOTE =
  * the detours, or named here with a reason. There is no fourth outcome in
  * which one goes missing quietly.
  */
-export const GUIDE_OMITTED: ApplicationStatus[] = ['issued']
+/*
+ * `cancelled` joined `issued` on 5 October 2026. The status exists on the
+ * API (a draft or an unpaid filing may be cancelled through it) but no screen
+ * offers an applicant the act, so the guide was promising an exit nobody can
+ * take. Client: *"Remove 'Cancelled' here. We don't have this status right?"*
+ */
+export const GUIDE_OMITTED: ApplicationStatus[] = ['issued', 'cancelled']
 
 /*
  * `STATUS_DETOURS` was here. It is `statusDetoursFor(flow)` now, because the
