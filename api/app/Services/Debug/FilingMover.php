@@ -200,7 +200,10 @@ final class FilingMover
         $status = $app->status;
         $steps = [];
 
-        if ($status === null || $status->isTerminal()
+        // `isDecided()`, not `status->isTerminal()`: a paid filing gathering
+        // its other permits wears `approved`, and the status alone would
+        // report no steps for every live clearance stage.
+        if ($status === null || $app->isDecided()
             || in_array($status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)) {
             return [];
         }
@@ -248,8 +251,14 @@ final class FilingMover
             $status === null => ['This filing has no status.'],
             $status === ApplicationStatus::Draft => ['The applicant has not submitted this filing yet.'],
             $status === ApplicationStatus::Returned => ['BPLO returned the form. It moves again when the applicant resubmits it.'],
-            $status === ApplicationStatus::Approved => [],
-            $status->isTerminal() => ["This filing is {$status->label()}. Nothing moves it on."],
+            /*
+             * Asked of the row. `approved` is both a filing the city has
+             * finished with and one still gathering its other permits, and
+             * only the first is stuck — the second has steps, which is why
+             * the bare Approved arm that used to sit here (returning no
+             * reason at all) has gone with it.
+             */
+            $app->isDecided() => ["This filing is {$app->statusLabel()}. Nothing moves it on."],
             default => null,
         };
         if ($filing !== null) {
@@ -682,7 +691,14 @@ final class FilingMover
     private function inClearanceStage(Application $app): bool
     {
         $status = $app->status;
-        if ($status === null || $status->isTerminal()) {
+        /*
+         * `isDecided()` and not `status->isTerminal()`. A paid filing has
+         * stood at `approved` since 4 October 2026 while it gathers its
+         * other permits, so the status alone reads every live clearance
+         * stage as finished and this returned false for all of them — the
+         * Debug page offered no step on any paid filing at all.
+         */
+        if ($status === null || $app->isDecided()) {
             return false;
         }
 
@@ -715,7 +731,7 @@ final class FilingMover
     private function renewalUpload(Application $app, ApplicationPermitType $row): bool
     {
         return $app->application_type === ApplicationType::Renewal
-            && $row->mode === ApplicationPermitType::MODE_UPLOAD;
+            && $row->mode === 'upload';
     }
 
     /** @return list<array<string, mixed>> */

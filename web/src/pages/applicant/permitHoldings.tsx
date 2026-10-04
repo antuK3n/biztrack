@@ -6,10 +6,10 @@ import {
   EyeIcon,
 } from '../../components/icons'
 import { type SortFilterOption } from '../../components/ui/Proto'
-import { businessName, formatBytes, formatDate } from '../../lib/format'
-import { documents as documentsApi, permits as permitsApi } from '../../lib/resources'
+import { businessName, formatDate } from '../../lib/format'
+import { permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { HeldClearance, PageMeta, Permit } from '../../lib/types'
+import type { PageMeta, Permit } from '../../lib/types'
 
 /*
  * What an applicant holds, and how a business's row is drawn.
@@ -64,7 +64,6 @@ async function loadAllPermits(): Promise<{
 /** What one fetch has to bring back before this page can group anything. */
 export interface ProfileHoldings {
   permits: Permit[]
-  held: HeldClearance[]
   /*
    * Ridden back on the FIRST page's meta, because it is a fact about the
    * owner and not about the page — every page would repeat it.
@@ -80,13 +79,14 @@ export interface ProfileHoldings {
  * business with its permits and then visibly grow a second block of rows under
  * it a moment later. One wait, one paint.
  *
- * `/permits/held` is unpaged — it is bounded at six clearances per filing and
- * only ever carries the caller's own uploads, so the walk `loadAllPermits` does
- * has nothing to defend against here.
+ * It fetched `/permits/held` alongside this until 4 October 2026 — the
+ * clearances an applicant had submitted a copy of instead of applying for.
+ * The client had that route removed, so there is one feed again.
  */
 export async function loadHoldings(): Promise<ProfileHoldings> {
-  const [paged, held] = await Promise.all([loadAllPermits(), permitsApi.held()])
-  return { permits: paged.permits, held, unbilled: paged.unbilled }
+  const paged = await loadAllPermits()
+
+  return { permits: paged.permits, unbilled: paged.unbilled }
 }
 
 /* ── Approved Businesses ──────────────────────────────────────────────── */
@@ -101,7 +101,6 @@ export interface BusinessGroup {
    * derived value below — expiry, nearing, expired, flagged — is a fact about
    * an ISSUED permit, and a held copy has none of them to contribute.
    */
-  held: HeldClearance[]
   /** Latest expiry in the group — the date shown when nothing is wrong. */
   latestExpiry: string | null
   /** Soonest expiry — the date shown when a renewal is due or already late. */
@@ -128,10 +127,6 @@ export const FILTERS: SortFilterOption[] = [
   { value: 'nearing', label: `Expiring within ${NEARING_DAYS} days` },
   { value: 'expired', label: 'Has an expired permit' },
   { value: 'flagged', label: 'Suspended or revoked' },
-  // The other three all ask a question about an ISSUED permit, so a business
-  // holding nothing but copies the applicant submitted answers no to every one
-  // of them and is reachable only under "All". This is the option that finds it.
-  { value: 'held', label: 'Has a copy you submitted' },
 ]
 
 /** Sorts on a nullable date without letting "no date" jump to the front. */
@@ -161,7 +156,16 @@ function Triangle({ open }: { open: boolean }) {
  * to say which permit it acts on, or a screen-reader user hears "download"
  * twenty times with no way to tell them apart.
  */
-function PermitDownloadButton({ permit, label }: { permit: Permit; label: string }) {
+function PermitDownloadButton({
+  permit,
+  label,
+  /* Muted on a past permit, so the history reads as paper rather than cover. */
+  muted = false,
+}: {
+  permit: Permit
+  label: string
+  muted?: boolean
+}) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
 
@@ -190,7 +194,9 @@ function PermitDownloadButton({ permit, label }: { permit: Permit; label: string
       // stopped by the guard at the top of `download` instead.
       aria-disabled={busy}
       aria-label={failed ? `Download failed for ${label}. Try again` : `Download ${label} as PDF`}
-      className={`shrink-0 rounded text-white transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
+      className={`shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+        muted ? 'text-ink-secondary focus-visible:outline-royal' : 'text-white focus-visible:outline-white'
+      } ${
         busy ? 'opacity-50' : ''
       }`}
     >
@@ -200,82 +206,183 @@ function PermitDownloadButton({ permit, label }: { permit: Permit; label: string
 }
 
 /**
- * A clearance the applicant already held and submitted a copy of.
+ * Is this certificate part of the owner's history rather than their cover?
  *
- * This row exists to be told apart from the royal permit row above it, at a
- * glance and without reading the label. The City did not issue this document —
- * it is the applicant's own file, uploaded in place of applying for that
- * clearance — and no Permit record exists for it (WorkflowService::approveAndIssue
- * only issues the permit types actually ON the filing, and submitting a copy is
- * precisely the act of leaving one off).
+ * `superseded` is what a renewal leaves behind, `revoked` is cover withdrawn,
+ * and an expired permit is one whose term simply ran out. None of the three is
+ * what the business is trading on today.
  *
- * So, deliberately, and none of this is to be "tidied up" later:
- *  - no permit number, because the City never assigned one;
- *  - no validity dates, because the City never recorded any;
- *  - no eye link to /permits/{id} and no verify QR, because there is nothing at
- *    either end. `id` here is a DOCUMENT id.
- *  - a dashed outline and the plain canvas, not the solid royal fill the issued
- *    permits wear. Colour is not carrying that on its own: the row says
- *    "Your own copy" in words and names the file it is a copy of.
- *
- * The permit certificate is a legal instrument and this codebase has already
- * had to strip a vendor logo off it for exactly this reason. A fabricated
- * number or validity here would be the same mistake one screen earlier.
+ * `suspended` is deliberately NOT here. A suspended permit is current — it is
+ * the one the owner has to do something about — and filing it away under Past
+ * would hide the heaviest thing the system does to them.
  */
-function HeldCopyRow({ copy, business }: { copy: HeldClearance; business: string }) {
-  const [busy, setBusy] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const typeName = copy.permit_type?.name ?? 'Clearance'
+function isPastPermit(permit: Permit): boolean {
+  if (permit.status === 'superseded' || permit.status === 'revoked') return true
 
-  async function download() {
-    if (busy) return
-    setBusy(true)
-    setFailed(false)
-    try {
-      await documentsApi.download(copy.id, copy.filename)
-    } catch {
-      setFailed(true)
-    } finally {
-      setBusy(false)
-    }
-  }
+  return permit.days_until_expiry !== null && permit.days_until_expiry < 0
+}
+
+/**
+ * One certificate on a business card.
+ *
+ * ── Why `past` changes more than a colour ────────────────────────────────
+ *
+ * Lifted out of the list on 4 October 2026 so the current permits and the
+ * historical ones can be drawn as two lists. They were one, and a replaced
+ * certificate sat at the bottom of it in the same royal blue as the live ones,
+ * told apart only by a small chip. The client opened last year's Sanitary
+ * Permit from that list, read its VALID UNTIL, and reported the renewal as
+ * broken — *"I just renewed that sanitary form and the expiration date should
+ * be Oct. 4, 2027"* — while the permit they had just been issued sat four rows
+ * above with the right dates on it.
+ *
+ * So a past row is muted rather than merely chipped: the live permits are the
+ * blue block, and the history reads as paper in a drawer. Both stay openable
+ * and downloadable, which is the whole reason they are still on the page.
+ */
+function PermitRow({
+  permit,
+  business,
+  past = false,
+}: {
+  permit: Permit
+  business: string
+  past?: boolean
+}) {
+  const typeName = permit.permit_type?.name ?? 'Permit'
+  /* "Sanitary Permit for CedarBloom Café (MCB-2026-000406)" — the
+     eye and the arrow are the only labels a sighted user gets, and
+     neither says which of the five rows it belongs to. The number is
+     on the end because a renewal leaves two permits of the SAME type
+     on the same business, and then the type and the business name
+     together still do not tell them apart. */
+  const label = `${typeName} for ${business} (${permit.permit_number})`
+  const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  const note = permit.status !== 'active' ? permit.status_label : expired ? 'Expired' : null
+  /*
+   * ── Two kinds of badge, because they are two kinds of news ──
+   *
+   * Every note rendered in the same outlined white, so
+   * "Superseded" — the ordinary result of renewing — looked
+   * exactly like "Suspended", which means the business may not
+   * trade on this permit today. One is bookkeeping and the other
+   * is the heaviest thing the system does to an owner.
+   *
+   * Filled red for the two an officer DECIDED, outline for the
+   * two that are just what happened to a date. The word is still
+   * there in both, so the distinction never rests on the colour
+   * (DESIGN.md, Never Color Alone) — the fill is what makes it
+   * findable while scrolling a long profile.
+   */
+  const sanctioned = permit.status === 'suspended' || permit.status === 'revoked'
 
   return (
-    <li className="flex items-center gap-3 rounded-lg border-2 border-dashed border-royal/45 bg-canvas px-4 py-3 sm:gap-4 sm:px-5">
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-base font-bold text-ink">{typeName}</span>
-        {/* The filename and its size are the only two things the register
-            actually knows about this document. Printing them says plainly that
-            what is on offer is a file the applicant handed in. */}
-        <span className="block truncate text-xs text-ink-secondary">
-          {copy.filename} · {formatBytes(copy.size_bytes)} · submitted {formatDate(copy.submitted_at)}
+    <li
+      className={`flex items-center gap-3 rounded-lg px-4 py-3 sm:gap-4 sm:px-5 ${
+        past ? 'border border-line bg-shell' : 'bg-royal shadow-card'
+      }`}
+    >
+      <span
+        className={`min-w-0 flex-1 truncate text-base font-bold ${past ? 'text-ink-secondary' : 'text-white'}`}
+      >
+        {typeName}
+      </span>
+      {note && (
+        <span
+          className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
+            sanctioned
+              ? 'border border-s-red bg-s-red text-white'
+              : past
+                ? 'border border-line text-ink-muted'
+                : 'border border-white/70 text-white'
+          }`}
+        >
+          {note}
         </span>
+      )}
+      {/* The permit number is what an owner quotes at a counter, so
+          it survives the redesign — dropped only where there is no
+          width for it rather than dropped outright. */}
+      <span
+        className={`hidden shrink-0 text-xs font-semibold md:inline ${past ? 'text-ink-muted' : 'text-white/75'}`}
+      >
+        {permit.permit_number}
       </span>
-      <span className="shrink-0 rounded border border-ink-secondary px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
-        Your own copy
-      </span>
-      <button
-        type="button"
-        onClick={download}
-        // `aria-disabled`, never `disabled` — same reasoning as the issued
-        // permit's download button above. The guard at the top of `download`
-        // is what actually stops a second press.
-        aria-disabled={busy}
-        aria-label={
-          failed
-            ? `Download failed for your copy of the ${typeName} for ${business}. Try again`
-            : `Download your copy of the ${typeName} for ${business}`
-        }
-        className={`shrink-0 rounded text-royal transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal ${
-          busy ? 'opacity-50' : ''
+      <Link
+        to={`/permits/${permit.id}`}
+        aria-label={`View ${label}`}
+        className={`shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+          past ? 'text-ink-secondary focus-visible:outline-royal' : 'text-white focus-visible:outline-white'
         }`}
       >
-        {failed ? <AlertCircleIcon size={22} /> : <DownloadIcon size={22} />}
-      </button>
+        <EyeIcon size={22} />
+      </Link>
+      <PermitDownloadButton permit={permit} label={label} muted={past} />
     </li>
   )
 }
+/**
+ * The business's own history, behind the same triangle its permits are.
+ *
+ * ── Why a disclosure and not a heading ──────────────────────────────────────
+ *
+ * It shipped as an open block with a heading and a paragraph of explanation,
+ * and on a profile with several businesses that is what the page became: three
+ * lines of prose between every pair of businesses, repeated down the screen.
+ * The client's verdict was *"the layout is very terrible"* [4 October 2026],
+ * with the remedy — make it a dropdown like the businesses themselves.
+ *
+ * So it borrows the business row's shape exactly: a real `<button
+ * aria-expanded>` over a panel that stays in the DOM and toggles `hidden`, the
+ * triangle decorative, the button's own text naming what it opens. A reader
+ * who has met one of these has met both.
+ *
+ * ── Closed, where the business above it is open ─────────────────────────────
+ *
+ * The opposite default, for the opposite reason. A business opens because its
+ * permits are what the page is for [client brief, "more visibility"]. These
+ * are last year's paper: worth keeping, worth reaching, not worth spending the
+ * screen on every time. The count is in the summary so it is findable without
+ * opening — a disclosure labelled only "Past permits" makes a reader click to
+ * find out whether there is anything behind it.
+ */
+function PastPermits({ permits, business }: { permits: Permit[]; business: string }) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  const headingId = useId()
 
+  return (
+    <div className="pt-1">
+      <h4>
+        <button
+          type="button"
+          id={headingId}
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="flex w-full items-center gap-3 rounded-lg border border-line bg-white px-4 py-2.5 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal sm:px-5"
+        >
+          <Triangle open={open} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <span className="text-sm font-bold text-ink-secondary">
+              Past permits ({permits.length})
+            </span>
+            <span className="shrink-0 text-xs italic text-ink-muted">
+              Renewed or ended · still downloadable
+            </span>
+          </span>
+        </button>
+      </h4>
+      <div id={panelId} role="group" aria-labelledby={headingId} hidden={!open} className="pt-2">
+        <ul className="space-y-2">
+          {permits.map((permit) => (
+            <PermitRow key={permit.id} permit={permit} business={business} past />
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
 /**
  * One business, collapsed to a heading row that opens into its permits (p25–26).
  *
@@ -303,6 +410,13 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
    */
   const [open, setOpen] = useState(defaultOpen)
   const panelId = useId()
+  /*
+   * Split once, here, rather than filtered twice in the markup below — the
+   * two lists have to be exhaustive over `group.permits` or a certificate
+   * would vanish from the page entirely.
+   */
+  const current = group.permits.filter((permit) => !isPastPermit(permit))
+  const past = group.permits.filter(isPastPermit)
   const headingId = useId()
 
   /*
@@ -377,95 +491,32 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
         hidden={!open}
         className="space-y-2"
       >
-        {group.permits.length > 0 && (
-          <ul className="space-y-2">
-            {group.permits.map((permit) => {
-              const typeName = permit.permit_type?.name ?? 'Permit'
-              /* "Sanitary Permit for CedarBloom Café (MCB-2026-000406)" — the
-                 eye and the arrow are the only labels a sighted user gets, and
-                 neither says which of the five rows it belongs to. The number is
-                 on the end because a renewal leaves two permits of the SAME type
-                 on the same business, and then the type and the business name
-                 together still do not tell them apart. */
-              const label = `${typeName} for ${group.name} (${permit.permit_number})`
-              const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
-              const note = permit.status !== 'active' ? permit.status_label : expired ? 'Expired' : null
-              /*
-               * ── Two kinds of badge, because they are two kinds of news ──
-               *
-               * Every note rendered in the same outlined white, so
-               * "Superseded" — the ordinary result of renewing — looked
-               * exactly like "Suspended", which means the business may not
-               * trade on this permit today. One is bookkeeping and the other
-               * is the heaviest thing the system does to an owner.
-               *
-               * Filled red for the two an officer DECIDED, outline for the
-               * two that are just what happened to a date. The word is still
-               * there in both, so the distinction never rests on the colour
-               * (DESIGN.md, Never Color Alone) — the fill is what makes it
-               * findable while scrolling a long profile.
-               */
-              const sanctioned = permit.status === 'suspended' || permit.status === 'revoked'
+        {/*
+          ── Cover, then history ───────────────────────────────────────────
 
-              return (
-                <li
-                  key={permit.id}
-                  className="flex items-center gap-3 rounded-lg bg-royal px-4 py-3 shadow-card sm:gap-4 sm:px-5"
-                >
-                  <span className="min-w-0 flex-1 truncate text-base font-bold text-white">{typeName}</span>
-                  {note && (
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
-                        sanctioned
-                          ? 'border border-s-red bg-s-red text-white'
-                          : 'border border-white/70 text-white'
-                      }`}
-                    >
-                      {note}
-                    </span>
-                  )}
-                  {/* The permit number is what an owner quotes at a counter, so
-                      it survives the redesign — dropped only where there is no
-                      width for it rather than dropped outright. */}
-                  <span className="hidden shrink-0 text-xs font-semibold text-white/75 md:inline">
-                    {permit.permit_number}
-                  </span>
-                  <Link
-                    to={`/permits/${permit.id}`}
-                    aria-label={`View ${label}`}
-                    className="shrink-0 rounded text-white transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                  >
-                    <EyeIcon size={22} />
-                  </Link>
-                  <PermitDownloadButton permit={permit} label={label} />
-                </li>
-              )
-            })}
+          One list until 4 October 2026, with the replaced certificates at the
+          bottom of it in the same royal blue as the live ones. The client
+          opened last year's Sanitary Permit from that list and reported the
+          renewal as broken, which is the list doing its job badly rather than
+          the reader doing theirs: nothing about the row said it was history.
+
+          Asked whether renewing should stop superseding at all, so that past
+          permits stay visible — they already were. `superseded` is what keeps
+          exactly one certificate of a type live, and it is what keeps the
+          replaced one out of next year's renewal picker (see
+          `PermitStatus::Superseded`, added for that bug). The thing that was
+          missing was not the records; it was the line between them.
+        */}
+        {current.length > 0 && (
+          <ul className="space-y-2">
+            {current.map((permit) => (
+              <PermitRow key={permit.id} permit={permit} business={group.name} />
+            ))}
           </ul>
         )}
 
-        {group.held.length > 0 && (
-          <div className="pt-1">
-            <h4 className="px-1 text-[13px] font-bold text-ink-secondary">
-              Clearances you submitted a copy of
-            </h4>
-            {/*
-              * Said in full, once per business, rather than trusted to the badge
-              * on each row. This is the sentence that has to survive somebody
-              * skimming: whatever else the page implies, the City did not issue
-              * these and does not stand behind them.
-              */}
-            <p className="mb-2 px-1 text-xs text-ink-muted">
-              Your own documents, uploaded instead of applying for these clearances. The City did
-              not issue them, so they carry no permit number and nothing here verifies them.
-            </p>
-            <ul className="space-y-2">
-              {group.held.map((copy) => (
-                <HeldCopyRow key={copy.id} copy={copy} business={group.name} />
-              ))}
-            </ul>
-          </div>
-        )}
+        {past.length > 0 && <PastPermits permits={past} business={group.name} />}
+
       </div>
     </li>
   )
@@ -483,7 +534,7 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
  */
 export function useHoldings(enabled: boolean) {
   const { data, loading, error, reload } = useAsync<ProfileHoldings>(
-    () => (enabled ? loadHoldings() : Promise.resolve({ permits: [], held: [], unbilled: undefined })),
+    () => (enabled ? loadHoldings() : Promise.resolve({ permits: [], unbilled: undefined })),
     [enabled],
   )
   const [sort, setSort] = useState('name')
@@ -520,7 +571,6 @@ export function useHoldings(enabled: boolean) {
         id: key,
         name: businessName(business),
         permits: [],
-        held: [],
         latestExpiry: null,
         soonestExpiry: null,
         nearing: false,
@@ -534,6 +584,29 @@ export function useHoldings(enabled: boolean) {
     for (const permit of data?.permits ?? []) {
       const group = groupFor(permit.business as Permit['business'] | null)
       group.permits.push(permit)
+
+      /*
+       * ── A replaced permit no longer has an expiry worth announcing ──────
+       *
+       * `superseded` is what a renewal leaves behind, and the row stays on
+       * the list on purpose — the applicant keeps last year's certificate and
+       * can still download it. What it must not do is drive the DATE in the
+       * heading, and it was: a shop that renewed its Sanitary Permit on
+       * 4 October 2026 was still told *"Nearing Permit Expiration: October
+       * 23, 2026"* — the date on the certificate it had just replaced — while
+       * the new one sat in the same list, unexpired, a few rows above
+       * [client, 4 October 2026]. It reads as the renewal having done
+       * nothing.
+       *
+       * The same mistake as the `flagged` filter below, caught a fortnight
+       * later in the arithmetic instead of the wording: superseded is a
+       * historical record, not a live holding.
+       *
+       * Only superseded. A SUSPENDED permit still expires and the owner still
+       * needs telling, and an expired one is what `expired` is for.
+       */
+      if (permit.status === 'superseded') continue
+
       if (permit.valid_until) {
         if (!group.latestExpiry || permit.valid_until > group.latestExpiry) group.latestExpiry = permit.valid_until
         if (!group.soonestExpiry || permit.valid_until < group.soonestExpiry) group.soonestExpiry = permit.valid_until
@@ -571,10 +644,6 @@ export function useHoldings(enabled: boolean) {
      * recorded its validity, so the page has nothing to say about it and must
      * not guess. Same reason the row prints no dates.
      */
-    for (const copy of data?.held ?? []) {
-      groupFor(copy.business).held.push(copy)
-    }
-
     return [...map.values()]
   }, [data])
 
@@ -592,9 +661,7 @@ export function useHoldings(enabled: boolean) {
           ? g.expired
           : filter === 'flagged'
             ? g.flagged
-            : filter === 'held'
-              ? g.held.length > 0
-              : true
+            : true
 
     const key = (g: BusinessGroup) => g.soonestExpiry ?? g.latestExpiry ?? NEVER
     const sorted = groups.filter(matches)

@@ -268,13 +268,22 @@ it('lets BPLO send back one clearance by name, and not the whole filing', functi
     ]));
     expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
 
-    // The five clearances handed in as copies the applicant already holds.
+    /*
+     * The five clearances applied for, each sheet handed in.
+     *
+     * They were uploaded copies until 4 October 2026, when the client had
+     * that route removed — *"IT IS NOT POSSIBLE FOR THE USER TO SUBMIT A COPY
+     * OF AN OTHER PERMIT."* Applying is the only way in now, and it takes two
+     * calls rather than one: `startClearance` returns early on a permit whose
+     * office has a form, so the office is routed when the FORM is handed in
+     * and not before. What this test needs is five routed offices, which is
+     * what the second call produces.
+     */
     foreach (['SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING'] as $code) {
-        $workflow->startClearance(
-            $app->fresh(),
-            PermitType::where('code', $code)->firstOrFail(),
-            ApplicationPermitType::MODE_UPLOAD,
-        );
+        $type = PermitType::where('code', $code)->firstOrFail();
+        $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+        satisfyChecklist($app->fresh(), $type);
+        $workflow->submitClearanceForm($app->fresh(), $type);
     }
 
     /*
@@ -285,16 +294,16 @@ it('lets BPLO send back one clearance by name, and not the whole filing', functi
      *
      * This asserted ZERO while the scenario was a renewal: `startClearance`
      * skipped the routing there, because the visit behind last year's
-     * certificate had already happened. That skip is narrowed to renewals
-     * and renewals can no longer upload, so it fires for nothing now — see
-     * `$renewalUpload`, kept as a guard rather than a path.
+     * certificate had already happened. That skip was tied to an uploaded
+     * copy on a renewal, and with uploads removed on 4 October 2026 it went
+     * with them — every started permit routes to its office now.
      */
     $offices = ApplicationAssignment::where('application_id', $app->id)
         ->whereHas('department', fn ($d) => $d->where('code', '!=', 'BPLO'))
         ->count();
     expect($offices)->toBe(5);
 
-    // BPLO reads the copies and sends ONE back, naming it with the pointer.
+    // BPLO reads the filing and sends ONE permit back, naming it with the pointer.
     $bplo = ApplicationAssignment::where('application_id', $app->id)
         ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
         ->firstOrFail();
@@ -333,23 +342,22 @@ it('lets BPLO send back one clearance by name, and not the whole filing', functi
         ->toThrow(ValidationException::class);
 
     /*
-     * ── Re-uploading does NOT reopen approval, since 3 October 2026 ──
+     * ── Answering BPLO does NOT reopen approval ──────────────────────
      *
      * This used to end by handing in a fresh copy and approving on it,
      * because an upload satisfied the requirement by its MODE. That rule
-     * is deleted: the client asked for it on renewals, and it was removed
-     * for every type rather than left as a quieter way for a filing to be
-     * called satisfied with no office having approved anything.
+     * went on 3 October 2026 — it was a quieter way for a filing to be
+     * called satisfied with no office having approved anything — and the
+     * upload route itself went on 4 October, at the client's instruction.
      *
-     * So the copy goes back in — which is still the applicant answering
-     * what BPLO asked — and the filing is still not approvable, because
-     * the office that issues an FSIC has not issued one.
+     * So the applicant applies again, which is the only answer available
+     * to them now, and the filing is still not approvable: the office that
+     * issues an FSIC has not issued one.
      */
-    $workflow->startClearance(
-        $app->fresh(),
-        PermitType::where('code', 'FSIC')->firstOrFail(),
-        ApplicationPermitType::MODE_UPLOAD,
-    );
+    $fsic = PermitType::where('code', 'FSIC')->firstOrFail();
+    $workflow->startClearance($app->fresh(), $fsic, ApplicationPermitType::MODE_APPLY);
+    satisfyChecklist($app->fresh(), $fsic);
+    $workflow->submitClearanceForm($app->fresh(), $fsic);
 
     expect($workflow->pivotFor($app->fresh(), 'FSIC')->status)
         ->not->toBe(ClearanceStatus::Returned);

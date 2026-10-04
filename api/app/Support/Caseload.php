@@ -159,7 +159,10 @@ class Caseload
         return $query
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id,status',
+                // `decided_at` for `Application::statusLabel()` below: without the
+                // column the model reads it as null and every finished filing
+                // comes back as one still gathering.
+                'application:id,tracking_id,business_id,status,decided_at',
                 'application.business:id,name',
                 'application.permitTypes:id,code,name,issuing_department_id',
             ])
@@ -198,7 +201,16 @@ class Caseload
                  * completed na?"* Both were true — the step was finished and
                  * the filing was not — and only one of them was on screen.
                  */
-                'application_status_label' => $a->application?->status?->label(),
+                /*
+                 * `statusLabel()` and not `status?->label()`, for the very
+                 * reason given above. Since 4 October 2026 `approved` is
+                 * worn by a filing still gathering its other permits as
+                 * well as by a finished one, and the enum's word for it is
+                 * "Completed" — so the bare label would have put the client's
+                 * complaint straight back on this screen, on a row that is
+                 * live rather than one whose step is done.
+                 */
+                'application_status_label' => $a->application?->statusLabel(),
                 'at' => optional($a->assigned_at)->toISOString(),
             ])
             ->values()
@@ -261,7 +273,10 @@ class Caseload
         $inspections = self::inspections($officer)
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id,status',
+                // `decided_at` for `Application::statusLabel()` below: without the
+                // column the model reads it as null and every finished filing
+                // comes back as one still gathering.
+                'application:id,tracking_id,business_id,status,decided_at',
                 'application.business:id,name',
             ])
             ->get()

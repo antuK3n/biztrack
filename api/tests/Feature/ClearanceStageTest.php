@@ -326,7 +326,7 @@ it('carries the full contract shape on every row', function () {
 
     expect($row)->toHaveKeys([
         'permit_type', 'state', 'has_office_form', 'office_form_complete',
-        'held_document', 'assignment', 'fee_preview',
+        'assignment', 'fee_preview',
     ]);
     expect($row['permit_type'])->toHaveKeys(['id', 'code', 'name', 'department']);
     expect($row['permit_type']['department'])->toHaveKeys(['code', 'name']);
@@ -347,7 +347,6 @@ it('carries the full contract shape on every row', function () {
 
     expect($row['has_office_form'])->toBeTrue()
         ->and($row['office_form_complete'])->toBeFalse()
-        ->and($row['held_document'])->toBeNull()
         ->and($row['assignment'])->toBeNull()
         ->and($row['fee_preview'])->toBeString();
 
@@ -512,11 +511,14 @@ it('keeps the stage open when an office returns its own permit, and shut when BP
 it('refuses every write while the application is still a draft', function () {
     $app = draftClearanceApplication();
 
+    /*
+     * Both writes there are. The held-copy pair was refused here too until
+     * 4 October 2026, when the client had that route removed — it now 404s,
+     * which is a different claim and belongs to the routing table rather
+     * than to this test.
+     */
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/held", [
-        'file' => UploadedFile::fake()->create('zoning.pdf', 20, 'application/pdf'),
-    ])->assertStatus(422);
 
     /*
      * Nothing leaked through. ZONING is genuinely absent here and this is the
@@ -541,9 +543,6 @@ it('refuses to start a permit on a submitted filing that has not been paid for',
     $app = submittedClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/held", [
-        'file' => UploadedFile::fake()->create('zoning.pdf', 20, 'application/pdf'),
-    ])->assertStatus(422);
 
     // Attached and billed since submission, but not STARTED — and no office has
     // been given work.
@@ -875,250 +874,6 @@ function paidFilingThatMayHandIn(): Application
 }
 
 /*
- * ── Who may hand in a copy they already hold ────────────────────────────────
- *
- * NOT a new filing. Client, 29 September 2026, relaying the LGU: a business
- * cannot already hold these before it applies to BPLO, and one business may
- * not hand in another's certificate. Nothing in the system can tell whose
- * certificate a file is — it is an image against a permit row — so the
- * choice itself is the only place the rule can live.
- *
- * NOT a renewal either, since 3 October 2026. The client: *"an admin
- * verifying an uploaded other permit will be useless if the system already
- * tells them whether they are still valid or not."* A renewal attaches only
- * the permits the applicant ticked, so one still in date is never on the
- * filing — what could be uploaded was a copy of a permit they had just said
- * needs renewing.
- *
- * Both refusals are asserted here together, and with the one type that is
- * still allowed, because the rule is the SET: a guard widened one type at a
- * time is one that can quietly lose the case it was written for.
- */
-it('refuses a held copy on a new filing and on a renewal, and takes one on an amendment', function () {
-    $new = paidClearanceApplication();
-
-    $this->postJson("/api/v1/applications/{$new->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])
-        ->assertStatus(422)
-        ->assertJsonPath('errors.mode.0', 'A new business has no permits to hand in yet. Apply for this one instead.');
-
-    /* And nothing was recorded on the way to being refused. */
-    $row = ApplicationPermitType::where('application_id', $new->id)
-        ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
-        ->first();
-    expect($row?->mode)->not->toBe(ApplicationPermitType::MODE_UPLOAD);
-
-    /* A RENEWAL is refused too, and told why in its own terms. */
-    $renewal = paidClearanceApplication('Renewal Refuses Copy');
-    $renewal->forceFill(['application_type' => 'renewal'])->saveQuietly();
-
-    $this->postJson("/api/v1/applications/{$renewal->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])
-        ->assertStatus(422)
-        ->assertJsonPath(
-            'errors.mode.0',
-            'BizTrack already holds this permit and knows whether it is valid. Apply to renew it instead.'
-        );
-
-    expect(
-        ApplicationPermitType::where('application_id', $renewal->id)
-            ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
-            ->value('mode')
-    )->not->toBe(ApplicationPermitType::MODE_UPLOAD);
-
-    /* The amendment takes it. */
-    $amendment = paidFilingThatMayHandIn();
-    $body = $this->postJson("/api/v1/applications/{$amendment->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertCreated()->json();
-
-    expect($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value)
-        ->and($body['data']['held_document']['name'])->toBe('sanitary.pdf')
-        ->and($body['data']['held_document']['size'])->toBeGreaterThan(0);
-
-    expect(
-        ApplicationPermitType::where('application_id', $amendment->id)
-            ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
-            ->value('mode')
-    )->toBe(ApplicationPermitType::MODE_UPLOAD);
-
-    /*
-     * An amendment's upload DOES route, unlike the renewal's used to: the
-     * 6 September decision stands where it was made — the LGU inspects the
-     * premises, not the paperwork. See `$renewalUpload` in
-     * `WorkflowService::startClearance`, which narrows the skip to renewals
-     * and so no longer fires at all.
-     */
-    $cho = Department::where('code', 'CHO')->firstOrFail();
-    expect(
-        ApplicationAssignment::where('application_id', $amendment->id)
-            ->where('department_id', $cho->id)->exists()
-    )->toBeTrue();
-});
-it('records the held copy through the same mechanism the wizard uses', function () {
-    $app = paidFilingThatMayHandIn();
-    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertCreated();
-
-    $doc = ApplicationDocument::where('application_id', $app->id)
-        ->where('permit_type_id', $sanitary->id)
-        ->with('documentType')
-        ->firstOrFail();
-
-    // Same document-type convention as DocumentController's path, so an officer
-    // reading the attachment list cannot tell which screen it arrived through.
-    expect($doc->documentType->code)->toBe('HELD_SANITARY')
-        ->and($doc->documentType->name)->toContain('already held');
-});
-
-it('replaces an earlier held copy rather than stacking them', function () {
-    $app = paidFilingThatMayHandIn();
-    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('old.pdf', 20, 'application/pdf'),
-    ])->assertCreated();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('new.pdf', 20, 'application/pdf'),
-    ])->assertCreated();
-
-    $held = ApplicationDocument::where('application_id', $app->id)
-        ->where('permit_type_id', $sanitary->id)->get();
-
-    expect($held)->toHaveCount(1)
-        ->and($held->first()->original_filename)->toBe('new.pdf');
-});
-
-/*
- * RENAMED from "removes the held copy and its file", whose assertion that the
- * card falls back to `available` described the inferred state that is gone.
- *
- * The file goes and the permit does NOT: `destroyHeld` forgets the document,
- * and the pivot stays `for_approval` with `mode = upload`, still in CHO's
- * queue. That is what the code does and the test says so rather than asserting
- * a tidier answer — see the note in the file's report about what an office is
- * then looking at.
- */
-it('removes the held copy and its file, and leaves the permit standing with its office', function () {
-    $app = paidFilingThatMayHandIn();
-    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertCreated();
-
-    $path = ApplicationDocument::where('application_id', $app->id)
-        ->where('permit_type_id', $sanitary->id)->firstOrFail()->stored_path;
-    expect(Storage::disk('local')->exists($path))->toBeTrue();
-
-    $body = $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held")
-        ->assertOk()->json();
-
-    expect($body['data']['held_document'])->toBeNull()
-        ->and($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value)
-        ->and(ApplicationDocument::where('application_id', $app->id)->where('permit_type_id', $sanitary->id)->count())->toBe(0)
-        // A "removed" document still sitting on disk is not removed: it stays
-        // downloadable through /documents/{id}/download for as long as it is there.
-        ->and(Storage::disk('local')->exists($path))->toBeFalse();
-});
-
-/*
- * RENAMED from "keeps applying and submitting mutually exclusive", which was
- * INVERTED on 6 September and says so in `ClearanceController::storeHeld`.
- *
- * The old exclusion existed because a held copy meant no pivot row, and holding
- * both records would have put two contradictory claims about one permit in the
- * register. There is one record now — the pivot, with a mode — so replacing an
- * application with a copy is an edit rather than a contradiction, and it is
- * allowed for exactly as long as the office has not acted.
- *
- * The narrower rule that replaces it: once the permit is past `for_approval`
- * the office has accepted the paperwork and booked a visit against it, and
- * swapping the evidence underneath that is not a correction but a different
- * application.
- */
-it('lets a copy replace an application, and does not let an application replace a copy', function () {
-    $app = paidFilingThatMayHandIn();
-    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
-
-    // No withdrawal step: the copy is filed straight over the application, which
-    // matters because withdrawal is refused on all five (see above).
-    $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertCreated()->json();
-
-    $row = fn () => ApplicationPermitType::where('application_id', $app->id)
-        ->where('permit_type_id', $sanitary->id)->firstOrFail();
-
-    expect($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value)
-        ->and($row()->mode)->toBe(ApplicationPermitType::MODE_UPLOAD);
-
-    /*
-     * The other direction is CLOSED, and asserted rather than assumed because
-     * the old file claimed the switch worked both ways.
-     *
-     * `ClearanceController::apply` aborts on `isAppliedFor`, which reads any
-     * pivot status other than `not_started` as started — mode is not consulted.
-     * So a permit sitting at `for_approval` in upload mode is "already applied
-     * for", and removing the copy does not reopen the door: `destroyHeld` only
-     * forgets the document and leaves the status where it was.
-     *
-     * That predicate is deliberate for the state it was written about — a
-     * RETURNED permit goes back through its office FORM, which reopens
-     * editable, so the office's remarks are not lost to a second start. Upload
-     * mode simply falls under the same rule: one way in and no way back.
-     *
-     * This named `refileClearance()` and a REJECTED permit alongside it. Both
-     * went on 17 September 2026 when clearance-level rejection was removed.
-     */
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
-
-    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held")->assertOk();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
-
-    expect($row()->mode)->toBe(ApplicationPermitType::MODE_UPLOAD)
-        ->and(ApplicationDocument::where('application_id', $app->id)
-            ->where('permit_type_id', $sanitary->id)->count())->toBe(0);
-});
-
-/*
- * RENAMED from "will not file a copy of a clearance whose office has already
- * started work", which drove the refusal by writing an assignment status by
- * hand. The gate moved onto the permit's own status, so the fixture has to
- * move with it: the office really approves, which sends the permit to
- * `for_inspection`, and that is what closes the door.
- */
-it('will not file a copy of a permit its office has already accepted', function () {
-    $app = paidClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
-    // CHO can only accept a sheet it has been given, so the fixture hands it in.
-    handInClearance($app, 'SANITARY');
-
-    $assignment = ApplicationAssignment::where('application_id', $app->id)
-        ->where('department_id', Department::where('code', 'CHO')->firstOrFail()->id)
-        ->firstOrFail();
-
-    authAs('sanitary@biztrack.local');
-    $this->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
-
-    authAs('owner@biztrack.local');
-    expect(clearanceRow($app, 'SANITARY')['state'])->toBe(ClearanceStatus::ForInspection->value);
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertStatus(422);
-
-    expect(ApplicationDocument::where('application_id', $app->id)->count())->toBe(0);
-});
-
-/*
  * REPLACES "drops the office form obligation when a clearance is withdrawn,
  * without discarding the answers" and "lets the applicant fill in the sheet for
  * a clearance applied for after payment".
@@ -1323,10 +1078,6 @@ it('refuses a stranger every clearance write', function () {
     authAs('juan@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertForbidden();
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertForbidden();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/held", [
-        'file' => UploadedFile::fake()->create('zoning.pdf', 20, 'application/pdf'),
-    ])->assertForbidden();
-    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/held")->assertForbidden();
 
     /*
      * The 403 is the whole story: nothing was started, stored or routed.
@@ -1388,22 +1139,6 @@ it('survives a filing whose business has been removed from the register', functi
         ->assertStatus(422);
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")
         ->assertStatus(422);
-});
-
-it('still lets a held copy be filed when the business record has gone', function () {
-    /* A held copy is a renewal's, so this filing has to be one. */
-    $app = paidFilingThatMayHandIn();
-    $app->business->delete();
-
-    // Nothing here needs a price — the applicant can still hand in the
-    // certificate they hold.
-    $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
-        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
-    ])->assertCreated()->json();
-
-    expect($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value);
-
-    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held")->assertOk();
 });
 
 it('reports an office form as complete only once the applicant has saved it', function () {

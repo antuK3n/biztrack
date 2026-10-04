@@ -148,5 +148,11 @@ class ApplicationPermitType extends Model
      * premises, not the paperwork, so an uploaded permit is scheduled and
      * visited like any other (docs/application-flow-2026-09.md rule 3).
      */
-    public const MODE_UPLOAD = 'upload';
+    /*
+     * `upload` was the other mode — a copy of a permit the applicant
+     * already held — and the client had it removed on 4 October 2026.
+     * The column still accepts the string so that any historical row
+     * reads back unchanged; nothing writes it, and the register has
+     * never held one.
+     */
 }

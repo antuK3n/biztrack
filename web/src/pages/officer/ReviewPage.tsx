@@ -3789,8 +3789,42 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * either way.
    */
   const bploCoordinatesThroughout = data.department.code === 'BPLO'
+
+  /*
+   * ── This office's own permit is accepted but not yet granted ────────────
+   *
+   * The third way in, and the one a clearance-only renewal needed. Client,
+   * 4 October 2026, on a Sanitary renewal sitting at its site visit: *"This
+   * should NOT BE APPROVED. IT IS STILL FOR INSPECTION"* — and then the
+   * remedy, which is the right one: *"why not just make it similar to the
+   * New Permit filing view where the admin can Approve or Reject, and even
+   * Set Schedule For Inspection."*
+   *
+   * The two filings were reaching different screens from the same situation,
+   * and the reason was that the test above asks the FILING's status. A new
+   * filing is `approved` and gathering by the time its office accepts the
+   * paperwork, so it took this branch and got the inspection panel — the only
+   * place in the product that draws Set Schedule for Inspection. A renewal
+   * carrying one clearance never leaves `for_approval`: its office's work IS
+   * the filing, so there is no gathering stage for it to be in. It fell
+   * through to the full review sheet, which has no inspection panel at all
+   * and stamps a green "Approved" the moment the assignment closes — over a
+   * progress rail reading For Inspection, two inches below.
+   *
+   * So the question is asked of the PERMIT instead, which is what both cases
+   * actually have in common: this office has accepted the paperwork
+   * (`!owesReview`) and its permit has not been granted or refused yet.
+   * `data.clearance` is the office's own permit on this filing, matched
+   * server-side on `issuing_department_id` — see the note on
+   * `bookFirstInspection` for why nothing else here may be used for it.
+   */
+  const myPermitInFlight =
+    data.clearance !== null &&
+    data.clearance.status !== null &&
+    !['approved', 'rejected'].includes(data.clearance.status)
+
   const nothingLeftForThisOffice =
-    (isGatheringOtherPermits(app) || app.status === 'for_final_approval') &&
+    (isGatheringOtherPermits(app) || app.status === 'for_final_approval' || myPermitInFlight) &&
     !owesReview &&
     !bploCoordinatesThroughout
 
@@ -3798,7 +3832,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     return (
       <div>
         {backLink}
-        <PageTitle>Business Permit</PageTitle>
+        {/*
+          Named, because this screen is not only the Business Permit's any
+          more. It reads "Business Permit" on BPLO's seat and whenever the
+          office's own permit cannot be named, and the permit's own name
+          everywhere else — a Sanitary officer sent here by a clearance-only
+          renewal was being shown a heading about a permit their office does
+          not issue.
+        */}
+        <PageTitle>{data.clearance?.name ?? 'Business Permit'}</PageTitle>
 
         <div className="mx-auto max-w-3xl">
           <p

@@ -4,7 +4,7 @@ import { InboxIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { applications, assignments } from '../../lib/resources'
+import { applications, assignments, inspections } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
 import {
   GATHERING_META,
@@ -28,7 +28,7 @@ import type {
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
-type Tab = 'approval' | 'payment' | 'gathering' | 'inspection' | 'final'
+type Tab = 'all' | 'approval' | 'payment' | 'gathering' | 'inspection' | 'final'
 
 /**
  * The stages, in the order the flow visits them (docs/application-flow-2026-09.md):
@@ -113,6 +113,24 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
    * does — and an optional field costs less than rediscovering that a second
    * TABS array drifts.
    */
+  /*
+   * ── Every stage at once ─────────────────────────────────────────────────
+   *
+   * Client, 4 October 2026, looking at a STAGE group whose two siblings both
+   * had one: *"Is it good if we put an 'All' too under the STAGE filter?"*
+   * It is, and the gap was never a missing option — it was that the stages
+   * are two endpoints and three filtering strategies, so one query cannot
+   * ask for them together. `loadEveryStage` asks each in parallel and merges
+   * instead, which is the piece of work the note on the filter sidebar said
+   * was still to do.
+   *
+   * First, because it is the widest answer and the one an officer who does
+   * not yet know the stages apart should meet first. Not the DEFAULT though:
+   * a queue that opens on every stage at once opens on a list nobody is
+   * being asked to act on, and For Approval is the work that is actually
+   * waiting.
+   */
+  { value: 'all', label: 'All stages' },
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
   /*
@@ -366,6 +384,14 @@ const FINAL_STATUSES = ['for_final_approval'] as const
 const GATHERING_STATUSES = ['approved'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
+  /*
+   * Empty, and the one entry here that is not sent to the server. `all`
+   * fetches each stage under its OWN filters and merges the results, so
+   * there is no single status list behind it. What the Filter dropdown
+   * offers on this stage is built from the seat's other tabs — see
+   * `tabStatuses`.
+   */
+  all: [],
   approval: APPROVAL_STATUSES,
   payment: PAYMENT_STATUSES,
   gathering: GATHERING_STATUSES,
@@ -409,6 +435,13 @@ function tabLabel(tab: Tab, ownPermit: boolean): string {
  * would move a control out from under the tests that press it by name.
  */
 const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
+  /*
+   * Nothing is relabelled across every stage at once. The two readings below
+   * are each true of ONE stage — "waiting on your review" and "site visit
+   * outstanding" are different answers to the same status — so naming
+   * either here would be right for half the list and wrong for the other.
+   */
+  all: {},
   approval: {
     approved: 'Your permit · waiting on your review',
   },
@@ -641,6 +674,20 @@ interface QueueItem {
   /** `at` in milliseconds, for the browser-side sorts. Missing sorts as brand new. */
   atMs: number
   /**
+   * Who holds this row's work, which is not always the officer in charge.
+   *
+   * A row at For Inspection is about a SITE VISIT, and the visit has its own
+   * holder: `inspections.inspector_user_id`, named when the visit is booked
+   * and movable without touching the review. The card showed the reviewer on
+   * both stages until 4 October 2026, which the client caught — *"it is
+   * possible that a new officer may be assigned in the For Inspection"*.
+   *
+   * Null where this office has no visit on the filing, including a permit
+   * whose visit is DUE but unbooked: there is no inspector yet, and the
+   * review officer is still the one holding the work.
+   */
+  inspection: Assignment['inspection']
+  /**
    * Has the city finished with this filing? Carried because the row badge
    * needs it: `approved` is "Completed" as a status and "Approved" on one
    * still gathering its other permits, and the status alone stopped telling
@@ -744,6 +791,7 @@ function fromAssignment(item: Assignment): QueueItem {
     unpaid: UNPAID_STATUSES.includes(app.status),
     status: app.status,
     decided: app.decided,
+    inspection: item.inspection,
     type: app.application_type,
     clearance: item.clearance,
     assignmentId: item.id,
@@ -789,6 +837,9 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     unpaid: UNPAID_STATUSES.includes(app.status),
     status: app.status,
     decided: app.decided,
+    // An unpaid filing has not been routed, so no office holds it and no
+    // visit has been booked against it.
+    inspection: null,
     /*
      * Set even though this tab narrows by type on the server, so that one row
      * shape means one thing on every tab. A field that is only populated where
@@ -808,6 +859,130 @@ function fromApplication(app: ApplicationListItem): QueueItem {
  * questions genuinely have different answers: "which of my office's assignments
  * is open" cannot be asked about a filing that has none.
  */
+/**
+ * Every stage the seat can see, as one list.
+ *
+ * ── Why this is a merge and not a query ──────────────────────────────────
+ *
+ * The stages do not share a filter. For Approval wants an OPEN assignment;
+ * For Inspection wants a clearance at its site visit, on an assignment the
+ * office has already closed. Asking for both in one request ANDs them and
+ * returns nothing, and the union of the two filtered sets is NOT the
+ * unfiltered set — dropping both filters would sweep in clearances that are
+ * finished and belong to neither stage. BPLO's Pending Payment is further
+ * off still: a different endpoint, over applications rather than
+ * assignments.
+ *
+ * So each stage is asked under its own rules and the answers are merged
+ * here. The stage definitions stay in one place — the same constants the
+ * single-stage path uses — rather than being restated server-side where the
+ * two copies could drift.
+ *
+ * ── The count stays honest ───────────────────────────────────────────────
+ *
+ * `total` is the sum of each feed's own `meta.total`, less any duplicate
+ * actually seen.
+ *
+ * The stages do not overlap, but NOT for the reason their status lists
+ * suggest — For Approval and For Inspection share `approved` and
+ * `for_approval`, and are told apart by the assignment and the clearance
+ * instead. What separates them is that `approveClearance()` completes the
+ * office's assignment in the same act that sends the permit to its site
+ * visit, so a row at For Inspection can never satisfy For Approval's
+ * open-assignment filter. Pending Payment cannot collide at all: its rows
+ * are applications and carry an `application:` key where the rest carry
+ * `assignment:`.
+ *
+ * That is an argument about today's code, though, and a count on screen
+ * should not rest on one. The merge counts the duplicates it removes and
+ * takes them off the total, so the day a clearance can sit at inspection
+ * with its assignment still open, the figure is right without anybody
+ * remembering this note.
+ *
+ * That mattered: "Showing N of M" lying about a merged list is exactly what
+ * the note on the filter sidebar said had to be solved before this could
+ * ship.
+ */
+async function loadEveryStage(
+  args: Parameters<typeof loadPage>[0],
+  stages: readonly Tab[],
+): Promise<QueueFeed> {
+  /*
+   * Enough of each stage to fill the window being shown. The slice below is
+   * taken from the MERGED order, so page 3 of the merge can in the worst
+   * case be three pages of a single stage.
+   */
+  const window = Math.min(args.page * PAGE_SIZE, DEEP_PAGE_SIZE)
+
+  const feeds = await Promise.all(
+    stages.map((stage) => {
+      /*
+       * Pending Payment drops out entirely when the officer is narrowing by
+       * who holds the case. Nothing holds an unpaid filing — it has not been
+       * routed, so there is no assignment and no officer in charge — and
+       * including its rows under "My assigned" would answer a question about
+       * ownership with filings nobody owns.
+       */
+      if (stage === 'payment' && args.oic) return null
+
+      return loadPage({
+        ...args,
+        tab: stage,
+        statuses: TAB_STATUSES[stage].join(','),
+        assignmentStatuses: stage === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined,
+        clearanceStatuses: stage === 'inspection' ? INSPECTION_CLEARANCE_STATUSES : undefined,
+        // Filing type is matched in the browser across the merged list, so
+        // the one stage that COULD narrow it server-side must not — it would
+        // be the only stage whose `meta.total` had the type applied.
+        type: '',
+        oic: stage === 'payment' ? undefined : args.oic,
+        // Each stage asks about ITS own holder, not the merged `any`.
+        oicOn: stage === 'inspection' ? 'inspection' : undefined,
+        page: 1,
+        perPage: window,
+      })
+    }),
+  )
+
+  const got = feeds.filter((f): f is QueueFeed => f !== null)
+  const seen = new Set<string>()
+  let duplicates = 0
+  const merged = got
+    .flatMap((f) => f.items)
+    .filter((row) => {
+      if (seen.has(row.key)) {
+        duplicates++
+
+        return false
+      }
+      seen.add(row.key)
+
+      return true
+    })
+    /*
+     * Waiting longest first, which is what every assignment feed already
+     * returns and therefore the order that needs no explaining when the
+     * stages are mixed. A row with no timestamp sorts last rather than
+     * first: `atMs` is 0 when it is missing, and ascending would pin it to
+     * the top of the queue for good — the same trap the server's
+     * `assigned_at is null` ordering exists to avoid.
+     */
+    .sort((a, b) => (a.atMs || Infinity) - (b.atMs || Infinity))
+
+  const total = Math.max(0, got.reduce((n, f) => n + f.meta.total, 0) - duplicates)
+  const from = (args.page - 1) * PAGE_SIZE
+
+  return {
+    items: merged.slice(from, from + PAGE_SIZE),
+    meta: {
+      current_page: args.page,
+      last_page: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+      per_page: PAGE_SIZE,
+      total,
+    },
+  }
+}
+
 async function loadPage(args: {
   tab: Tab
   statuses: string
@@ -825,6 +1000,8 @@ async function loadPage(args: {
   type: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
+  /** Whose holder `oic` means; see the call site. */
+  oicOn?: 'inspection' | 'any'
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -858,6 +1035,7 @@ async function loadPage(args: {
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
     ...(args.oic ? { oic: args.oic } : {}),
+    ...(args.oic && args.oicOn ? { oic_on: args.oicOn } : {}),
     page: args.page,
     per_page: args.perPage,
   })
@@ -927,6 +1105,17 @@ const TYPE_LABEL: Record<string, string> = {
  */
 const CARD = 'flex h-full flex-col overflow-hidden rounded-lg bg-white shadow-card'
 
+/**
+ * Is this row about a SITE VISIT rather than the paperwork review?
+ *
+ * One definition, because three places ask it: the row that names the holder,
+ * and the two handlers that claim and release. Two of them disagreeing would
+ * mean a card showing the inspector over a button that took the review.
+ */
+function visitOf(item: QueueItem): QueueItem['inspection'] {
+  return item.clearance?.status === 'for_inspection' ? item.inspection : null
+}
+
 function QueueRow({
   item,
   ownPermit,
@@ -951,6 +1140,43 @@ function QueueRow({
   onRelease?: (item: QueueItem) => void
   claiming?: boolean
 }) {
+  /*
+   * ── Whose name goes under the row ───────────────────────────────────────
+   *
+   * A row at For Inspection is about a SITE VISIT, and the visit is held by
+   * `inspections.inspector_user_id` — a different column from the review's
+   * officer in charge, and often a different person: the inspector is named
+   * when the visit is booked (`leastLoadedInspector`), an admin can move
+   * them, and whoever conducts the visit claims it. The card printed the
+   * reviewer on both stages until 4 October 2026, which the client caught:
+   * *"the officer assigned on the For Approval is the same as the For
+   * Inspection. It should not be like that."*
+   *
+   * Decided per ROW and not per tab, because All stages mixes them — and
+   * because it is the truer test anyway: the row is about a visit when this
+   * office's permit is AT its visit and a visit exists. A permit whose visit
+   * is due but unbooked has no inspector yet, so the reviewer is still the
+   * one holding the work and is still who the card should name.
+   */
+  const visit = visitOf(item)
+  const holder = visit
+    ? {
+        label: 'Inspector',
+        name: visit.inspector?.name ?? null,
+        vacant: 'Visit not yet taken by anyone',
+        canClaim: visit.can_claim,
+        canAct: visit.can_act,
+        mine: visit.inspector !== null && visit.can_act,
+      }
+    : {
+        label: 'Officer in charge',
+        name: item.officer?.name ?? null,
+        vacant: 'Not yet taken by anyone',
+        canClaim: item.canClaim,
+        canAct: item.canAct,
+        mine: item.mine,
+      }
+
   /*
    * ── Which status the badge shows, which depends on the seat ────────────
    *
@@ -1161,17 +1387,17 @@ function QueueRow({
       {item.assignmentId !== null && (
         <div className="-mt-px flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-line bg-white px-6 py-2.5">
           <p className="text-sm text-ink-secondary">
-            {item.officer ? (
+            {holder.name ? (
               <>
-                <span className="text-ink-muted">Officer in charge: </span>
-                <span className="font-semibold text-ink">{item.officer.name}</span>
-                {!item.canAct && <span className="text-ink-muted"> · read-only for you</span>}
+                <span className="text-ink-muted">{holder.label}: </span>
+                <span className="font-semibold text-ink">{holder.name}</span>
+                {!holder.canAct && <span className="text-ink-muted"> · read-only for you</span>}
               </>
             ) : (
-              <span className="text-ink-muted">Not yet taken by anyone</span>
+              <span className="text-ink-muted">{holder.vacant}</span>
             )}
           </p>
-          {item.canClaim && onClaim && (
+          {holder.canClaim && onClaim && (
             <button
               type="button"
               onClick={() => onClaim(item)}
@@ -1194,7 +1420,7 @@ function QueueRow({
             * same strip, and an outline button is how the row says this is the
             * undo rather than the action.
             */}
-          {item.mine && onRelease && (
+          {holder.mine && onRelease && (
             <button
               type="button"
               onClick={() => onRelease(item)}
@@ -1223,7 +1449,20 @@ function QueueRow({
  */
 export function QueuePage() {
   const canReadEveryOffice = useAuth((s) => Boolean(s.user?.permissions.includes(ANY_OFFICE)))
-  const [tab, setTab] = useState<Tab>('approval')
+  /*
+   * Opens on every stage, by the client's instruction of 4 October 2026:
+   * *"When I open this page, the filter under STAGE is For Approval by
+   * default. Turn this into All stages."*
+   *
+   * The argument for For Approval was that it is the work actually waiting,
+   * and that a queue opening on every stage opens on rows nobody is being
+   * asked to act on. The client's is the stronger one: an officer opening
+   * Manage Applications wants to see what is on their desk, and a default
+   * that hides two thirds of it teaches them the screen is empty when it is
+   * not — which is the complaint the For Approval empty state already
+   * carries a paragraph about.
+   */
+  const [tab, setTab] = useState<Tab>('all')
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<QueueItem[]>([])
   const [search, setSearch] = useState('')
@@ -1324,7 +1563,24 @@ export function QueuePage() {
    * a decision — under review, or sent back — and the status is the first of
    * those two.
    */
-  const tabStatuses = TAB_STATUSES[tab]
+  /*
+   * The real stages behind "All stages": this seat's own tabs, less the All
+   * entry itself. Read off `tabs` rather than listed again, so an office
+   * that gains or loses a stage gains or loses it here too.
+   */
+  const stageTabs = tabs.map((t) => t.value).filter((v): v is Tab => v !== 'all')
+  /* Joined, so the fetch below depends on a value that compares by equality. */
+  const stageKey = stageTabs.join(',')
+
+  /*
+   * On All stages the Filter dropdown offers every status the seat could
+   * meet, deduped across the stages it is merging. `TAB_STATUSES.all` is
+   * empty precisely so this is derived rather than kept as a third copy.
+   */
+  const tabStatuses =
+    tab === 'all'
+      ? [...new Set(stageTabs.flatMap((v) => [...TAB_STATUSES[v]]))]
+      : TAB_STATUSES[tab]
   const activeStatuses: readonly ApplicationStatus[] = statusFilter
     ? [statusFilter as ApplicationStatus]
     : tabStatuses
@@ -1395,8 +1651,8 @@ export function QueuePage() {
   const perPage = deep ? DEEP_PAGE_SIZE : PAGE_SIZE
 
   const { data, loading, error, reload } = useAsync(
-    () =>
-      loadPage({
+    () => {
+      const request = {
         tab,
         statuses,
         assignmentStatuses,
@@ -1407,11 +1663,30 @@ export function QueuePage() {
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
+        /*
+         * Which holder 'oic' is asking about. For Inspection is about the
+         * SITE VISIT's inspector, a different column from the review's officer
+         * in charge; All stages mixes the two and asks about either, or "My
+         * assigned" would drop every visit the reader is out on.
+         */
+        oicOn: (tab === 'inspection' ? 'inspection' : tab === 'all' ? 'any' : undefined) as
+          | 'inspection'
+          | 'any'
+          | undefined,
         page,
         perPage,
-      }),
+      }
+
+      /*
+       * One request per stage, merged here, because no single request can
+       * ask for them together — see `loadEveryStage`.
+       */
+      return tab === 'all' ? loadEveryStage(request, stageTabs) : loadPage(request)
+    },
     [
       tab,
+      // Which stages All is standing for; see `stageKey`.
+      stageKey,
       statuses,
       assignmentStatuses,
       clearanceStatuses,
@@ -1519,9 +1794,20 @@ export function QueuePage() {
     setClaimingId(item.assignmentId)
     setClaimError(null)
     setClaimMessage(null)
+    /*
+     * Whichever this row is about. Taking the visit must not take the
+     * review — they are different columns held by different people, which is
+     * the whole of the client's 4 October report.
+     */
+    const visit = visitOf(item)
     try {
-      await assignments.claim(item.assignmentId)
-      setClaimMessage(`${item.name} is yours — you are now the officer in charge.`)
+      if (visit) {
+        await inspections.claim(visit.id)
+        setClaimMessage(`The site visit for ${item.name} is yours.`)
+      } else {
+        await assignments.claim(item.assignmentId)
+        setClaimMessage(`${item.name} is yours — you are now the officer in charge.`)
+      }
       restart()
       reload()
     } catch (err) {
@@ -1544,9 +1830,15 @@ export function QueuePage() {
     setClaimingId(item.assignmentId)
     setClaimError(null)
     setClaimMessage(null)
+    const visit = visitOf(item)
     try {
-      await assignments.release(item.assignmentId)
-      setClaimMessage(`${item.name} is back with the office. Any officer here can take it.`)
+      if (visit) {
+        await inspections.release(visit.id)
+        setClaimMessage(`The site visit for ${item.name} is back with the office.`)
+      } else {
+        await assignments.release(item.assignmentId)
+        setClaimMessage(`${item.name} is back with the office. Any officer here can take it.`)
+      }
       restart()
       reload()
     } catch (err) {
@@ -1656,7 +1948,15 @@ export function QueuePage() {
 
   /** Status options for the tab in hand — a tab never offers a status it excludes. */
   const statusOptions: SortFilterOption[] = [
-    { value: '', label: `All in ${tabLabel(tab, !canReadEveryOffice)}` },
+    /*
+     * "All in All stages" is what the template would have produced on the
+     * merged stage, which says nothing twice. The status filter is the only
+     * question left open there, so it names that instead.
+     */
+    {
+      value: '',
+      label: tab === 'all' ? 'Any status' : `All in ${tabLabel(tab, !canReadEveryOffice)}`,
+    },
     ...tabStatuses.map((s) => ({
       value: s,
       label: STATUS_IN_TAB[tab][s] ?? applicationStatusMeta(s).label,
@@ -2098,8 +2398,15 @@ export function QueuePage() {
                 filingType !== ''
                 ? `No ${TYPE_PLURAL[filingType]} are at this stage right now. Other types may be — try All filings.`
                 : 'No application in this queue matches every filter set above. Try widening one.'
-              : tab === 'payment'
-                ? 'No filing is waiting on payment right now.'
+              : tab === 'all'
+                ? /*
+                   * The widest stage there is, so there is no "try another
+                   * stage" to offer — this one already looked everywhere.
+                   * What is left to widen is one of the other two groups.
+                   */
+                  'Nothing is on your desk at any stage right now.'
+                : tab === 'payment'
+                  ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
                   ? /*
                      * Points at the sections, because this is where the screen

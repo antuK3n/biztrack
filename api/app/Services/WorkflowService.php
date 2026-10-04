@@ -1293,9 +1293,8 @@ class WorkflowService
          * message that cannot be unsent has no business inside something
          * that can be rolled back.
          */
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'BPLO changed what needs correcting: '.$remarks,
         );
     }
@@ -1360,9 +1359,8 @@ class WorkflowService
         });
 
         /* Told, for the reason `amendMainFormReturn` gives at length. */
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $row->application,
-            $row->application->status,
             $row->permitType->name.': the office changed what needs correcting — '.$remarks,
         );
     }
@@ -2000,9 +1998,8 @@ class WorkflowService
             $this->issuePermitFor($app, $row->permitType);
         });
 
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'Your Business Permit has been released. The other permits on this '
             .'application are still being processed — if one of them is rejected, '
             .'this permit will be suspended until it is settled.',
@@ -2043,9 +2040,23 @@ class WorkflowService
             ]);
         }
 
-        if (! in_array($mode, [ApplicationPermitType::MODE_APPLY, ApplicationPermitType::MODE_UPLOAD], true)) {
+        /*
+         * ── Applying is the only way a permit starts ─────────────────────────
+         *
+         * Handing in a copy you already hold was the other, and the client had
+         * it removed on 4 October 2026: *"IT IS NOT POSSIBLE FOR THE USER TO
+         * SUBMIT A COPY OF AN OTHER PERMIT."*
+         *
+         * It had already been refused on new filings and on renewals — a new
+         * business holds nothing to hand in, and on a renewal BizTrack issued
+         * the certificate itself and knows whether it is still valid. That
+         * left amendments as the one path still taking an upload, and the
+         * register records nobody ever having used it: no pivot row has ever
+         * carried `upload`, and no document has ever been attached as one.
+         */
+        if ($mode !== ApplicationPermitType::MODE_APPLY) {
             throw ValidationException::withMessages([
-                'mode' => ['A permit is either applied for or handed in as a copy you already hold.'],
+                'mode' => ['A permit is applied for. Handing in a copy you already hold is no longer accepted.'],
             ]);
         }
 
@@ -2096,16 +2107,6 @@ class WorkflowService
          * its shape is an open question the client will take separately,
          * and answering it here by omission would be answering it.
          */
-        if ($mode === ApplicationPermitType::MODE_UPLOAD
-            && in_array($app->application_type, [ApplicationType::New, ApplicationType::Renewal], true)) {
-            throw ValidationException::withMessages([
-                'mode' => [
-                    $app->application_type === ApplicationType::Renewal
-                        ? 'BizTrack already holds this permit and knows whether it is valid. Apply to renew it instead.'
-                        : 'A new business has no permits to hand in yet. Apply for this one instead.',
-                ],
-            ]);
-        }
 
         return DB::transaction(function () use ($app, $type, $mode) {
             $row = $this->pivotFor($app, $type->code);
@@ -2163,13 +2164,7 @@ class WorkflowService
             }
 
             $row->update(['submitted_at' => now()]);
-            $this->transitionClearance(
-                $row,
-                ClearanceStatus::ForApproval,
-                $mode === ApplicationPermitType::MODE_UPLOAD
-                    ? 'Applicant handed in a permit they already hold.'
-                    : 'Applicant applied for this permit.',
-            );
+            $this->transitionClearance($row, ClearanceStatus::ForApproval, 'Applicant applied for this permit.');
 
             /*
              * ── A renewal's uploaded copy routed NOBODY, and is now refused ──
@@ -2202,10 +2197,13 @@ class WorkflowService
              * 6 September, *"the LGU inspects the premises, not the
              * paperwork"* — and that stands where it was made.
              */
-            $renewalUpload = $mode === ApplicationPermitType::MODE_UPLOAD
-                && $app->application_type === ApplicationType::Renewal;
-
-            if ($type->issuing_department_id !== null && ! $renewalUpload) {
+            /*
+             * Every started permit routes to its office now. The exception was
+             * a renewal's uploaded copy, which routed nobody because no office
+             * was involved in reading it — and uploads are gone (see the mode
+             * check at the top of this method).
+             */
+            if ($type->issuing_department_id !== null) {
                 $this->routeTo($app, $type->issuing_department_id);
             }
 
@@ -2302,9 +2300,8 @@ class WorkflowService
             );
         }
 
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'Your City Environmental Certificate has been issued. '
             .count($outstanding).' DENR document(s) are now due under Other Requirements by '
             .$due->toFormattedDateString().'.',
@@ -2554,9 +2551,8 @@ class WorkflowService
                 ($type->department?->name ?? 'The office').' accepted the paperwork. A site inspection will be scheduled.',
             );
             $this->completeAssignment($app, $type->issuing_department_id, $remarks);
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $app,
-                $app->status,
                 ($type->department?->name ?? 'An office').' approved your '.$type->name.'. A site inspection will be scheduled.',
             );
         });
@@ -2618,9 +2614,8 @@ class WorkflowService
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
 
             $this->transitionClearance($row, ClearanceStatus::Returned, $remarks);
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $row->application,
-                $row->application->status,
                 $row->permitType->name.' was returned for revision: '.$remarks,
             );
         });
@@ -3217,9 +3212,8 @@ class WorkflowService
                 'scheduled_at' => (string) $visit->scheduled_at,
             ]);
 
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $app,
-                $app->status,
                 $row->permitType->name.' inspection is set for '.$visit->scheduled_at->format('d M Y').'.',
             );
 
@@ -3286,9 +3280,15 @@ class WorkflowService
              */
             $app = $inspection->application;
             $office = $inspection->department?->name ?? 'The office';
-            $this->notify->applicationStatus(
+            /*
+             * `inspectionFailed` and not `applicationStatus`: the latter is
+             * silent on Approved, and since 4 October 2026 a filing still
+             * gathering its other permits IS Approved — so routing this
+             * through it put the failure back into the silence the note above
+             * records being fixed.
+             */
+            $this->notify->inspectionFailed(
                 $app,
-                $app->status,
                 "{$office} inspection did not pass."
                 .($findings ? " Findings: {$findings}" : '')
                 .' The office will schedule a re-inspection.',
@@ -4862,7 +4862,35 @@ class WorkflowService
         $priorEnds = $prior?->valid_until ? Carbon::parse($prior->valid_until)->startOfDay() : null;
         $continues = $priorEnds !== null && $priorEnds->greaterThanOrEqualTo(now()->startOfDay());
 
-        $validFrom = $continues ? $priorEnds->copy()->addDay() : now()->startOfDay();
+        /*
+         * ── A renewed CLEARANCE starts the day it is issued ──────────────────
+         *
+         * Client, 4 October 2026, having renewed a Sanitary Permit that ran to
+         * the 23rd: *"I just renewed that sanitary form and the expiration date
+         * should be Oct. 4, 2027."* So the term runs from the renewal, not from
+         * where the old one left off, and the certificate reads a plain year:
+         * issued 4 October 2026, valid until 4 October 2027.
+         *
+         * This overrides continue-the-term for the five clearances, and the
+         * cost is the one that rule was written to avoid — renewing early now
+         * shortens the cover rather than extending it. It is bounded: the
+         * renewal window opens thirty days before expiry, so the most anyone
+         * can give up is thirty days, and they give it up knowingly by filing
+         * early. Put to the client against exactly that trade-off and chosen.
+         *
+         * The two certificates overlap for those days. Only one is live —
+         * `supersedePriorPermit` retires the old one the moment the new is
+         * issued — so the overlap is on paper and not in the register.
+         *
+         * The BUSINESS permit keeps continue-the-term, and nothing about it
+         * changes: it is anchored to 20 January either way, so where its term
+         * starts moves no date a reader ever sees.
+         */
+        $renewedClearance = $prior !== null && $type->code !== PermitType::OUTCOME_CODE;
+
+        $validFrom = $continues && ! $renewedClearance
+            ? $priorEnds->copy()->addDay()
+            : now()->startOfDay();
 
         /*
          * ── The BUSINESS permit ends on 20 January, whatever the start ───────
@@ -4906,9 +4934,46 @@ class WorkflowService
          * "ignore me" on others means nothing on any of them, and a future
          * permit type that does run a rolling term will want it back.
          */
-        $validUntil = $type->code === PermitType::OUTCOME_CODE
-            ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
-            : RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom));
+        /*
+         * ── A RENEWAL runs a year; a first issue aligns to the calendar ──────
+         *
+         * Client, 4 October 2026, having renewed a Sanitary Permit that expired
+         * on 23 October and been handed one expiring on 31 December: *"Why this
+         * was NOT RENEWED? The date should have been changed."* And then the
+         * rule: *"The expiration date should be 1 year after when you
+         * renewed."*
+         *
+         * The two-month certificate was the calendar-year anchor doing exactly
+         * what the note below says it does — *"a clearance issued in November
+         * runs about seven weeks rather than a year"* — which reads as a
+         * renewal that did nothing. A renewal is a year of cover bought; that
+         * is the whole of what it is for.
+         *
+         * ── Why this does not undo "always December 31" ──────────────────────
+         *
+         * It keeps it, for everything already on it. A permit ending 31
+         * December is renewed from 1 January, and a year from there is 31
+         * December again — the shape perpetuates itself once a permit is on
+         * the calendar. What changes is only the FIRST renewal of a permit
+         * whose term ends mid-year, which is the case that produced a stub.
+         *
+         * A first issue still anchors to 31 December, which is what puts a
+         * permit on the calendar to begin with [client, 1 October 2026].
+         *
+         * ── Dates ────────────────────────────────────────────────────────────
+         *
+         * Measured from `$validFrom`, which on a renewed clearance is the day
+         * it was issued — see the note above, where that was decided and what
+         * it costs. The anniversary itself, matching the register's own
+         * convention: the demo certificates run 23 October to 23 October.
+         */
+        $validUntil = match (true) {
+            $type->code === PermitType::OUTCOME_CODE => RenewalSeason::endOfTermFor(
+                CarbonImmutable::parse($validFrom),
+            ),
+            $prior !== null => CarbonImmutable::parse($validFrom)->addYear(),
+            default => RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom)),
+        };
 
         /*
          * Who signs it, with one addition only this moment can make.

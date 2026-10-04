@@ -767,7 +767,15 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
-        {(status === 'approved' || status === 'issued') && (
+        {/*
+          The END card. Gated on the row and not the status since 4 October
+          2026: a paid filing wears `approved` while its other permits come
+          in, and on that filing this card stacked under the
+          Business-Permit-Released card above it — two cards, one saying
+          "apply for your other permits", the next saying the application
+          was done.
+        */}
+        {(status === 'approved' || status === 'issued') && !isGatheringOtherPermits(app) && (
           <StatusCard tone="green">
             <div className="flex items-center gap-5 py-2 text-ink">
               <CheckRingIcon />

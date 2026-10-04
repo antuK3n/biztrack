@@ -5465,6 +5465,34 @@ export function ApplyWizard() {
   const submitOffice = (clearanceOnlyRenewal ? renewingOffice : null) ?? 'BPLO'
 
   /*
+   * ── The permits being renewed that have already lapsed ──────────────────
+   *
+   * Renewing after expiry is charged for: Revenue Code Sec. 8A.04 adds 25%
+   * once and Sec. 8A.05 adds 2% for every month or part of a month since,
+   * capped at 36. `WorkflowService::latePenaltyFor` has applied it on both
+   * paths since 1 October 2026 — as line items on a business permit's
+   * assessment, and on the deferred fee a clearance carries to January — so
+   * the money is real and the applicant was meeting it for the first time on
+   * the bill. The client asked for it at the point of commitment instead
+   * [4 October 2026].
+   *
+   * Read off the prior permits the applicant TICKED, not off the business:
+   * renewing a lapsed Sanitary Permit is late whatever the state of the four
+   * beside it, and naming the wrong certificate in a warning about money is
+   * worse than not warning at all.
+   */
+  const lapsedBeingRenewed = useMemo(
+    () =>
+      applicationType !== 'renewal'
+        ? []
+        : priorPermitIds
+            .map((id) => renewablePermits.find((p) => p.id === id))
+            .filter((p): p is Permit => p !== undefined)
+            .filter((p) => p.days_until_expiry !== null && p.days_until_expiry < 0),
+    [applicationType, priorPermitIds, renewablePermits],
+  )
+
+  /*
    * Item 110 — the two lines the Business Information summary prints back.
    *
    * The REGISTERED name, not `form.name`: the summary answers "which record is
@@ -13567,6 +13595,50 @@ export function ApplyWizard() {
           <p className="pt-4 text-center text-lg">
             Submit this application to {submitOffice} for approval?
           </p>
+          {/*
+            ── Late, and it costs something ────────────────────────────────
+
+            Named per permit with its expiry date, because "a permit" is not
+            something an applicant can check and "your Sanitary Permit expired
+            on 23 October" is. The rate is quoted rather than the peso amount:
+            the interest runs per month to the filing date, so a figure shown
+            here would be the one thing on the dialog that could be wrong by
+            the time they press the button.
+          */}
+          {lapsedBeingRenewed.length > 0 && (
+            <div className="mb-2 rounded-lg border border-s-red bg-s-red-tint px-4 py-3 text-sm text-red-900">
+              <p className="font-bold">This renewal is late, so a charge is added.</p>
+              <ul className="mt-1 list-disc pl-5">
+                {lapsedBeingRenewed.map((p) => (
+                  <li key={p.id}>
+                    {p.permit_type?.name ?? 'This permit'} expired on {formatDate(p.valid_until)}.
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">
+                A 25% surcharge plus 2% interest for each month late is added to the fee
+                (Revenue Code 8A.04 and 8A.05).
+              </p>
+            </div>
+          )}
+          {/*
+            ── Nothing to pay today ────────────────────────────────────────
+
+            A clearance renewed on its own is issued unbilled and collected
+            with the next business permit renewal — `Application::defersPayment`,
+            the client's rule of 17 September 2026. The applicant had no way to
+            know that from this screen, and a filing that asks for no payment
+            reads as one that has gone wrong. Said here because this is the
+            press where they expect to be charged [client, 4 October 2026].
+          */}
+          {clearanceOnlyRenewal && (
+            <div className="mb-2 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
+              <p className="font-bold text-ink">Nothing to pay now.</p>
+              <p className="mt-1">
+                You pay for this permit when you renew your Business Permit.
+              </p>
+            </div>
+          )}
           {/*
             ── What the press costs, said before it is pressed ────────────────
             *

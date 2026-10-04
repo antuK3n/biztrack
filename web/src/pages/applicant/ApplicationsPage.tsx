@@ -69,7 +69,32 @@ type TypeFilter = '' | 'new' | 'renewal' | 'amendment'
  * (WorkflowService::approveAndIssue), so an approved application always has its
  * permits waiting in Profile. Rejected stays here — it still needs a re-apply.
  */
+/*
+ * The statuses a FINISHED filing wears — but not, on their own, the test for
+ * one. See `isFinished` below, and the client's report of 4 October 2026:
+ * *"after paying for the application, THE BUSINESS IS ALREADY GONE IN THE
+ * TRACKING PAGE. WHERE IS THE PART THAT I SHOULD APPLY FOR OTHER PERMITS?"*
+ */
 const FINISHED: ApplicationStatus[] = ['approved', 'issued']
+
+/**
+ * Has this filing left the applicant's hands for good?
+ *
+ * It was `FINISHED.includes(status)`, and that was exactly right while a paid
+ * filing still gathering its five clearances wore `awaiting_other_permits`.
+ * The client had that status removed on 4 October 2026, and a paid filing
+ * wears `approved` from the moment its Mayor's Permit is released — so the
+ * status test filed every freshly-paid application under "completed" and
+ * dropped it from this page, taking with it the only screen that offers
+ * "apply for your other permits". The applicant paid and the filing vanished.
+ *
+ * `isGatheringOtherPermits` is the row's own answer: it reads the server's
+ * `decided` flag, falling back to the permit rows. A filing is finished when
+ * it wears a finished status AND nothing is still being gathered on it.
+ */
+function isFinished(app: ApplicationListItem): boolean {
+  return FINISHED.includes(app.status) && !isGatheringOtherPermits(app)
+}
 
 const FILTERS: { label: string; value: TypeFilter }[] = [
   { label: 'All', value: '' },
@@ -135,6 +160,7 @@ const SORTS: SortFilterOption[] = [
 const FILTERABLE_STATUSES: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
+  'approved',
   'returned',
   'rejected',
   'cancelled',
@@ -143,7 +169,16 @@ const FILTERABLE_STATUSES: ApplicationStatus[] = [
 /** "All" stays first: SortFilter marks Filter active by comparing to `options[0]`. */
 const STATUS_FILTERS: SortFilterOption[] = [
   { value: '', label: 'All statuses' },
-  ...FILTERABLE_STATUSES.map((s) => ({ value: s, label: applicationStatusMeta(s).label })),
+  /*
+   * `approved` is on the list because a filing gathering its other permits
+   * wears it and this page shows those (finished ones have left for Profile).
+   * Labelled "Approved", not the status's own "Completed": here the word
+   * only ever means the gathering kind.
+   */
+  ...FILTERABLE_STATUSES.map((s) => ({
+    value: s,
+    label: s === 'approved' ? GATHERING_META.label : applicationStatusMeta(s).label,
+  })),
 ]
 
 /**
@@ -1947,8 +1982,8 @@ export function ApplicationsPage() {
   // Drafts have their own page; keep this list to submitted work still in play.
   const submitted = (data ?? []).filter((a) => a.status !== 'draft')
   const byType = (a: ApplicationListItem) => !type || a.application_type === type
-  const inPlay = submitted.filter((a) => !FINISHED.includes(a.status)).filter(byType)
-  const finishedCount = submitted.filter((a) => FINISHED.includes(a.status)).filter(byType).length
+  const inPlay = submitted.filter((a) => !isFinished(a)).filter(byType)
+  const finishedCount = submitted.filter(isFinished).filter(byType).length
 
   /*
    * The rejection reason lives on the detail payload, not the list one, so the

@@ -206,6 +206,15 @@ class DemoSeeder extends Seeder
             'valid_until' => now()->addDays(7)->toDateString(), 'issued_at' => now()->subMonths(11),
             'issued_by_user_id' => $bploStaff->id,
         ]);
+        /*
+         * Finished eleven months ago, and now it has to SAY so. Nothing read
+         * `decided_at` while `approved` meant decided on its own, so this
+         * filing went out undated and nobody noticed. Since 4 October 2026 an
+         * approved filing with no decision date is one still gathering its
+         * other permits — so undated, a closed demo filing from last year
+         * turned up in officers' live queues. See `Application::isDecided()`.
+         */
+        $app3->update(['decided_at' => now()->subMonths(11)]);
     }
 
     /*
