@@ -197,11 +197,15 @@ export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 /**
  * Keys that are machinery, not answers — never shown to a reader.
  *
- * Both say which OTHER sheet owns a question when two papers print it: the
- * authorised representative (FSIC owns it, CPDD carries it) and the occupancy
- * type and storey count (OBO owns them, BFP carries them). The applicant never
- * sees them and the officer should not either — printed in the review grid they
- * read as a field the applicant answered "OCCUPANCY" to.
+ * Says which OTHER sheet owns a question when two papers print it: the
+ * authorised representative (FSIC owns it, CPDD carries it). The applicant never
+ * sees it and the officer should not either — printed in the review grid it
+ * reads as a field the applicant answered "FSIC" to.
+ *
+ * `occupancy_shared_source` was written until 5 October 2026, when the BFP
+ * sheet carried the occupancy type and storey count from OBO's. The sheets are
+ * separate now (client: *"Make them separate"*); the key stays listed so a
+ * sheet saved while it was written keeps it out of the grid.
  */
 export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
   'authorized_representative_source',
@@ -2650,12 +2654,6 @@ function FsicFields({
   business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
-  /*
-   * The Occupancy sheet owns the occupancy type and the storey count when it
-   * is on the filing — one paper asks both, and the client chose shared
-   * answers over a merged sheet. See the note above the component.
-   */
-  const sharedWithObo = get(data, 'occupancy_shared_source') === 'OCCUPANCY'
   return (
     <div className="space-y-7">
       <section className="space-y-3">
@@ -2724,55 +2722,36 @@ function FsicFields({
             restaurant is "Assembly" to a fire officer — and the applicant is
             the one who knows which.
           */}
-          {sharedWithObo ? (
-            <DerivedField
-              className="grow basis-[16rem]"
-              label={
-                <>
-                  Type of Occupancy / Business Nature
-                  <span className="font-normal text-ink-muted"> (from your Occupancy form)</span>
-                </>
-              }
-              value={get(data, 'occupancy_type')}
+          {/*
+            Asked here, on BFP's own paper, since 5 October 2026. These two were
+            read-only copies of the Occupancy sheet whenever that permit was on
+            the filing, which made this sheet wait on that one. The sheets are
+            separate now — client: "Make them separate" — and each paper asks
+            its own boxes.
+          */}
+          <label className="block grow basis-[16rem]">
+            <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
+            <input
+              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              onChange={(e) => set('occupancy_type', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. Mercantile, Assembly, Business"
+              className={inputCls}
             />
-          ) : (
-            <label className="block grow basis-[16rem]">
-              <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
-              <input
-                value={get(data, 'occupancy_type') || business.lineOfBusiness}
-                onChange={(e) => set('occupancy_type', e.target.value)}
-                readOnly={ro}
-                placeholder="e.g. Mercantile, Assembly, Business"
-                className={inputCls}
-              />
-              <CarriedTag field="occupancy_type" />
-            </label>
-          )}
-          {sharedWithObo ? (
-            <DerivedField
-              className="shrink-0"
-              label={
-                <>
-                  No. of Storeys
-                  <span className="font-normal text-ink-muted"> (from Occupancy)</span>
-                </>
-              }
+            <CarriedTag field="occupancy_type" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Storeys</FieldLabel>
+            <input
+              inputMode="numeric"
               value={get(data, 'building_storeys')}
+              onChange={(e) => set('building_storeys', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum w-[7rem]`}
             />
-          ) : (
-            <label className="block shrink-0">
-              <FieldLabel required>No. of Storeys</FieldLabel>
-              <input
-                inputMode="numeric"
-                value={get(data, 'building_storeys')}
-                onChange={(e) => set('building_storeys', e.target.value)}
-                readOnly={ro}
-                placeholder="e.g. 2"
-                className={`${inputCls} tnum w-[7rem]`}
-              />
-              <CarriedTag field="building_storeys" />
-            </label>
-          )}
+            <CarriedTag field="building_storeys" />
+          </label>
           {/*
             The three the applicant has already given. Floor area is the same
             figure the zoning sheet is assessed on — item 1 of Business
@@ -2799,8 +2778,10 @@ function FsicFields({
       <section className="space-y-3">
         <SectionMarker letter="C" label="Certificate Applied For" />
         {/*
-         * The permits you picked and the application type already decide this,
-         * so the BFP sheet carries it without asking the applicant to repeat it.
+         * The application type already decides this — new or renewal of the
+         * Business Permit — so the BFP sheet carries it without asking the
+         * applicant to repeat it. Never the Occupancy kind on a business filing;
+         * see `OfficeFormAnswers`.
          */}
         <DerivedField
           label={
@@ -2810,7 +2791,7 @@ function FsicFields({
             </>
           }
           value={get(data, 'certificate_applied_for')}
-          hint="Set from the permits and application type you chose in step 1. To change it, go back to Permit Selection."
+          hint="Set from the application type you chose in step 1: a new business or a renewal."
         />
       </section>
 

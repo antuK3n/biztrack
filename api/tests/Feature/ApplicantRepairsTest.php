@@ -54,9 +54,9 @@ it('serves the applicant the rows the office named, and takes their new file', f
 
     $workflow->returnClearance(
         $workflow->pivotFor($app->fresh(), 'FSIC'),
-        'The endorsement is unsigned.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
-        ['FSIC_REQ_OBO_ENDORSEMENT' => 'No signature.'],
+        'The occupancy certificate copy is not certified.',
+        'FSIC_REQ_VALID_COO',
+        ['FSIC_REQ_VALID_COO' => 'Not a certified true copy.'],
     );
 
     $owner = authAs('owner@biztrack.local');
@@ -73,8 +73,8 @@ it('serves the applicant the rows the office named, and takes their new file', f
     $row = collect($rows)->firstWhere('permit_type.code', 'FSIC');
 
     expect($row['state'])->toBe('returned')
-        ->and($row['return_target'])->toBe('FSIC_REQ_OBO_ENDORSEMENT')
-        ->and($row['return_notes']['FSIC_REQ_OBO_ENDORSEMENT'])->toBe('No signature.');
+        ->and($row['return_target'])->toBe('FSIC_REQ_VALID_COO')
+        ->and($row['return_notes']['FSIC_REQ_VALID_COO'])->toBe('Not a certified true copy.');
 
     /*
      * And the slot it names takes a file from them. `ownerMayEdit` reopens
@@ -83,7 +83,7 @@ it('serves the applicant the rows the office named, and takes their new file', f
      */
     test()->withHeaders($owner)
         ->post(
-            "/api/v1/applications/{$app->id}/office-forms/FSIC/requirements/FSIC_REQ_OBO_ENDORSEMENT",
+            "/api/v1/applications/{$app->id}/office-forms/FSIC/requirements/FSIC_REQ_VALID_COO",
             ['file' => UploadedFile::fake()->create('endorsement-signed.pdf', 40, 'application/pdf')],
         )
         ->assertSuccessful();
@@ -114,10 +114,10 @@ it('lets the applicant answer a REFUSAL the same way', function () {
     $workflow->approveClearance($workflow->pivotFor($app->fresh(), 'FSIC'), 'Paperwork fine.');
     $workflow->rejectClearance(
         $workflow->pivotFor($app->fresh(), 'FSIC'),
-        'The endorsement is unsigned.',
+        'The occupancy certificate copy is not certified.',
         'Have it signed, then apply again.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
-        ['FSIC_REQ_OBO_ENDORSEMENT' => 'No signature.'],
+        'FSIC_REQ_VALID_COO',
+        ['FSIC_REQ_VALID_COO' => 'Not a certified true copy.'],
     );
 
     $owner = authAs('owner@biztrack.local');
@@ -128,13 +128,13 @@ it('lets the applicant answer a REFUSAL the same way', function () {
     $row = collect($rows)->firstWhere('permit_type.code', 'FSIC');
 
     expect($row['state'])->toBe('rejected')
-        ->and($row['return_target'])->toBe('FSIC_REQ_OBO_ENDORSEMENT')
-        ->and($row['return_notes']['FSIC_REQ_OBO_ENDORSEMENT'])->toBe('No signature.');
+        ->and($row['return_target'])->toBe('FSIC_REQ_VALID_COO')
+        ->and($row['return_notes']['FSIC_REQ_VALID_COO'])->toBe('Not a certified true copy.');
 
     /* The sheet is theirs again — `ownerMayEdit` allows Rejected. */
     test()->withHeaders($owner)
         ->post(
-            "/api/v1/applications/{$app->id}/office-forms/FSIC/requirements/FSIC_REQ_OBO_ENDORSEMENT",
+            "/api/v1/applications/{$app->id}/office-forms/FSIC/requirements/FSIC_REQ_VALID_COO",
             ['file' => UploadedFile::fake()->create('endorsement-signed.pdf', 40, 'application/pdf')],
         )
         ->assertSuccessful();
@@ -162,8 +162,8 @@ it('tells the applicant when the office changes what it asked for', function () 
 
     $workflow->returnClearance(
         $workflow->pivotFor($app->fresh(), 'FSIC'),
-        'The endorsement is unsigned.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
+        'The occupancy certificate copy is not certified.',
+        'FSIC_REQ_VALID_COO',
         [],
     );
 
@@ -172,7 +172,7 @@ it('tells the applicant when the office changes what it asked for', function () 
     $workflow->amendClearanceReturn(
         $workflow->pivotFor($app->fresh(), 'FSIC'),
         'The completion certificate too.',
-        'FSIC_REQ_OBO_ENDORSEMENT,FSIC_REQ_COMPLETION',
+        'FSIC_REQ_VALID_COO,FSIC_REQ_COMPLETION',
         [],
     );
 
@@ -192,9 +192,9 @@ it('lets an office correct a refusal it got wrong', function () {
     $workflow->approveClearance($workflow->pivotFor($app->fresh(), 'FSIC'), 'Paperwork fine.');
     $workflow->rejectClearance(
         $workflow->pivotFor($app->fresh(), 'FSIC'),
-        'The endorsement is unsigned.',
+        'The occupancy certificate copy is not certified.',
         'Have it signed.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
+        'FSIC_REQ_VALID_COO',
         [],
     );
 
@@ -215,5 +215,5 @@ it('lets an office correct a refusal it got wrong', function () {
          * re-reading it needs most.
          */
         ->and($row->rejected_at)->not->toBeNull()
-        ->and($row->rejection_note)->toBe('The endorsement is unsigned.');
+        ->and($row->rejection_note)->toBe('The occupancy certificate copy is not certified.');
 });

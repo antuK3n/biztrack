@@ -6,26 +6,33 @@ use App\Models\Application;
 use App\Models\DocumentType;
 
 /**
- * BFP's "ATTACHED DOCUMENTARY REQUIREMENTS", which is three lists, not one.
+ * BFP's "ATTACHED DOCUMENTARY REQUIREMENTS", which is two lists here, not one.
  *
  * BFP-QSF-FSED-002 prints a checkbox at the head of each branch and a different
  * set of attachments under it:
  *
- *   FSIC FOR CERTIFICATE OF OCCUPANCY — the building is new or altered and the
- *     Building Official has to endorse it before BFP will look.
  *   FSIC FOR BUSINESS PERMIT · FOR NEW BUSINESS — the building already has its
  *     occupancy certificate and this is a new trade going into it.
  *   FSIC FOR BUSINESS PERMIT · FOR RENEWAL OF BUSINESS — nothing structural has
  *     changed, so BFP wants maintenance evidence rather than construction
  *     evidence.
  *
+ * The paper's third branch, FSIC FOR CERTIFICATE OF OCCUPANCY, is not on a
+ * business filing since 5 October 2026. It asked for OBO's endorsement, the
+ * Certificate of Completion and the occupancy assessment — papers that exist
+ * only after the Building Official has acted — on a sheet filled in parallel
+ * with OBO's, which in turn asked for BFP's FSEC. Client: *"Make them
+ * separate."* That certificate goes with a building, not a trade, and if the
+ * system ever files for one it will be its own filing with its own list; the
+ * five rows are in git history under this date.
+ *
  * ── Which branch, and why nobody is asked ────────────────────────────────────
  *
  * The same expression that already writes the sheet's "Certificate Applied For"
- * box: OCCUPANCY on the filing means the first, otherwise new-or-renewal by
- * application type. Asking the applicant to tick a box the system has already
- * worked out would invite them to tick a different one, and the checklist and
- * the answer printed above it would then disagree on one sheet.
+ * box: new-or-renewal by application type. Asking the applicant to tick a box
+ * the system has already worked out would invite them to tick a different one,
+ * and the checklist and the answer printed above it would then disagree on one
+ * sheet.
  *
  * ── "(if necessary)" is BFP's own wording, and it is kept ───────────────────
  *
@@ -43,48 +50,11 @@ final class FsicRequirements
     /**
      * The rows, in the paper's own order within each branch.
      *
-     * `when` is the branch: 'always', 'occupancy', 'new' or 'renewal'.
+     * `when` is the branch: 'always', 'new', 'renewal' or 'representative'.
      *
      * @var list<array{key: string, label: string, when: string, note: string, carried_from: ?string, blocking?: bool}>
      */
     public const ROWS = [
-        /* ── FSIC for Certificate of Occupancy ───────────────────────────── */
-        [
-            'key' => 'OBO_ENDORSEMENT',
-            'label' => 'Endorsement from the Office of the Local Building Official',
-            'when' => 'occupancy',
-            'note' => 'OBO endorses the building to BFP once it has checked the plans.',
-            'carried_from' => null,
-        ],
-        [
-            'key' => 'COMPLETION',
-            'label' => 'Certificate of Completion',
-            'when' => 'occupancy',
-            'note' => 'Form B-10, notarised and sealed by your architect or civil engineer. The blank form comes from the Office of the Local Building Official.',
-            'carried_from' => null,
-        ],
-        [
-            'key' => 'COO_ASSESSMENT',
-            'label' => 'Assessment fee for the Certificate of Occupancy, certified true copy',
-            'when' => 'occupancy',
-            'note' => 'From OBO, showing what the occupancy certificate was assessed at.',
-            'carried_from' => null,
-        ],
-        [
-            'key' => 'AS_BUILT',
-            'label' => 'As-built plan (if necessary)',
-            'when' => 'occupancy',
-            'note' => 'Only where the building differs from the approved plans.',
-            'carried_from' => null,
-        ],
-        [
-            'key' => 'FSCCR',
-            'label' => 'Fire Safety Compliance and Commissioning Report (if necessary)',
-            'when' => 'occupancy',
-            'note' => 'One set. BFP asks for it where the building has fire protection systems to commission.',
-            'carried_from' => null,
-        ],
-
         /* ── FSIC for Business Permit · new business ─────────────────────── */
         [
             'key' => 'VALID_COO',
@@ -178,11 +148,7 @@ final class FsicRequirements
     {
         $applied = OfficeFormAnswers::derive($application, 'FSIC', [])['certificate_applied_for'] ?? '';
 
-        return match (true) {
-            str_contains($applied, 'Certificate of Occupancy') => 'occupancy',
-            str_contains($applied, 'Renewal') => 'renewal',
-            default => 'new',
-        };
+        return str_contains($applied, 'Renewal') ? 'renewal' : 'new';
     }
 
     /** @return list<array<string, mixed>> */
