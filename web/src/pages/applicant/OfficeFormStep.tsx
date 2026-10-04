@@ -1953,7 +1953,6 @@ function RequirementRow({
    * this stage begins after payment. `code` is null on the sheet row and
    * non-null on the rest, so it carries the distinction on its own.
    */
-  const takesFile = row.code !== null && !readOnly && onChange
   /*
    * Every file on this row. `documents` is the list the API sends now;
    * `document` is its first, and the fallback keeps a row rendering if a
@@ -1966,6 +1965,20 @@ function RequirementRow({
    * business permit", so it is not offered on these.
    */
   const fromPermit = new Set(row.carried_document_ids ?? [])
+  /*
+   * ── A row the business permit already answered is read-only ─────────────
+   *
+   * Client, 5 October 2026, on the zoning checklist: *"Why are some other
+   * fields here already answered? If they came from fields from the business
+   * permit application, then they should not be editable."* The dropzone on
+   * a carried row dates from 30 September, for the applicant whose business
+   * permit had NOTHING attached and who was otherwise stuck. That case keeps
+   * it. A carried row the permit's own copy answers shows that copy and
+   * where it came from, and takes no file — the place to change it is the
+   * business permit's documents, which is where it lives.
+   */
+  const answeredByPermit = row.source === 'carried' && fromPermit.size > 0
+  const takesFile = row.code !== null && !readOnly && onChange && !answeredByPermit
 
   return (
     <div
@@ -2093,8 +2106,20 @@ function RequirementRow({
         </label>
       ) : (
         <>
-          <p className="text-sm font-bold text-ink">{row.label}</p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{row.note}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-ink">
+            {row.label}
+            {row.blocking === true && <span className="-ml-1 text-s-red">*</span>}
+            {answeredByPermit && (
+              <span className="rounded-full bg-royal-tint px-2 py-0.5 text-[11px] font-semibold text-royal">
+                From your Business Permit application
+              </span>
+            )}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+            {answeredByPermit
+              ? 'Already attached to your Business Permit application. To change it, update that attachment.'
+              : row.note}
+          </p>
         </>
       )}
 
