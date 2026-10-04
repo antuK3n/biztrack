@@ -2,6 +2,7 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Business;
@@ -483,4 +484,72 @@ it('draws the Sanitary Permit to Operate as the CHO issues it', function () {
 
     $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
     expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
+});
+
+/*
+ * ── Malabon's Certificate of Occupancy (NBC Form B-13) ──────────────────────
+ *
+ * The City's own two-page spread [client, 5 October 2026], on landscape
+ * Letter: No. is the permit number, the building permit number and date are
+ * the OBO's own entries, the Locational/Zoning line carries the Zoning
+ * Clearance issued on the same filing, and the Building Official signs.
+ */
+it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function () {
+    $seed = ownersPermit();
+    $occupancy = PermitType::where('code', 'OCCUPANCY')->firstOrFail();
+    $permit = Permit::create([
+        'permit_number' => 'OP-TEST-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $occupancy->id,
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+    $zoning = Permit::create([
+        'permit_number' => 'LC-TEST-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => PermitType::where('code', 'ZONING')->value('id'),
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now()->addMinute(),
+    ]);
+    ApplicationOfficeForm::updateOrCreate(
+        ['application_id' => $seed->application_id, 'permit_type_id' => $occupancy->id],
+        ['form_data' => ['building_permit_no' => 'BP-MLB-2024-0318', 'building_permit_date' => '2024-03-18', 'project_name' => 'Two-storey Commercial Building']],
+    );
+    OfficeSignatory::updateOrCreate(
+        ['department_id' => $occupancy->issuing_department_id, 'role' => 'Building Official'],
+        ['name' => 'Engr. Carlos M. Dela Paz', 'sort_order' => 1, 'is_active' => true],
+    );
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['is_occupancy'])->toBeTrue()
+        ->and($cert['occ_building_permit_no'])->toBe('BP-MLB-2024-0318')
+        ->and($cert['occ_building_permit_date'])->toBe('March 18, 2024')
+        ->and($cert['occ_project'])->toBe('Two-storey Commercial Building')
+        ->and($cert['occ_zoning_no'])->toBe($zoning->permit_number)
+        ->and($cert['signatories'])->toBe([['role' => 'Building Official', 'name' => 'Engr. Carlos M. Dela Paz']]);
+
+    authAs('owner@biztrack.local');
+    $pdf = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent());
+    $text = $pdf->getText();
+
+    expect($pdf->getPages())->toHaveCount(1)
+        ->and($text)->toContain('CERTIFICATE OF OCCUPANCY')
+        ->and($text)->toContain('NBC FORM NO. B-13')
+        ->and($text)->toContain($permit->permit_number)
+        ->and($text)->toContain('BP-MLB-2024-0318')
+        ->and($text)->toContain($zoning->permit_number)
+        ->and($text)->toContain('ENGR. CARLOS M. DELA PAZ')
+        ->and($text)->not->toContain('City Mayor');
+
+    // Landscape US Letter: the two pages side by side.
+    $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
+    expect([(int) round($box[2]), (int) round($box[3])])->toBe([792, 612]);
 });

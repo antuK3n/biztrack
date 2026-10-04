@@ -10,6 +10,7 @@ import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit } from '../../lib/types'
 import { FsicSheet } from './FsicSheet'
+import { OccupancySheet } from './OccupancySheet'
 import { SanitarySheet } from './SanitarySheet'
 import { ZoningSheet } from './ZoningSheet'
 
@@ -96,6 +97,16 @@ interface PermitCertificate {
   /** The CHO's Sanitary Permit to Operate, drawn by SanitarySheet [client, 5 October 2026]. */
   is_sanitary?: boolean
   sanitary_classification?: string | null
+  /** Malabon's Certificate of Occupancy (NBC Form B-13), drawn by OccupancySheet. */
+  is_occupancy?: boolean
+  date_submitted?: string | null
+  occ_project?: string | null
+  occ_use?: string | null
+  occ_area?: string | null
+  occ_building_permit_no?: string | null
+  occ_building_permit_date?: string | null
+  occ_zoning_no?: string | null
+  occ_fire_no?: string | null
 }
 
 /**
@@ -290,7 +301,7 @@ export function PermitDetailPage() {
       a single column of fields, and widening them would only stretch ten rows
       of label-and-value across a screen.
     */
-    <div className={`mx-auto ${cert?.is_business_permit || cert?.is_cenro_certificate ? 'max-w-5xl' : 'max-w-3xl'}`}>
+    <div className={`mx-auto ${cert?.is_business_permit || cert?.is_cenro_certificate || cert?.is_occupancy ? 'max-w-5xl' : 'max-w-3xl'}`}>
       {/*
         Print the same paper the download is on: US Letter, landscape.
 
@@ -299,7 +310,7 @@ export function PermitDetailPage() {
         differently shaped certificates of the same permit. `@page` cannot be
         set from a class, which is why it is a tag rather than a utility.
       */}
-      {(cert?.is_business_permit || cert?.is_cenro_certificate) && (
+      {(cert?.is_business_permit || cert?.is_cenro_certificate || cert?.is_occupancy) && (
         <style>{'@media print { @page { size: letter landscape; margin: 0.4in; } }'}</style>
       )}
       {/* The FSIC is a portrait Letter sheet, as the download is. */}
@@ -342,8 +353,14 @@ export function PermitDetailPage() {
         </div>
 
         {/* The permit "document" */}
-        <article className="border-[6px] border-white bg-white px-3 py-5 sm:px-10 sm:py-7 print:border-0 print:p-0">
-          {cert?.is_fsic ? (
+        <article
+          className={`border-[6px] border-white bg-white px-3 py-5 sm:py-7 print:border-0 print:p-0 ${
+            cert?.is_occupancy ? 'sm:px-3' : 'sm:px-10'
+          }`}
+        >
+          {cert?.is_occupancy ? (
+            <OccupancySheet cert={cert} verifyUrl={permit.verify_url} validFrom={permit.valid_from} />
+          ) : cert?.is_fsic ? (
             <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-8 sm:py-6">
               <FsicSheet
                 cert={cert}
