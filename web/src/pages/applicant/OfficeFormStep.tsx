@@ -6,7 +6,7 @@ import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../component
 import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
-import type { OfficeFormRequirement } from '../../lib/types'
+import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
 import { ACCEPT_ATTR, MAX_UPLOAD_BYTES } from './uploads'
 
 /*
@@ -1039,7 +1039,7 @@ function ControlNoField({
  * fields that need it are scattered, the value is the same for all of them,
  * and passing it by hand is how one sheet ends up not getting it.
  */
-const CarriedContext = createContext<string[]>([])
+const CarriedContext = createContext<Record<string, CarriedSource>>({})
 
 /**
  * "From your 2026 application" — the flag on a carried answer.
@@ -1062,12 +1062,20 @@ const CarriedContext = createContext<string[]>([])
  * inventing "2026" would be wrong the moment a business skipped a year.
  */
 function CarriedTag({ field }: { field: string }) {
-  const carried = useContext(CarriedContext)
-  if (! carried.includes(field)) return null
+  const source = useContext(CarriedContext)[field]
+  if (!source) return null
 
+  /*
+   * Two sources, two phrases. The owner's home address comes from the account
+   * since 5 October 2026 (`AccountPrefill`), and "from your previous
+   * application" on a first filing would send the applicant looking for a
+   * filing that does not exist.
+   */
   return (
     <span className="mt-1 block text-xs font-normal text-s-orange-ink">
-      From your previous application — check this is still right
+      {source === 'account'
+        ? 'From your account’s home address — check this is still right'
+        : 'From your previous application — check this is still right'}
     </span>
   )
 }
@@ -3159,7 +3167,7 @@ export function OfficeFormSheet({
   requirements,
   returnTarget = null,
   returnNotes = null,
-  carriedKeys = [],
+  carried = {},
   requirementBusy = null,
   requirementError = null,
   onRequirementChange,
@@ -3195,7 +3203,7 @@ export function OfficeFormSheet({
    * reviewed. Flagged per field by `CarriedTag`; see the note there for why it
    * is not one banner.
    */
-  carriedKeys?: string[]
+  carried?: Record<string, CarriedSource>
   /** The document code with an upload in flight, so one row can say so. */
   requirementBusy?: string | null
   requirementError?: string | null
@@ -3224,7 +3232,7 @@ export function OfficeFormSheet({
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       {/* Which answers are still last year’s; see CarriedTag. */}
-      <CarriedContext.Provider value={carriedKeys}>
+      <CarriedContext.Provider value={carried}>
     <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
       {readOnly && (
         <div className="mb-4 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">

@@ -11,6 +11,7 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\AccountPrefill;
 use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
@@ -49,6 +50,31 @@ class OfficeFormController extends Controller
     private const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued'];
 
     /** GET — owner-of or application.view_all. Derived answers are merged in. */
+    /**
+     * What a sheet is OFFERED, and where each offer came from.
+     *
+     * Two sources, one channel. Last year's answers (`RenewalPrefill`) and the
+     * account's (`AccountPrefill`, 5 October 2026 — the owner's home address,
+     * which the business permit never asked). The previous filing wins where
+     * both speak: it was given on a form the applicant signed. `prefill_from`
+     * names the source per key so the browser's flag can say "from your
+     * previous application" or "from your account" rather than one phrase
+     * that is wrong half the time.
+     *
+     * @return array{prefill: array<string, mixed>, prefill_from: array<string, string>}
+     */
+    private function prefillFor(Application $application, string $code, array $stored): array
+    {
+        $previous = RenewalPrefill::forSheet($application, $code);
+        $account = array_diff_key(AccountPrefill::forSheet($application, $code, $stored), $previous);
+
+        return [
+            'prefill' => $previous + $account,
+            'prefill_from' => array_fill_keys(array_keys($previous), 'previous')
+                + array_fill_keys(array_keys($account), 'account'),
+        ];
+    }
+
     public function index(Request $request, Application $application): JsonResponse
     {
         $this->authorizeView($request, $application);
@@ -136,7 +162,7 @@ class OfficeFormController extends Controller
                  * filing that never saved this sheet. See `RenewalPrefill` for
                  * the three kinds of answer that never carry.
                  */
-                'prefill' => RenewalPrefill::forSheet($application, $code),
+                ...$this->prefillFor($application, $code, $stored[$code]->form_data ?? []),
             ])
             ->values();
 

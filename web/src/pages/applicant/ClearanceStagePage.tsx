@@ -25,6 +25,7 @@ import type {
   Clearance,
   ClearanceMeta,
   OfficeFormRequirement,
+  CarriedSource,
 } from '../../lib/types'
 
 /*
@@ -450,6 +451,8 @@ export function ClearanceStage({
    * flag clear itself, with nothing having to clear it.
    */
   const [offered, setOffered] = useState<Record<string, Record<string, unknown>>>({})
+  /** Where each offered key came from, by sheet; see `prefill_from`. */
+  const [offeredFrom, setOfferedFrom] = useState<Record<string, Record<string, CarriedSource>>>({})
   const [reqBusy, setReqBusy] = useState<string | null>(null)
   const [reqError, setReqError] = useState<string | null>(null)
 
@@ -523,6 +526,7 @@ export function ClearanceStage({
 
               if (Object.keys(carried).length > 0) {
                 setOffered((o) => ({ ...o, [f.permit_type_code]: carried }))
+                setOfferedFrom((o) => ({ ...o, [f.permit_type_code]: f.prefill_from ?? {} }))
               }
               /*
                * Seed the autosave's baseline with what the server just gave us.
@@ -1201,10 +1205,14 @@ export function ClearanceStage({
            * true — which would have shown every carried answer as edited the
            * moment it rendered.
            */
-          carriedKeys={Object.keys(offered[formCode] ?? {}).filter(
-            (key) =>
-              JSON.stringify((officeData[formCode] ?? {})[key]) ===
-              JSON.stringify((offered[formCode] ?? {})[key]),
+          carried={Object.fromEntries(
+            Object.keys(offered[formCode] ?? {})
+              .filter(
+                (key) =>
+                  JSON.stringify((officeData[formCode] ?? {})[key]) ===
+                  JSON.stringify((offered[formCode] ?? {})[key]),
+              )
+              .map((key) => [key, offeredFrom[formCode]?.[key] ?? 'previous']),
           )}
           requirementBusy={reqBusy}
           requirementError={reqError}
