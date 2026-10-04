@@ -11,6 +11,7 @@ use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\SheetRequirements;
 
 /*
  * Per-office forms: the sheet never asks for what the system already knows
@@ -81,13 +82,27 @@ it('does not trust a client-supplied certificate applied for', function () {
         ->toBe('FSIC for Business Permit (Renewal of Business)');
 });
 
-it('derives the occupancy certificate when an occupancy permit is applied for', function () {
+it('stays the Business Permit certificate even with an Occupancy Permit on the same filing', function () {
+    /*
+     * Until 5 October 2026 this derived "FSIC for Certificate of Occupancy"
+     * and the BFP checklist asked for OBO's papers before OBO had issued any.
+     * Client: *"Make them separate."* The two sheets no longer read each
+     * other: no occupancy certificate, no shared answers, no marker.
+     */
     $app = officeFormApp(['FSIC', 'OCCUPANCY']);
 
     $this->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", ['form_data' => []])
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", [
+            'form_data' => ['occupancy_type' => 'Mercantile', 'building_storeys' => '2'],
+        ])
         ->assertOk()
-        ->assertJsonPath('data.form_data.certificate_applied_for', 'FSIC for Certificate of Occupancy');
+        ->assertJsonPath('data.form_data.certificate_applied_for', 'FSIC for Business Permit (New Business)')
+        ->assertJsonPath('data.form_data.occupancy_type', 'Mercantile')
+        ->assertJsonMissingPath('data.form_data.occupancy_shared_source');
+
+    $codes = collect(SheetRequirements::for($app->fresh(), 'FSIC'))->pluck('code')->all();
+    expect($codes)->toContain('FSIC_REQ_VALID_COO')
+        ->and($codes)->not->toContain('FSIC_REQ_OBO_ENDORSEMENT');
 });
 
 it('derives the sanitary and CEC application types from the application record', function () {
