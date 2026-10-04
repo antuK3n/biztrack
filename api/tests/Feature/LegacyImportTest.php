@@ -199,6 +199,37 @@ it('updates on re-import instead of adding a second copy', function () {
         ->and(Permit::where('legacy_id', 'P-1')->first()->valid_until->toDateString())->toBe('2098-06-30');
 });
 
+/*
+ * A re-import refreshes the old register's record; it does not overrule
+ * BizTrack's (admin-audit-import row 41). The status column was written on
+ * every update, so a permit the super admin had since revoked went back to
+ * active the next time the same export was loaded, and /verify called it
+ * valid again — as did a permit a renewal had superseded.
+ */
+it('never brings a revoked or superseded permit back into force on re-import', function () {
+    $rows = [
+        legacyRow(),
+        legacyRow(['legacy_business_id' => 'B-2', 'business_name' => 'Second Store', 'legacy_permit_id' => 'P-2', 'permit_number' => 'OLD-MP-2025-0002']),
+    ];
+    runImport(previewAsAdmin(legacyCsv($rows))['id']);
+
+    $revoked = Permit::where('legacy_id', 'P-1')->firstOrFail();
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/permits/{$revoked->id}/revoke", ['reason' => 'Closed after inspection.'])
+        ->assertOk();
+    $superseded = Permit::where('legacy_id', 'P-2')->firstOrFail();
+    $superseded->update(['status' => PermitStatus::Superseded]); // as a renewal leaves it
+
+    // The same export, loaded again with a later expiry — the documented way to update.
+    $rows[0]['valid_until'] = '2098-06-30';
+    runImport(previewAsAdmin(legacyCsv($rows))['id']);
+
+    expect($revoked->fresh()->status)->toBe(PermitStatus::Revoked)
+        ->and($revoked->fresh()->valid_until->toDateString())->toBe('2098-06-30')
+        ->and($superseded->fresh()->status)->toBe(PermitStatus::Superseded)
+        ->and(test()->getJson('/api/v1/verify/OLD-MP-2025-0001')->json('data.is_valid'))->toBeFalse();
+});
+
 it('rejects a permit number BizTrack already issued, and a business account number already taken', function () {
     $taken = Permit::whereNull('legacy_id')->firstOrFail();
     $takenBan = Business::whereNull('legacy_id')->whereNotNull('ban')->value('ban');

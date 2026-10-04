@@ -2,6 +2,7 @@
 
 namespace App\Support\LegacyImport;
 
+use App\Enums\PermitStatus;
 use App\Models\Business;
 use App\Models\BusinessAddress;
 use App\Models\LegacyOwner;
@@ -43,7 +44,9 @@ use Illuminate\Support\Facades\DB;
  * Once a business HAS an owner account, a re-import no longer rewrites its
  * name, address or owner: from that point the owner keeps those details in
  * BizTrack, and the old export is the stale copy. Its permits are still
- * upserted — a certificate the old system issued is the old system's record.
+ * upserted — a certificate the old system issued is the old system's record —
+ * except that a permit BizTrack has since revoked or superseded keeps that
+ * status (see `apply`).
  *
  * ── Chunks ─────────────────────────────────────────────────────────────────
  *
@@ -213,7 +216,7 @@ class LegacyImporter
             $knownPermit = $lookups->permits[$p['legacy_id']] ?? null;
             $permit = $knownPermit !== null ? Permit::findOrFail($knownPermit['id']) : new Permit;
 
-            $permit->fill([
+            $fields = [
                 'legacy_id' => $p['legacy_id'],
                 'business_id' => $business->id,
                 'permit_type_id' => $p['permit_type_id'],
@@ -221,7 +224,28 @@ class LegacyImporter
                 'valid_from' => $p['valid_from'],
                 'valid_until' => $p['valid_until'],
                 'status' => $p['status'],
-            ]);
+            ];
+
+            /*
+             * ── An end BizTrack wrote is not the export's to undo ─────────
+             *
+             * The status was written on every update, and an old export says
+             * "active" for as long as the certificate's dates run. So the
+             * super admin revoked an imported permit, re-imported the same
+             * file — the documented way to update — and it was active again,
+             * with /verify calling it valid; a permit a renewal had
+             * superseded came back the same way (admin-audit-import row 41).
+             *
+             * Revoked and Superseded are both ends of a permit's life that
+             * happened HERE, after the old system's record was taken, so the
+             * export cannot know about them. The rest of the row is still
+             * the old register's and is still refreshed.
+             */
+            if ($permit->exists && in_array($permit->status, [PermitStatus::Revoked, PermitStatus::Superseded], true)) {
+                unset($fields['status']);
+            }
+
+            $permit->fill($fields);
             if (! $permit->exists) {
                 // Issued on paper: no BizTrack filing, no BizTrack officer.
                 $permit->application_id = null;
