@@ -133,7 +133,7 @@
                 <tr><td>O.R. Number:</td><td class="fsic-fee-value">{{ $or_number ?: ' ' }}</td></tr>
                 <tr><td>Date:</td><td class="fsic-fee-value">{{ $date_paid ?: ' ' }}</td></tr>
             </table>
-            <div class="fsic-control">Tracking ID: <b>{{ $tracking_id ?: '—' }}</b></div>
+            <div class="fsic-control">Business Account No.: <b>{{ $ban ?: '—' }}</b></div>
         </td>
         <td class="fsic-signs">
             @foreach($signatories as $s)

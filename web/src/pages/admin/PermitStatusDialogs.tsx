@@ -220,19 +220,7 @@ export function ChangeStatusDialog({
               ))}
             </div>
           </fieldset>
-          <label className="mt-4 block">
-            <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">Reason</span>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              aria-required="true"
-              className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-            />
-          </label>
-          <p className="mt-1 text-xs text-ink-muted">
-            The owner is notified with this reason, and it is recorded in the status history and the audit log.
-          </p>
+          <RequiredReason value={reason} onChange={setReason} choiceMade={choice !== ''} />
           {error && (
             <p role="alert" className="mt-2 text-xs font-medium text-s-red">
               {error}
@@ -241,6 +229,53 @@ export function ChangeStatusDialog({
         </>
       )}
     </Modal>
+  )
+}
+
+/**
+ * The reason, marked REQUIRED where it is asked for [client, 5 October 2026:
+ * "walang nakalagay na required, make it had sign man lang"]: a red asterisk
+ * with "(required)" for a screen reader, and — while it is empty — a line
+ * saying why Save will not go yet, so the disabled button is never a puzzle.
+ */
+export function RequiredReason({
+  value,
+  onChange,
+  choiceMade = true,
+}: {
+  value: string
+  onChange: (v: string) => void
+  choiceMade?: boolean
+}) {
+  const empty = value.trim() === ''
+  return (
+    <div className="mt-4">
+      <label htmlFor="status-reason" className="flex items-baseline gap-1 text-xs font-bold uppercase tracking-wide text-ink-secondary">
+        Reason
+        <span aria-hidden="true" className="text-s-red">*</span>
+        <span className="sr-only">(required)</span>
+      </label>
+      <textarea
+        id="status-reason"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        required
+        aria-required="true"
+        aria-describedby="status-reason-help"
+        placeholder="State the reason for this change."
+        className={`mt-1.5 w-full rounded-lg border px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-royal ${
+          empty ? 'border-line' : 'border-ink-muted'
+        }`}
+      />
+      <p id="status-reason-help" className="mt-1 text-xs leading-relaxed text-ink-muted">
+        {empty
+          ? choiceMade
+            ? 'Required. Enter a reason to save this change.'
+            : 'Required. Choose a new status and enter a reason to save.'
+          : 'The owner is notified with this reason, and it is kept in the status history and the audit log.'}
+      </p>
+    </div>
   )
 }
 

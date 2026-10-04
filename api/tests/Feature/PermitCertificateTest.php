@@ -427,6 +427,9 @@ it('draws the Zoning Clearance as the CPDO issues it, signed by its administrato
     expect($pdf->getPages())->toHaveCount(1)
         ->and($text)->toContain('ZONING CLEARANCE')
         ->and($text)->toContain('(For Business Permit)')
+        // The Business Account Number, not the BIZ- tracking ID [client, 5 October 2026].
+        ->and($text)->toContain((string) $permit->business->ban)
+        ->and($text)->not->toContain((string) $permit->application->tracking_id)
         ->and($text)->toContain($permit->permit_number)
         ->and($text)->toContain('ZONING CLEARANCE GRANTED')
         ->and($text)->toContain('ROBERTO F. SANTOS')

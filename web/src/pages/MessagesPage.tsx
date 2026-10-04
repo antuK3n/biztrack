@@ -600,6 +600,8 @@ export function MessagesPage() {
   }
 
   const selectedKey = params.get('application')
+  // An office named by the link (?office=<department id>) opens that conversation.
+  const linkedOffice = Number(params.get('office')) || null
   const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
 
   /*
@@ -1296,6 +1298,7 @@ export function MessagesPage() {
               ? { kind: 'general', userId: selected.user_id }
               : { kind: 'application', applicationId: selected.application_id! }
         }
+        initialOfficeId={linkedOffice}
         className="flex-1 px-5 pb-5 pt-4"
         scrollClassName="min-h-0"
         onSent={reload}

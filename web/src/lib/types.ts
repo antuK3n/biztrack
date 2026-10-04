@@ -1164,7 +1164,8 @@ export interface Permit {
   valid_from: string | null
   valid_until: string | null
   days_until_expiry: number | null
-  permit_type: { code: string; name: string }
+  /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
+  permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
   business: { id: number; name: string }
   application: { id: number; tracking_id: string }
   verify_url: string

@@ -31,7 +31,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PermitController extends Controller
 {
-    private array $eager = ['permitType', 'business:id,name', 'application:id,tracking_id'];
+    // The issuing office comes down too, so the owner's screen can name it
+    // and open a conversation with it [client, 5 October 2026].
+    private array $eager = ['permitType.department:id,name', 'business:id,name', 'application:id,tracking_id'];
 
     public function __construct(private WorkflowService $workflow) {}
 
@@ -609,9 +611,34 @@ class PermitController extends Controller
         $user = $request->user();
         $issuer = $permit->permitType?->issuing_department_id;
 
+        /*
+         * And the super admin, on every office's certificates [client, 5
+         * October 2026: "sa super admin, permits page, sa actions may Change
+         * status … kung ano ano ang mga nasa bplo at other offices"] — with
+         * the issuing office's choices, less Revoked (see isSuperAdmin()).
+         */
+        if ($this->isSuperAdmin($request)) {
+            return true;
+        }
+
         return $user->hasPermission('permit.revoke')
             && $issuer !== null
             && (int) $issuer === (int) $user->department_id;
+    }
+
+    /**
+     * The super admin: `user.manage`, and no office of its own.
+     *
+     * It changes any certificate's status with the choices the issuing office
+     * has, EXCEPT Revoked — taken off the super admin on the client's
+     * instruction of 4 October 2026 ("paki tanggal ang revoke sa super
+     * admin"). Revoking stays the issuing office's act.
+     */
+    private function isSuperAdmin(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user->hasPermission('user.manage') && $user->department_id === null;
     }
 
     /**
@@ -637,6 +664,8 @@ class PermitController extends Controller
 
         $options = collect($this->workflow->statusOptionsFor($permit))
             ->except($permit->status->value)
+            // Revoking is the issuing office's, never the super admin's.
+            ->when($this->isSuperAdmin($request), fn ($o) => $o->except(PermitStatus::Revoked->value))
             ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
             ->values()
             ->all();
@@ -670,6 +699,12 @@ class PermitController extends Controller
             $this->mayChangeStatus($request, $permit),
             403,
             'Only the office that issued this permit can change its status.',
+        );
+
+        abort_if(
+            $data['status'] === PermitStatus::Revoked->value && $this->isSuperAdmin($request),
+            403,
+            'The super admin does not revoke permits. The office that issued it does.',
         );
 
         $this->workflow->changePermitStatus($permit, PermitStatus::from($data['status']), $data['reason']);
@@ -749,6 +784,29 @@ class PermitController extends Controller
         ]);
 
         return response()->json(['data' => $entries->values()->all()]);
+    }
+
+    /**
+     * The requirements submitted for this permit: the uploads its office
+     * reads, and the Other Requirements it asked for once approved.
+     *
+     * [Client, 5 October 2026: "sa my permits, sa business owner side … make
+     * it andon na rin ang Requirements Submitted".] The SAME list the Permits
+     * table's Requirements Submitted column shows an office, built by the
+     * same code (PermitRegisterResource::requirementsFor), so the owner and
+     * the office cannot see two different answers.
+     */
+    public function requirements(Request $request, Permit $permit): JsonResponse
+    {
+        $this->authorizeView($request, $permit);
+
+        $permit->load([
+            'permitType.documentTypes',
+            'application.documents.documentType.permitTypes',
+            'application.documents.requestResponses.officerRequest:id,department_id,title',
+        ]);
+
+        return response()->json(['data' => (new PermitRegisterResource($permit))->requirementsFor() ?? []]);
     }
 
     public function pdf(Request $request, Permit $permit): Response
@@ -1286,6 +1344,14 @@ class PermitController extends Controller
              */
             ...$face,
             'tracking_id' => $permit->application?->tracking_id,
+            /*
+             * The Business Account Number on EVERY certificate, where the
+             * tracking ID used to print [client, 5 October 2026: "Business
+             * Account Number BP-2026-000X na ang ilalagay wag ang tracking id
+             * na may biz"]. The BAN names the business; a BIZ- number names one
+             * filing of it, and a renewal takes a new one.
+             */
+            'ban' => $permit->business?->ban,
             'valid_from' => optional($permit->valid_from)->format('F j, Y'),
             'valid_until' => optional($permit->valid_until)->format('F j, Y'),
             'signatories' => $signatories,

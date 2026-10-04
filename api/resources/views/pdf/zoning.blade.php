@@ -80,8 +80,8 @@
         <tr>
             <td class="zoning-label">VALID UNTIL:</td>
             <td class="zoning-value zoning-half">{{ strtoupper($valid_until ?: ' ') }}</td>
-            <td class="zoning-label zoning-label-right">TRACKING ID:</td>
-            <td class="zoning-value zoning-nowrap">{{ $tracking_id ?: ' ' }}</td>
+            <td class="zoning-label zoning-label-right">BUSINESS ACCOUNT NO.:</td>
+            <td class="zoning-value zoning-nowrap">{{ $ban ?: ' ' }}</td>
         </tr>
     </table>
     <div class="zoning-decision">DECISION &ndash; <b>ZONING CLEARANCE GRANTED</b></div>

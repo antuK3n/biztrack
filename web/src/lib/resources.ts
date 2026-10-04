@@ -1493,6 +1493,14 @@ export const permits = {
   /** Change status — the issuing office only; the server says no to anyone else. */
   changeStatus: (id: number, status: string, reason: string) =>
     unwrap<PermitRegisterRow>(api.post(`/permits/${id}/status`, { status, reason })),
+  /**
+   * The requirements submitted for a permit — the same list the Permits
+   * table's Requirements Submitted column shows its office.
+   */
+  requirements: (id: number) =>
+    unwrap<
+      { id: number; name: string; filename: string; status: string | null; download_url: string; from_request?: boolean }[]
+    >(api.get(`/permits/${id}/requirements`)),
   /** Every status the permit has held, newest first. */
   history: (id: number) => unwrap<PermitHistoryEntry[]>(api.get(`/permits/${id}/history`)),
 }
