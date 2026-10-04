@@ -75,6 +75,8 @@ class PermitController extends Controller
          * row, so a 25-row page is two queries rather than fifty.
          */
         'application.documents.documentType.permitTypes',
+        // The office that asked, for a file sent in answer to a requirement.
+        'application.documents.requestResponses.officerRequest:id,department_id,title',
         'permitType.documentTypes',
     ];
 

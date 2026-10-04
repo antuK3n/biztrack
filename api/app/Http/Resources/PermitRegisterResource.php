@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\OfficerRequestStatus;
+use App\Models\ApplicationDocument;
 use App\Models\PermitType;
 use App\Support\OfficeFormAnswers;
 use App\Support\PermitFace;
@@ -191,10 +193,30 @@ class PermitRegisterResource extends PermitResource
          *   4. on the Mayor's Permit only: nobody else claims it. BPLO receives
          *      every filing at intake, so an upload no office's list names —
          *      the Cedula, for one — is BPLO's to read rather than nobody's.
+         *
+         * Ahead of all four: a file sent in answer to an office's requirement
+         * (Other Requests) belongs to the office that ASKED for it, whichever
+         * office that is, BPLO included [client, 4 October 2026: "kung ano mang
+         * offices ang nanghingi sa other request, rerefelct din dapat sa
+         * requirements submitted"]. Such a file is typed "Other Requirements",
+         * which no permit type lists, so without this it fell through to rule 4
+         * and showed on the Mayor's Permit instead of the asking office's row.
          */
-        $belongs = function ($d) use ($wanted, $code): bool {
+        $office = (int) $this->permitType->issuing_department_id;
+
+        $belongs = function ($d) use ($wanted, $code, $office): bool {
             $type = $d->documentType;
             $typeCode = (string) ($type?->code ?? '');
+            /*
+             * And only once that office APPROVED the reply [client, 4 October
+             * 2026: "make sure na approved yung mga files submitted bago
+             * magreflect"]. A reply still For Review, or refused, is shown on
+             * no row at all — not on the asking office's, and not on the
+             * Mayor's Permit by falling through to rule 4.
+             */
+            if ($d->relationLoaded('requestResponses') && $d->requestResponses->isNotEmpty()) {
+                return in_array($office, $this->approvingOffices($d), true);
+            }
 
             if (in_array($d->document_type_id, $wanted, true) || $d->permit_type_id === $this->permit_type_id) {
                 return true;
@@ -215,13 +237,45 @@ class PermitRegisterResource extends PermitResource
             ->sortBy('created_at')
             ->map(fn ($d) => [
                 'id' => $d->id,
-                'name' => $d->documentType?->name ?? 'Document',
+                // A requested file is named by what the office asked for, not
+                // by the catch-all "Other Requirements" type it is filed under.
+                'name' => $this->requestTitle($d) ?? $d->documentType?->name ?? 'Document',
                 'filename' => $d->original_filename,
                 'status' => $d->verification_status,
                 'download_url' => '/documents/'.$d->id.'/download',
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The offices that asked for this file AND approved the reply carrying
+     * it, as department ids. Filing uploads are not checked here: they reach
+     * this table only on an issued permit, and issuing it is the office's
+     * approval of the filing they were part of.
+     *
+     * @return list<int>
+     */
+    private function approvingOffices(ApplicationDocument $document): array
+    {
+        return $document->requestResponses
+            ->filter(fn ($r) => $r->review_outcome === OfficerRequestStatus::Fulfilled->value)
+            ->map(fn ($r) => $r->officerRequest?->department_id)
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** The title of the requirement this file answered, if it answered one. */
+    private function requestTitle(ApplicationDocument $document): ?string
+    {
+        if (! $document->relationLoaded('requestResponses')) {
+            return null;
+        }
+
+        return $document->requestResponses->first()?->officerRequest?->title;
     }
 
     /**
