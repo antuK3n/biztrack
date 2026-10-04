@@ -24,6 +24,14 @@ WORKDIR /var/www/api
 COPY api/composer.json api/composer.lock ./
 RUN composer install --no-dev --no-scripts --no-autoloader --no-interaction --prefer-dist
 COPY api/ ./
+# The zoning data the API reads at run time from beside itself —
+# base_path('../docs/zoning-ordinance') and base_path('../web/public/zoning') —
+# at those paths. Copying api/ alone left them out, and on biztrack.page every
+# trade came back "not on the list" (zoning-check row 42, 5 October 2026).
+# AppImageDataTest fails when the code reads a file outside api/ that no
+# COPY here puts in the image.
+COPY docs/zoning-ordinance/ /var/www/docs/zoning-ordinance/
+COPY web/public/zoning/ /var/www/web/public/zoning/
 RUN composer dump-autoload --no-dev --optimize --classmap-authoritative \
     && php artisan package:discover --ansi \
     && chown -R www-data:www-data storage bootstrap/cache
