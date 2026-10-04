@@ -91,6 +91,18 @@ order whose payment page said it had expired unpaid, and BizTrack credited
 is kept on the payment as a note) but its answer completes and fails nothing.
 On a server KwikPay cannot reach, such as localhost, nothing then turns Paid.
 
+A third choice, **its answer's message** (`read-message`), fits the gateway at
+`payment-gateway-kwgu.onrender.com` as it actually behaves: its `/api/query`
+answers `status "5"` whenever the lookup works, and the order's state is the
+message — "Transaction completed successfully" (paid), "Transaction is waiting
+to be processed" (waiting) or "Transaction failed" (failed). That is how the
+gateway's own code reads KwikPay (`mapQueryState` in its kwikpay.processor.ts).
+biztrack.page uses this since 4 October 2026.
+
+biztrack.page runs its test charge at **₱50** (`KWIKPAY_CHARGE_OVERRIDE=50.00`
+on the server): the processor did not register a ₱1 GCash payment on 4 October
+2026, and ₱50 is known to work.
+
 The Debug page is closed by default. It opens only from the server, for a
 few hours at a time, and closes by itself after that:
 
@@ -117,6 +129,7 @@ php artisan biztrack:payment-gateway test-charge  # KwikPay collects the test am
 php artisan biztrack:payment-gateway full-charge  # KwikPay collects the full bill
 php artisan biztrack:payment-gateway callback-only  # only the signed callback marks a payment paid (default)
 php artisan biztrack:payment-gateway trust-query  # KwikPay's /api/query answer settles payments too
+php artisan biztrack:payment-gateway read-message  # the answer's MESSAGE settles payments (this gateway's way)
 ```
 
 ### Over the API (super admin only)
