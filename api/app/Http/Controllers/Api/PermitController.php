@@ -8,6 +8,7 @@ use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\ApplicationDocument;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
@@ -627,7 +628,9 @@ class PermitController extends Controller
             'business.address.barangay',
             'business.owner',
             'business.lines.psicCode',
-            'application',
+            // `payments` for the receipt line the paper form prints — see the
+            // Mayor's Permit block below.
+            'application.payments',
             // For the signatory fallback on permits frozen before the face
             // carried one — see PermitFace::forPrinting.
             'issuedBy',
@@ -671,7 +674,89 @@ class PermitController extends Controller
 
         $signatories = [...$block, ...$office];
 
+        /*
+         * ── The Mayor's Permit signs twice, not three times ─────────────────
+         *
+         * The City's form has two ruled lines: the Mayor on the left and the
+         * Licensing Officer, captioned OIC-BPLO, on the right. Our block adds
+         * a third — the per-filing "Officer-in-Charge" frozen at issue — and
+         * on this certificate that is wrong twice over. It is not on the
+         * paper, and the Mayor's Permit is released at PAYMENT, so on most
+         * filings no officer holds it yet and the line printed empty.
+         *
+         * Dropped only where OIC-BPLO is there to take its place. An LGU that
+         * has not named one keeps the per-filing officer rather than losing a
+         * signature altogether.
+         */
+        if ($permit->permitType?->code === PermitType::OUTCOME_CODE) {
+            $hasOic = collect($signatories)
+                ->contains(fn (array $s) => strtolower($s['role']) === 'oic-bplo');
+
+            if ($hasOic) {
+                $signatories = array_values(array_filter(
+                    $signatories,
+                    fn (array $s) => strtolower($s['role']) !== 'officer-in-charge',
+                ));
+            }
+        }
+
+        /*
+         * ── The Mayor's Permit is a different sheet ─────────────────────────
+         *
+         * The City's own form, photographed at the BPLO counter [client,
+         * 4 October 2026], asks for seven things no clearance does: the
+         * Business Account Number and the Mayor's Permit Number in their own
+         * boxes at the head, the floor AREA and the number of EMPLOYEES beside
+         * the date of issue, and the amount paid with its OR number and date
+         * along the fee line.
+         *
+         * They are gathered only for that permit type. A Sanitary Permit has
+         * no amount paid of its own — the fee is assessed once, against the
+         * filing — so printing "AMOUNT PAID" on a clearance would attach the
+         * business permit's receipt to a document it did not buy.
+         *
+         * Every one is nullable and every one prints blank rather than absent.
+         * The paper has a ruled box for each, and a counter clerk fills what
+         * the system does not know; a certificate that silently drops a row is
+         * harder to read against the paper than one with an empty line.
+         */
+        $isBusinessPermit = $permit->permitType?->code === PermitType::OUTCOME_CODE;
+
+        $mayorsPermitFields = [];
+
+        if ($isBusinessPermit) {
+            $profile = $permit->application?->fee_profile ?? [];
+
+            /*
+             * The settled payment, not the latest. A filing can carry an
+             * abandoned online order beside the one that actually paid, and
+             * the OR number on the certificate has to be the one the money
+             * arrived under.
+             */
+            $paid = $permit->application?->payments
+                ?->whereNotNull('paid_at')
+                ->sortBy('paid_at')
+                ->last();
+
+            $mayorsPermitFields = [
+                'ban' => $permit->business?->ban,
+                'area_sqm' => isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                    ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+                    : null,
+                'employees' => isset($profile['employees']) && $profile['employees'] !== null
+                    ? (string) (int) $profile['employees']
+                    : null,
+                'amount_paid' => $paid ? '₱'.number_format((float) $paid->amount, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+            ];
+        }
+
         return [
+            // Which sheet to draw. The views branch on this rather than on the
+            // permit type's name, which is a label and may be reworded.
+            'is_business_permit' => $isBusinessPermit,
+            ...$mayorsPermitFields,
             'permit_number' => $permit->permit_number,
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',
             'department_name' => $permit->permitType?->department?->name,

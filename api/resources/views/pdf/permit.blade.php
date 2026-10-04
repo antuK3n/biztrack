@@ -75,6 +75,21 @@
 
         .rule { height: 3px; background: #0025cc; opacity: 0.7; margin-top: 16px; }
 
+        /*
+         * The Mayor's Permit's own furniture. Boxes are ruled on all four
+         * sides because the City's form is: a reader holding the paper beside
+         * the print should see the same shapes in the same places.
+         */
+        .number-cell { width: 150px; vertical-align: top; padding-right: 10px; }
+        .box-label { font-size: 6.5px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; color: #1a1a1a; margin-top: 5px; }
+        .box { border: 1px solid #555; padding: 3px 5px; font-size: 9px; font-weight: bold; margin-top: 2px; min-height: 11px; }
+        table.fields.triple { width: 100%; margin-top: 8px; }
+        table.fields.triple td { width: 33.33%; padding-right: 10px; vertical-align: top; }
+        .fee-line { font-size: 9px; color: #1a1a1a; margin-top: 7px; }
+        .fee-label { font-size: 8px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; }
+        .enforcement { text-align: center; font-size: 8px; font-weight: bold; margin-top: 22px; color: #1a1a1a; }
+        .enforcement .stop { color: #c11212; }
+        .expires { text-align: center; font-size: 8px; font-weight: bold; letter-spacing: 0.4px; margin-top: 4px; color: #1a1a1a; }
         .remarks-label { font-size: 8.5px; font-weight: bold; letter-spacing: 0.6px; color: #555; text-transform: uppercase; margin-top: 12px; }
         .remarks-box { border: 1px solid #d5d9e2; height: 46px; margin-top: 3px; }
 
@@ -108,6 +123,17 @@
                 <div class="city">CITY OF MALABON</div>
                 <div class="office">{{ strtoupper($department_name ?? 'Business Permits and Licensing Office') }}</div>
             </td>
+            {{-- The City's two numbered boxes, on the Mayor's Permit only.
+                 A clearance has no Business Account Number on its face and
+                 prints its number in the field grid below. --}}
+            @if(($is_business_permit ?? false))
+                <td class="number-cell">
+                    <div class="box-label">Business Account Number</div>
+                    <div class="box">{{ $ban ?: ' ' }}</div>
+                    <div class="box-label">Mayor's Permit Number</div>
+                    <div class="box">{{ $permit_number }}</div>
+                </td>
+            @endif
             <td class="qr-cell">
                 @if($qr)
                     <img src="{{ $qr }}" alt="Verification QR code">
@@ -134,21 +160,41 @@
                 ? ['text' => $value, 'class' => 'value']
                 : ['text' => $absent, 'class' => 'value absent'];
         };
-        $rows = [
-            ['Name of Owner', $cell($owner_name)],
-            ['Business Name', $cell($business_name, 'Business removed from register')],
-        ];
-        if ($trade_name) {
-            $rows[] = ['Trade Name', $cell($trade_name)];
+        $fullAddress = collect([$address, $barangay, $city])->filter()->implode(', ') ?: null;
+        $mayors = $is_business_permit ?? false;
+
+        /*
+         * The Mayor's Permit carries the City's own three rows and nothing
+         * else at the head: owner, business, address. Its number is already in
+         * the box above, its line of business and receipt sit under the rule,
+         * and the issue date shares a line with area and headcount. A
+         * clearance keeps the full grid, which is the only place its number
+         * and tracking ID appear.
+         */
+        $rows = $mayors
+            ? [
+                ['Name of Owner', $cell($owner_name)],
+                ['Business Name', $cell($business_name, 'Business removed from register')],
+                ['Address', $cell($fullAddress)],
+            ]
+            : [
+                ['Name of Owner', $cell($owner_name)],
+                ['Business Name', $cell($business_name, 'Business removed from register')],
+            ];
+
+        if (! $mayors) {
+            if ($trade_name) {
+                $rows[] = ['Trade Name', $cell($trade_name)];
+            }
+            $rows[] = ['Business Address', $cell($fullAddress)];
+            if ($line_of_business) {
+                $rows[] = ['Line of Business', $cell($line_of_business)];
+            }
+            $rows[] = ['Permit No.', $cell($permit_number)];
+            $rows[] = ['Date of Issue', $cell($valid_from)];
+            $rows[] = ['Valid Until', $cell($valid_until)];
+            $rows[] = ['Tracking ID', $cell($tracking_id)];
         }
-        $rows[] = ['Business Address', $cell(collect([$address, $barangay, $city])->filter()->implode(', ') ?: null)];
-        if ($line_of_business) {
-            $rows[] = ['Line of Business', $cell($line_of_business)];
-        }
-        $rows[] = ['Permit No.', $cell($permit_number)];
-        $rows[] = ['Date of Issue', $cell($valid_from)];
-        $rows[] = ['Valid Until', $cell($valid_until)];
-        $rows[] = ['Tracking ID', $cell($tracking_id)];
     @endphp
 
     <table class="fields">
@@ -160,7 +206,29 @@
         @endforeach
     </table>
 
+    {{-- Date of issue, area and headcount share one line, as the paper sets
+         them. Only on the Mayor's Permit; a clearance has neither figure. --}}
+    @if($mayors)
+        <table class="fields triple">
+            <tr>
+                <td><div class="box-label">Date of Issue</div><div class="box">{{ $valid_from ?: ' ' }}</div></td>
+                <td><div class="box-label">Area</div><div class="box">{{ $area_sqm ?: ' ' }}</div></td>
+                <td><div class="box-label">Employees</div><div class="box">{{ $employees ?: ' ' }}</div></td>
+            </tr>
+        </table>
+    @endif
+
     <div class="rule"></div>
+
+    {{-- The fee line, under the rule, exactly where the City prints it. --}}
+    @if($mayors)
+        <div class="fee-line"><span class="fee-label">Line of Business:</span> {{ $line_of_business ?: ' ' }}</div>
+        <div class="fee-line">
+            <span class="fee-label">Amount Paid:</span> {{ $amount_paid ?: ' ' }}
+            &nbsp;&nbsp;&nbsp;<span class="fee-label">OR No.:</span> {{ $or_number ?: ' ' }}
+            &nbsp;&nbsp;&nbsp;<span class="fee-label">Date Paid:</span> {{ $date_paid ?: ' ' }}
+        </div>
+    @endif
 
     <div class="remarks-label">Remarks</div>
     <div class="remarks-box"></div>
@@ -189,6 +257,17 @@
             @endforeach
         </tr>
     </table>
+
+    {{-- The City's own enforcement terms, off the paper, red where the paper
+         sets them red. Only on the sheet that carries them. --}}
+    @if($mayors)
+        <div class="enforcement">
+            <span class="stop">Subject for inspection.</span>
+            Display in a conspicuous place at business establishment.
+            <span class="stop">Not valid without official receipt.</span>
+        </div>
+        <div class="expires">(THIS PERMIT WILL EXPIRE ON {{ strtoupper($valid_until ?: '') }})</div>
+    @endif
 
     <div class="note">
         Subject to revocation for non-compliance with existing laws, ordinances, rules and regulations.<br>

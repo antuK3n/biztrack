@@ -49,6 +49,66 @@ interface PermitCertificate {
   /** Admin-edited office signatories; never a name compiled into this file. */
   signatories: { role: string; name: string }[]
   verify_url: string
+  /*
+   * ── The Mayor's Permit prints the City's own form ────────────────────────
+   *
+   * The seven below are sent only when `is_business_permit`, because they are
+   * only on that sheet: the BPLO form photographed at the counter [client,
+   * 4 October 2026] heads with a Business Account Number and a Mayor's Permit
+   * Number, asks the floor area and headcount beside the issue date, and
+   * carries the receipt along the fee line. A clearance has none of that — its
+   * fee was assessed against the filing, not against it.
+   */
+  is_business_permit?: boolean
+  ban?: string | null
+  area_sqm?: string | null
+  employees?: string | null
+  amount_paid?: string | null
+  or_number?: string | null
+  date_paid?: string | null
+}
+
+/**
+ * A ruled box with its caption outside it, as the paper draws them.
+ *
+ * The caption sits to the LEFT on the wide rows and ABOVE on the short ones,
+ * which is how the form itself is set: NAME OF OWNER runs the width of the
+ * sheet, while DATE OF ISSUE, AREA and EMPLOYEES share a line in thirds.
+ *
+ * An empty box is drawn, never collapsed. The City's form has a ruled line for
+ * every field whether or not the counter filled it, and a certificate that
+ * silently drops a row cannot be read against the paper it copies.
+ */
+function PaperField({
+  label,
+  value,
+  stacked = false,
+}: {
+  label: string
+  value: string | null | undefined
+  stacked?: boolean
+}) {
+  if (stacked) {
+    return (
+      <div className="min-w-0">
+        <p className="text-[9px] font-bold uppercase tracking-wide text-ink sm:text-[10px]">{label}</p>
+        <p className="mt-1 min-h-[1.6rem] truncate border border-ink/70 px-2 py-1 text-[11px] font-semibold text-ink sm:text-sm">
+          {value || ' '}
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <p className="w-28 shrink-0 text-[9px] font-bold uppercase tracking-wide text-ink sm:w-40 sm:text-[11px]">
+        {label}
+      </p>
+      <p className="min-h-[1.7rem] min-w-0 flex-1 truncate border border-ink/70 px-2.5 py-1 text-[11px] font-semibold text-ink sm:text-sm">
+        {value || ' '}
+      </p>
+    </div>
+  )
 }
 
 function CertField({
@@ -264,9 +324,42 @@ export function PermitDetailPage() {
                   {cert?.department_name ?? 'Business Permits and Licensing Office'}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-center gap-1.5 self-center sm:self-start">
-                <QRCodeSVG value={permit.verify_url} size={92} level="M" />
-                <p className="text-[10px] text-ink-muted">Scan to verify</p>
+              <div className="flex shrink-0 items-start gap-4 self-center sm:self-start">
+                {/*
+                  The two numbered boxes the City's form heads with, and they
+                  are the reason this sheet can be checked against a paper one
+                  at a counter: the Business Account Number identifies the
+                  payer in the register, the Mayor's Permit Number identifies
+                  the certificate.
+
+                  Only on the Mayor's Permit. A clearance has no BAN box on
+                  its face, and its number is already printed in the field
+                  list below.
+                */}
+                {cert?.is_business_permit && (
+                  <div className="hidden w-44 shrink-0 space-y-2 sm:block">
+                    <div>
+                      <p className="text-[8px] font-bold uppercase tracking-wide text-ink">
+                        Business Account Number
+                      </p>
+                      <p className="tnum mt-0.5 min-h-[1.5rem] truncate border border-ink/70 px-2 py-0.5 text-[11px] font-semibold text-ink">
+                        {cert.ban || ' '}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-bold uppercase tracking-wide text-ink">
+                        Mayor&rsquo;s Permit Number
+                      </p>
+                      <p className="tnum mt-0.5 min-h-[1.5rem] truncate border border-ink/70 px-2 py-0.5 text-[11px] font-semibold text-ink">
+                        {permit.permit_number}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-col items-center gap-1.5">
+                  <QRCodeSVG value={permit.verify_url} size={92} level="M" />
+                  <p className="text-[10px] text-ink-muted">Scan to verify</p>
+                </div>
               </div>
             </header>
 
@@ -341,31 +434,110 @@ export function PermitDetailPage() {
               A certificate reading down one aligned column is both correct and
               quicker to read than two ragged ones.
             */}
-            <div className="mt-6 grid gap-3">
-              <CertField label="Name of Owner" value={ownerName} />
-              <CertField
-                label="Business Name"
-                value={cert ? cert.business_name : permit.business?.name}
-                absent="Business removed from register"
-              />
-              {cert?.trade_name && <CertField label="Trade Name" value={cert.trade_name} />}
-              <CertField label="Business Address" value={address} />
-              {cert?.line_of_business && (
-                <CertField label="Line of Business" value={cert.line_of_business} />
-              )}
-              <CertField label="Permit No." value={permit.permit_number} />
-              <CertField label="Permit Type" value={permit.permit_type.name} />
-              <CertField label="Date of Issue" value={formatDate(permit.valid_from)} />
-              <CertField label="Valid Until" value={formatDate(permit.valid_until)} />
-              {/* Approved filings leave the tracking list; this walks back to one. */}
-              <CertField
-                label="Tracking ID"
-                value={permit.application?.tracking_id ?? null}
-                to={permit.application ? `/applications/${permit.application.id}` : undefined}
-              />
-            </div>
+            {cert?.is_business_permit ? (
+              /*
+                ── The City's own Business Permit form ──────────────────────
 
-            <div className="mt-5 h-1 bg-royal/70" />
+                Laid out from the sheet the BPLO issues over the counter
+                [client, 4 October 2026]: ruled boxes rather than a label and
+                value list, the three short facts sharing one line, the fee
+                line under the rule, and REMARKS as a box a hand writes in.
+
+                The Malabon Ahon mark on the paper is left off deliberately —
+                the client asked only that the city seal we already hold stays
+                and that the details match. A second logo we do not have an
+                asset for would print as a gap.
+              */
+              <>
+                <div className="mt-6 grid gap-3">
+                  <PaperField label="Name of Owner" value={ownerName} />
+                  <PaperField
+                    label="Business Name"
+                    value={cert.business_name ?? 'Business removed from register'}
+                  />
+                  <PaperField label="Address" value={address} />
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <PaperField stacked label="Date of Issue" value={formatDate(permit.valid_from)} />
+                  <PaperField stacked label="Area" value={cert.area_sqm} />
+                  <PaperField stacked label="Employees" value={cert.employees} />
+                </div>
+
+                {/* The paper's own rule, in the city's blue. */}
+                <div className="mt-5 h-1.5 rounded-sm bg-gradient-to-r from-royal to-royal/40" />
+
+                <div className="mt-4 space-y-2.5">
+                  <p className="flex flex-wrap items-baseline gap-2 text-[11px] font-bold uppercase tracking-wide text-ink">
+                    Line of Business:
+                    <span className="font-semibold normal-case tracking-normal text-ink-secondary">
+                      {cert.line_of_business || ' '}
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-x-8 gap-y-2 text-[11px] font-bold uppercase tracking-wide text-ink">
+                    <p className="flex items-baseline gap-2">
+                      Amount Paid:
+                      <span className="tnum font-semibold normal-case tracking-normal text-ink-secondary">
+                        {cert.amount_paid || '    '}
+                      </span>
+                    </p>
+                    <p className="flex items-baseline gap-2">
+                      OR No.:
+                      <span className="tnum font-semibold normal-case tracking-normal text-ink-secondary">
+                        {cert.or_number || '    '}
+                      </span>
+                    </p>
+                    <p className="flex items-baseline gap-2">
+                      Date Paid:
+                      <span className="font-semibold normal-case tracking-normal text-ink-secondary">
+                        {cert.date_paid || '    '}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                {/*
+                  Remarks, and on THIS sheet it is on screen as well as in
+                  print. The generic certificate hides it on screen because it
+                  is furniture; here it is a box the City's form draws and a
+                  reader comparing the two would miss it.
+                */}
+                <div className="mt-4 flex items-start gap-3">
+                  <p className="w-20 shrink-0 pt-1 text-[9px] font-bold uppercase tracking-wide text-ink sm:w-24 sm:text-[11px]">
+                    Remarks:
+                  </p>
+                  <div className="h-16 flex-1 border border-ink/70" />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mt-6 grid gap-3">
+                  <CertField label="Name of Owner" value={ownerName} />
+                  <CertField
+                    label="Business Name"
+                    value={cert ? cert.business_name : permit.business?.name}
+                    absent="Business removed from register"
+                  />
+                  {cert?.trade_name && <CertField label="Trade Name" value={cert.trade_name} />}
+                  <CertField label="Business Address" value={address} />
+                  {cert?.line_of_business && (
+                    <CertField label="Line of Business" value={cert.line_of_business} />
+                  )}
+                  <CertField label="Permit No." value={permit.permit_number} />
+                  <CertField label="Permit Type" value={permit.permit_type.name} />
+                  <CertField label="Date of Issue" value={formatDate(permit.valid_from)} />
+                  <CertField label="Valid Until" value={formatDate(permit.valid_until)} />
+                  {/* Approved filings leave the tracking list; this walks back to one. */}
+                  <CertField
+                    label="Tracking ID"
+                    value={permit.application?.tracking_id ?? null}
+                    to={permit.application ? `/applications/${permit.application.id}` : undefined}
+                  />
+                </div>
+
+                <div className="mt-5 h-1 bg-royal/70" />
+              </>
+            )}
 
             {/*
               ── Remarks is paper furniture ─────────────────────────────────
@@ -404,6 +576,26 @@ export function PermitDetailPage() {
               which on a document about authenticity looks like a broken link
               rather than a long one.
             */}
+            {/*
+              The City's own warning, word for word off the paper, and only on
+              the sheet that carries it. It is set in red on the form because
+              the three sentences are the enforcement terms — display it, it is
+              inspectable, and it is void without the receipt — so they are red
+              here too. The expiry line follows, as it does on the paper.
+            */}
+            {cert?.is_business_permit && (
+              <div className="mt-8 space-y-1 text-center">
+                <p className="text-[10px] font-bold leading-relaxed">
+                  <span className="text-s-red">Subject for inspection.</span>
+                  <span className="text-ink"> Display in a conspicuous place at business establishment. </span>
+                  <span className="text-s-red">Not valid without official receipt.</span>
+                </p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink">
+                  (This permit will expire on {formatDate(permit.valid_until) || ' '})
+                </p>
+              </div>
+            )}
+
             <p className="mt-8 text-center text-[10px] leading-relaxed text-ink-muted">
               Subject to revocation for non-compliance with existing laws, ordinances, rules and
               regulations. Verify authenticity at
