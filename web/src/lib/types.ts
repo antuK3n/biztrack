@@ -2939,6 +2939,12 @@ export interface PrefillResult {
    * browser, which could hide the permit being renewed on page two.
    */
   renewable_permits: Permit[]
+  /**
+   * The permits above that a submitted renewal is already carrying. The
+   * picker shows them greyed out, labelled `Renewal in progress`; the server
+   * refuses a second renewal of them either way (`RenewablePermit`).
+   */
+  renewal_in_progress_permit_ids?: number[]
   last_application: { id: number; permit_type_ids: number[] } | null
   suggested_permit_type_ids: number[]
   /**

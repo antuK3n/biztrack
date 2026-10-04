@@ -2318,8 +2318,17 @@ function IdentifyFilingModal({
          * when the list still contains it is what makes reopening this dialog
          * to change something else non-destructive.
          */
+        /*
+         * Nor may one that another filing is already renewing: the server
+         * refuses it, and keeping the tick would carry the refusal to the
+         * last screen.
+         */
         setPermitIds((current) =>
-          current.filter((id) => (result.renewable_permits ?? []).some((p) => p.id === id)),
+          current.filter(
+            (id) =>
+              (result.renewable_permits ?? []).some((p) => p.id === id) &&
+              !(result.renewal_in_progress_permit_ids ?? []).includes(id),
+          ),
         )
       })
       .catch((err) => {
@@ -2346,6 +2355,8 @@ function IdentifyFilingModal({
    * invited them to tick three things the server refuses at submission.
    */
   const allPermits = prefill?.renewable_permits ?? []
+  // Ken, 5 October 2026: one renewal in progress per permit.
+  const inProgressIds = prefill?.renewal_in_progress_permit_ids ?? []
   const permits =
     applicationType === 'amendment'
       ? allPermits.filter((p) => p.permit_type?.code === BUSINESS_PERMIT_CODE)
@@ -2712,9 +2723,17 @@ function IdentifyFilingModal({
                 {renewableNow.map((p) => {
                   const chosen = permitIds.includes(p.id)
                   const days = p.days_until_expiry
+                  /*
+                   * Already being renewed on another filing, so not one this
+                   * filing may carry. Greyed in place rather than moved or
+                   * dropped: the permit is on the owner's profile, and a row
+                   * that vanished would read as lost.
+                   */
+                  const inProgress = inProgressIds.includes(p.id)
                   // Never colour alone: the word says expired or not.
-                  const state =
-                    days === null
+                  const state = inProgress
+                    ? { label: 'Renewal in progress', cls: 'text-ink-secondary' }
+                    : days === null
                       ? null
                       : days < 0
                         ? { label: 'Expired', cls: 'text-s-red' }
@@ -2767,7 +2786,7 @@ function IdentifyFilingModal({
                   const reason =
                     blockedReason !== null
                       ? { text: blockedReason, cls: 'text-s-red font-semibold' }
-                      : chosen || days === null || days >= 0
+                      : chosen || inProgress || days === null || days >= 0
                         ? null
                         : { text: 'No valid copy on file.', cls: 'text-s-red' }
                   return (
@@ -2776,7 +2795,7 @@ function IdentifyFilingModal({
                     <li key={p.id}>
                       <label
                         className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                          blockedReason !== null
+                          blockedReason !== null || inProgress
                             ? 'cursor-not-allowed opacity-60'
                             : chosen
                               ? 'cursor-pointer bg-input'
@@ -2799,8 +2818,16 @@ function IdentifyFilingModal({
                            * own permit list, with no explanation anywhere.
                            */
                           disabled={blockedReason !== null}
-                          checked={chosen && blockedReason === null}
+                          /*
+                           * `aria-disabled`, not `disabled` (AGENTS.md §6.2),
+                           * so a screen reader still reaches the row and its
+                           * `Renewal in progress`. The handler below is what
+                           * keeps it unticked.
+                           */
+                          aria-disabled={inProgress || undefined}
+                          checked={chosen && blockedReason === null && !inProgress}
                           onChange={() => {
+                            if (inProgress) return
                             /*
                              * Appended, never inserted: the first tick is the
                              * primary and the renewal chain is keyed on it, so
