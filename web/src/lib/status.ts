@@ -307,6 +307,36 @@ export function filingStatusMeta(app: {
   return isGatheringOtherPermits(app) ? GATHERING_META : applicationStatusMeta(app.status)
 }
 
+/**
+ * What each History row is called, which its status alone no longer says.
+ *
+ * Every move into `approved` reads "Approved" except the one that closed the
+ * filing. Since 4 October 2026 a paid filing reaches `approved` at payment and
+ * gathers its other permits there, so naming the payment row from the status
+ * table printed "Completed" under a card that calls the same filing Approved
+ * (owner-track 19). The close is the NEWEST row into `approved` — the payment
+ * row when nothing was left to gather, otherwise the approved→approved row
+ * `approveOverall` writes — and it is only a close if the filing is decided now.
+ *
+ * A `from` of `approved` is always the gathering kind: a decided filing does not
+ * move again.
+ */
+export function labelHistory<T extends { from_status: string | null; to_status: string }>(
+  history: T[],
+  app: Parameters<typeof filingStatusMeta>[0],
+): { entry: T; to: string; from: string | null }[] {
+  const closed = app.status === 'approved' && !isGatheringOtherPermits(app)
+  const closingRow = closed ? history.map((e) => e.to_status).lastIndexOf('approved') : -1
+  const label = (status: string, closes: boolean) =>
+    status === 'approved' && !closes ? GATHERING_META.label : applicationStatusMeta(status).label
+
+  return history.map((entry, i) => ({
+    entry,
+    to: label(entry.to_status, i === closingRow),
+    from: entry.from_status ? label(entry.from_status, false) : null,
+  }))
+}
+
 export function applicationStatusMeta(status: string, fallbackLabel?: string): StatusMeta {
   return (
     APPLICATION_STATUS[status as ApplicationStatus] ?? {

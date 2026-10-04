@@ -45,10 +45,15 @@ class IllegalTransitionException extends RuntimeException
      * have been open since before somebody else rejected it — "you cannot do
      * that" without saying what changed underneath them is how a real bug gets
      * reported as a mystery.
+     *
+     * `$fromLabel` is the FILING's word for where it stands
+     * (`Application::statusLabel()`), which the status alone no longer gives:
+     * a paid filing still gathering its other permits is `approved` and reads
+     * "Approved" on every screen, where the enum's word is "Completed".
      */
-    public static function refuse(?ApplicationStatus $from, ApplicationStatus $to): self
+    public static function refuse(?ApplicationStatus $from, ApplicationStatus $to, ?string $fromLabel = null): self
     {
-        $fromLabel = $from?->label() ?? 'no status';
+        $fromLabel ??= $from?->label() ?? 'no status';
 
         return new self($from, $to, sprintf(
             'This application is %s, so it cannot move to %s. Refresh the filing to see its current state.',

@@ -316,6 +316,26 @@ it('does not close the filing just because the permit is out', function () {
         ->and($app->status->isTerminal())->toBeTrue();
 });
 
+it('names a paid filing still gathering Approved when BPLO is refused at it', function () {
+    /*
+     * Every screen calls this filing "Approved" (`Application::statusLabel()`);
+     * the two refusals named the bare status, whose word is "Completed", so an
+     * officer pressing Approve or a whole-form Return in a stale tab was told
+     * the filing was finished (bplo-review 1).
+     */
+    $app = paidNewFiling();
+    $bplo = ApplicationAssignment::where('application_id', $app->id)
+        ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
+        ->firstOrFail();
+
+    authAs('bplo@biztrack.local');
+    expect(test()->postJson("/api/v1/assignments/{$bplo->id}/approve")->assertStatus(422)->json('message'))
+        ->toStartWith('There is nothing for BPLO to approve while this application is Approved.')
+        ->and(test()->postJson("/api/v1/assignments/{$bplo->id}/return", ['remarks' => 'Stale tab.'])
+            ->assertStatus(409)->json('message'))
+        ->toBe('This application is Approved, so it cannot move to Returned. Refresh the filing to see its current state.');
+});
+
 it('leaves only an amendment to BPLO, releasing nothing at payment', function () {
     /*
      * An AMENDMENT alone, since 3 October 2026.

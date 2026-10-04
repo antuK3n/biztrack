@@ -8,6 +8,7 @@ import {
   clearanceStatusMeta,
   genericStatusTone,
   filingStatusMeta,
+  labelHistory,
   otherPermitProgress,
 } from '../lib/status'
 import type { StatusTone } from '../lib/status'
@@ -658,7 +659,7 @@ function OfficeProgress({ assignments, ended }: { assignments: Assignment[]; end
 
 /* ── What actually happened ───────────────────────────────────────────── */
 
-function HistoryLog({ history }: { history: TimelineEntry[] }) {
+function HistoryLog({ history, app }: { history: TimelineEntry[]; app: Application }) {
   if (history.length === 0) return null
 
   return (
@@ -668,9 +669,8 @@ function HistoryLog({ history }: { history: TimelineEntry[] }) {
       </h3>
       {/* Newest first: the last thing that happened is the thing being asked about. */}
       <ol className="mt-3 space-y-3">
-        {[...history].reverse().map((entry, i) => {
-          const meta = applicationStatusMeta(entry.to_status)
-
+        {/* Named per filing, not per status — see `labelHistory`. */}
+        {labelHistory(history, app).reverse().map(({ entry, to, from }, i) => {
           return (
             <li key={`${entry.to_status}-${entry.created_at}-${i}`} className="flex gap-3">
               <span
@@ -679,10 +679,8 @@ function HistoryLog({ history }: { history: TimelineEntry[] }) {
               />
               <div className="min-w-0">
                 <p className="text-sm text-ink">
-                  <span className="font-semibold">{meta.label}</span>
-                  {entry.from_status && (
-                    <span className="text-ink-muted"> · from {applicationStatusMeta(entry.from_status).label}</span>
-                  )}
+                  <span className="font-semibold">{to}</span>
+                  {from && <span className="text-ink-muted"> · from {from}</span>}
                 </p>
                 <p className="text-xs text-ink-muted">
                   <span className="tnum">{formatDateTime(entry.created_at)}</span>
@@ -841,7 +839,7 @@ export function ApplicationProgress({
       {!clearance && (
         <OfficeProgress assignments={app.assignments ?? []} ended={terminal !== null} />
       )}
-      <HistoryLog history={history} />
+      <HistoryLog history={history} app={app} />
     </section>
   )
 }

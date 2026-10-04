@@ -108,7 +108,7 @@ class WorkflowService
             return;
         }
         if ($from !== null && ! $from->canTransitionTo($to)) {
-            throw IllegalTransitionException::refuse($from, $to);
+            throw IllegalTransitionException::refuse($from, $to, $app->statusLabel());
         }
         $app->update(['status' => $to]);
         ApplicationStatusHistory::create([
@@ -4760,8 +4760,10 @@ class WorkflowService
                     : $this->approveOverall($app, $remarks),
                 default => throw ValidationException::withMessages([
                     'status' => [
+                        // `statusLabel()`: a paid filing still gathering is "Approved"
+                        // on every screen, so the refusal names it that too.
                         'There is nothing for BPLO to approve while this application is '
-                        .($app->status?->label() ?? 'in no state')
+                        .($app->statusLabel() ?? 'in no state')
                         .'. BPLO approves the form first, then the whole application once every other permit is approved.',
                     ],
                 ]),

@@ -1391,6 +1391,43 @@ it('says where the filing has got to, not only where the review step has', funct
     )->pluck('id'))->toContain($assignment->id);
 });
 
+it('calls a paid filing still gathering Approved on the caseload and the OIC register', function () {
+    /*
+     * Since 4 October 2026 a paid filing stands at `approved` with its other
+     * permits to come, and the enum's word for that status is "Completed". The
+     * review rows already asked `statusLabel()`; the site-visit rows and the OIC
+     * register asked the enum, so a filing being inspected — which is always
+     * one still gathering — read "Completed" there.
+     */
+    $officer = User::whereNotNull('department_id')->firstOrFail();
+    $assignment = ApplicationAssignment::where('department_id', $officer->department_id)->firstOrFail();
+    $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value, 'decided_at' => null])->save();
+    $visit = Inspection::create([
+        'application_id' => $assignment->application_id,
+        'department_id' => $officer->department_id,
+        'inspector_user_id' => $officer->id,
+        'status' => 'scheduled',
+        'scheduled_at' => now()->addWeek(),
+    ]);
+
+    $headers = authAs('admin@biztrack.local');
+    $cases = collect(test()->withHeaders($headers)
+        ->getJson("/api/v1/admin/users/{$officer->id}/caseload")->assertOk()->json('data.cases'));
+    $oic = collect(test()->withHeaders($headers)
+        ->getJson('/api/v1/admin/oic-assignments?per_page=200')->assertOk()->json('data'));
+
+    expect($cases->first(fn ($c) => $c['kind'] === 'inspection' && $c['id'] === $visit->id)['application_status_label'])
+        ->toBe('Approved')
+        ->and($oic->firstWhere('id', $assignment->id)['application_status_label'])->toBe('Approved');
+
+    // Decided, it is Completed on both.
+    $assignment->application->forceFill(['decided_at' => now()])->save();
+    $oic = collect(test()->withHeaders($headers)
+        ->getJson('/api/v1/admin/oic-assignments?per_page=200')->json('data'));
+    expect($oic->firstWhere('id', $assignment->id)['application_status_label'])->toBe('Completed');
+});
+
 it('drops the row from the caseload once the filing itself is decided', function () {
     /*
      * The other half. The confusion was that a Completed step stayed; the

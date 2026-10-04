@@ -18,8 +18,8 @@ import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
 import {
   TONE_CLASSES,
-  applicationStatusMeta,
   isGatheringOtherPermits,
+  labelHistory,
   otherPermitProgress,
 } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
@@ -1245,8 +1245,12 @@ export function ApplicationDetailPage() {
           <section className="mt-10">
             <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-muted">History</p>
             <ol className="space-y-2.5 rounded-2xl bg-white px-6 py-5 shadow-card">
-              {[...(timeline ?? [])].reverse().map((entry, i) => {
-                const meta = applicationStatusMeta(entry.to_status)
+              {/*
+                Named per filing, not per status: the payment row of a filing
+                still gathering its other permits is "Approved", not the
+                status table's "Completed". See `labelHistory`.
+              */}
+              {labelHistory(timeline ?? [], app).reverse().map(({ entry, to }, i) => {
                 return (
                   <li key={`${entry.to_status}-${entry.created_at}-${i}`} className="flex items-baseline gap-3">
                     <span
@@ -1254,7 +1258,7 @@ export function ApplicationDetailPage() {
                         i === 0 ? 'bg-royal' : 'bg-line'
                       }`}
                     />
-                    <span className="text-sm font-semibold text-ink">{meta.label}</span>
+                    <span className="text-sm font-semibold text-ink">{to}</span>
                     <span className="text-xs text-ink-muted">
                       {formatDateTime(entry.created_at)}
                       {entry.changed_by ? ` · ${entry.changed_by.name}` : ''}

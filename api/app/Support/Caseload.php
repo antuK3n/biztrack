@@ -291,8 +291,9 @@ class Caseload
                 'permit' => null,
                 'status_label' => $i->status?->label(),
                 // The same fact for a site visit, so both lists carry it and
-                // the column never has to explain a gap.
-                'application_status_label' => $i->application?->status?->label(),
+                // the column never has to explain a gap. `statusLabel()` for the
+                // reason given on the review rows above.
+                'application_status_label' => $i->application?->statusLabel(),
                 'at' => optional($i->scheduled_at)->toISOString(),
             ]);
 

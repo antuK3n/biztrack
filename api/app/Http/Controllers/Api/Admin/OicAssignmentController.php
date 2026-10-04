@@ -76,7 +76,8 @@ class OicAssignmentController extends Controller
             ->with([
                 'department:id,code,name',
                 'officer:id,name,email,department_id',
-                'application:id,tracking_id,business_id,application_type,status',
+                // `decided_at` for `Application::statusLabel()` in row().
+                'application:id,tracking_id,business_id,application_type,status,decided_at',
                 'application.business:id,name',
             ])
             // A filing removed from the register takes its assignments with it;
@@ -241,7 +242,9 @@ class OicAssignmentController extends Controller
             'status' => $assignment->status?->value,
             'status_label' => $assignment->status?->label(),
             'application_status' => $application?->status?->value,
-            'application_status_label' => $application?->status?->label(),
+            // The filing's word, not the enum's: a paid filing still gathering
+            // its other permits is "Approved", not "Completed".
+            'application_status_label' => $application?->statusLabel(),
         ];
     }
 }
