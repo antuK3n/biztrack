@@ -7,11 +7,13 @@ use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
+use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Inspection;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\KwikPay\Signature;
 use App\Services\WorkflowService;
@@ -60,11 +62,11 @@ beforeEach(function () {
     ]);
 });
 
-/** A new filing BPLO has approved, on the demo owner's business: ready to pay. */
-function holdFiling(): Application
+/** A new filing BPLO has approved, on the demo owner's business (or the one given): ready to pay. */
+function holdFiling(?Business $business = null): Application
 {
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
-    $business = Business::where('owner_user_id', $owner->id)->firstOrFail();
+    $business ??= Business::where('owner_user_id', $owner->id)->firstOrFail();
 
     $app = Application::create([
         'business_id' => $business->id,
@@ -75,6 +77,21 @@ function holdFiling(): Application
     app(WorkflowService::class)->submit($app);
 
     return bploApprovesForm($app);
+}
+
+/** Another business for the demo owner, registered through the API. */
+function holdSecondBusiness(): Business
+{
+    $id = test()->withHeaders(authAs('owner@biztrack.local'))->postJson('/api/v1/businesses', [
+        'name' => 'Held Annex '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(100000, 999999),
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '9 Hold Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 150000]],
+    ])->assertCreated()->json('data.id');
+
+    return Business::findOrFail($id);
 }
 
 /** The owner opens a KwikPay order for it, before anything is suspended. */
@@ -134,6 +151,54 @@ it('records a KwikPay payment that lands while the business is suspended, and ho
     expect($payment->fresh()->status)->toBe(PaymentStatus::Completed)
         ->and($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment)
         ->and(holdBusinessPermit($app))->toBeNull();
+});
+
+it('moves the held filing on when the business is reinstated, without a second payment', function (string $backTo) {
+    $app = holdFiling();
+    $payment = holdOpenKwikPay($app);
+    holdSetStatus($app->business_id, 'suspended')->assertOk();
+    holdPaid($payment);
+
+    holdSetStatus($app->business_id, $backTo)->assertOk();
+
+    $permit = holdBusinessPermit($app);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        ->and($permit?->status)->toBe(PermitStatus::Active)
+        ->and(Payment::where('application_id', $app->id)->count())->toBe(1);
+})->with(['active', 'flagged']);
+
+it('holds money that lands while the owner is blacklisted, and moves it on when the blacklisting is lifted', function () {
+    $app = holdFiling();
+    $payment = holdOpenKwikPay($app);
+    holdSetStatus($app->business_id, 'blacklisted')->assertOk();
+    holdPaid($payment);
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment)
+        ->and(holdBusinessPermit($app))->toBeNull();
+
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/owners/{$owner->id}/lift-blacklist", ['status' => 'active', 'reason' => 'Finding withdrawn.'])
+        ->assertOk();
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        ->and(holdBusinessPermit($app)?->status)->toBe(PermitStatus::Active);
+});
+
+it('moves on a held filing of the owner\'s other business when the blacklisting is lifted from one', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $first = Business::where('owner_user_id', $owner->id)->orderBy('id')->firstOrFail();
+    $app = holdFiling(holdSecondBusiness());
+    $payment = holdOpenKwikPay($app);
+    holdSetStatus($first, 'blacklisted')->assertOk();
+    holdPaid($payment);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+
+    // Setting the first back to Active lifts the owner, and the cascade with it.
+    holdSetStatus($first, 'active')->assertOk();
+
+    expect($app->business->fresh()->status)->toBe('active')
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
 /* ── Nothing else moves a held filing toward a permit ───────────────────── */
@@ -241,7 +306,7 @@ it('refuses BPLO\'s final approval of a held filing', function () {
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
-it('keeps a held filing waiting when its last clearance is in, rather than closing it', function () {
+it('keeps a held filing waiting when its last clearance is in, and closes it once the business is reinstated', function () {
     $app = Application::findOrFail(scopedAssignmentFiling('Held Ready Shop'));
     ApplicationPermitType::where('application_id', $app->id)
         ->where('permit_type_id', '!=', PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'))
@@ -251,6 +316,10 @@ it('keeps a held filing waiting when its last clearance is in, rather than closi
     app(WorkflowService::class)->refreshReadiness($app->fresh());
 
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+
+    holdSetStatus($app->business_id, 'active')->assertOk();
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('refuses the Debug panel paying for, or passing a visit on, a held filing', function () {

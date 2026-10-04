@@ -7027,7 +7027,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:487",
+        "check": "api/app/Services/WorkflowService.php:489",
         "test": "api/tests/Feature/AmendmentFlowTest.php::carries a new zoning clearance when an amendment changes the trade or enlarges the floor area",
         "marker": "public static function amendmentNeedsLocationalClearance"
       }
@@ -7078,7 +7078,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:487",
+        "check": "api/app/Services/WorkflowService.php:489",
         "test": "api/tests/Feature/AmendmentFlowTest.php::carries a new zoning clearance when an amendment changes the trade or enlarges the floor area",
         "marker": "public static function amendmentNeedsLocationalClearance"
       }
@@ -7257,7 +7257,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:2001",
+        "check": "api/app/Services/WorkflowService.php:2006",
         "test": "api/tests/Feature/ClearanceStageTest.php::refuses to start a permit on a submitted filing that has not been paid for",
         "marker": "! $app->status?->isPaid() && ! $app->defersPayment()"
       }
@@ -7418,7 +7418,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:2001",
+        "check": "api/app/Services/WorkflowService.php:2006",
         "test": "api/tests/Feature/ClearanceStageTest.php::refuses to start a permit on a submitted filing that has not been paid for",
         "marker": "! $app->status?->isPaid() && ! $app->defersPayment()"
       }

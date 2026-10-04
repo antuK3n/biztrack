@@ -9,6 +9,7 @@ use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
@@ -33,6 +34,7 @@ use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
 use App\Support\PermitFace;
+use App\Support\PermitFees;
 use App\Support\Ra11032;
 use App\Support\RenewalSeason;
 use App\Support\ReturnTargets;
@@ -1745,6 +1747,9 @@ class WorkflowService
          * callback had been minting an Active permit for a suspended business,
          * owner-pay 19). Returning rather than refusing, because the money has
          * already arrived and refusing it would lose the record of it.
+         *
+         * `releaseHeldFilings` brings the filing back through this method when
+         * the business is put back, so the owner never pays twice.
          */
         if ($this->onHold($app)) {
             Audit::log('payment.held', $payment, [
@@ -3017,6 +3022,67 @@ class WorkflowService
     }
 
     /**
+     * A business came off suspension or blacklisting. Move on what was held.
+     *
+     * Two kinds of filing wait while a business is on hold, and both pick up
+     * here, where they stopped:
+     *
+     *  - one whose payment landed during the hold: a KwikPay order opened
+     *    before the suspension and paid after it. `onPaymentCompleted` kept
+     *    the money and left the filing at Pending Payment; it runs again now,
+     *    exactly as if the money had just arrived, so the owner never pays
+     *    twice (Ken's decision after the October 2026 scenario run). Paid is
+     *    the ledger's answer — a completed payment and nothing left due —
+     *    because that is what the owner would otherwise be asked for again.
+     *  - one whose last clearance or requirement came in during the hold.
+     *    `refreshReadiness` left it where it was, and is asked again.
+     *
+     * Called wherever a business leaves Suspended or Blacklisted for Active or
+     * Flagged. A business still on hold — its owner's blacklisting outlives
+     * its own status — is left alone.
+     *
+     * Each filing in its own transaction. One that fails is reported and left
+     * where it was, rather than taking the status change the super admin has
+     * just made, and every other filing, down with it.
+     */
+    public function releaseHeldFilings(Business $business): void
+    {
+        if ($business->filingsOnHoldReason() !== null) {
+            return;
+        }
+
+        $waiting = $business->applications()
+            ->whereIn('status', [
+                ApplicationStatus::PendingPayment->value,
+                ApplicationStatus::AwaitingOtherPermits->value,
+            ])
+            ->get();
+
+        foreach ($waiting as $app) {
+            try {
+                DB::transaction(function () use ($app) {
+                    if ($app->status !== ApplicationStatus::PendingPayment) {
+                        $this->refreshReadiness($app);
+
+                        return;
+                    }
+
+                    $paid = $app->payments()
+                        ->where('status', PaymentStatus::Completed->value)
+                        ->latest('id')
+                        ->first();
+
+                    if ($paid !== null && PermitFees::balance($app)['balance_due'] <= 0) {
+                        $this->onPaymentCompleted($paid);
+                    }
+                });
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+    }
+
+    /**
      * BPLO lifts a suspension on its own judgement, with a recorded reason.
      *
      * The discretion half of *"can be suspended"*. The suspension fires by
@@ -3424,7 +3490,8 @@ class WorkflowService
          * Every forward move below closes the filing or puts it in front of
          * BPLO, and this runs inside OTHER acts — an office closing a
          * requirement it raised, say — so it waits quietly rather than
-         * refusing them. The one backward move, out of Final Approval, still
+         * refusing them; `releaseHeldFilings` asks again when the business is
+         * put back. The one backward move, out of Final Approval, still
          * happens: a refusal on a held filing is allowed.
          */
         $held = $this->onHold($app);

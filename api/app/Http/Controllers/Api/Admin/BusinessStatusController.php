@@ -497,6 +497,15 @@ class BusinessStatusController extends Controller
             } elseif ($data['status'] === 'active') {
                 $this->workflow->restorePermitsForBusiness($business);
             }
+
+            /*
+             * Off hold: what waited while the business was suspended moves on
+             * now — a payment that landed, a filing that came ready. Flagged
+             * as well as Active, because a flag is not a sanction (above).
+             */
+            if (in_array($data['status'], ['active', 'flagged'], true)) {
+                $this->workflow->releaseHeldFilings($business);
+            }
         }
 
         /*
@@ -618,7 +627,8 @@ class BusinessStatusController extends Controller
 
                 /*
                  * Suspended keeps the certificates suspended; the other two
-                 * bring them back. Flagged is a watch marker and never a
+                 * bring them back, and move on whatever was held while the
+                 * owner was barred. Flagged is a watch marker and never a
                  * sanction — `isBlockedFromApplying` ignores it — so a flagged
                  * business trades on valid permits like an active one.
                  */
@@ -626,6 +636,7 @@ class BusinessStatusController extends Controller
                     $this->workflow->suspendPermitsForBusiness($business, $reason);
                 } else {
                     $this->workflow->restorePermitsForBusiness($business);
+                    $this->workflow->releaseHeldFilings($business);
                 }
             }
 
@@ -752,6 +763,7 @@ class BusinessStatusController extends Controller
                     'cascaded_from_business_id' => $business->id,
                 ]);
                 $this->workflow->restorePermitsForBusiness($other);
+                $this->workflow->releaseHeldFilings($other);
             }
 
             return ['blacklisted' => 0, 'restored' => $others->count()];
