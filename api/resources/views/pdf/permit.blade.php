@@ -51,7 +51,13 @@
         table.row td { vertical-align: top; padding: 0; }
 
         .seal { height: 46px; margin-bottom: 4px; }
-        .republic { font-size: 9px; letter-spacing: 1px; color: #555; }
+        /*
+         * Matched to the on-screen certificate, which sets both lines in the
+         * same bold ink. This was 9px grey over a 15px black CITY OF MALABON,
+         * so the download and the website disagreed about which line of the
+         * city block was the heading.
+         */
+        .republic { font-size: 15px; font-weight: bold; letter-spacing: 1px; color: #1a1a1a; }
         .city { font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-top: 2px; }
         .office { font-size: 9px; font-weight: bold; letter-spacing: 1px; color: #444; margin-top: 2px; }
 
@@ -59,7 +65,11 @@
         .qr-cell img { width: 92px; height: 92px; }
         .qr-cell .caption { font-size: 8px; color: #777; margin-top: 2px; }
 
-        .title { text-align: center; font-size: 22px; font-weight: bold; letter-spacing: 5px; margin: 22px 0 0; }
+        /* Serif, as the screen sets it (display-serif). A bold sans title was
+         * the most visible difference between the two renderings of one
+         * document: the download looked like a form, the screen like a
+         * certificate. */
+        .title { text-align: center; font-family: "DejaVu Serif", serif; font-size: 22px; letter-spacing: 5px; margin: 22px 0 0; color: #1a1a1a; }
         /* Status only shows when it is something other than "Active": a permit
            that is expired or revoked must say so on its own face, or a stale
            download passes for a current one. */
@@ -72,6 +82,10 @@
         /* Removed-from-register and other absent values read as grey, so an
            empty box is never mistaken for a value that failed to print. */
         td.value.absent { color: #8a8f99; font-style: italic; }
+        /* The Mayor's Permit rules its boxes in ink on white, as the City's
+         * pad does and as the screen draws it. The tinted fill stays on the
+         * clearances, which are tinted on screen too. */
+        td.value.ruled { border: 1px solid #555; background: #fff; font-weight: bold; }
 
         .rule { height: 3px; background: #0025cc; opacity: 0.7; margin-top: 16px; }
 
@@ -92,14 +106,21 @@
         .expires { text-align: center; font-size: 8px; font-weight: bold; letter-spacing: 0.4px; margin-top: 4px; color: #1a1a1a; }
         .remarks-label { font-size: 8.5px; font-weight: bold; letter-spacing: 0.6px; color: #555; text-transform: uppercase; margin-top: 12px; }
         .remarks-box { border: 1px solid #d5d9e2; height: 46px; margin-top: 3px; }
+        .remarks-box.ruled { border: 1px solid #555; margin-top: 0; }
+        table.fields.remarks-row { margin-top: 10px; }
 
-        table.signatures { width: 100%; border-collapse: collapse; margin-top: 34px; }
+        /* `margin-top` on the first row only; later rows sit closer, as the
+         * screen's grid gap does. dompdf has no :first-of-type, so the spacing
+         * is carried by the row class below. */
+        table.signatures { width: 100%; border-collapse: collapse; margin-top: 26px; }
         table.signatures td { text-align: center; padding: 0 14px; vertical-align: bottom; }
         .sig-name { font-size: 11.5px; font-weight: bold; padding-bottom: 2px; }
         /* Holds the line's height when there is no name above it, so signature
            cells sit on the same baseline whether or not the office is staffed. */
         .sig-name.blank { color: transparent; }
-        .sig-line { border-bottom: 1px solid #2b2b2b; }
+        /* 170px and centred, as the screen draws it (w-44). A rule run across
+         * the whole half-width read as a table border, not a signature line. */
+        .sig-line { border-bottom: 1px solid #2b2b2b; width: 170px; margin: 0 auto; }
         .sig-role { font-size: 8.5px; font-weight: bold; letter-spacing: 0.6px; color: #555; text-transform: uppercase; padding-top: 3px; }
 
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
@@ -201,7 +222,7 @@
         @foreach($rows as [$label, $box])
             <tr>
                 <td class="label">{{ $label }}</td>
-                <td class="{{ $box['class'] }}">{{ $box['text'] }}</td>
+                <td class="{{ $box['class'] }}{{ $mayors ? ' ruled' : '' }}">{{ $box['text'] }}</td>
             </tr>
         @endforeach
     </table>
@@ -230,8 +251,20 @@
         </div>
     @endif
 
-    <div class="remarks-label">Remarks</div>
-    <div class="remarks-box"></div>
+    {{-- Remarks: caption to the LEFT on the Mayor's Permit, as both the City's
+         pad and our own screen set it; above the box on a clearance, which is
+         how that sheet reads on screen too. --}}
+    @if($mayors)
+        <table class="fields remarks-row">
+            <tr>
+                <td class="label">Remarks:</td>
+                <td><div class="remarks-box ruled"></div></td>
+            </tr>
+        </table>
+    @else
+        <div class="remarks-label">Remarks</div>
+        <div class="remarks-box"></div>
+    @endif
 
     @php
         /*
@@ -246,17 +279,37 @@
          */
         $blocks = $signatories;
     @endphp
-    <table class="signatures">
-        <tr>
-            @foreach($blocks as $block)
-                <td style="width: {{ round(100 / max(count($blocks), 1), 2) }}%">
-                    <div class="sig-name {{ $block['name'] ? '' : 'blank' }}">{{ $block['name'] ?: '.' }}</div>
-                    <div class="sig-line"></div>
-                    <div class="sig-role">{{ $block['role'] }}</div>
-                </td>
-            @endforeach
-        </tr>
-    </table>
+    {{--
+        TWO to a row, as the screen sets them (sm:grid-cols-2).
+
+        They were all in one row, each column `100 / count` wide. With CENRO's
+        four — City Mayor, Officer-in-Charge, Evaluator, Chief-CENRO — that is
+        25% each on portrait A4, and the fourth ran off the right edge of the
+        page: "Mark Lloyd A. Mesina" was cut mid-name in the download while the
+        website showed all four. Found by rendering the PDF and looking at it,
+        which is the only way this class of fault shows up.
+
+        Chunking also keeps the signature lines at their drawn width rather
+        than squeezing them narrower with every office that adds a signatory.
+    --}}
+    @foreach(array_chunk($blocks, 2) as $pair)
+        <table class="signatures">
+            <tr>
+                @foreach($pair as $block)
+                    <td style="width: 50%">
+                        <div class="sig-name {{ $block['name'] ? '' : 'blank' }}">{{ $block['name'] ?: '.' }}</div>
+                        <div class="sig-line"></div>
+                        <div class="sig-role">{{ $block['role'] }}</div>
+                    </td>
+                @endforeach
+                {{-- An odd count leaves the second half empty rather than
+                     stretching one signature across the sheet. --}}
+                @if(count($pair) === 1)
+                    <td style="width: 50%"></td>
+                @endif
+            </tr>
+        </table>
+    @endforeach
 
     {{-- The City's own enforcement terms, off the paper, red where the paper
          sets them red. Only on the sheet that carries them. --}}
