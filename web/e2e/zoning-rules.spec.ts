@@ -9,9 +9,10 @@ import { mergedStorageState, sessionFor } from './helpers'
  * needed answered. Ken removed it on 5 October 2026, from the applicant's
  * Location & Zoning step, from Review and from CPDO's review sheet. What is
  * left to prove in a browser is that it is gone, that a line of business the
- * zone under the pin clearly does not allow stops the owner with a popup, that
- * CPDO reads the zone at the pin instead, and that the note under the map
- * still reads a trade against the ordinance's own words.
+ * zone under the pin clearly does not allow stops the owner (the box under the
+ * map says so, on a new filing and on an amendment that moves), that CPDO
+ * reads the zone at the pin instead, and that the note under the map still
+ * reads a trade against the ordinance's own words.
  *
  * Screenshots go to E2E_SHOTS_DIR when it is set, for review by eye.
  */
@@ -56,13 +57,13 @@ test.describe('the applicant', () => {
 
   /*
    * Ken, 5 October 2026: a line of business the zone under the pin clearly
-   * does not allow stops the owner on Location & Zoning, with a popup that
-   * says why, and Next stays held. A sari-sari store at the middle of Acacia
-   * lands in its Industrial-2 zone, whose list has no shop and no home
-   * business; at the middle of Baritan it lands among homes and small shops,
-   * and passes without a word.
+   * does not allow stops the owner on Location & Zoning. The box under the
+   * map says so, in red, and Next stays held; there is no popup. A pharmacy
+   * at the middle of Acacia lands in its Industrial-2 zone, whose list has no
+   * drugstore; at the middle of Baritan it lands where the list names one, and
+   * the box names that zone.
    */
-  test('a pin where the line of business is not allowed holds the step with a popup, and an allowed pin does not', async ({
+  test('a pin where the line of business is not allowed turns the box under the map red and holds Next', async ({
     page,
   }) => {
     await page.getByRole('checkbox').first().check()
@@ -71,10 +72,10 @@ test.describe('the applicant', () => {
 
     const search = page.getByLabel(/search for the one line of business/i)
     await search.click()
-    await search.fill('sari-sari')
-    await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+    await search.fill('pharmacy')
+    await expect(page.getByText(/trades matching “pharmacy”/)).toBeVisible()
     await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
-    await page.getByRole('textbox', { name: /products \/ services/i }).first().fill('rice, canned goods')
+    await page.getByRole('textbox', { name: /products \/ services/i }).first().fill('medicines')
     await page.getByLabel(/^street/i).fill('Rizal Street')
     await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
     await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
@@ -82,7 +83,7 @@ test.describe('the applicant', () => {
     const barangay = page.getByLabel(/barangay name/i)
     const map = page.locator('.leaflet-container')
     const next = page.getByRole('button', { name: /^next$/i })
-    const popup = page.getByRole('dialog', { name: 'Not allowed at this location' })
+    const note = page.getByTestId('zoning-note')
 
     await barangay.selectOption({ label: 'Acacia' })
     await map.scrollIntoViewIfNeeded()
@@ -90,25 +91,92 @@ test.describe('the applicant', () => {
     await map.click()
     await expect(page.getByText(/pin placed/i)).toBeVisible()
 
-    await expect(popup).toBeVisible({ timeout: 20_000 })
-    await expect(popup).toContainText(
-      "Retail sale in non-specialized stores (sari-sari store) isn't allowed in the Industry zone where your pin is. To petition this, visit the Business Permits and Licensing Office (BPLO) at Malabon City Hall.",
+    await expect(note).toHaveAttribute('data-verdict', 'refused', { timeout: 20_000 })
+    await expect(note).toHaveText(
+      "Retail sale of pharmaceutical goods (pharmacy) isn't allowed in the Industry zone where your pin is. To petition this, visit the Business Permits and Licensing Office (BPLO) at Malabon City Hall.",
     )
-    await expect(popup.getByRole('button')).toHaveText(['OK'])
-    await shot(page, 'applicant-zone-blocked-popup')
-    await popup.getByRole('button', { name: 'OK' }).click()
-    await expect(popup).toBeHidden()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(next).toBeDisabled()
+    await shot(page, 'applicant-zone-not-allowed')
 
-    // The same line in Baritan, among homes and small shops: no popup, and on.
+    // The same line in Baritan, where the list names a drugstore: the green
+    // box, naming the zone the pin is in, and on.
     await barangay.selectOption({ label: 'Baritan' })
     await map.click()
     await expect(page.getByText(/pin placed/i)).toBeVisible()
+    await expect(note).toHaveAttribute('data-verdict', 'listed', { timeout: 20_000 })
+    await expect(note).toContainText('Your type of business is allowed in Baritan’s “Homes and apartments, some small shops” zone.')
     await expect(next).toBeEnabled({ timeout: 20_000 })
-    await expect(popup).toBeHidden()
     await shot(page, 'applicant-zone-allowed-pin')
     await next.click()
     await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  })
+
+  /*
+   * And on an amendment that moves the business: the same box under the
+   * amendment's own map, for the new pin and the line it asks for, holding
+   * Next the same way. The seeded owner's business 1 is a sari-sari store,
+   * which passes anywhere, so the amendment also changes the line: a pharmacy
+   * moved to the middle of Acacia is refused; a warehouse there is allowed.
+   */
+  test('an amendment that moves the business shows the same box under its map, and is held where it is not allowed', async ({
+    page,
+  }) => {
+    await page.goto('/apply?type=amendment')
+    const modal = page.getByRole('dialog')
+    await expect(modal).toBeVisible({ timeout: 30_000 })
+    await modal.getByLabel(/which business are you amending/i).selectOption({ value: '1' })
+    await modal.getByRole('button', { name: /continue/i }).click()
+    await expect(modal).toBeHidden({ timeout: 30_000 })
+
+    await page.getByRole('checkbox').first().check()
+    await page.getByRole('button', { name: /^next$/i }).click()
+
+    // FO-003's boxes: "Other amendments" for the line, then the address —
+    // once the draft has loaded its amendment rows, which redraw the boxes.
+    await expect(page.getByText(/changes since last permit/i).first()).toBeVisible({ timeout: 30_000 })
+    await page.waitForLoadState('networkidle')
+    const tick = async (name: RegExp) => {
+      const box = page.getByRole('checkbox', { name })
+      await expect(async () => {
+        await box.check()
+        await expect(box).toBeChecked({ timeout: 2_000 })
+      }).toPass({ timeout: 20_000 })
+    }
+    const pickLine = async (words: string, title: string) => {
+      const search = page.getByLabel(/search for the trade you are changing to/i)
+      await search.click()
+      await search.fill(words)
+      await page.getByRole('radio', { name: new RegExp(words, 'i') }).first().click()
+      await expect(page.getByText(title).first()).toBeVisible()
+    }
+    await tick(/^Other amendments/)
+    await pickLine('pharmacy', 'Retail sale of pharmaceutical goods (pharmacy)')
+    await tick(/^I\. Change of address/)
+
+    const map = page.locator('.leaflet-container')
+    const next = page.getByRole('button', { name: /^next$/i })
+    const note = page.getByTestId('zoning-note')
+
+    await page.locator('#amend-address_barangay_id').selectOption({ label: 'Acacia' })
+    await map.scrollIntoViewIfNeeded()
+    await map.click()
+    await expect(note).toHaveAttribute('data-verdict', 'refused', { timeout: 20_000 })
+    await expect(note).toHaveText(
+      "Retail sale of pharmaceutical goods (pharmacy) isn't allowed in the Industry zone where your pin is. To petition this, visit the Business Permits and Licensing Office (BPLO) at Malabon City Hall.",
+    )
+    await expect(next).toBeDisabled()
+    await note.scrollIntoViewIfNeeded()
+    await shot(page, 'amendment-zone-not-allowed-page')
+
+    // The same pin for a warehouse, which Industrial-2 lists: green, and on.
+    await page.getByRole('button', { name: 'Clear', exact: true }).first().click()
+    await pickLine('warehousing', 'Warehousing and storage')
+    await expect(note).toHaveAttribute('data-verdict', 'listed', { timeout: 20_000 })
+    await expect(note).toContainText('Your type of business is allowed in Acacia’s “Industry” zone.')
+    await expect(next).toBeEnabled({ timeout: 20_000 })
+    await note.scrollIntoViewIfNeeded()
+    await shot(page, 'amendment-zone-allowed-page')
   })
 
   /*

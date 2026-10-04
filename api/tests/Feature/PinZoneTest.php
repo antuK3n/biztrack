@@ -269,3 +269,32 @@ it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is un
 
     expect($sheets(pzDraft('Catmon', [14.669393, 120.959980], '47111'))['ZONING'])->toBeNull();
 });
+
+it('says in the note under the map what the zone at the pin says, and nothing about another zone', function () {
+    authAs('owner@biztrack.local');
+    $note = fn (array $pin, string $barangay, string $code) => $this->getJson('/api/v1/location-insights?'.http_build_query([
+        'latitude' => $pin[0], 'longitude' => $pin[1],
+        'barangay_id' => pzBarangay($barangay)->id, 'psic_code_id' => pzPsic($code)->id,
+    ]))->assertOk()->json('data.zoning');
+
+    // Refused: the step's own sentence.
+    $refused = $note([14.667975, 120.969217], 'Acacia', '47721');
+    expect($refused['verdict'])->toBe('refused')
+        ->and($refused['reason'])->toBe('Retail sale of pharmaceutical goods (pharmacy) isn\'t allowed in the Industry'.PZ_SENTENCE);
+
+    // Listed: the one zone named is the pin's.
+    $listed = $note([14.659117, 120.957631], 'Longos', '47721');
+    expect($listed['verdict'])->toBe('listed')
+        ->and($listed['zones'])->toHaveCount(1)
+        ->and($listed['zones'][0]['codes'])->toBe(['R-2-BASIC', 'R-2-MAX'])
+        ->and($listed['zones'][0]['matched_use'])->toContain('Drug stores');
+
+    // Passed but not on the pin's list (a sari-sari store in Industrial-2), or
+    // a pin in no traced zone: the barangay's answer, with no zone marked as
+    // the one that lists it.
+    foreach ([[[14.667975, 120.969217], 'Acacia'], [[14.669393, 120.959980], 'Catmon']] as [$pin, $barangay]) {
+        $answer = $note($pin, $barangay, '47111');
+        expect($answer['verdict'])->not->toBe('refused')
+            ->and(collect($answer['zones'])->filter(fn ($z) => $z['listed'] || $z['possible'])->all())->toBe([]);
+    }
+});

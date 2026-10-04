@@ -27,7 +27,7 @@ import { zoneLabel } from '../lib/zoningNames'
  * The zone under the pin IS read now, on the server and from these same files
  * (App\Support\Zoning\PinZone), for one purpose Ken set on 5 October 2026: a
  * line of business the zone CLEARLY does not allow holds the Location & Zoning
- * step, with a popup. Everything unclear — and the tracing is why so much is —
+ * step, and the note under the map says so. Everything unclear — and the tracing is why so much is —
  * passes in silence, and CPDO decides it.
  *
  * Each zone used to say "approximate" on hover, and the key carried "Traced

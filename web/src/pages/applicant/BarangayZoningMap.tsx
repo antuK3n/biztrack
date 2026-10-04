@@ -23,8 +23,10 @@ import { plainOverlay, plainZoneName } from '../../lib/zoningNames'
  *
  * The one thing that does read the zone under the pin is a refusal (Ken, 5
  * October 2026): a line of business the traced zone clearly does not allow
- * holds the step, with a popup (App\Support\Zoning\PinZone). It never says
- * the reverse — that a pin conforms — which is the claim this card avoids.
+ * holds the step, and the note under the map says so; where the zone's list
+ * names the trade, that note names the pin's zone (App\Support\Zoning\
+ * PinZone, ZoningConformance::forPin). This card still names no zone for the
+ * pin.
  *
  * And even exact zone polygons would not make a verdict follow: the ordinance
  * itself cannot be resolved into one (`docs/zoning-ordinance/README.md` sets

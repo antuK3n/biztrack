@@ -116,11 +116,17 @@ interface LocationInsightsData {
    * allowed.
    */
   zoning: {
-    verdict: 'listed' | 'possible' | 'not_listed' | 'undetermined'
+    /**
+     * `refused` since 5 October 2026: the zone under the pin clearly does not
+     * allow the trade, and `reason` is the sentence the step is held with.
+     */
+    verdict: 'listed' | 'possible' | 'not_listed' | 'undetermined' | 'refused'
     reason: string
     trade: string | null
     zones: {
       code: string
+      /** The pin's zone, when the answer is for it: two codes for the traced R-2 pair. */
+      codes?: string[]
       name: string
       use_count: number
       listed: boolean
@@ -573,6 +579,16 @@ export function LocationInsightsPanel({
  * Administrator's grant or denial to the Local Zoning Board of Appeals, and a
  * use the zone does not list goes there as an exception (Art. VIII §1.2).
  * questions-for-malabon C12 records it.
+ *
+ * ── It follows the pin now (Ken, 5 October 2026) ──────────────────────────
+ *
+ * The answer is for the zone the traced map puts the pin in
+ * (ZoningConformance::forPin), so the note can never contradict the rule that
+ * holds the step. Where that zone clearly does not allow the trade the box is
+ * the refusal: red, because the step is stopped (Red Means Stop), and nothing
+ * in it but the sentence the step is held with and submit would answer. Where
+ * the pin's zone is unknown or says nothing clear, the note is the barangay's
+ * answer as before, but names no zone as the one that allows the trade.
  */
 export function ZoningConformanceNote({
   zoning,
@@ -582,6 +598,19 @@ export function ZoningConformanceNote({
   barangayName: string | null
 }) {
   if (!zoning || zoning.verdict === 'undetermined') return null
+
+  if (zoning.verdict === 'refused') {
+    return (
+      <section
+        aria-live="polite"
+        data-testid="zoning-note"
+        data-verdict="refused"
+        className="rounded-xl border-2 border-s-red bg-s-red-tint p-4 sm:p-5"
+      >
+        <p className="text-lg font-bold leading-snug text-ink">{zoning.reason}</p>
+      </section>
+    )
+  }
 
   const listed = zoning.verdict === 'listed'
   /*
@@ -645,11 +674,11 @@ export function ZoningConformanceNote({
       <p className="mt-1.5 text-lg font-bold leading-snug text-ink">
         {listed
           ? matched
-            ? `Your type of business is allowed in ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
+            ? `Your type of business is allowed in ${where}’s “${plainZoneName(matched.codes ?? matched.code, matched.name)}” zone.`
             : `Your type of business is allowed in ${where}.`
           : possible
             ? matched
-              ? `Your type of business may fit ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
+              ? `Your type of business may fit ${where}’s “${plainZoneName(matched.codes ?? matched.code, matched.name)}” zone.`
               : `Your type of business may fit a zone in ${where}.`
             : `Your type of business is not on the zoning rules’ list for ${where}.`}
       </p>

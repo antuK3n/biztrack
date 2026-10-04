@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\Barangay;
 use App\Models\PsicCode;
 use App\Support\Zoning\Ordinance;
+use App\Support\Zoning\PinZone;
 use App\Support\Zoning\TradeUses;
 use Illuminate\Support\Facades\Cache;
 
@@ -277,6 +278,82 @@ class ZoningConformance
         }
 
         return $out;
+    }
+
+    /**
+     * The note under the map, for the zone under the owner's pin (Ken, 5
+     * October 2026: the box must follow the pin, so it can never contradict
+     * the rule that holds the step).
+     *
+     *  - The zone at the pin clearly does not allow the trade: `refused`, and
+     *    `reason` is PinZone's sentence, the one submit answers 422 with.
+     *  - The zone's list names it, or may: `listed` or `possible`, and the
+     *    one zone in `zones` is the pin's, so that is the zone the note names.
+     *  - Anything else — no pin, a pin in no traced zone, a trade the pin's
+     *    zone neither names nor refuses (a home business, a code nobody has
+     *    read, a zone with no list): the barangay's answer as forBarangay
+     *    gives it, with no zone marked as the one that lists the trade, so
+     *    the note never says it is allowed in a zone that is not the pin's.
+     *
+     * @return array{verdict: 'listed'|'possible'|'not_listed'|'undetermined'|'refused', reason: string, zones: list<array<string, mixed>>, trade: ?string}
+     */
+    public static function forPin(?Barangay $barangay, ?PsicCode $psic, ?float $lat, ?float $lng): array
+    {
+        $zone = PinZone::at($lat, $lng, $barangay);
+        if ($zone !== null && $psic !== null) {
+            $entry = fn (?array $hit) => [
+                'code' => $zone['codes'][0],
+                'codes' => $zone['codes'],
+                'name' => $zone['name'],
+                'use_count' => array_sum(array_map(
+                    fn (string $code) => array_sum(array_map(fn (string $s) => count(self::ownUses($s)), Ordinance::closure($code))),
+                    $zone['codes'],
+                )),
+                'listed' => $hit !== null && $hit['certain'],
+                'possible' => $hit !== null && ! $hit['certain'],
+                'matched_use' => $hit['use'] ?? null,
+                'source' => 'sheet',
+                'governing' => true,
+                'via' => $hit['via'] ?? null,
+                'from' => $hit['from'] ?? null,
+            ];
+
+            if (PinZone::refuses($zone['codes'], $psic)) {
+                return [
+                    'verdict' => 'refused',
+                    'reason' => (string) PinZone::refusal($lat, $lng, $barangay, [$psic]),
+                    'zones' => [$entry(null)],
+                    'trade' => $psic->title,
+                ];
+            }
+
+            // Both halves of the R-2 pair, a line it names before one it may be.
+            $hit = null;
+            foreach ($zone['codes'] as $code) {
+                $found = self::lookup($code, $psic);
+                if ($found !== null && ($hit === null || ($found['certain'] && ! $hit['certain']))) {
+                    $hit = $found;
+                }
+            }
+            if ($hit !== null) {
+                return [
+                    'verdict' => $hit['certain'] ? 'listed' : 'possible',
+                    'reason' => $hit['certain']
+                        ? 'The ordinance lists this use for the zone at the pin.'
+                        : 'The zone at the pin lists a use this may be; CPDO decides whether it is.',
+                    'zones' => [$entry($hit)],
+                    'trade' => $psic->title,
+                ];
+            }
+        }
+
+        $answer = self::forBarangay($barangay, $psic);
+        $answer['zones'] = array_map(
+            fn (array $z) => ['listed' => false, 'possible' => false, 'matched_use' => null] + $z,
+            $answer['zones'],
+        );
+
+        return $answer;
     }
 
     /**

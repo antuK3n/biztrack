@@ -4900,21 +4900,49 @@ export function ApplyWizard() {
    * ── A line of business the zone under the pin clearly does not allow ─────
    *
    * Ken, 5 October 2026: the lot's zone comes from the pin, and an owner whose
-   * line of business is clearly not allowed in it cannot continue. Location &
-   * Zoning is the one step that holds both the pin and the line, so Next stays
-   * held there, and Submit on Review, which draws that section again. A popup
-   * says why, once per pin and line: moving the pin or changing the line asks
-   * again, and a new refusal opens it again.
+   * line of business is clearly not allowed in it cannot continue. A new
+   * filing is held on Location & Zoning, the step that holds both the pin and
+   * the line; an amendment that moves the business is held on its own step,
+   * judged on the new pin with the line it asks for or the one on record.
+   * Submit on Review is held for both. Moving the pin or changing the line
+   * asks again.
+   *
+   * What says why is the box under the map (ZoningConformanceNote), which
+   * answers for the same pin with the same sentence. There is no popup: the
+   * one built first was a misreading — "the popup" Ken asked for was always
+   * that box.
    *
    * The server decides (App\Support\Zoning\PinZone, `GET zone-at-pin`) and
-   * refuses the same filing at submit with the same sentence. Only a new
-   * filing is asked here: a renewal carries no Location & Zoning step, and an
-   * amendment that moves or changes its line meets the rule at submit.
+   * refuses the same filing at submit with the same sentence. A renewal is not
+   * asked: it has no Location & Zoning step and changes neither.
    *
    * Held while the question is in flight, too, so a quick press cannot slip
    * past a refusal that has not landed yet. A failed lookup holds nothing.
    */
+  const amendZonePlace = useMemo(() => {
+    if (applicationType !== 'amendment') return null
+    // What the server holds, as submit will read it: the requested value,
+    // else the register's.
+    const asked = (field: string) => {
+      const row = amendRows.find((r) => r.field === field)
+      return row?.requested && row.new_value ? row.new_value : null
+    }
+    const held = (field: string) => asked(field) ?? amendRows.find((r) => r.field === field)?.current_value ?? ''
+    const pin = (asked('address_pin') ?? '').split(',')
+    const latitude = Number(pin[0])
+    const longitude = Number(pin[1])
+    if (pin.length !== 2 || pin[0] === '' || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null
+    }
+    const barangayId = Number(held('address_barangay_id'))
+    const psicCodeId = Number(held('line_of_business'))
+    return barangayId > 0 && psicCodeId > 0 ? { latitude, longitude, barangayId, psicCodeId } : null
+  }, [applicationType, amendRows])
   const zoneAtPinQuery = useMemo<ZoneAtPinQuery | null>(() => {
+    if (amendZonePlace !== null) {
+      const { latitude, longitude, barangayId, psicCodeId } = amendZonePlace
+      return { latitude, longitude, barangayId, psicCodeIds: [psicCodeId] }
+    }
     const psicCodeIds = form.lines.map((l) => l.psic_code_id).filter((id) => Boolean(id))
     return applicationType === 'new'
       && sequence.includes('address')
@@ -4929,13 +4957,17 @@ export function ApplyWizard() {
           psicCodeIds,
         }
       : null
-  }, [applicationType, sequence, form.latitude, form.longitude, form.barangay_id, form.lines])
+  }, [amendZonePlace, applicationType, sequence, form.latitude, form.longitude, form.barangay_id, form.lines])
   const zoneAtPin = useZoneAtPin(zoneAtPinQuery)
-  const zoneHeldHere = phase === 'address' || phase === 'review'
+  const zoneHeldHere = applicationType === 'amendment'
+    ? phase === 'amendments' || phase === 'review'
+    : phase === 'address' || phase === 'review'
   const zoneRefusal = zoneHeldHere ? (zoneAtPin.data?.refusal ?? null) : null
   const zoneHolds = zoneHeldHere && (zoneRefusal !== null || zoneAtPin.pending)
-  // The question whose refusal the owner has already closed with OK.
-  const [zoneRefusalSeen, setZoneRefusalSeen] = useState<string | null>(null)
+  // The amendment's box under its own map, read for its new pin.
+  const amendInsights = useLocationInsights(
+    amendZonePlace === null ? null : { ...amendZonePlace, businessId },
+  )
 
   /*
    * ── What this filing is FOR ─────────────────────────────────────────────
@@ -7291,10 +7323,11 @@ export function ApplyWizard() {
      * the gate off the response. Same question `missingFor('amendments')`
      * asks; asked of rows that include the save this press triggered.
      */
+    if (zoneHolds) return
     if (applicationType === 'amendment' && phase === 'amendments') {
       const rows = await flushAmendments()
       if (!rows.some((r) => r.requested)) return
-    } else if (stepMissing.length > 0 || zoneHolds) {
+    } else if (stepMissing.length > 0) {
       return
     }
     // Location & Zoning used to stop here for the zoning dialog; the answer is
@@ -7751,6 +7784,19 @@ export function ApplyWizard() {
               >
                 {amendPinError}
               </p>
+            )}
+            {/*
+              The same box as under Location & Zoning's map, for the new pin:
+              allowed, or the sentence that holds this step (see
+              `zoneAtPinQuery`). Ken, 5 October 2026.
+            */}
+            {amendZonePlace !== null && !amendInsights.loading && (
+              <div className="mt-3">
+                <ZoningConformanceNote
+                  zoning={amendInsights.data?.zoning ?? null}
+                  barangayName={amendBarangayName}
+                />
+              </div>
             )}
             {value !== '' && (
               <button
@@ -9704,9 +9750,9 @@ export function ApplyWizard() {
        * neither the applicant nor CPDO gains from storing both — geometry
        * checks against the city and barangay polygons, `lib/malabonGeo.ts`;
        * and, since 5 October 2026 (Ken), a line of business the traced zone
-       * under the pin CLEARLY does not allow holds the step, with a popup
-       * that says so (`zoneAtPin`, above). Anything less than clear is left
-       * to CPDO, as before.
+       * under the pin CLEARLY does not allow holds the step, and the note
+       * under the map says so (`zoneAtPinQuery`, above). Anything less than
+       * clear is left to CPDO, as before.
        */}
       <WizardSection
         name="address"
@@ -13301,22 +13347,9 @@ export function ApplyWizard() {
         (23 September 2026: "Zoning must not be a popup"), so the live
         ZoningConformanceNote under the map carries the answer and Next just
         moves on. CPDO's final say — the line this dialog existed to keep — is
-        in that note.
-
-        The one popup zoning has now is a refusal, below, and it is Ken's
-        (5 October 2026): it opens only when the zone under the pin clearly
-        does not allow the line of business, and the step will not move on.
+        in that note. A refusal at the pin is said in that note too, and the
+        step is held (see `zoneAtPinQuery`).
       */}
-      {zoneRefusal !== null && zoneRefusalSeen !== zoneAtPin.key && (
-        <ProtoModal
-          title="Not allowed at this location"
-          tone="red"
-          cancelLabel="OK"
-          onCancel={() => setZoneRefusalSeen(zoneAtPin.key)}
-        >
-          <p className="text-center text-base">{zoneRefusal}</p>
-        </ProtoModal>
-      )}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}
       {showConfirm && (

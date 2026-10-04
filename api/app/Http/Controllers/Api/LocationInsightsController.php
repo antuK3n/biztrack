@@ -43,13 +43,13 @@ class LocationInsightsController extends Controller
             /*
              * The barangay the applicant CHOSE, not one derived from the pin.
              *
-             * The zoning answer below is keyed on a barangay because that is how
-             * CPDO's sheets are drawn — one sheet per barangay, no geometry
-             * inside it. Deriving it from the point instead would be deriving it
-             * from `malabonGeo`, whose own docblock says an individual point
-             * near an edge may be on the wrong side by ~100 m. The wizard already
-             * refuses a pin that contradicts the chosen barangay, so by the time
-             * this is asked the two agree and the chosen one is the honest key.
+             * CPDO's sheets are drawn one per barangay, so the zoning answer
+             * below reads the chosen barangay's traced zones and finds the pin
+             * among them. Deriving the barangay from the point instead would
+             * be deriving it from `malabonGeo`, whose own docblock says an
+             * individual point near an edge may be on the wrong side by ~100 m.
+             * The wizard already refuses a pin that contradicts the chosen
+             * barangay, so by the time this is asked the two agree.
              */
             'barangay_id' => ['nullable', 'integer', 'exists:barangays,id'],
         ]);
@@ -90,10 +90,17 @@ class LocationInsightsController extends Controller
          * it is now anchored to the 695 uses read off City Ordinance 24-2018.
          *
          * Still a lookup, still not a determination: see ZoningConformance.
+         *
+         * Read for the zone under the pin since 5 October 2026 (Ken): the
+         * note must never call a trade allowed in a zone the pin is not in,
+         * and when that zone clearly does not allow it, it says so in the
+         * sentence the step is held with. See ZoningConformance::forPin.
          */
-        $insights['zoning'] = ZoningConformance::forBarangay(
+        $insights['zoning'] = ZoningConformance::forPin(
             isset($data['barangay_id']) ? Barangay::with('zoningClassifications')->find($data['barangay_id']) : null,
             $psic,
+            (float) $data['latitude'],
+            (float) $data['longitude'],
         );
 
         return response()->json([
