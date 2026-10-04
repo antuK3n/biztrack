@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 import { OFFICES } from '../src/pages/admin/permitColumns'
 
-/** Six offices; the picker adds "All offices" and "Other offices" around them. */
+/** Six offices; the tab strip adds ALL in front of them. */
 const OFFICE_COUNT = OFFICES.length
 
 /*
@@ -342,7 +342,7 @@ test.describe('the permit register table', () => {
     expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
 
     // And the picker still offers every office, "All" and "Other offices".
-    await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 2)
+    await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1)
     await expect(officeTab(page, '')).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -749,21 +749,14 @@ test.describe('the permit register table', () => {
     await expect(page.getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
   })
 
-  test('the other offices’ permits are a view of their own', async ({ page }) => {
+  test('there is no "Other offices" tab, and ALL is the first', async ({ page }) => {
     /*
-     * Checklist item 18: "other permits in a separate view". BPLO's table is
-     * the Mayor's Permit; the five clearances other offices issue are one
-     * choice away, asked of the server as "every type but BUSINESS".
+     * Removed on the client's instruction [4 October 2026: "paki remove to
+     * Other offices", and "sa all office gawing ALL lang"]. The tabs are the
+     * six offices and ALL, on one line.
      */
-    await chooseOffice(page, 'OTHER')
-
-    await expect.poll(() => asked.at(-1)).toContain('exclude_permit_type=BUSINESS')
-    expect(asked.at(-1)).not.toContain('permit_type=OTHER')
-
-    const rows = page.locator('tbody tr')
-    await expect(rows).toHaveCount(2)
-    await expect(page.locator('tbody')).not.toContainText('MCB-2026-000001')
-    await expect(page.getByText(/issued by every office but BPLO/)).toBeVisible()
+    await expect(officeGroup(page).getByRole('button', { name: /Other offices/ })).toHaveCount(0)
+    await expect(officeGroup(page).getByRole('button').first()).toHaveText(/^ALL/)
   })
 
   test('retired businesses are hidden until the filter asks for them', async ({ page }) => {
@@ -1069,7 +1062,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
 
       await expect(officeGroup(page)).toBeVisible()
-      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 2) // six offices, "All", "Other offices"
+      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1) // six offices and ALL
       // It opens on BPLO's own office; widen it, which is the whole point of
       // the control being here.
       await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
