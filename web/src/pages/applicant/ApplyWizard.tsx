@@ -2369,18 +2369,6 @@ function IdentifyFilingModal({
       : allPermits
 
   /*
-   * Is the Mayor’s / Business Permit among the ticks?
-   *
-   * It decides what the note under the picker says, and it is the same
-   * question the tick handler asks and that `RenewalScope` asks on the
-   * API: a filing carrying the business permit may carry whatever else is
-   * due with it, and one that does not carries a single permit.
-   */
-  const carriesBusinessPermitTick = permits.some(
-    (p) => permitIds.includes(p.id) && p.permit_type?.code === BUSINESS_PERMIT_CODE,
-  )
-
-  /*
    * The permits this filing may actually carry, and the rest.
    *
    * Split on the SERVER's own refusal (`renewal_blocked_reason`) rather
@@ -2651,59 +2639,6 @@ function IdentifyFilingModal({
         <div className="mt-3">
           {/* The list below carries the full question as its own name. */}
           <FieldLabel required>Permit</FieldLabel>
-          {/*
-            One bill, said where the ticking happens.
-
-            Item #79: nothing in this picker said what a second tick costs, so
-            the applicant had no way to know whether renewing three permits
-            meant three trips to the cashier. It does not, and that is worth
-            stating here rather than three screens later on PayPage, because
-            the fear of a second bill is what makes someone untick a permit
-            that is genuinely due.
-
-            Why it is true, so a later reader can re-check it rather than
-            trust this line: a tick lands in `priorPermitIds`, the effect above
-            derives `form.permit_type_ids` from it, and
-            `WorkflowService::assessFees()` then loops `$app->permitTypes`
-            into a SINGLE `FeeAssessment` — one `total_amount`, written by an
-            `updateOrCreate` keyed on `application_id` so a filing can only
-            ever hold one assessment row. `PermitFees::balance()` reads that
-            one row. There is no per-permit accrual anywhere in the path.
-
-            It deliberately does not say "on your business permit renewal",
-            which is how #79 phrased it. A renewal is of whichever permits are
-            actually due (see the effect that derives `permit_type_ids`), so a
-            shop renewing only its Sanitary Permit has no business permit on
-            the filing at all and that sentence would be false for them. "This
-            filing" is true in every case, including the paper-permit escape.
-
-            It names no amount and no date on purpose — both belong to the Tax
-            Order of Payment, which BPLO raises after reading the form, and
-            neither is knowable here.
-
-            If a second `FeeAssessment` row per permit is ever introduced, or
-            an accrual returns the way `ClearanceService::reassess()` once
-            worked, this sentence becomes a lie about money and must go with
-            it.
-          */}
-          {/*
-            Two sentences, and which one shows depends on the answer so far.
-
-            The fee line earns its place for the reason item #79 gave: nothing
-            in this picker said what a second tick costs, and the fear of a
-            second bill is what makes someone untick a permit that is due.
-
-            The other line is new on 3 October 2026 and has to come FIRST in
-            the reader's day, not after: ticking a second clearance will drop
-            the first, and a control that rearranges itself without warning is
-            read as a bug. It is also why the rule is phrased as what to do —
-            file them separately — rather than as what is forbidden.
-          */}
-          <p className="mb-2 text-xs text-ink-secondary">
-            {carriesBusinessPermitTick
-              ? 'As many as you need — one payment, not one per permit.'
-              : 'Choose your Mayor’s / Business Permit to renew several at once.'}
-          </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
           ) : loadError ? (
@@ -2718,12 +2653,8 @@ function IdentifyFilingModal({
             renewableNow.length > 0 && (
               <ul
                 aria-label={`Which permit are you ${verb}?`}
-                /*
-                 * A radiogroup while one answer is allowed, a plain list
-                 * once the Mayor's Permit has opened it to several. The
-                 * inputs below switch with it.
-                 */
-                role={carriesBusinessPermitTick ? undefined : 'radiogroup'}
+                // One permit per renewal, so one answer (Ken, 5 October 2026).
+                role="radiogroup"
                 className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
               >
                 {renewableNow.map((p) => {
@@ -2809,13 +2740,9 @@ function IdentifyFilingModal({
                         }`}
                       >
                         <input
-                          /*
-                           * One answer or several — see the note on the
-                           * list above. A radio in a group named by the
-                           * same `aria-label`, so the two never disagree.
-                           */
-                          type={carriesBusinessPermitTick ? 'checkbox' : 'radio'}
-                          name={carriesBusinessPermitTick ? undefined : 'renewal-permit'}
+                          // A radio in a group named by the same `aria-label`.
+                          type="radio"
+                          name="renewal-permit"
                           /*
                            * Disabled, not hidden. A permit the business
                            * holds and cannot renew is a fact the applicant
@@ -2835,44 +2762,18 @@ function IdentifyFilingModal({
                           onChange={() => {
                             if (inProgress) return
                             /*
-                             * Appended, never inserted: the first tick is the
-                             * primary and the renewal chain is keyed on it, so
-                             * the order the applicant ticked in IS the answer.
-                             * Untick-and-retick is how you change which is
-                             * primary, which is the only honest way to say it
-                             * without a second control asking the same thing.
+                             * ── One permit per renewal ─────────────────────
                              *
-                             * ── One filing, or one other permit ───────────
-                             *
-                             * Client, 3 October 2026, on the other permits
-                             * being independent of each other. Ticking a
-                             * second one with no Mayor's Permit in the set
-                             * REPLACES the first rather than refusing it:
-                             * the applicant is telling us which permit they
-                             * mean, and answering a changed mind with an
-                             * error is answering it with an obstacle. The
-                             * note under the list says it will happen before
-                             * it does.
-                             *
-                             * `RenewalScope` on the API refuses the set this
-                             * cannot produce, on both endpoints that write
-                             * it — the UI keeping a shape off the screen is
-                             * not the same as the server refusing it.
+                             * Every permit is renewed on its own filing, the
+                             * Mayor's / Business Permit included (Ken, 5
+                             * October 2026). It had been allowed to carry the
+                             * others, so revoking one of them mid-renewal left
+                             * a filing half about a permit that no longer
+                             * existed. Picking another permit replaces the
+                             * first; `RenewalScope` refuses a second on the
+                             * API, on both endpoints that write the set.
                              */
-                            setPermitIds((current) => {
-                              if (current.includes(p.id)) {
-                                return current.filter((id) => id !== p.id)
-                              }
-
-                              const next = [...current, p.id]
-                              const carriesBusinessPermit = permits.some(
-                                (q) =>
-                                  next.includes(q.id) &&
-                                  q.permit_type?.code === BUSINESS_PERMIT_CODE,
-                              )
-
-                              return carriesBusinessPermit ? next : [p.id]
-                            })
+                            setPermitIds([p.id])
                           }}
                           className="h-4 w-4 shrink-0 accent-royal"
                         />

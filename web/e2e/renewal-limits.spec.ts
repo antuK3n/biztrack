@@ -113,6 +113,6 @@ test.describe('renewal limits, as the applicant sees them', () => {
      * than enabled, hiding whether the assertion had any teeth at all.
      */
     const row = modal.locator('li').filter({ hasText: /can no longer be renewed/i })
-    await expect(row.getByRole('checkbox')).toBeDisabled()
+    await expect(row.getByRole('radio')).toBeDisabled()
   })
 })

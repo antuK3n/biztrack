@@ -173,7 +173,7 @@ it('lets two drafts of one permit coexist, and submits only the first', function
         ->assertJsonPath('errors.prior_permit_id.0', 'This permit already has a renewal in progress.');
 });
 
-it('counts a permit carried in a renewal’s set, not only its primary', function () {
+it('counts a permit carried in an older bundled renewal, not only its primary', function () {
     $businessId = rnpBusiness();
     $permit = rnpPermit($businessId);
     $sanitary = Permit::create([
@@ -187,13 +187,10 @@ it('counts a permit carried in a renewal’s set, not only its primary', functio
         'status' => PermitStatus::Expired,
     ]);
 
-    authAs('owner@biztrack.local');
-    $first = $this->postJson('/api/v1/applications', [
-        'business_id' => $businessId,
-        'data_privacy_consent' => true,
-        'application_type' => 'renewal',
-        'prior_permit_ids' => [$permit->id, $sanitary->id],
-    ])->assertCreated()->json('data.id');
+    // A renewal filed before one permit per filing became the rule (5 October
+    // 2026) can still carry two; the second must count as being renewed too.
+    $first = rnpRenew($businessId, $permit)->assertCreated()->json('data.id');
+    Application::findOrFail($first)->priorPermits()->attach($sanitary->id);
     rnpSubmit($first)->assertOk();
 
     rnpRenew($businessId, $sanitary)

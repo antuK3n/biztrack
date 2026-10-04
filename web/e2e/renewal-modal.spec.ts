@@ -89,7 +89,7 @@ function paperPermitRow(page: Page) {
 
 /** The tick inside a picker row. */
 function tickOf(row: Locator) {
-  return row.getByRole('checkbox')
+  return row.getByRole('radio')
 }
 
 /**

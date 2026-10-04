@@ -97,19 +97,18 @@ it('refuses two other permits on one filing', function () {
         ->toBeString();
 });
 
-it('allows the business permit to carry the others with it', function () {
+it('refuses the business permit carrying another permit too', function () {
     /*
-     * The inverse, and the half that must NOT be narrowed: the January filing
-     * renews the Mayor's Permit and whatever else has fallen due, on one Tax
-     * Order of Payment.
+     * The exception the January filing used to have is gone (Ken, 5 October
+     * 2026): the Mayor's / Business Permit is renewed on its own as well, and
+     * each clearance on its own filing.
      */
-    [, $permits] = scopeBusinessHolding([PermitType::OUTCOME_CODE, 'SANITARY', 'FSIC']);
+    [, $permits] = scopeBusinessHolding([PermitType::OUTCOME_CODE, 'SANITARY']);
 
     expect(RenewalScope::refusal([
         $permits[PermitType::OUTCOME_CODE]->id,
         $permits['SANITARY']->id,
-        $permits['FSIC']->id,
-    ]))->toBeNull();
+    ]))->toBe('Each permit is renewed on its own application. Choose one here and file the next separately.');
 });
 
 it('says nothing about an empty set', function () {

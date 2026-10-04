@@ -100,8 +100,8 @@ class PriorPermitController extends Controller
         }
 
         /*
-         * One filing carries the business permit, or one other permit —
-         * see `RenewalScope` for the rule and why it stops there.
+         * One filing carries one permit — see `RenewalScope` for the rule
+         * and why.
          *
          * Checked here as well as in `ApplicationController`, because this
          * is the other door to the same answer: reopening the entry dialog

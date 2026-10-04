@@ -284,10 +284,9 @@ class ApplicationController extends Controller
         }
 
         /*
-         * And how MANY it may name — the business permit with whatever else
-         * is due, or one other permit alone. `RenewalScope` carries the
-         * rule and the reason; `PriorPermitController` asks the same
-         * question on the other door to this answer.
+         * And how MANY it may name — one. `RenewalScope` carries the rule
+         * and the reason; `PriorPermitController` asks the same question on
+         * the other door to this answer.
          */
         if ($refusal = RenewalScope::refusal($priorIds)) {
             abort(422, $refusal);
