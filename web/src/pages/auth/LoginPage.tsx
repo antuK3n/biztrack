@@ -17,7 +17,7 @@ import {
   toApiError,
 } from '../../lib/api'
 import type { Portal } from '../../lib/api'
-import { emailCodes } from '../../lib/resources'
+import { emailCodes, signInOptions } from '../../lib/resources'
 import type { SignInCodeChallenge } from '../../lib/resources'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
@@ -59,6 +59,15 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
    */
   const [captchaToken, setCaptchaToken] = useState('')
   const [captchaResets, setCaptchaResets] = useState(0)
+  /*
+   * Whether the SERVER checks the captcha. A site key here says the widget can
+   * be drawn; the server says whether it is wanted, because the super admin
+   * can switch a configured captcha off from the Debug page. Null until it
+   * answers, which counts as wanted: a form briefly showing a captcha it did
+   * not need is harmless, one missing a captcha it did need fails the sign-in.
+   */
+  const [serverCaptcha, setServerCaptcha] = useState<boolean | null>(null)
+  const captchaOn = captchaEnabled() && serverCaptcha !== false
   const [errors, setErrors] = useState<FormErrors>({})
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -77,6 +86,22 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const [cooldown, setCooldown] = useCooldown(0)
   const formRef = useRef<HTMLFormElement>(null)
   const lastPath = useRef(location.pathname)
+
+  useEffect(() => {
+    if (!captchaEnabled()) return
+    let cancelled = false
+    signInOptions
+      .get()
+      .then((o) => {
+        if (!cancelled) setServerCaptcha(o.captcha)
+      })
+      .catch(() => {
+        /* unknown: keep drawing it, as before the switch existed */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
@@ -183,7 +208,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
        * widget renders nothing and there is nothing to complete, which is what
        * lets local development and the e2e suite sign in — see TurnstileWidget.
        */
-      captcha: !captchaEnabled() || captchaToken ? undefined : 'Complete the security check to continue.',
+      captcha: !captchaOn || captchaToken ? undefined : 'Complete the security check to continue.',
     }
   }
 
@@ -505,7 +530,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
           signing in without a Cloudflare account. See TurnstileWidget.
         */}
         <div>
-          <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResets} />
+          {captchaOn && <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResets} />}
           {errors.captcha && (
             <p id="login-captcha-error" role="alert" className="mt-1.5 text-sm font-medium text-s-red">
               {errors.captcha}

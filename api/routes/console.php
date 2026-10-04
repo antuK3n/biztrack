@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\QueueHeartbeat;
+use App\Support\Heartbeat;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -32,3 +34,13 @@ Schedule::command('backup:run')->dailyAt('02:00')->timezone('Asia/Manila');
  * made before the switch went off still has to be settled.
  */
 Schedule::command('biztrack:reconcile-payments')->everyMinute()->withoutOverlapping();
+
+/*
+ * Heartbeats for the Debug page's Health section (App\Support\SystemHealth):
+ * one written by the scheduler itself, and one put on the queue for a worker
+ * to write. If either goes stale, that process has stopped — which nothing
+ * else in the app would say until a payment failed to settle or an e-mail
+ * never left.
+ */
+Schedule::call(fn () => Heartbeat::beat(Heartbeat::SCHEDULER))->everyMinute()->name('health:scheduler-heartbeat');
+Schedule::job(new QueueHeartbeat)->everyMinute();

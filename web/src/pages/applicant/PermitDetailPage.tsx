@@ -171,19 +171,15 @@ export function PermitDetailPage() {
   const address = cert
     ? [cert.address, cert.barangay, cert.city].filter(Boolean).join(', ') || null
     : null
-  const signatories =
-    cert?.signatories?.length
-      ? cert.signatories
-      : /*
-         * Role captions with no name, used when the issuing office has no
-         * signatories configured. The blank line is a document waiting for a wet
-         * signature; a name written here in code would be a forgery that keeps
-         * printing after the officeholder has moved on.
-         */
-        [
-          { role: 'City Mayor', name: '' },
-          { role: 'Officer-in-Charge', name: '' },
-        ]
+  /*
+   * As the API built it — City Mayor and Officer-in-Charge first, then the
+   * issuing office's own names. This used to fall back to a literal pair of
+   * nameless captions when no office signatories were configured, which was
+   * every office but CENRO; both roles now come down named (see
+   * PermitFace::signatureBlock), so the literal is gone rather than left to
+   * print a duplicate line. `?? []` is the loading state, not a fallback.
+   */
+  const signatories = cert?.signatories ?? []
 
   return (
     <div className="mx-auto max-w-3xl">

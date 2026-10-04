@@ -84,6 +84,13 @@ class Application extends Model
          * defaults false on every new filing and reads as history.
          */
         'prior_permit_declared_none',
+        /*
+         * The answers City Ordinance No. 24-2018 needs that nothing else on the
+         * filing carries — the applicant's, and the zoning officer's own. Two
+         * columns so neither side's endpoint can overwrite the other's; see
+         * the migration 2026_10_03_000100 and App\Support\Zoning\ZoningFacts.
+         */
+        'zoning_facts', 'zoning_officer_facts',
     ];
 
     protected $casts = [
@@ -95,6 +102,8 @@ class Application extends Model
         'complexity_set_at' => 'datetime',
         'last_opened_at' => 'datetime',
         'fee_profile' => 'array',
+        'zoning_facts' => 'array',
+        'zoning_officer_facts' => 'array',
         /*
          * What each returned field said when the officer sent it back, plus
          * the moment they did. Compared once at resubmission and cleared —

@@ -1,4 +1,4 @@
-import { businessName } from '../../lib/format'
+import { businessName, tradeName } from '../../lib/format'
 import type { CarriedOverBusiness } from './OfficeFormStep'
 import type { Application } from '../../lib/types'
 
@@ -51,7 +51,7 @@ export function carriedOverBusiness(application: Application): CarriedOverBusine
       [b?.address?.line1, b?.address?.line2, b?.address?.barangay?.name]
         .filter(Boolean)
         .join(', ') || '—',
-    lineOfBusiness: line?.line_of_business?.trim() || line?.psic_code?.title || '—',
+    lineOfBusiness: tradeName(line) ?? '—',
     // MCG-CENRO-FO-001's Ownership and Documentation block. See the type.
     registrationType: REGISTRATION_TYPE_LABELS[b?.registration_type ?? ''] ?? '',
     ownerName:
@@ -88,7 +88,7 @@ export function carriedOverBusiness(application: Application): CarriedOverBusine
      * USE, so both together are the answer, and joining beats picking.
      */
     activity:
-      [line?.line_of_business?.trim() || line?.psic_code?.title, joinLines((l) => l.products_services)]
+      [tradeName(line), joinLines((l) => l.products_services)]
         .filter(Boolean)
         .join(' — '),
   }

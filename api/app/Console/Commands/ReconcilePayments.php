@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Payment;
 use App\Services\KwikPay\KwikPayGateway;
+use App\Support\Heartbeat;
 use Illuminate\Console\Command;
 
 /**
@@ -59,6 +60,9 @@ class ReconcilePayments extends Command
         }
 
         $this->info("Asked about {$due->count()} payment(s); {$settled} settled.");
+
+        // For the Debug page's Health section: when this last ran, and what it did.
+        Heartbeat::beat(Heartbeat::RECONCILE, ['asked' => $due->count(), 'settled' => $settled]);
 
         return self::SUCCESS;
     }

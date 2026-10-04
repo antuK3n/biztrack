@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\PaymentStatus;
+use App\Services\KwikPay\KwikPayGateway;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -14,6 +15,13 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * image) to finish paying, and once the payment is settled they are an
  * invitation to pay again. `gateway_order_id`, the check counters and the
  * gateway's own words stay server-side — they are for staff, not the owner.
+ *
+ * `gateway_amount` is the exception, because it is the owner's own business:
+ * what KwikPay was asked to collect from them for this payment. It differs
+ * from `amount` only while the super admin's charge switch says `test`, and
+ * the waiting screen shows it so "pay ₱2,000.00" is not on screen while the
+ * owner's app asks for ₱1.00. Null on a simulated payment, which collects
+ * nothing.
  */
 class PaymentResource extends JsonResource
 {
@@ -26,6 +34,9 @@ class PaymentResource extends JsonResource
             'id' => $this->id,
             'reference_number' => $this->reference_number,
             'amount' => $this->amount,
+            'gateway_amount' => $this->isKwikPay()
+                ? number_format(KwikPayGateway::requestedAmount($this->resource), 2, '.', '')
+                : null,
             'method' => $this->method?->value,
             'status' => $this->status?->value,
             'paid_at' => optional($this->paid_at)->toISOString(),

@@ -67,6 +67,13 @@ return [
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
 
     /*
+     * A build stamp, for the Debug page's Health section. Set it where the
+     * image is built (a commit, a tag); without it the section reads the git
+     * checkout, and says "unknown" when there is none (App\Support\SystemHealth).
+     */
+    'version' => env('APP_VERSION'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------

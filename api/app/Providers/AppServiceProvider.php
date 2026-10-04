@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Services\Sms\LogSmsChannel;
 use App\Services\Sms\SmsChannel;
 use App\Support\ReportViews;
+use App\Support\SystemSwitches;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
@@ -20,6 +21,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // System switches read once per request or job (SystemSwitches::stored).
+        $this->app->scoped(SystemSwitches::MEMO, fn () => new \ArrayObject);
+
         // SMS channel driver — swap via SMS_DRIVER env (only `log` in the demo).
         $this->app->bind(SmsChannel::class, function () {
             return match (config('services.sms.driver', env('SMS_DRIVER', 'log'))) {

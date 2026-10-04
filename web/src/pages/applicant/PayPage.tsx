@@ -34,7 +34,26 @@ import type { FeeAssessment, Payment, PaymentMethod, PaymentOptions } from '../.
  * Coming back from the payment app lands here with `?payment=<id>&returned=1`
  * (the gateway's return address). `returned` makes the page ask once straight
  * away instead of waiting for the next poll.
+ *
+ * ── The test charge ───────────────────────────────────────────────────────
+ *
+ * While the super admin's charge switch says `test`, the payment service
+ * collects ₱1.00 however large the bill (docs/payment-gateway.md). The page
+ * says so before the owner pays (`options.test_charge`), so a panelist
+ * watching a ₱1 payment settle a ₱2,000 bill sees that it is deliberate. Once
+ * a payment is open, the waiting screen shows what that payment asks for
+ * (`gateway_amount`), which a later switch does not change.
  */
+
+/** What the payment service was asked to collect, falling back to the bill. */
+function collected(payment: Payment): string {
+  return payment.gateway_amount ?? payment.amount
+}
+
+/** True when this payment collects a test amount rather than its bill. */
+function isTestCharge(payment: Payment): boolean {
+  return payment.gateway_amount != null && Number(payment.gateway_amount) !== Number(payment.amount)
+}
 
 const POLL_MS = 5000
 
@@ -322,9 +341,9 @@ export function PayPage() {
             <span className="text-3xl font-medium">Payment did not go through</span>
           </div>
           <p className="max-w-md text-center text-sm text-ink-secondary">
-            Your {paymentMethodLabel(attempt.method)} payment of {formatMoney(attempt.amount)} was not
-            completed, so your application is still waiting for payment. You can try again, with the
-            same method or another one.
+            Your {paymentMethodLabel(attempt.method)} payment of {formatMoney(collected(attempt))} was
+            not completed, so your application is still waiting for payment. You can try again, with
+            the same method or another one.
           </p>
           <p className="text-xs text-ink-muted">
             Reference no. <span className="tnum">{attempt.reference_number}</span>
@@ -424,6 +443,21 @@ export function PayPage() {
         )}
       </fieldset>
 
+      {/*
+        Before the button, not after it: this is what the owner is about to
+        be charged, and it is not the Total Amount on the card above. Info,
+        not a warning — nothing is wrong, it is a test.
+      */}
+      {online && options?.test_charge && (
+        <div className="mt-6">
+          <Alert variant="info" title="Test charge">
+            You will be charged {formatMoney(options.test_charge)} for this bill
+            {assessment ? ` instead of ${formatMoney(assessment.total_amount)}` : ''}. The bill and your
+            receipt keep the full amount.
+          </Alert>
+        </div>
+      )}
+
       <div className="mt-7">
         <PillButton
           onClick={pay}
@@ -469,7 +503,9 @@ function WaitingCard({
   const [qrBroken, setQrBroken] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const isQr = payment.pay_url_kind === 'qr' && !!payment.pay_url && !qrBroken
-  const amount = formatMoney(payment.amount)
+  // What the owner's app will ask for, which is the test amount while the
+  // test charge was on when this payment was opened — not the bill.
+  const amount = formatMoney(collected(payment))
 
   return (
     <StatusCard tone="yellow">
@@ -497,6 +533,12 @@ function WaitingCard({
           Finish paying <span className="tnum font-semibold text-ink">{amount}</span> in your{' '}
           {paymentMethodLabel(payment.method)} app. If you have already paid, this page updates by
           itself once the payment is confirmed — usually within a minute.
+        </p>
+      )}
+
+      {isTestCharge(payment) && (
+        <p className="max-w-md text-center text-xs text-ink-muted">
+          Test charge. Your bill of {formatMoney(payment.amount)} is recorded in full.
         </p>
       )}
 

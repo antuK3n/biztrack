@@ -92,6 +92,31 @@ it('returns the applicant\'s submitted particulars on the inspection detail', fu
         ->toEqualCanonicalizing($inspection->application->permitTypes->pluck('code')->all());
 });
 
+it('sends the inspector the trade as the applicant described it', function () {
+    /*
+     * This read `psicCode->title` whenever that relation happened to be
+     * loaded, so an officer sent to a business filed under the catch-all 00000
+     * was told its line of business was "Other (not listed)" — the one answer
+     * that says nothing about the premises they are standing in front of —
+     * while the applicant's own description sat one column away in
+     * `business_lines.line_of_business`.
+     *
+     * Same rule as the certificate, same method: BusinessLine::tradeName.
+     */
+    $inspection = inspectionWithFiling();
+    $line = $inspection->application->business->lines()->firstOrFail();
+    $line->line_of_business = 'Hardware and construction supply';
+    $line->save();
+
+    $p = $this->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson("/api/v1/inspections/{$inspection->id}")
+        ->assertOk()
+        ->json('data.particulars');
+
+    expect($p['line_of_business'])->toContain('Hardware and construction supply')
+        ->and($p['line_of_business'])->not->toContain('Other (not listed)');
+});
+
 it('leaves the particulars null on the inspection list rather than sending a block of nulls', function () {
     inspectionWithFiling();
 

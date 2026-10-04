@@ -29,24 +29,33 @@ return [
     'default' => env('PAYMENT_GATEWAY') ?: 'simulated',
 
     'kwikpay' => [
-        // The provider's Back Office domain. Point it at the fake (below) for a
-        // demo without credentials.
-        'base_url' => env('KWIKPAY_BASE_URL') ?: 'https://pay4-kwikpay.jd.management',
+        // The KwikPay gateway BizTrack's merchant account is on. It answers the
+        // same /api/transfer, /api/query and /api/me as KwikPay's own Back
+        // Office (pay4-kwikpay.jd.management). Point it at the fake (below) for
+        // a demo without credentials.
+        'base_url' => env('KWIKPAY_BASE_URL') ?: 'https://payment-gateway-kwgu.onrender.com',
 
-        // Issued by KwikPay at contract time. The key signs every request and
-        // verifies every callback; it must never reach the browser or a log.
-        'merchant' => env('KWIKPAY_MERCHANT'),
+        // The merchant is an account name, not a secret: it travels in the
+        // clear in every request and callback. The key is the secret. It signs
+        // every request and verifies every callback, so it lives only in the
+        // server's env and must never reach the browser or a log.
+        'merchant' => env('KWIKPAY_MERCHANT') ?: 'harson-tech',
         'key' => env('KWIKPAY_KEY'),
 
-        // "1"–"12". Which one is enabled for us is KwikPay's to say — the docs
-        // say to ask the account manager. Empty until they do.
-        'payment_type' => env('KWIKPAY_PAYMENT_TYPE'),
+        // "1"–"12" in KwikPay's docs, and which are enabled is the gateway's to
+        // say. harson-tech's account takes any of "1"–"4".
+        'payment_type' => env('KWIKPAY_PAYMENT_TYPE') ?: '1',
 
         /*
-         * Testing only: when set (e.g. "1.00"), KwikPay is asked to collect this
-         * amount instead of the bill. The bill, the payment record and the
-         * receipt keep the real assessed amount. Leave empty for real use; the
-         * full amount is then charged. See docs/payment-gateway.md.
+         * The test charge's amount (e.g. "1.00"; ₱1.00 when empty), and the
+         * charge switch's DEFAULT: until somebody sets `kwikpay_charge` in
+         * `settings`, a positive amount here means KwikPay collects it instead
+         * of the bill, and empty means the full bill. Once the switch is set —
+         * from the Debug page, the admin API or
+         * `php artisan biztrack:payment-gateway test-charge|full-charge` — the
+         * switch decides (App\Support\PaymentMode::charge). The bill, the
+         * payment record and the receipt keep the real assessed amount either
+         * way. See docs/payment-gateway.md.
          */
         'charge_override' => env('KWIKPAY_CHARGE_OVERRIDE') ?: null,
 

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PermitStatus;
+use App\Support\BusinessDate;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -172,9 +173,13 @@ class Permit extends Model
         return $this->belongsTo(User::class, 'issued_by_user_id');
     }
 
-    /** Days until expiry (negative if already past). */
+    /**
+     * Days until expiry (negative if already past), counted from BusinessDate:
+     * the Debug page's pretend date when one is set, so the countdown on every
+     * permit screen agrees with the late surcharge the same filing would get.
+     */
     public function daysUntilExpiry(): int
     {
-        return now()->startOfDay()->diffInDays($this->valid_until, false);
+        return (int) BusinessDate::today()->startOfDay()->diffInDays($this->valid_until, false);
     }
 }

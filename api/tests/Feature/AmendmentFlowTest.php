@@ -13,6 +13,7 @@ use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
+use App\Services\WorkflowService;
 use App\Support\AmendableFields;
 use App\Support\PermitFace;
 
@@ -648,7 +649,7 @@ it('defaults the amendment fee to zero while the LGU has not set one', function 
     expect(config('biztrack.amendment_fee'))->toBe(0.0);
 });
 
-it('carries the zoning clearance when the premises move, and only then', function () {
+it('carries the zoning clearance when the premises move, not when an address is respelled', function () {
     /*
      * Client's decision, 19 September 2026: a move must not be approved until
      * CPDO has cleared the new address, and CPDO must get a real filing.
@@ -713,13 +714,61 @@ it('carries the zoning clearance when the premises move, and only then', functio
     expect(Application::findOrFail($brgyOnlyId)->permitTypes()->pluck('code')->all())
         ->toBe([PermitType::OUTCOME_CODE]);
 
-    // And a floor area tells CPDO nothing it assessed either.
+    /*
+     * A floor area with no earlier figure on the register is not a move and
+     * not provably an expansion — there is nothing to compare it with — so it
+     * carries no clearance either. This line said "a floor area tells CPDO
+     * nothing it assessed", which City Ordinance No. 24-2018 Art. IX §8
+     * contradicts for an EXPANSION; that case is the next test.
+     */
     [$areaId] = amendmentFiling(['business_area_sqm' => '250']);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$areaId}/submit")->assertOk();
 
     expect(Application::findOrFail($areaId)->permitTypes()->pluck('code')->all())
         ->toBe([PermitType::OUTCOME_CODE]);
+});
+
+it('carries a new zoning clearance when an amendment changes the trade or enlarges the floor area', function () {
+    /*
+     * City Ordinance No. 24-2018, Art. IX §8 (repeated in §9): "Should there
+     * be any change in the activity or expansion of the area subject of the
+     * Locational Clearance, the owner/developer shall apply for a new
+     * Locational Clearance." CPDO assessed both — the activity is item V of
+     * MCG-CPDD-FO-003 and the floor area item VIII.A — so an amendment
+     * changing either goes back to CPDO, exactly as a move does.
+     */
+    $owner = authAs('owner@biztrack.local');
+    $codes = fn (int $id) => Application::findOrFail($id)->permitTypes()->pluck('code')->sort()->values()->all();
+
+    $other = PsicCode::where('id', '!=', PsicCode::first()->id)->firstOrFail();
+    [$tradeId] = amendmentFiling(['line_of_business' => (string) $other->id]);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$tradeId}/submit")->assertOk();
+    expect($codes($tradeId))->toBe(['BUSINESS', 'ZONING']);
+
+    // A larger floor area than the register holds is an expansion.
+    // Written straight to the row: the column is not mass-assignable, and
+    // the fixture's business carries no floor area to begin with.
+    [$growId, $growBusiness] = amendmentFiling(['business_area_sqm' => '250']);
+    Business::whereKey($growBusiness)->update(['business_area_sqm' => 100]);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$growId}/submit")->assertOk();
+    expect($codes($growId))->toBe(['BUSINESS', 'ZONING']);
+
+    // A smaller one is not.
+    [$shrinkId, $shrinkBusiness] = amendmentFiling(['business_area_sqm' => '80']);
+    Business::whereKey($shrinkBusiness)->update(['business_area_sqm' => 100]);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$shrinkId}/submit")->assertOk();
+    expect($codes($shrinkId))->toBe([PermitType::OUTCOME_CODE]);
+
+    // Nor is a new owner: Annex A 63, a change of tenants or proprietors is
+    // not a change of occupancy.
+    [$ownerId] = amendmentFiling(['owner_name' => 'Juana Dela Cruz']);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$ownerId}/submit")->assertOk();
+    expect($codes($ownerId))->toBe([PermitType::OUTCOME_CODE]);
+
+    // And the refusal to approve names what CPDO is assessing.
+    expect(WorkflowService::amendmentNeedsLocationalClearance(Application::findOrFail($tradeId)))->toBe(['activity'])
+        ->and(WorkflowService::amendmentNeedsLocationalClearance(Application::findOrFail($growId)))->toBe(['area']);
 });
 
 it('refuses to approve a move until the new address is cleared', function () {
@@ -859,6 +908,16 @@ it('replaces the one line of business rather than adding to it', function () {
 
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    /*
+     * A change of line of business now carries a zoning clearance and waits
+     * for CPDO (City Ordinance No. 24-2018, Art. IX §8). Marked issued on the
+     * pivot, as the move test above does, because this test is about what
+     * approval writes, not about CPDO's review.
+     */
+    Application::findOrFail($appId)->permitTypes()->updateExistingPivot(
+        PermitType::where('code', 'ZONING')->value('id'),
+        ['status' => 'approved'],
+    );
     bploApprovesForm($appId);
 
     $lines = Business::findOrFail($businessId)->lines()->orderBy('id')->get();
@@ -898,6 +957,16 @@ it('does not re-rate a change of trade, and says which detail the fee is for', f
 
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    /*
+     * A change of line of business now carries a zoning clearance and waits
+     * for CPDO (City Ordinance No. 24-2018, Art. IX §8). Marked issued on the
+     * pivot, as the move test above does, because this test is about what
+     * approval writes, not about CPDO's review.
+     */
+    Application::findOrFail($appId)->permitTypes()->updateExistingPivot(
+        PermitType::where('code', 'ZONING')->value('id'),
+        ['status' => 'approved'],
+    );
     bploApprovesForm($appId);
 
     $fee = UnbilledPermitFee::where('application_id', $appId)->firstOrFail();

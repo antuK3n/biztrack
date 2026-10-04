@@ -7,11 +7,14 @@ use App\Http\Resources\UserResource;
 use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\AccountRestriction;
 use App\Support\Audit;
+use App\Support\DebugPanel;
 use App\Support\EmailCodes;
 use App\Support\EmailSwitch;
 use App\Support\LegacyImport\LegacyClaim;
 use App\Support\OfficeHours;
+use App\Support\SystemSwitches;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -144,6 +147,23 @@ class AuthController extends Controller
                  * is configured, only what it has to ask the reader for.
                  */
                 'password_change_code_required' => EmailSwitch::on(),
+                /*
+                 * Whether the Debug page is open to this account: the super
+                 * admin, with the panel opened from the server
+                 * (App\Support\DebugPanel). The web app shows the rail entry
+                 * and the route on this alone, so it never learns the rule —
+                 * and every /debug endpoint checks it again regardless.
+                 */
+                'debug_panel' => DebugPanel::allows($user),
+                /*
+                 * Whether this account is barred, and where its owner takes it
+                 * (App\Support\AccountRestriction). On the session payload because
+                 * the answer governs the whole session: the shell raises the
+                 * warning from it, the navigation hides what it bars, and the
+                 * router refuses the rest. Null for every account that is not a
+                 * business owner's.
+                 */
+                'restriction' => AccountRestriction::for($user),
                 /*
                  * An owner with no home address on file [checklist 2026-09-28,
                  * Register 2] — anyone who registered before it was asked. The
@@ -550,8 +570,13 @@ class AuthController extends Controller
          * a right password earns a code by e-mail, not a session. Everyone —
          * owners, officers, the super admin. With mail off (the demo) the
          * password is enough, as it always was.
+         *
+         * Asked through SystemSwitches rather than EmailSwitch directly, so
+         * the super admin can turn the code off from the Debug page with mail
+         * still on [Ken, 2026-10-04]. It still cannot be on while mail goes
+         * nowhere: that decision is EmailSwitch's, and signInCodes() asks it.
          */
-        if (EmailSwitch::on()) {
+        if (SystemSwitches::signInCodes()) {
             return $this->startSignInCode($user, $portal);
         }
 
