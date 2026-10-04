@@ -299,6 +299,101 @@ class PaymentController extends Controller
     }
 
     /**
+     * BPLO marks a bill paid over the counter at City Hall, for an owner who
+     * paid in person instead of online [Ken, 4 Oct 2026]: "they should just be
+     * able to find a user whose filing is pending to be paid and mark it, no
+     * need to enter anything". Nothing is taken from the request — the amount
+     * is the balance due, same as the owner's own `pay()`.
+     *
+     * Only BPLO. `application.review`, which the route sits behind, is held by
+     * all seven offices (RbacSeeder) — BPLO is who raises and chases the Tax
+     * Order of Payment, so `authorizeBploStaff` narrows it the same way
+     * `AssignmentController::authorizeDepartment` narrows an office's other
+     * review actions to its own cases, except the office here is always BPLO.
+     *
+     * The guards are `FilingMover::pay()`'s — the Debug page's own simulated
+     * "pay the bill" step, which already has to answer the same two questions
+     * (is this filing billable, is anything actually owed) with the same
+     * refusals. One difference from both `FilingMover::pay()` and the owner's
+     * own `pay()`: an online KwikPay payment still waiting on this filing is
+     * set aside here rather than refused — see the note above that branch.
+     */
+    public function counterPayment(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeBploStaff($request);
+
+        $closed = in_array(
+            $application->status,
+            [ApplicationStatus::Rejected, ApplicationStatus::Cancelled],
+            true
+        );
+
+        if (! $closed && ! $application->status->isBillable()) {
+            throw ValidationException::withMessages([
+                'status' => ['BPLO has not approved this application yet, so there is nothing to pay.'],
+            ]);
+        }
+
+        $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
+        $balanceDue = PermitFees::balance($application->fresh())['balance_due'];
+        $awaitingFirstPayment = $application->status === ApplicationStatus::PendingPayment;
+
+        if (! $awaitingFirstPayment && $closed) {
+            throw ValidationException::withMessages([
+                'status' => ['This application is closed, so there is nothing left to pay.'],
+            ]);
+        }
+
+        if (! $awaitingFirstPayment && $balanceDue <= 0) {
+            throw ValidationException::withMessages([
+                'status' => ['This application has nothing outstanding.'],
+            ]);
+        }
+
+        /*
+         * An online KwikPay payment still waiting on this filing is set aside
+         * — never refused, and never asked about first.
+         *
+         * `PaymentController::pay()` hands a waiting payment back to the owner
+         * rather than opening a second, and `FilingMover::pay()` refuses
+         * outright, because in both of those there is still somebody who might
+         * go finish paying it. At the counter the owner is standing in front of
+         * a BPLO clerk settling the bill right now; that online payment is not
+         * going to be finished, so the clerk is not made to explain a KwikPay
+         * order to the applicant before the counter payment can be taken.
+         *
+         * KwikPay is deliberately NOT asked first, unlike the owner's own "pay
+         * a different way" (`KwikPayGateway::abandon()`): that call asks
+         * because the OWNER is choosing to set the payment aside and might
+         * have just paid it. Here BPLO is acting on the owner's behalf on a
+         * payment the owner never opened from this seat, and there is no
+         * reason to make the counter wait on a third party for it. If KwikPay
+         * later reports it paid anyway, the callback / reconciliation `check()`
+         * still completes it as usual, and `catchDoublePayment()` flags both
+         * payments for a refund review — exactly as it would if the owner had
+         * abandoned it themselves.
+         */
+        $waiting = $this->inFlight($application);
+        if ($waiting !== null) {
+            $waiting->update(['abandoned_at' => now()]);
+            Audit::log('payment.abandoned', $waiting, [
+                'gateway' => 'kwikpay',
+                'order_id' => $waiting->gateway_order_id,
+                'reason' => 'counter_payment',
+            ]);
+        }
+
+        $payment = $this->gateway->charge($fee, PaymentMethod::Counter, $balanceDue);
+        Audit::log('payment.completed', $payment, ['amount' => (string) $payment->amount, 'via' => 'counter']);
+
+        $this->workflow->onPaymentCompleted($payment);
+
+        return response()->json([
+            'data' => new PaymentResource($payment->fresh()),
+        ], 201);
+    }
+
+    /**
      * What the pay screen needs before the owner chooses: which mode, which
      * methods, and whether a payment is already waiting on KwikPay. The screen
      * reads the methods from here rather than listing them itself, because the
@@ -504,6 +599,26 @@ class PaymentController extends Controller
             $application->applicant_user_id === $request->user()->id,
             403,
             'This application is not yours.'
+        );
+    }
+
+    /**
+     * BPLO alone, among the seven offices `application.review` is shared with.
+     *
+     * A department check rather than a permission, because no permission says
+     * "BPLO specifically" — every office holds the same `application.review`
+     * this route sits behind. `department_id === null` (the super admin) is
+     * refused too: Ken's decision names BPLO staff, not every reader who can
+     * see every office's queue.
+     */
+    private function authorizeBploStaff(Request $request): void
+    {
+        $departmentId = $request->user()->department_id;
+
+        abort_unless(
+            $departmentId !== null && $departmentId === $this->workflow->bploDepartmentId(),
+            403,
+            'Only BPLO can mark a payment made at the counter.'
         );
     }
 }
