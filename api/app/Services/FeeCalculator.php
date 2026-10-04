@@ -13,65 +13,11 @@ class FeeCalculator
     /** @return array{items: list<array<string,mixed>>, total: float} */
     public function assess(Application $app): array
     {
-        $app->loadMissing('permitTypes', 'business.lines');
+        $app->loadMissing('permitTypes');
 
-        $profile = $app->fee_profile ?? [];
         $requested = $app->permitTypes->pluck('code')->all();
-        $profile['is_new_business'] = $app->application_type?->value === 'new';
-
-        // lines of business: explicit profile lines win; fall back to the
-        // registered business lines with the profile's shared figures.
-        $lines = collect($profile['lines'] ?? []);
-        if ($lines->isEmpty()) {
-            $lines = $app->business->lines->map(fn ($l) => [
-                'psic_code_id' => $l->psic_code_id,
-                'gross_sales' => $profile['gross_sales'] ?? null,
-                'capitalization' => $profile['capitalization'] ?? null,
-            ]);
-        }
-
-        $lines = $this->classify($lines);
-
-        /*
-         * TWO lists, not one, and this is the fix for a real mis-billing.
-         *
-         * `business_tax` matches the 22 broad classes of Sec. 2J.02;
-         * `mayors_permit` matches the 117 fine categories of Sec. 3A.03. They
-         * are separate vocabularies, and while one field held one answer the
-         * applicant could only ever satisfy one of them — a carinderia that
-         * classified itself accurately as "Carinderia" got its ₱550 permit fee
-         * and NO business tax at all, losing ₱9,750 on ₱1,200,000 of gross.
-         *
-         * So the fine categories join the broad ones here. The per-line
-         * matching below is unaffected: `matches()` reads the LINE's own
-         * `category` when a line is given, so a fine category in this list
-         * cannot reach a business-tax rule and vice versa.
-         */
-        $categories = $lines
-            ->pluck('category')
-            ->merge($lines->pluck('permit_category'));
-
-        /*
-         * A THIRD key, from the liquor answer.
-         *
-         * The nine Sec. 3A.03 liquor rules key on how the liquor is sold —
-         * `liquor_retailer`, `liquor_wholesaler`, `liquor_serving`,
-         * `liquor_manufacturer`, `amusement_place` — and no line of business
-         * maps to one, because nothing about a trade says whether the shop
-         * happens to stock beer. While the wizard offered its 273-label
-         * picker an applicant could type the category themselves; deriving the
-         * class instead took that route away and left the flag inert for
-         * everyone but an amusement place. See TaxClassification::LIQUOR_OF.
-         */
-        if (in_array('sells_liquor', $profile['flags'] ?? [], true)) {
-            $categories = $categories->merge(
-                $lines->pluck('category')
-                    ->map(fn (?string $class) => TaxClassification::LIQUOR_OF[$class] ?? null)
-            );
-        }
-
-        $profile['categories'] = $categories->filter()->unique()->values()->all();
-
+        $profile = $this->facts($app);
+        $lines = collect($profile['lines']);
         $rules = FeeRule::where('active', true)->get()
             ->filter(fn (FeeRule $r) => $r->group === 'penalty' ? false
                 : array_intersect($r->permit_types, $requested) !== []);
@@ -246,6 +192,88 @@ class FeeCalculator
      * that can be corrected, so a filing assessed under the old mapping must
      * not silently re-price itself when the table changes underneath it.
      */
+    /**
+     * The profile every Revenue Code rule is read against — fee or otherwise.
+     *
+     * One answer for `assess()` and for `OtherRequirementRules`, since 5
+     * October 2026: the flag that prices the liquor filing fee is the flag
+     * that says a Liquor Permit is needed, and two normalisations of it would
+     * be two chances to disagree. Lines of business are the profile's where
+     * it has them, else the registered lines with the profile's shared
+     * figures; each is classified from its PSIC code; `categories` is the
+     * union of every tax class and permit category, plus the liquor classes
+     * (`TaxClassification::LIQUOR_OF`) when the business sells liquor.
+     *
+     * @return array<string, mixed>  the fee profile with `lines` (classified),
+     *                               `categories`, `is_new_business` and `flags` filled in
+     */
+    public function facts(Application $app): array
+    {
+        $app->loadMissing('business.lines');
+
+        $profile = $app->fee_profile ?? [];
+        $profile['is_new_business'] = $app->application_type?->value === 'new';
+        $profile['flags'] = array_values((array) ($profile['flags'] ?? []));
+
+
+        // lines of business: explicit profile lines win; fall back to the
+        // registered business lines with the profile's shared figures.
+        $lines = collect($profile['lines'] ?? []);
+        if ($lines->isEmpty()) {
+            $lines = $app->business->lines->map(fn ($l) => [
+                'psic_code_id' => $l->psic_code_id,
+                'gross_sales' => $profile['gross_sales'] ?? null,
+                'capitalization' => $profile['capitalization'] ?? null,
+            ]);
+        }
+
+        $lines = $this->classify($lines);
+
+        /*
+         * TWO lists, not one, and this is the fix for a real mis-billing.
+         *
+         * `business_tax` matches the 22 broad classes of Sec. 2J.02;
+         * `mayors_permit` matches the 117 fine categories of Sec. 3A.03. They
+         * are separate vocabularies, and while one field held one answer the
+         * applicant could only ever satisfy one of them — a carinderia that
+         * classified itself accurately as "Carinderia" got its ₱550 permit fee
+         * and NO business tax at all, losing ₱9,750 on ₱1,200,000 of gross.
+         *
+         * So the fine categories join the broad ones here. The per-line
+         * matching below is unaffected: `matches()` reads the LINE's own
+         * `category` when a line is given, so a fine category in this list
+         * cannot reach a business-tax rule and vice versa.
+         */
+        $categories = $lines
+            ->pluck('category')
+            ->merge($lines->pluck('permit_category'));
+
+        /*
+         * A THIRD key, from the liquor answer.
+         *
+         * The nine Sec. 3A.03 liquor rules key on how the liquor is sold —
+         * `liquor_retailer`, `liquor_wholesaler`, `liquor_serving`,
+         * `liquor_manufacturer`, `amusement_place` — and no line of business
+         * maps to one, because nothing about a trade says whether the shop
+         * happens to stock beer. While the wizard offered its 273-label
+         * picker an applicant could type the category themselves; deriving the
+         * class instead took that route away and left the flag inert for
+         * everyone but an amusement place. See TaxClassification::LIQUOR_OF.
+         */
+        if (in_array('sells_liquor', $profile['flags'] ?? [], true)) {
+            $categories = $categories->merge(
+                $lines->pluck('category')
+                    ->map(fn (?string $class) => TaxClassification::LIQUOR_OF[$class] ?? null)
+            );
+        }
+
+        $profile['categories'] = $categories->filter()->unique()->values()->all();
+
+        $profile['lines'] = $lines->values()->all();
+
+        return $profile;
+    }
+
     public function classifyProfile(array $profile): array
     {
         if (($profile['lines'] ?? []) === []) {

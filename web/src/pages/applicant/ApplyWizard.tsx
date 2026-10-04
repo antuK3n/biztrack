@@ -13345,6 +13345,40 @@ export function ApplyWizard() {
             </div>
             )}
             {/*
+              ── What the business's nature commits them to ──────────────────
+
+              Client, 5 October 2026: rules that tell which Other Requirements
+              a business must hold. The list comes with the estimate
+              (`other_requirements` on the fee preview) so it describes the same
+              business the figure does. Rows that ask for something say so,
+              because those are the ones that reappear under Other Requirements
+              once this is submitted, and an applicant who was told should not
+              be surprised.
+            */}
+            {(feeEstimate?.other_requirements?.length ?? 0) > 0 && (
+              <div className="mt-4 w-full rounded-lg border border-line bg-shell px-5 py-3 text-left">
+                <h2 className="text-[13px] font-bold uppercase tracking-wide text-ink">
+                  Your business will also need
+                </h2>
+                <ul className="mt-2 space-y-2.5">
+                  {feeEstimate!.other_requirements!.map((r) => (
+                    <li key={r.key} className="text-sm">
+                      <p className="font-semibold text-ink">
+                        {r.title}
+                        <span className="ml-2 text-xs font-normal text-ink-muted">{r.article}</span>
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">{r.summary}</p>
+                      {r.asks && (
+                        <p className="mt-0.5 text-xs font-semibold text-royal">
+                          Asked under Other Requirements after you submit.
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/*
               The zoning rules again, at the point of committing — and the only
               place a renewal or an amendment meets them, since neither walks
               through Location & Zoning. Answerable here too: a question
@@ -13618,6 +13652,21 @@ export function ApplyWizard() {
               <p className="mt-1">
                 A 25% surcharge plus 2% interest for each month late is added to the fee
                 (Revenue Code 8A.04 and 8A.05).
+              </p>
+            </div>
+          )}
+          {/*
+            ── What else this press commits them to ───────────────────────
+
+            The names only. The review step above explains each; this is the
+            last line before the button, and the client's standing rule for it
+            is *"SIMPLIFY AND SHORTEN"*.
+          */}
+          {(feeEstimate?.other_requirements?.length ?? 0) > 0 && (
+            <div className="mb-2 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
+              <p className="font-bold text-ink">Your business will also need:</p>
+              <p className="mt-1">
+                {feeEstimate!.other_requirements!.map((r) => r.title).join(' · ')}
               </p>
             </div>
           )}

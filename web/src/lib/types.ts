@@ -738,6 +738,24 @@ export interface FeeLineItem {
 export interface FeeAssessment {
   line_items: FeeLineItem[]
   total_amount: string
+  /**
+   * What the business's nature commits the filing to beyond the fees — the
+   * Liquor Permit behind the liquor filing fee, the Health Certificates
+   * behind the sanitary one. `OtherRequirementRules` on the API; present on
+   * the fee preview since 5 October 2026, and the rows with `asks` are raised
+   * under Other Requirements when the filing is submitted.
+   */
+  other_requirements?: OtherRequirementPreview[]
+}
+
+export interface OtherRequirementPreview {
+  key: string
+  title: string
+  /** The Revenue Code article behind it, e.g. "Revenue Code Art. T, Sec. 3T.01". */
+  article: string
+  summary: string
+  /** Whether something is asked of the applicant after submission. */
+  asks: boolean
 }
 
 /* ── Fee profile (revenue-code inputs; draft applications only) ────────── */
