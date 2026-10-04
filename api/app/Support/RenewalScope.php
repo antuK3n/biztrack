@@ -2,18 +2,24 @@
 
 namespace App\Support;
 
-use App\Models\Permit;
-use App\Models\PermitType;
 
 /**
  * How many permits one renewal may carry.
  *
  * ── The rule ────────────────────────────────────────────────────────────────
  *
- * A renewal carries the Mayor's / Business Permit, with whatever else is due
- * alongside it — or exactly ONE other permit, on its own.
+ * A renewal carries exactly ONE permit — the Mayor's / Business Permit
+ * included, since 5 October 2026.
  *
- * ── Why those two shapes and not one ────────────────────────────────────────
+ * Client, on seeing Zoning and the Mayor's Permit ticked together: *"The
+ * applicant should not be allowed to renew multiple permits at the same
+ * time."* The exception below — the Mayor's Permit carrying whatever else was
+ * due — is gone. Its reason was the fee, and the fee is now handled where it
+ * arises: a clearance renewed on its own while the business permit renewal is
+ * still unpaid joins THAT bill (`WorkflowService::foldIntoOpenBusinessPermitBill`)
+ * instead of waiting a year for the next one.
+ *
+ * ── The history, kept because the reasoning still holds ─────────────────────
  *
  * Client, 3 October 2026: *"since all permits are independent of each other
  * (can be renewed in different applications), do you recommend the picking at
@@ -61,21 +67,10 @@ final class RenewalScope
             return null;
         }
 
-        $carriesBusinessPermit = Permit::whereIn('id', $ids)
-            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
-            ->exists();
-
-        if ($carriesBusinessPermit) {
-            return null;
-        }
-
         /*
-         * Names the way out, not just the refusal. An applicant who ticked two
-         * clearances wants both renewed; the answer is two filings, and saying
-         * so is the difference between a rule and a dead end.
+         * Names the way out, not just the refusal: one filing each. Short, per
+         * the client's rule for validation messages.
          */
-        return 'Each of the other permits is renewed on its own application, because each one is '
-            .'read by its own office. Choose one here and file the next separately — or tick your '
-            .'Mayor’s / Business Permit, which may carry the others with it.';
+        return 'Each permit is renewed on its own application.';
     }
 }

@@ -9,6 +9,7 @@ use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
@@ -703,43 +704,9 @@ class WorkflowService
 
         $swept = $this->sweepDeferredFees($app);
         foreach ($swept as $fee) {
-            $items[] = [
-                /*
-                 * The rows own description when it has one, so an amendment
-                 * does not print as a second business-permit fee beside the
-                 * real one. Falls back to the permit type, which is the right
-                 * answer for every clearance row and always was.
-                 */
-                'label' => ($fee->description ?? $fee->permitType?->name.' fee')
-                    .' ('.$fee->incurred_at->format('M Y').', unbilled until now)',
-                'amount' => (float) $fee->amount,
-            ];
-            $total = round($total + (float) $fee->amount, 2);
-
-            /*
-             * The penalty this row was already carrying, as its own line
-             * under the fee it belongs to.
-             *
-             * Read off the row, never recomputed: it was frozen at the late
-             * renewal's filing date (see `latePenaltyFor`), and re-deriving
-             * it here would make the figure depend on when BPLO happened to
-             * draw the bill.
-             *
-             * Its own line rather than folded into the fee, so the sanitary
-             * permit still reads at the ordinance's price and the penalty is
-             * visible as a penalty. An applicant who is being charged extra
-             * should be able to see what for and dispute it.
-             */
-            $penalty = round((float) $fee->surcharge + (float) $fee->interest, 2);
-            if ($penalty > 0.0) {
-                $items[] = [
-                    'label' => 'Late surcharge and interest \u2014 '
-                        .($fee->permitType?->name ?? 'permit')
-                        .' ('.$fee->months_late.' month'
-                        .($fee->months_late === 1 ? '' : 's').' late)',
-                    'amount' => $penalty,
-                ];
-                $total = round($total + $penalty, 2);
+            foreach ($this->deferredFeeLines($fee) as $line) {
+                $items[] = $line;
+                $total = round($total + $line['amount'], 2);
             }
         }
 
@@ -747,6 +714,60 @@ class WorkflowService
             ['application_id' => $app->id],
             ['line_items' => $items, 'total_amount' => $total]
         );
+    }
+
+    /**
+     * The bill lines one deferred fee contributes: the fee, and its penalty.
+     *
+     * Shared by `assessFees` (a bill drawn fresh) and
+     * `foldIntoOpenBusinessPermitBill` (a fee added to a bill already drawn),
+     * so a fee reads the same on either.
+     *
+     * @return list<array{label: string, amount: float}>
+     */
+    private function deferredFeeLines(UnbilledPermitFee $fee): array
+    {
+        $lines = [];
+        $fee->loadMissing('permitType');
+
+        $lines[] = [
+            /*
+             * The rows own description when it has one, so an amendment
+             * does not print as a second business-permit fee beside the
+             * real one. Falls back to the permit type, which is the right
+             * answer for every clearance row and always was.
+             */
+            'label' => ($fee->description ?? $fee->permitType?->name.' fee')
+                .' ('.$fee->incurred_at->format('M Y').', unbilled until now)',
+            'amount' => (float) $fee->amount,
+        ];
+
+        /*
+         * The penalty this row was already carrying, as its own line
+         * under the fee it belongs to.
+         *
+         * Read off the row, never recomputed: it was frozen at the late
+         * renewal's filing date (see `latePenaltyFor`), and re-deriving
+         * it here would make the figure depend on when BPLO happened to
+         * draw the bill.
+         *
+         * Its own line rather than folded into the fee, so the sanitary
+         * permit still reads at the ordinance's price and the penalty is
+         * visible as a penalty. An applicant who is being charged extra
+         * should be able to see what for and dispute it.
+         */
+        $penalty = round((float) $fee->surcharge + (float) $fee->interest, 2);
+        if ($penalty > 0.0) {
+            $lines[] = [
+                'label' => 'Late surcharge and interest \u2014 '
+                    .($fee->permitType?->name ?? 'permit')
+                    .' ('.$fee->months_late.' month'
+                    .($fee->months_late === 1 ? '' : 's').' late)',
+                'amount' => $penalty,
+            ];
+        }
+
+        return $lines;
     }
 
     /**
@@ -4729,7 +4750,7 @@ class WorkflowService
 
         $penalty = $this->latePenaltyFor($app, $this->priorPermitFor($app, $type), $amount);
 
-        UnbilledPermitFee::firstOrCreate(
+        $deferred = UnbilledPermitFee::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
             [
                 'business_id' => $app->business_id,
@@ -4740,6 +4761,9 @@ class WorkflowService
                 'incurred_at' => now(),
             ],
         );
+        $foldedInto = $deferred->wasRecentlyCreated
+            ? $this->foldIntoOpenBusinessPermitBill($deferred)
+            : null;
 
         Audit::log('permit_fee.deferred', $app, [
             'permit_type' => $type->code,
@@ -4768,13 +4792,89 @@ class WorkflowService
             ->where('permit_type_id', $type->id)
             ->first();
 
-        if ($issued !== null) {
+        if ($foldedInto !== null) {
+            $this->notify->applicationNote(
+                $foldedInto,
+                'Your '.$type->name.' fee was added to this Business Permit bill.',
+            );
+        } elseif ($issued !== null) {
             $this->notify->permitIssuedUnbilled(
                 $issued,
                 $amount,
                 round($penalty['surcharge'] + $penalty['interest'], 2),
             );
         }
+    }
+
+    /**
+     * Add a just-deferred clearance fee to the business permit bill still open.
+     *
+     * ── Why ─────────────────────────────────────────────────────────────────
+     *
+     * Since 5 October 2026 every renewal carries one permit (`RenewalScope`),
+     * so a January filer renews the Mayor's Permit and an expiring Sanitary
+     * Permit on two filings. The Sanitary renewal bills nothing itself — its
+     * fee waits for the next business permit bill. Unless the business permit
+     * renewal is ALREADY assessed and still unpaid, that next bill is a year
+     * away, and the city would collect the fee a year late. This puts it on the
+     * bill that is open now.
+     *
+     * ── Which bill ──────────────────────────────────────────────────────────
+     *
+     * A filing of this business that carries the business permit, has been
+     * assessed, is not decided, and has not been paid. A Draft is left alone:
+     * its own submission sweeps the fee in the ordinary way. A bill with a
+     * gateway payment already open is left alone too — changing the amount
+     * under a payment in flight would make the two disagree — and the fee
+     * stays deferred, as before.
+     *
+     * Added to the bill as lines, never by re-assessing: an officer may have
+     * adjusted that bill (`PaymentController::feeAdjust`), and recomputing it
+     * would quietly undo their adjustment.
+     */
+    private function foldIntoOpenBusinessPermitBill(UnbilledPermitFee $deferred): ?Application
+    {
+        $open = Application::query()
+            ->where('business_id', $deferred->business_id)
+            ->whereIn('status', [
+                ApplicationStatus::ForApproval,
+                ApplicationStatus::Returned,
+                ApplicationStatus::PendingPayment,
+            ])
+            ->notDecided()
+            ->whereHas('permitTypes', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->whereHas('feeAssessment')
+            ->whereDoesntHave('payments', fn ($q) => $q->whereIn('status', [
+                PaymentStatus::Pending->value,
+                PaymentStatus::Completed->value,
+            ]))
+            ->latest('id')
+            ->first();
+        if ($open === null) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($open, $deferred) {
+            $deferred->update(['billed_on_application_id' => $open->id]);
+
+            $bill = $open->feeAssessment()->lockForUpdate()->first();
+            $items = (array) $bill->line_items;
+            $total = (float) $bill->total_amount;
+            foreach ($this->deferredFeeLines($deferred) as $line) {
+                $items[] = $line;
+                $total = round($total + $line['amount'], 2);
+            }
+            $bill->update(['line_items' => $items, 'total_amount' => $total]);
+
+            Audit::log('permit_fee.folded_into_open_bill', $open, [
+                'unbilled_permit_fee_id' => $deferred->id,
+                'permit_type_id' => $deferred->permit_type_id,
+                'amount' => (float) $deferred->amount,
+                'new_total' => $total,
+            ]);
+
+            return $open;
+        });
     }
 
     /**
