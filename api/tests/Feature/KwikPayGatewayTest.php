@@ -11,7 +11,9 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Services\KwikPay\KwikPayGateway;
 use App\Services\KwikPay\Signature;
+use App\Services\NotificationService;
 use App\Services\WorkflowService;
+use App\Support\Heartbeat;
 use App\Support\ManilaCalendar;
 use App\Support\PaymentMode;
 use Illuminate\Http\Client\ConnectionException;
@@ -647,6 +649,76 @@ it('ignores a late callback for a payment reconciliation already completed', fun
 
     expect($app->fresh()->statusHistory()->count())->toBe($history);
     expect(AuditLog::where('action', 'payment.completed')->where('auditable_id', $payment->id)->count())->toBe(1);
+});
+
+/*
+ * Marking a payment paid and moving its filing happen together, or neither
+ * does. A throw between the two used to leave a Completed payment on a filing
+ * still at Pending Payment, which reconciliation never looked at again
+ * (scenario run, payments-kwikpay 19); and one such throw ended the whole
+ * reconciliation run (system-scheduler 28).
+ */
+
+/** The workflow, real except that moving the given payment's filing throws (any payment when null). */
+function kpWorkflowThatFailsOn(?Payment $payment = null, bool $once = false): void
+{
+    $mock = Mockery::mock(WorkflowService::class, [app(NotificationService::class)])->makePartial();
+    $failing = $mock->shouldReceive('onPaymentCompleted')
+        ->with(Mockery::on(fn (Payment $p) => $payment === null || $p->id === $payment->id))
+        ->andThrow(new RuntimeException('mail server down'));
+    if ($once) {
+        $failing->once();
+    }
+    $mock->shouldReceive('onPaymentCompleted')->passthru();
+    app()->instance(WorkflowService::class, $mock);
+}
+
+it('leaves the payment pending when moving its filing fails, and settles both on the next try', function () {
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpWorkflowThatFailsOn($payment, once: true);
+
+    kpPostCallback(kpCallback($payment))->assertOk();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+
+    // Pay again hands back the same order, not a new one for nothing.
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])
+        ->assertOk()
+        ->assertJsonPath('data.id', $payment->id);
+
+    kpQueryAnswers('5', (float) $payment->amount);
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Completed)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+});
+
+it('carries on past a payment it cannot settle, and puts that one in front of staff after a day', function () {
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
+    $stuck = kpOpen(kpFiling());
+    $other = kpOpen(kpFiling());
+    // The stuck one is asked about first.
+    Payment::whereKey($stuck->id)->update(['next_check_at' => null]);
+    kpQueryAnswers('5');
+    kpWorkflowThatFailsOn($stuck);
+
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($stuck->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($other->fresh()->status)->toBe(PaymentStatus::Completed)
+        ->and(Heartbeat::last(Heartbeat::RECONCILE))->not->toBeNull();
+
+    $this->travel(1)->days();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($stuck->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($stuck->fresh()->flagged_at)->not->toBeNull();
 });
 
 it('lets the owner ask once for their payment status', function () {

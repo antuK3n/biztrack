@@ -53,7 +53,26 @@ class ReconcilePayments extends Command
 
         $settled = 0;
         foreach ($due as $payment) {
-            $after = $gateway->check($payment, 'reconcile');
+            /*
+             * One payment that cannot be settled does not stop the run.
+             *
+             * A throw here used to end the command: the payments behind it in
+             * the queue went unasked and no heartbeat was written, so Health
+             * reported reconciliation as not running at all (scenario run,
+             * system-scheduler 28). `complete()` rolls its own work back, so
+             * the payment is still pending and is asked about again on its
+             * backoff; a day on, it is flagged for the super admin.
+             */
+            try {
+                $after = $gateway->check($payment, 'reconcile');
+            } catch (\Throwable $e) {
+                report($e);
+                KwikPayGateway::log('reconcile.error', $payment, ['error' => $e->getMessage()]);
+                $gateway->flagIfOverdue($payment);
+
+                continue;
+            }
+
             if (! $after->isPending()) {
                 $settled++;
             }

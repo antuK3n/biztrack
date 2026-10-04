@@ -12,6 +12,7 @@ use App\Services\WorkflowService;
 use App\Support\Audit;
 use App\Support\Numbering;
 use App\Support\PaymentMode;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -198,46 +199,72 @@ class KwikPayGateway
             }
         }
 
-        $fresh = $payment->fresh();
-        if ($fresh->isPending() && $fresh->flagged_at === null
-            && $fresh->created_at->lte(now()->subHours(self::FLAG_AFTER_HOURS))) {
-            $this->flag($fresh, 'Still not confirmed after '.self::FLAG_AFTER_HOURS.' hours.');
-        }
+        $this->flagIfOverdue($payment);
 
         return $payment->fresh();
     }
 
     /**
-     * Mark it paid and move the application on — once. Returns false when it
-     * was not pending (already settled by another path), which is not an error.
+     * Still pending a day after it was opened, and nobody told yet: tell the
+     * super admin. Asked after every check, and by the reconciliation run
+     * about a payment whose check failed outright, so a payment that cannot
+     * be settled still reaches staff.
+     */
+    public function flagIfOverdue(Payment $payment): void
+    {
+        $fresh = $payment->fresh();
+        if ($fresh->isPending() && $fresh->flagged_at === null
+            && $fresh->created_at->lte(now()->subHours(self::FLAG_AFTER_HOURS))) {
+            $this->flag($fresh, 'Still not confirmed after '.self::FLAG_AFTER_HOURS.' hours.');
+        }
+    }
+
+    /**
+     * Mark it paid and move the application on — once, and together. Returns
+     * false when it was not pending (already settled by another path), which
+     * is not an error.
+     *
+     * ── Both or neither ──────────────────────────────────────────────────
+     *
+     * The conditional UPDATE and the filing's move are one transaction. They
+     * were two steps, and a throw between them (a mail server down inside
+     * `onPaymentCompleted`, in the scenario run) left the payment Completed on
+     * a filing still at Pending Payment. Reconciliation reads pending payments
+     * only, so nothing looked at it again, and the owner's next Pay opened an
+     * order for ₱0.00 (payments-kwikpay 19). Rolled back, the payment is still
+     * pending: reconciliation asks about it again — and settles it, where the
+     * switch lets /api/query do that — and one still pending after a day is
+     * flagged for the super admin like any other.
      */
     public function complete(Payment $payment, string $source, array $context = []): bool
     {
-        $moved = Payment::query()
-            ->whereKey($payment->id)
-            ->where('status', PaymentStatus::Pending->value)
-            ->update([
-                'status' => PaymentStatus::Completed->value,
-                'paid_at' => now(),
-                'next_check_at' => null,
-                'updated_at' => now(),
-            ]);
+        return DB::transaction(function () use ($payment, $source, $context) {
+            $moved = Payment::query()
+                ->whereKey($payment->id)
+                ->where('status', PaymentStatus::Pending->value)
+                ->update([
+                    'status' => PaymentStatus::Completed->value,
+                    'paid_at' => now(),
+                    'next_check_at' => null,
+                    'updated_at' => now(),
+                ]);
 
-        if ($moved === 0) {
-            return false;
-        }
+            if ($moved === 0) {
+                return false;
+            }
 
-        $payment = $payment->fresh();
-        Audit::log('payment.completed', $payment, [
-            'amount' => (string) $payment->amount,
-            'gateway' => 'kwikpay',
-            'source' => $source,
-        ] + $context);
+            $payment = $payment->fresh();
+            Audit::log('payment.completed', $payment, [
+                'amount' => (string) $payment->amount,
+                'gateway' => 'kwikpay',
+                'source' => $source,
+            ] + $context);
 
-        $this->workflow->onPaymentCompleted($payment);
-        $this->catchDoublePayment($payment);
+            $this->workflow->onPaymentCompleted($payment);
+            $this->catchDoublePayment($payment);
 
-        return true;
+            return true;
+        });
     }
 
     /**
