@@ -473,8 +473,10 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      */
     Route::get('permits/{permit}/status-options', [PermitController::class, 'statusOptions']);
     Route::get('permits/{permit}/history', [PermitController::class, 'history']);
-    Route::middleware('permission:permit.revoke')
-        ->post('permits/{permit}/status', [PermitController::class, 'status']);
+    // The requirements submitted for a permit, for its owner and its readers.
+    Route::get('permits/{permit}/requirements', [PermitController::class, 'requirements']);
+    // Who may is the controller's: the issuing office (permit.revoke), or the super admin.
+    Route::post('permits/{permit}/status', [PermitController::class, 'status']);
 
     // Chatbot (rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);

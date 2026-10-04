@@ -21,6 +21,7 @@ export interface SanitaryCertificate {
   city: string | null
   line_of_business: string | null
   tracking_id: string | null
+  ban?: string | null
   signatories: { role: string; name: string | null; action?: string }[]
   sanitary_classification?: string | null
   letterhead?: Record<string, string | null> | null
@@ -113,8 +114,8 @@ export function SanitarySheet({
           <Row label="Date of Expiration">
             <Fill>{formatDate(validUntil) ?? ''}</Fill>
           </Row>
-          <Row label="Tracking ID">
-            <Fill>{cert.tracking_id ?? ''}</Fill>
+          <Row label="Business Account No.">
+            <Fill>{cert.ban ?? ''}</Fill>
           </Row>
         </div>
       </div>

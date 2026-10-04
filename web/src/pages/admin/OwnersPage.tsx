@@ -10,6 +10,7 @@ import { admin } from '../../lib/resources'
 import { BUSINESS_STATUS } from '../../lib/status'
 import type { AdminOwner, AuditLog, BusinessStatus, OwnerHistoryEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
+import { RequiredReason } from './PermitStatusDialogs'
 
 /*
  * ── Business Owner Status, one row per OWNER ───────────────────────────────
@@ -325,24 +326,9 @@ function DialogButtons({
   )
 }
 
-function ReasonField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <>
-      <label className="mt-4 block">
-        <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">Reason</span>
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          aria-required="true"
-          className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-        />
-      </label>
-      <p className="mt-1 text-xs text-ink-muted">
-        The owner is notified with this reason, and it is kept in the status history.
-      </p>
-    </>
-  )
+// The same required Reason field the permit dialogs use.
+function ReasonField({ value, onChange, choiceMade = true }: { value: string; onChange: (v: string) => void; choiceMade?: boolean }) {
+  return <RequiredReason value={value} onChange={onChange} choiceMade={choiceMade} />
 }
 
 /* ── Owner: Change status (Active or Blacklisted) ─────────────────────── */
@@ -573,7 +559,7 @@ function BusinessStatusModal({
       <p className="mt-2 text-xs text-ink-muted">
         To blacklist, use Change status on the owner’s row — a blacklisting is of the owner, not of one business.
       </p>
-      <ReasonField value={reason} onChange={setReason} />
+      <ReasonField value={reason} onChange={setReason} choiceMade={choice !== ''} />
       {error && (
         <p role="alert" className="mt-2 text-xs font-medium text-s-red">
           {error}

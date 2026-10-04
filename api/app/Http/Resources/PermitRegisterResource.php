@@ -169,6 +169,12 @@ class PermitRegisterResource extends PermitResource
      *
      * @return list<array<string, mixed>>|null
      */
+    /** The same list, for callers outside the register (the owner's My Permits). */
+    public function requirementsFor(): ?array
+    {
+        return $this->requirementDocuments();
+    }
+
     private function requirementDocuments(): ?array
     {
         if (! $this->relationLoaded('application') || $this->application === null

@@ -404,6 +404,7 @@ export function MessageThreadView({
   className = '',
   scrollClassName = 'max-h-96',
   onSent,
+  initialOfficeId = null,
 }: {
   target: MessageTarget
   /**
@@ -416,6 +417,12 @@ export function MessageThreadView({
   className?: string
   scrollClassName?: string
   onSent?: () => void
+  /**
+   * The office to open on, when a link names one — My Permits' "Message the
+   * office" on a rejected permit [client, 5 October 2026]. Otherwise the
+   * busiest office, as before.
+   */
+  initialOfficeId?: number | null
 }) {
   const user = useAuth((s) => s.user)
   const viewerIsOfficer = Boolean(user?.permissions.includes('application.view_all'))
@@ -438,7 +445,7 @@ export function MessageThreadView({
    * view of all of them. Pinning it in state rather than deriving it is what
    * lets them switch away and stay switched.
    */
-  const [officeId, setOfficeId] = useState<number | null>(null)
+  const [officeId, setOfficeId] = useState<number | null>(initialOfficeId)
 
   /*
    * Picking a different office re-asks the server, and the answer is a

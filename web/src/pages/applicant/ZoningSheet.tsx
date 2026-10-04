@@ -22,6 +22,7 @@ export interface ZoningCertificate {
   city: string | null
   line_of_business: string | null
   tracking_id: string | null
+  ban?: string | null
   signatories: { role: string; name: string | null }[]
   letterhead?: Record<string, string | null> | null
 }
@@ -102,7 +103,7 @@ export function ZoningSheet({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Line label="VALID UNTIL:" value={formatDate(validUntil) ?? ''} />
-            <Line label="TRACKING ID:" value={cert.tracking_id ?? ''} />
+            <Line label="BUSINESS ACCOUNT NO.:" value={cert.ban ?? ''} />
           </div>
           <p className="pt-1 text-[13px]">
             DECISION &ndash; <b className="font-serif">ZONING CLEARANCE GRANTED</b>

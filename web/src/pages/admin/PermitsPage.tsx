@@ -156,11 +156,18 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 ]
 
 /**
- * May THIS reader change this permit's status? The issuing office only — BPLO
- * the Mayor's Permit, CHO its Sanitary Permits, and so on; the super admin
- * reads the history. The server applies the same rule (PermitController::status).
+ * May THIS reader change this permit's status? The issuing office — BPLO the
+ * Mayor's Permit, CHO its Sanitary Permits, and so on — and the super admin on
+ * every office's, with that office's choices less Revoked [client, 5 October
+ * 2026]. The server applies the same rule (PermitController::status).
  */
-function mayChangeStatus(permit: PermitRegisterRow, canChange: boolean, ownOffice: OfficeCode | null): boolean {
+function mayChangeStatus(
+  permit: PermitRegisterRow,
+  canChange: boolean,
+  ownOffice: OfficeCode | null,
+  superAdmin: boolean,
+): boolean {
+  if (superAdmin) return true
   return canChange && ownOffice !== null && permit.permit_type?.code === ownOffice
 }
 
@@ -1076,7 +1083,7 @@ export function PermitsPage() {
                     */}
                     <td className="whitespace-nowrap px-4 py-3.5 text-right">
                       <div className="inline-flex gap-2">
-                        {mayChangeStatus(permit, canChange, ownOffice) && (
+                        {mayChangeStatus(permit, canChange, ownOffice, isSuperAdmin) && (
                           <button
                             type="button"
                             onClick={() => setChanging(permit)}

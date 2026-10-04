@@ -2,8 +2,10 @@
 
 use App\Enums\PermitStatus;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\AppNotification;
 use App\Models\Barangay;
+use App\Models\DocumentType;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -171,17 +173,31 @@ it('keeps each office to its own vocabulary and its own certificates', function 
     // BPLO cannot reject a Mayor's Permit.
     setStatus('bplo@biztrack.local', $mp, 'rejected')->assertUnprocessable();
 
-    // Nobody changes another office's permit, and the super admin changes none.
+    // Nobody changes another office's permit.
     setStatus('bplo@biztrack.local', $hc, 'rejected')->assertForbidden();
     setStatus('fire@biztrack.local', $hc, 'rejected')->assertForbidden();
-    setStatus('admin@biztrack.local', $mp, 'suspended')->assertForbidden();
-
-    $admin = test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
-    expect($admin['can_change'])->toBeFalse()->and($admin['options'])->toBe([]);
+    setStatus('owner@biztrack.local', $mp, 'suspended')->assertForbidden();
 
     expect($mp->fresh()->status)->toBe(PermitStatus::Active)
         ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('lets the super admin change any office’s permit with that office’s choices, but never revoke', function () {
+    // Client, 5 October 2026; Revoked stays off the super admin (4 October 2026).
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    $admin = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
+    expect($admin['can_change'])->toBeTrue()
+        ->and(array_column($admin['options'], 'label'))->toBe(['Suspended', 'Retired']);
+
+    $clearance = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/permits/{$hc->id}/status-options")->assertOk()->json('data');
+    expect(array_column($clearance['options'], 'label'))->toBe(['Rejected']);
+
+    setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertForbidden();
+    setStatus('admin@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
 });
 
 it('asks for a reason', function () {
@@ -199,4 +215,31 @@ it('tells the public verify page a Rejected or Retired permit is not valid', fun
         ->assertOk()
         ->assertJsonPath('data.status', 'rejected')
         ->assertJsonPath('data.is_valid', false);
+});
+
+it('gives the owner the requirements submitted for their permit, as the office sees them', function () {
+    ['business' => $mp] = statusPair();
+    $doc = ApplicationDocument::create([
+        'application_id' => $mp->application_id,
+        // A requirement the Mayor's Permit reads: one it lists, or one no permit type claims.
+        'document_type_id' => DocumentType::whereHas('permitTypes', fn ($q) => $q->where('code', 'BUSINESS'))->value('id')
+            ?? DocumentType::whereDoesntHave('permitTypes')->where('code', 'not like', '%_REQ_%')->value('id'),
+        'original_filename' => 'id.png',
+        'stored_path' => 'private/documents/x/id.png',
+        'mime_type' => 'image/png',
+        'size_bytes' => 10,
+    ]);
+
+    $owner = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/requirements")->assertOk()->json('data');
+    $office = collect(test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/permits?detail=1&per_page=100&q='.$mp->permit_number)->assertOk()->json('data'))
+        ->firstWhere('id', $mp->id)['documents'];
+
+    expect(collect($owner)->pluck('id')->all())->toBe(collect($office)->pluck('id')->all())
+        ->and(collect($owner)->pluck('id'))->toContain($doc->id);
+
+    // Nobody else's owner reads it.
+    test()->withHeaders(authAs('juan@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/requirements")->assertForbidden();
 });

@@ -534,7 +534,7 @@
             $rows[] = ['Permit No.', $cell($permit_number)];
             $rows[] = ['Date of Issue', $cell($valid_from)];
             $rows[] = ['Valid Until', $cell($valid_until)];
-            $rows[] = ['Tracking ID', $cell($tracking_id)];
+            $rows[] = ['Business Account No.', $cell($ban)];
         }
     @endphp
 
@@ -659,7 +659,7 @@
             <div><span class="cenro-receipt-label">Official Receipt:</span> {{ $or_number ?: '' }}</div>
             <div><span class="cenro-receipt-label">Amount Paid:</span> {{ $office_amount_paid ?: '' }}</div>
             <div><span class="cenro-receipt-label">Date Paid:</span> {{ $date_paid ?: '' }}</div>
-            <div><span class="cenro-receipt-label">Application Control No.:</span> {{ $tracking_id ?: '' }}</div>
+            <div><span class="cenro-receipt-label">Business Account No.:</span> {{ $ban ?: '' }}</div>
         </div>
     @endif
 
