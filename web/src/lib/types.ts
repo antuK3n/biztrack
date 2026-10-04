@@ -2548,8 +2548,14 @@ export interface AuditLog {
   id: number
   action: string
   user: { name: string } | null
-  auditable_type: string
-  auditable_id: number
+  /**
+   * What the action was done TO, and null when it was done to nothing in the
+   * register: a KwikPay callback refused for its signature, a payment gateway
+   * switched. Typed as a string alone, `split` on the first such row threw and
+   * blanked the whole Audit Logs screen.
+   */
+  auditable_type: string | null
+  auditable_id: number | null
   changes: Record<string, unknown> | null
   /**
    * The record as it stood before a delete or retire (Audit Log 1). Null on

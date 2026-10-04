@@ -349,9 +349,11 @@ function DetailsModal({
               <div className="min-w-0">
                 <p className="text-sm font-bold text-ink">{humanizeAction(log.action)}</p>
                 <p className="text-xs text-ink-muted">{formatDateTime(log.created_at)}</p>
-                <p className="mt-0.5 truncate text-xs text-ink-secondary">
-                  {log.auditable_type.split('\\').pop()} #{log.auditable_id}
-                </p>
+                {log.auditable_type !== null && (
+                  <p className="mt-0.5 truncate text-xs text-ink-secondary">
+                    {log.auditable_type.split('\\').pop()} #{log.auditable_id}
+                  </p>
+                )}
               </div>
             </li>
           ))

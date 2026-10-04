@@ -79,7 +79,14 @@ function LogRow({ log }: { log: AuditLog }) {
   const [open, setOpen] = useState(false)
   const removed = log.snapshot !== null && typeof log.snapshot === 'object'
   const canExpand = hasChanges(log.changes) || removed
-  const target = `${shortType(log.auditable_type)} #${log.auditable_id}`
+  /*
+   * Some rows are about nothing in the register — a KwikPay callback refused
+   * for its signature, a gateway switched — and carry no subject. They read
+   * as a dash, as an empty field does in `fieldText`; reading the type
+   * regardless threw on `split` and blanked the screen.
+   */
+  const target =
+    log.auditable_type !== null ? `${shortType(log.auditable_type)} #${log.auditable_id}` : null
 
   return (
     <>
@@ -101,14 +108,14 @@ function LogRow({ log }: { log: AuditLog }) {
         <td className="px-5 py-3.5 font-medium text-ink">
           {log.user?.name ?? <span className="text-ink-muted">Not recorded</span>}
         </td>
-        <td className="px-5 py-3.5 text-ink-secondary">{target}</td>
+        <td className="px-5 py-3.5 text-ink-secondary">{target ?? '—'}</td>
         <td className="px-5 py-3.5 text-right">
           {canExpand ? (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              aria-label={`${removed ? 'Removed record' : 'Details'} for ${log.action} on ${target}`}
+              aria-label={`${removed ? 'Removed record' : 'Details'} for ${log.action}${target !== null ? ` on ${target}` : ''}`}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-royal transition-colors duration-150 hover:bg-royal-tint"
             >
               {removed ? 'View record' : 'Details'}

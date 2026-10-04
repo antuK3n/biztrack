@@ -75,3 +75,48 @@ test('the Removed filter asks for removals only and shows the record as it stood
     fullPage: true,
   })
 })
+
+/*
+ * A row about nothing in the register (admin-audit-import row 2). A forged,
+ * unsigned POST to the public KwikPay callback writes
+ * `payment.callback_refused` with no subject, and the screen read the
+ * subject's type regardless — "Cannot read properties of null (reading
+ * 'split')" — so one anonymous request blanked the whole trail for the super
+ * admin. The row now renders with a dash where the subject would be.
+ */
+test('a row with no subject still renders, with a dash for its target', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
+
+  const REFUSED = {
+    id: 9002,
+    action: 'payment.callback_refused',
+    user: null,
+    auditable_type: null,
+    auditable_id: null,
+    changes: { reason: 'bad_signature', order_id: 'FORGED-1' },
+    snapshot: null,
+    created_at: '2026-09-27T03:00:00.000000Z',
+  }
+  await page.route('**/api/v1/admin/audit-logs**', (route) =>
+    route.fulfill({
+      json: { data: [REFUSED, ORDINARY], meta: { current_page: 1, last_page: 1, per_page: 25, total: 2 } },
+    }),
+  )
+
+  await page.goto('/admin/audit-logs')
+  await expect(page.getByRole('row')).toHaveCount(3) // header + 2
+
+  const row = page.getByRole('row').filter({ hasText: 'payment.callback_refused' })
+  await expect(row.getByRole('cell').nth(3)).toHaveText('—')
+  await row.getByRole('button', { name: 'Details for payment.callback_refused' }).click()
+  await expect(page.getByText('FORGED-1')).toBeVisible()
+  // The ordinary row beside it is unaffected.
+  await expect(page.getByRole('row').filter({ hasText: 'Business #7' })).toBeVisible()
+  expect(errors).toEqual([])
+
+  await page.screenshot({
+    path: `${process.env.E2E_SCREENSHOT_DIR ?? '/tmp'}/audit-no-subject.png`,
+    fullPage: true,
+  })
+})
