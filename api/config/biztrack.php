@@ -174,6 +174,12 @@ return [
             'city' => 'City of Malabon',
             'office' => 'City Planning & Development Office',
         ],
+        // The CHO's head on the Sanitary Permit to Operate.
+        'SANITARY' => [
+            'republic' => 'Republic of the Philippines',
+            'city' => 'City of Malabon',
+            'office' => 'City Health Office',
+        ],
         'BFP' => [
             'agency' => 'Bureau of Fire Protection',
             'region' => 'National Capital Region',

@@ -434,3 +434,53 @@ it('draws the Zoning Clearance as the CPDO issues it, signed by its administrato
     $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
     expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
 });
+
+/*
+ * ── The CHO's Sanitary Permit to Operate ────────────────────────────────────
+ *
+ * Laid out from the issued sheet [client, 5 October 2026]: issued to the
+ * registered name, the SANITARY PERMIT NO. being this system's permit
+ * number, the date of expiration, the non-transferable clause, and two
+ * signatures — Recommending Approval by the Sanitary Inspector, Approved by
+ * the City Health Officer — with no Mayor on it.
+ */
+it('draws the Sanitary Permit to Operate as the CHO issues it', function () {
+    $seed = ownersPermit();
+    $permit = Permit::create([
+        'permit_number' => 'HC-TEST-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+    OfficeSignatory::updateOrCreate(
+        ['department_id' => PermitType::where('code', 'SANITARY')->value('issuing_department_id'), 'role' => 'City Health Officer'],
+        ['name' => 'Maria L. Reyes, MD', 'sort_order' => 1, 'is_active' => true],
+    );
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['is_sanitary'])->toBeTrue()
+        ->and(array_column($cert['signatories'], 'role'))->toBe(['Sanitary Inspector', 'City Health Officer'])
+        ->and(array_column($cert['signatories'], 'action'))->toBe(['Recommending Approval', 'Approved'])
+        ->and($cert['signatories'][1]['name'])->toBe('Maria L. Reyes, MD')
+        ->and($cert['signatories'][0]['name'])->toBeNull();
+
+    authAs('owner@biztrack.local');
+    $pdf = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent());
+    $text = $pdf->getText();
+
+    expect($pdf->getPages())->toHaveCount(1)
+        ->and($text)->toContain('SANITARY PERMIT TO OPERATE')
+        ->and($text)->toContain($permit->permit_number)
+        ->and($text)->toContain('Date of Expiration')
+        ->and($text)->toContain('MARIA L. REYES, MD')
+        ->and($text)->not->toContain('City Mayor');
+
+    $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
+    expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
+});
