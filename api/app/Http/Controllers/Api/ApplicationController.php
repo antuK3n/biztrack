@@ -17,6 +17,8 @@ use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\RenewablePermit;
+use App\Support\RenewalScope;
 use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
@@ -287,8 +289,20 @@ class ApplicationController extends Controller
          * rule and the reason; `PriorPermitController` asks the same
          * question on the other door to this answer.
          */
-        if ($refusal = \App\Support\RenewalScope::refusal($priorIds)) {
+        if ($refusal = RenewalScope::refusal($priorIds)) {
             abort(422, $refusal);
+        }
+
+        /*
+         * And each of them must still be renewable — not revoked, not already
+         * renewed. `RenewablePermit` says why. Renewals only: an amendment
+         * names its permit to alter it, which is a different question.
+         */
+        if (
+            $data['application_type'] === ApplicationType::Renewal->value
+            && ($refusal = RenewablePermit::refusal($priorIds))
+        ) {
+            throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
         }
 
         $app = Application::create([
@@ -623,6 +637,22 @@ class ApplicationController extends Controller
          */
         if ($application->application_type === ApplicationType::Renewal) {
             $application->loadMissing('priorPermits.permitType');
+
+            /*
+             * Before the window: a permit that was revoked or renewed while
+             * this sat as a draft is not renewable in any season, and saying
+             * "come back in January" about it would send the applicant back
+             * for nothing.
+             */
+            $refusal = RenewablePermit::refusal([
+                $application->prior_permit_id,
+                ...$application->priorPermits->pluck('id')->all(),
+            ]);
+            if ($refusal !== null) {
+                throw ValidationException::withMessages([
+                    'prior_permit_id' => [$refusal],
+                ]);
+            }
 
             foreach ($application->priorPermits as $prior) {
                 $refusal = RenewalWindow::refusalFor($prior);

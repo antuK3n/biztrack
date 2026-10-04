@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\Application;
 use App\Support\Audit;
+use App\Support\RenewablePermit;
 use App\Support\RenewalScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Which permit a renewal or amendment is FOR (checklist item 50).
@@ -108,6 +111,14 @@ class PriorPermitController extends Controller
          */
         if ($refusal = RenewalScope::refusal($ids)) {
             abort(422, $refusal);
+        }
+
+        // Still renewable, for the same reason: this is the other door.
+        if (
+            $application->application_type === ApplicationType::Renewal
+            && ($refusal = RenewablePermit::refusal($ids))
+        ) {
+            throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
         }
 
         // The primary keys the renewal chain; the first tick is the answer.
