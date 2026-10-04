@@ -5,19 +5,21 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ChatbotConversation;
 use App\Models\ChatbotMessage;
-use App\Services\ChatbotResponder;
+use App\Services\ChatbotAssistant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Rule-based BizTrack assistant (no LLM). One conversation per user, created
- * lazily on first message and kept that way by a unique index on user_id.
- * Self-scoped: users only ever see their own thread.
+ * The BizTrack assistant: Gemini in front of the rule-based bot, which answers
+ * whenever Gemini is not configured, not asked, or fails (ChatbotAssistant).
+ * One conversation per user, created lazily on first message and kept that way
+ * by a unique index on user_id. Self-scoped: users only ever see their own
+ * thread.
  */
 class ChatbotController extends Controller
 {
-    public function __construct(private ChatbotResponder $responder) {}
+    public function __construct(private ChatbotAssistant $assistant) {}
 
     /** How many turns of the assistant transcript one request returns. */
     private const WINDOW = 200;
@@ -70,8 +72,13 @@ class ChatbotController extends Controller
             'message.max' => 'Please keep your message to 2,000 characters or fewer.',
         ]);
 
+        /*
+         * Answered before the transaction opens: a Gemini request can take up
+         * to its timeout, and holding a write transaction open across an HTTP
+         * call would hold the conversation's rows with it.
+         */
         $user = $request->user();
-        $answer = $this->responder->reply($user, $data['message']);
+        $answer = $this->assistant->reply($user, $data['message']);
 
         [$asked, $reply] = DB::transaction(function () use ($user, $data, $answer) {
             $conversation = $this->conversationFor($user->id);

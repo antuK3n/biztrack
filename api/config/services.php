@@ -74,6 +74,35 @@ return [
     ],
 
     /*
+     * Gemini — the model the chatbot asks first (App\Services\GeminiChatbot).
+     *
+     * Flash-Lite, Ken's choice of 5 October 2026: the cheapest model that
+     * answers in the owner's own language, on a free-tier key (roughly 15–30
+     * requests a minute and a few hundred to ~1,500 a day). GEMINI_MODEL moves
+     * it without a deploy.
+     *
+     * NO KEY = THE RULE-BASED BOT, on purpose, like Turnstile above: with
+     * GEMINI_KEY blank nothing is sent anywhere and ChatbotResponder answers
+     * every question, exactly as it did before Gemini. Any failure with a key
+     * set — timeout, HTTP error, quota, a blocked or unreadable reply — ends
+     * the same way, silently. The key travels in the x-goog-api-key header,
+     * never in the URL, so it cannot land in an access log.
+     *
+     *   api/.env   GEMINI_KEY=…
+     *
+     * `timeout` is short because the owner is watching the typing dots while
+     * it runs; the rules answer is already in hand when it expires.
+     * `base_url` is the API root, overridable only so a stand-in can answer
+     * on a test stack.
+     */
+    'gemini' => [
+        'key' => env('GEMINI_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
+        'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+        'timeout' => (int) env('GEMINI_TIMEOUT', 8),
+    ],
+
+    /*
      * The account the legacy ODBC import signs in with (docs/odbc.md).
      *
      * Read here and nowhere else, so the import screen never asks for a

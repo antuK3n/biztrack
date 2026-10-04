@@ -14,7 +14,13 @@ use App\Support\Ra11032;
 use Illuminate\Support\Collection;
 
 /**
- * Rule-based chatbot brain (no LLM). Keyword intent matching, Taglish-tolerant.
+ * Rule-based chatbot brain. Keyword intent matching, Taglish-tolerant.
+ *
+ * It is the whole assistant when Gemini is not configured, and the fallback
+ * when it is (ChatbotAssistant): every question is answered here first, and
+ * this answer stands whenever the model is not asked or fails in any way. It
+ * also decides what may never be sent out at all — see keepLocal on
+ * ChatbotReply.
  *
  * Two things keep the answers useful: the intent is scored (the longest keyword
  * hit wins, so "how much to pay" is a fee question, not a how-to-pay question),
@@ -88,6 +94,17 @@ class ChatbotResponder
 
     /** Payment questions that are really about the accepted methods. */
     private const METHOD_TERMS = ['gcash', 'maya', 'card', 'cash', 'over the counter', 'bank', 'method', 'methods', 'paraan'];
+
+    /**
+     * Words that make a question about the asker's own records: "my permit",
+     * "my sanitary permit", "application ko", "aking bayad". See
+     * asksAboutOwnRecords().
+     */
+    private const OWN_RECORDS_PATTERNS = [
+        '/\bmy\s+(?:[\p{L}\'-]+\s+){0,3}(?:applications?|permits?|payments?|filings?|receipts?|bills?|clearances?|certificates?|status|tracking|assessments?|tax order|fsic)\b/u',
+        '/\b(?:applications?|aplikasyon|permits?|payments?|bayad|bayarin|resibo|receipts?|clearances?|filings?|fsic|certificates?|lisensya)\s+(?:ko|namin|natin)\b/u',
+        '/\b(?:aking|naming|ating)\s+(?:applications?|aplikasyon|permits?|payments?|bayad|bayarin|resibo|clearances?|lisensya)\b/u',
+    ];
 
     /**
      * Plain-language names for the facts the fee engine actually consumes
@@ -306,8 +323,8 @@ class ChatbotResponder
     ];
 
     /**
-     * The rule-based answer, with the intent it was taken as and a confidence
-     * derived from the keyword scoring.
+     * The rule-based answer, with the intent it was taken as, a confidence
+     * derived from the keyword scoring, and whether it must stay here.
      */
     public function reply(User $user, string $message): ChatbotReply
     {
@@ -315,32 +332,33 @@ class ChatbotResponder
 
         // Nothing to work with (blank, emoji-only, "???"): ask for a question.
         if (! preg_match('/[\p{L}\p{N}]/u', $text)) {
-            return new ChatbotReply($this->emptyPrompt(), 'fallback', 0.0);
+            return new ChatbotReply($this->emptyPrompt(), 'fallback', 0.0, keepLocal: true);
         }
 
         // A tracking id anywhere in the message means "where is this one?"
         if (preg_match(self::TRACKING_PATTERN, $message, $m)) {
-            return new ChatbotReply($this->trackingStatus($user, strtoupper($m[0])), 'status', 1.0);
+            return new ChatbotReply($this->trackingStatus($user, strtoupper($m[0])), 'status', 1.0, keepLocal: true);
         }
 
         // A half-typed tracking id gets the format, never a guessed lookup.
         if (preg_match(self::NEAR_MISS_TRACKING_PATTERN, $message)) {
-            return new ChatbotReply($this->trackingFormat(), 'status', 0.9);
+            return new ChatbotReply($this->trackingFormat(), 'status', 0.9, keepLocal: true);
         }
 
+        $own = $this->asksAboutOwnRecords($text);
         $permitType = $this->permitType($text);
 
         // Zoning is the one office people ask about that issues no permit here.
         $office = $permitType ? null : $this->office($text);
         if ($office) {
-            return new ChatbotReply($this->zoning($office), 'offices', 0.9);
+            return new ChatbotReply($this->zoning($office), 'offices', 0.9, keepLocal: $own);
         }
 
         // "What is the water source for?" names a permit but asks about a box on
         // its form, so the field layer gets first refusal on the answer.
         $field = $this->fieldAnswer($text, $permitType);
         if ($field !== null) {
-            return new ChatbotReply($field[0], 'field', $field[1]);
+            return new ChatbotReply($field[0], 'field', $field[1], keepLocal: $own);
         }
 
         $broad = ! $permitType && $this->mentionsAny($text, self::BROAD_TERMS);
@@ -360,14 +378,33 @@ class ChatbotResponder
 
         // A permit named and nothing asked about it: the menu, and a middling guess.
         if ($score['intent'] === 'fallback' && $permitType) {
-            return new ChatbotReply($body, 'permit', 0.6);
+            return new ChatbotReply($body, 'permit', 0.6, keepLocal: $own);
         }
 
         return new ChatbotReply(
             $body,
             $score['intent'],
             $this->confidence($score, $permitType !== null),
+            keepLocal: $own || $score['intent'] === 'status',
         );
+    }
+
+    /**
+     * The asker's own recent filings, as the status answer gives them.
+     *
+     * For ChatbotAssistant when Gemini classifies a question as `status`: the
+     * model only names the intent, and the lookup stays here, scoped to the
+     * asker, whoever did the classifying.
+     */
+    public function ownApplications(User $user): string
+    {
+        return $this->status($user, null);
+    }
+
+    /** "Sorry, I did not quite get that", for a question nobody could place. */
+    public function fallbackReply(): string
+    {
+        return $this->fallback();
     }
 
     // --- intent + entity matching --------------------------------------------
@@ -420,7 +457,8 @@ class ChatbotResponder
      * little, and a named permit adds the most, because the answer is then
      * scoped to it. Capped below 1, which only an exact tracking id earns.
      *
-     * Logged with the answer (UCR-07 step 3.1).
+     * Logged with the answer (UCR-07 step 3.1), and read by ChatbotAssistant:
+     * at 0.9 and above this answer stands and Gemini is not asked.
      *
      * @param  array{intent: string, length: int, phrase: bool, hits: int}  $score
      */
@@ -434,6 +472,25 @@ class ChatbotResponder
         $more = 0.05 * min(2, $score['hits'] - 1);
 
         return round(min(0.95, $base + $more + ($permitNamed ? 0.15 : 0.0)), 2);
+    }
+
+    /**
+     * Does the question ask about the asker's OWN filings, payments or permits?
+     *
+     * Those are answered here, from the scoped lookups, and never sent to
+     * Gemini [Ken, 5 October 2026]. Read generously: a false "yes" costs a
+     * rules answer instead of a model one, a false "no" would send a question
+     * about somebody's filing out of the building.
+     */
+    private function asksAboutOwnRecords(string $text): bool
+    {
+        foreach (self::OWN_RECORDS_PATTERNS as $pattern) {
+            if (preg_match($pattern, $text)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -555,6 +612,20 @@ class ChatbotResponder
             ."If it is specific to your application, message {$office} from the application page. They can tell you exactly what they need in that box.";
     }
 
+    /**
+     * Every form field this bot has a note on, as "label: answer", for the
+     * facts Gemini is grounded in (ChatbotFacts).
+     *
+     * @return list<string>
+     */
+    public function fieldNotes(): array
+    {
+        return array_map(
+            fn (array $rule) => $rule['label'].': '.str_replace("\n", ' ', $rule['answer']),
+            self::FIELD_RULES,
+        );
+    }
+
     private function office(string $text): ?Department
     {
         foreach (self::OFFICE_ALIASES as $code => $aliases) {
@@ -598,7 +669,8 @@ class ChatbotResponder
             ."I also have the checklists for: {$others}. Ask me about any one of them, or say \"all requirements\" for the full rundown.";
     }
 
-    private function checklist(?PermitType $type): string
+    /** A permit's documents, one bullet each, qualified by when they apply. */
+    public function checklist(?PermitType $type): string
     {
         if (! $type) {
             return '';
@@ -701,23 +773,12 @@ class ChatbotResponder
         }
 
         if ($type) {
-            $rules = $this->feeRulesFor($type);
+            $head = $this->feeBasis($type);
 
-            if ($rules->isEmpty()) {
+            if ($head === null) {
                 return "I do not have a fee schedule loaded for the {$type->name}, so I will not guess at an amount.\n"
                     .'Your Tax Order of Payment shows the assessed amount before you pay, and the '
                     .($type->department?->name ?? 'issuing office').' can explain any line on it.';
-            }
-
-            // FSIC is a percentage of the other fees, not a schedule of its own.
-            $percentage = $rules->first(fn (FeeRule $rule) => $rule->basis === 'regulatory_subtotal');
-            if ($percentage) {
-                $rate = $this->percent((float) ($percentage->computation['rate'] ?? 0));
-                $head = "The {$type->name} is not a flat fee: it is {$rate} of your mayor's permit and regulatory fees ({$percentage->section}), "
-                    .'so it moves with the rest of your assessment.';
-            } else {
-                $head = "The {$type->name} has no flat rate. Under the Malabon Revenue Code it is computed from "
-                    .$this->feeDrivers($rules).'.';
             }
 
             return "{$head}\n"
@@ -728,6 +789,30 @@ class ChatbotResponder
             ."your gross sales or capitalization, floor area, and the permits you applied for all feed into it.\n"
             ."Every line item is shown in your Tax Order of Payment on the fee step, so you can review the breakdown before paying.\n"
             .'Name a permit and I will tell you what drives its fee. Heads up: '.lcfirst($this->penaltyPhrase());
+    }
+
+    /**
+     * What a permit's fee is computed from, in one sentence, from the live
+     * fee rules; null when none are loaded for it.
+     */
+    public function feeBasis(PermitType $type): ?string
+    {
+        $rules = $this->feeRulesFor($type);
+        if ($rules->isEmpty()) {
+            return null;
+        }
+
+        // FSIC is a percentage of the other fees, not a schedule of its own.
+        $percentage = $rules->first(fn (FeeRule $rule) => $rule->basis === 'regulatory_subtotal');
+        if ($percentage) {
+            $rate = $this->percent((float) ($percentage->computation['rate'] ?? 0));
+
+            return "The {$type->name} is not a flat fee: it is {$rate} of your mayor's permit and regulatory fees ({$percentage->section}), "
+                .'so it moves with the rest of your assessment.';
+        }
+
+        return "The {$type->name} has no flat rate. Under the Malabon Revenue Code it is computed from "
+            .$this->feeDrivers($rules).'.';
     }
 
     /** Active, non-penalty rules that price this permit type. */
@@ -764,7 +849,7 @@ class ChatbotResponder
     }
 
     /** Surcharge and interest, read from the seeded penalty rule. */
-    private function penaltyPhrase(): string
+    public function penaltyPhrase(): string
     {
         $constants = FeeRule::where('code', 'penalty.late_payment')->first()?->constants ?? [];
         $surcharge = $this->percent((float) ($constants['surcharge_rate'] ?? 0.25));

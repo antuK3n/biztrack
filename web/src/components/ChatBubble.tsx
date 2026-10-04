@@ -3,8 +3,10 @@ import type { FormEvent } from 'react'
 import { api, toApiError } from '../lib/api'
 import { PlusIcon, XIcon } from './icons'
 
-/* Chatbot bubble + slide-in panel (owner screens, p7-p8). Rule-based assistant
- * backed by /chatbot/messages; one conversation per user.
+/* Chatbot bubble + slide-in panel (owner screens, p7-p8), backed by
+ * /chatbot/messages; one conversation per user. Who answers is the server's
+ * business (Gemini in front of the rule-based bot, ChatbotAssistant): this
+ * panel shows the reply either way and never knows which.
  *
  * The thread lives on the server, so this component only mirrors it. Two things
  * used to make it look like it did not:

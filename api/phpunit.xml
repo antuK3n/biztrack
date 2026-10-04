@@ -41,5 +41,12 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!--
+            No Gemini in the suite, whatever this machine's .env holds: a key
+            left in it would send every chatbot test to the real API and spend
+            the free tier's quota. Forced, so an exported GEMINI_KEY loses too.
+            The Gemini tests set a key in config and fake every request.
+        -->
+        <env name="GEMINI_KEY" value="" force="true"/>
     </php>
 </phpunit>

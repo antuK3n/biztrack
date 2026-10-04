@@ -472,7 +472,7 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::middleware('permission:permit.revoke')
         ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);
 
-    // Chatbot (rule-based assistant; self-scoped, one conversation per user)
+    // Chatbot (Gemini in front of the rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
     Route::post('chatbot/messages', [ChatbotController::class, 'store']);
 
