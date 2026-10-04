@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ApplicationType;
 use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
@@ -94,6 +95,9 @@ function officeWorksPermit(Application $app, string $code, string $remarks): App
      */
     $workflow = app(WorkflowService::class);
     $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app, $type);
     $workflow->submitClearanceForm($app, $type);
 
     $row = ApplicationPermitType::where('application_id', $app->id)
@@ -244,7 +248,19 @@ it('still lets the applicant read every word written on their own filing', funct
 it('does not show one office a permit copy handed in for another office', function () {
     Storage::fake('local');
 
+    /*
+     * A RENEWAL, because this case hands in a certificate the business
+     * already holds. `startClearance` has refused that on a new filing
+     * since 29 September 2026 — the LGU's rule, relayed by the client:
+     * a business cannot hold these before it applies to BPLO.
+     *
+     * The case is about who may SEE the copy, not about who may upload
+     * one, so the filing type is a detail of the fixture rather than of
+     * the rule under test.
+     */
     $app = paidFilingForScoping();
+    $app->update(['application_type' => ApplicationType::Renewal]);
+    $app->refresh();
 
     // CHO has to be ON the filing, or this proves only that a stranger is kept
     // out — which is `canView`'s job and a different rule.
@@ -338,6 +354,9 @@ it('does not show one office the questionnaire another office collected', functi
         'FSIC' => ['storey_count' => '2', 'floor_area' => '180'],
         'SANITARY' => ['sanitary_classification' => 'Food Establishment'],
     ] as $code => $formData) {
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist($app->fresh(), PermitType::where('code', $code)->firstOrFail());
         test()->putJson("/api/v1/applications/{$app->id}/office-forms/{$code}", [
             'form_data' => $formData,
             'submit' => true,

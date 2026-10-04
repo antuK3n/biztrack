@@ -1,0 +1,77 @@
+# BizTrack in production: biztrack.page on the Azure server.
+#
+#   cd ~/biztrack/infra/azure
+#   docker compose build
+#   docker compose up -d
+#
+# The database is NOT here: it is Azure Database for PostgreSQL (biztrack-db),
+# reached with the settings in api/.env.production. See docs/deploy-azure.md.
+#
+# Only Caddy publishes ports. nginx and php-fpm are reachable solely on
+# Docker's private network, so the firewall only ever sees 80 and 443.
+name: biztrack
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/azure/web.Dockerfile
+      args:
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+    image: biztrack-web
+    restart: unless-stopped
+    depends_on:
+      - app
+
+  app:
+    build:
+      context: ../..
+      dockerfile: infra/azure/app.Dockerfile
+    image: biztrack-app
+    restart: unless-stopped
+    env_file: ../../api/.env.production
+    volumes:
+      - appstorage:/var/www/api/storage
+
+  queue:
+    image: biztrack-app
+    pull_policy: never
+    restart: unless-stopped
+    command: php artisan queue:work --tries=3 --max-time=3600 --memory=128
+    env_file: ../../api/.env.production
+    volumes:
+      - appstorage:/var/www/api/storage
+    depends_on:
+      - app
+
+  scheduler:
+    image: biztrack-app
+    pull_policy: never
+    restart: unless-stopped
+    command: php artisan schedule:work
+    env_file: ../../api/.env.production
+    volumes:
+      - appstorage:/var/www/api/storage
+    depends_on:
+      - app
+
+volumes:
+  appstorage:
+  caddy_data:
+  caddy_config:

@@ -91,8 +91,19 @@ class PermitRegisterResource extends PermitResource
              */
             'ban' => $this->whenLoaded('business', fn () => $this->business?->ban),
         ], parent::toArray($request), [
-            // The certificate face: PermitFace::KEYS, and the two
-            // SIGNATORY_KEYS that print under the ruled lines.
+            /*
+             * Whether the business was removed from the register — "retired"
+             * on the screen (checklist item 21). The controller loads retired
+             * businesses for this table, so `business` is present on those
+             * rows and this is what tells them apart.
+             */
+            'business_retired' => $this->whenLoaded(
+                'business',
+                fn () => (bool) $this->business?->trashed(),
+                false,
+            ),
+
+            // The certificate face. Keys match PermitFace::KEYS exactly.
             'face' => $face,
 
             'valid_from' => optional($this->valid_from)->toDateString(),

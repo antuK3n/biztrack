@@ -142,20 +142,19 @@ function officerBehind(ApplicationAssignment $assignment): User
     return User::where('department_id', $assignment->department_id)->firstOrFail();
 }
 
-it('refuses BPLO’s approval of the form while the filing has no category', function () {
+it('approves the form without anyone choosing a category', function () {
     $app = uncategorised();
     $assignment = pendingAssignmentOn($app);
 
-    expect(fn () => app(WorkflowService::class)->approveAssignment($assignment))
-        ->toThrow(ValidationException::class);
-
     /*
-     * The refusal has to come BEFORE the write, not after it. An approval that
-     * marks the assignment completed and then throws leaves the filing
-     * carrying a review no officer intended and no rollback removes — the same
-     * ordering bug the rejection guard above it exists to prevent.
+     * This threw until 27 September 2026 — see the note at the head of this
+     * patch. The tier now comes from Malabon's Citizen's Charter, so there
+     * is nothing for an officer to choose and nothing to hold the approval
+     * for.
      */
-    expect($assignment->fresh()->status)->toBe(AssignmentStatus::Pending);
+    app(WorkflowService::class)->approveAssignment($assignment);
+
+    expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
 
 it('lets that same approval through once a category is chosen', function () {
@@ -170,24 +169,22 @@ it('lets that same approval through once a category is chosen', function () {
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
 
-it('refuses BPLO’s approval on a category the system guessed', function () {
+it('approves a filing carrying the category the system assigned', function () {
     /*
-     * THE CASE THE ORIGINAL BUG WOULD HAVE FAILED.
+     * THE CASE THE GATE EXISTED FOR, INVERTED.
      *
-     * The filing carries a real tier — this is not the null fixture — and it is
-     * still refused, because nobody has read it. A guess made from the filing
-     * type and the declared capital is a convenience, not the LGU's published
-     * classification (open question A10), and this gate exists to make an
-     * officer look. The first version asked `complexity !== null` and would
-     * have let this through, which is precisely what the client hit.
+     * A filing whose tier nobody confirmed used to be refused, because the
+     * tier was a guess and open question A10 recorded that we did not know
+     * Malabon's real classification. We do now — the Citizen's Charter puts
+     * new and renewal business permits in Simple — so an unconfirmed tier is
+     * no longer an unchecked one, and there is nobody left to ask.
      */
     $app = automaticallyCategorised();
     $assignment = pendingAssignmentOn($app);
 
-    expect(fn () => app(WorkflowService::class)->approveAssignment($assignment))
-        ->toThrow(ValidationException::class);
+    app(WorkflowService::class)->approveAssignment($assignment);
 
-    expect($assignment->fresh()->status)->toBe(AssignmentStatus::Pending);
+    expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
 
 it('mints no permits on a filing carrying only the system’s guess', function () {
@@ -302,19 +299,20 @@ it('mints no permits on an uncategorised filing', function () {
         ->and($app->fresh()->status)->not->toBe(ApplicationStatus::Approved);
 });
 
-it('names the category as the field at fault so the screen can point at it', function () {
+it('no longer refuses the final approval over a missing category', function () {
     /*
-     * The key matters as much as the message: the review sheet reads the 422's
-     * field name to decide what to highlight. A generic error would leave the
-     * officer with a red banner and no indication that the control they need is
-     * the one under For Office Use Only.
+     * This asserted the 422 carried the key `complexity`, so the review sheet
+     * could highlight the control the officer had to use. There is no 422 and
+     * no control: the tier is read from the Citizen's Charter at submission.
+     *
+     * Kept, inverted, rather than deleted — it is the clearest record that
+     * the final approval path was gated too, not just the form approval.
      */
     $app = uncategorised();
 
     try {
         app(WorkflowService::class)->approveOverall($app);
-        $this->fail('approveOverall accepted a filing with no processing category.');
     } catch (ValidationException $e) {
-        expect($e->errors())->toHaveKey('complexity');
+        expect($e->errors())->not->toHaveKey('complexity');
     }
 });

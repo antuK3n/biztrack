@@ -63,6 +63,12 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
         ->assertSuccessful();
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($appId),
+        PermitType::where('code', 'ZONING')->firstOrFail(),
+    );
     $this->withHeaders($owner)
         ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
             'form_data' => [],
@@ -121,6 +127,12 @@ it('lets the zoning officer clear its own assignment but not end the application
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
         ->assertSuccessful();
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($appId),
+        PermitType::where('code', 'ZONING')->firstOrFail(),
+    );
     $this->withHeaders($owner)
         ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
             'form_data' => [],

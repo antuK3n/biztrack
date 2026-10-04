@@ -25,13 +25,18 @@ function makeUser(partial: Partial<MockUser> & Pick<MockUser, 'email' | 'first_n
     mobile_number: '09171234567',
     middle_name: null,
     suffix: null,
+    // No home address by default: the staff mocks are never asked for one, and
+    // registration below passes the owner's own.
+    home_street: null,
+    home_barangay: null,
+    home_city: null,
+    home_province: null,
+    home_postal_code: null,
     department: null,
     // The mock has no file storage, so every mock account draws the glyph.
     has_photo: false,
     is_active: true,
     email_verified_at: '2026-07-01T08:00:00Z',
-    // The mock register holds no findings, so no mock account is barred.
-    restriction: null,
     roles: ['business_owner'],
     permissions: [
       'business.manage_own',
@@ -51,7 +56,18 @@ function makeUser(partial: Partial<MockUser> & Pick<MockUser, 'email' | 'first_n
 }
 
 const users: MockUser[] = [
-  makeUser({ email: 'owner@biztrack.local', first_name: 'Nena', last_name: 'Dela Cruz', gender: 'F' }),
+  // The same home address DemoSeeder gives her, so mock mode and the live API agree.
+  makeUser({
+    email: 'owner@biztrack.local',
+    first_name: 'Nena',
+    last_name: 'Dela Cruz',
+    gender: 'F',
+    home_street: '12 Gen. Luna St.',
+    home_barangay: 'Longos',
+    home_city: 'Malabon',
+    home_province: 'Metro Manila',
+    home_postal_code: '1472',
+  }),
   makeUser({
     email: 'bplo@biztrack.local',
     first_name: 'Liza',
@@ -61,7 +77,7 @@ const users: MockUser[] = [
     roles: ['bplo_staff'],
     // analytics.view: checklist #78 moved the dashboard to BPLO. This list has to
     // track RbacSeeder's bplo_staff row or mock mode disagrees with the live API.
-    permissions: ['application.view_all', 'application.review', 'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create', 'message.participate', 'compliance.view', 'zoning.evaluate', 'analytics.view'],
+    permissions: ['application.view_all', 'application.review', 'fee.adjust', 'permit.view_all', 'permit.issue', 'permit.revoke', 'request.create', 'message.participate', 'compliance.view', 'zoning.evaluate', 'analytics.view'],
   }),
   makeUser({
     email: 'admin@biztrack.local',
@@ -76,6 +92,7 @@ const users: MockUser[] = [
       'inspection.manage',
       'permit.view_all',
       'permit.issue',
+      'permit.revoke',
       'request.create',
       'message.participate',
       'compliance.view',
@@ -86,6 +103,7 @@ const users: MockUser[] = [
       'oic.assign',
       'reference.manage',
       'audit.view',
+      'data.import',
     ],
   }),
   makeUser({
@@ -165,6 +183,11 @@ function handle(config: InternalAxiosRequestConfig): MockResponse {
         suffix: body.suffix || null,
         gender: body.gender,
         mobile_number: body.mobile_number,
+        home_street: body.home_street,
+        home_barangay: body.home_barangay,
+        home_city: body.home_city,
+        home_province: body.home_province,
+        home_postal_code: body.home_postal_code || null,
         password: body.password,
         email_verified_at: null,
       })

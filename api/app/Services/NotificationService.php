@@ -341,6 +341,47 @@ class NotificationService
         );
     }
 
+    /**
+     * BPLO or the super admin took a permit away (checklist item 23).
+     *
+     * To the business's OWNER, found through the permit rather than through a
+     * filing: a revocation is about the certificate, and a permit whose filing
+     * was deleted is still one somebody holds. Soft-deleted businesses and
+     * owners resolve to null and the notice is skipped — there is nobody left
+     * to tell, and the audit row the caller writes is the record.
+     *
+     * The reason is included. A26 asked whether it should be; the officer typed
+     * it knowing it is audited, and an owner told only "revoked" has nothing to
+     * contest or correct. If the City answers otherwise, this sentence is the
+     * one place it changes.
+     *
+     * `disapproval: true` gives the e-mail copy the same treatment a rejected
+     * application's gets. push() queues that copy itself; nothing here mails.
+     */
+    public function permitRevoked(Permit $permit, string $reason): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+
+        $permit->loadMissing('permitType');
+        $name = $permit->permitType?->name ?? 'Permit';
+
+        $this->push(
+            $owner,
+            'decision',
+            "{$name} revoked",
+            "Your {$name} {$permit->permit_number} has been revoked and is no longer valid. "
+                ."Reason: {$reason} Contact the Business Permits and Licensing Office if you "
+                .'believe this is wrong.',
+            '/permits',
+            $permit,
+            disapproval: true,
+        );
+        $this->fanOut($owner, "BizTrack: {$name} {$permit->permit_number} has been revoked.");
+    }
+
     // --- Messaging -----------------------------------------------------------
     public function newMessage(Application $app, User $recipient): void
     {
@@ -392,6 +433,38 @@ class NotificationService
             $app,
         );
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
+    }
+
+    /**
+     * An applicant has answered a RETURN and handed the filing back.
+     *
+     * Modelled on `requestResponded` directly above, which does the same job
+     * for a requirement. A return is the larger of the two — it blocks the
+     * whole filing rather than sitting beside it — and until 28 September
+     * 2026 it was the one that told the office nothing.
+     *
+     * \@param  int  $fields  How many fields the applicant corrected, from
+     *   `application_corrections`. Zero for a return answered in the wizard,
+     *   where the changes are not recorded field by field — the sentence
+     *   drops the count rather than claiming none were changed.
+     */
+    public function filingResubmitted(Application $app, User $recipient, int $fields = 0): void
+    {
+        $what = $fields > 0
+            ? $fields.' field'.($fields === 1 ? '' : 's').' corrected'
+            : 'Corrections received';
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'Corrections received',
+            "{$what} on {$app->tracking_id}. It is back with your office for review.",
+            // Into the LGU site, chosen by who is being TOLD rather than by a
+            // literal — the same reasoning `requestResponded` records.
+            $this->filingLink($recipient, $app),
+            $app,
+        );
+        $this->fanOut($recipient, "BizTrack: corrections received on {$app->tracking_id}.");
     }
 
     public function requestClosed(OfficerRequest $request, User $recipient): void
@@ -456,17 +529,90 @@ class NotificationService
         $unit = $threshold === 1 ? 'day' : 'days';
         $expiresOn = $permit->valid_until->format('j M Y');   // cast to a date on the model
 
+        /*
+         * ── The right permit's name, and only where it was wrong ────────
+         *
+         * This said "Business Permit expiring" for EVERY type, so an owner
+         * holding six certificates got reminders that all named the one
+         * certificate that was usually not the one expiring.
+         *
+         * But the business permit's own wording is not a slip to correct:
+         * `PermitExpiryRemindersTest` pins title and body as "the paper's
+         * reminder wording and the mockup's title", which makes them
+         * transcribed from the city's documents rather than written here.
+         * A first pass replaced both and failed that test, correctly —
+         * rewriting an LGU's own notice is the client's call, not a side
+         * effect of fixing a name.
+         *
+         * So the mockup's words stand for the permit they were written
+         * about, and the other five get the same sentence with their own
+         * name in it. `permitType->name` is not used for the business
+         * permit because the register calls it "Mayor's / Business
+         * Permit" and the mockup says "Business Permit".
+         */
+        $permit->loadMissing('permitType');
+        $isOutcome = $permit->permitType?->code === PermitType::OUTCOME_CODE;
+        $name = $isOutcome ? 'Business Permit' : ($permit->permitType?->name ?? 'Permit');
+        $subject = $isOutcome ? 'business permit' : $name;
+
+        /*
+         * The paper's sentence, then what lateness costs — APPENDED, not
+         * substituted. "To avoid penalties" was true and unactionable
+         * until 1 October 2026, because nothing called
+         * `FeeCalculator::latePenalty`; there are penalties now, and a
+         * reminder that names the number is a reason to act where one
+         * gesturing at consequences is furniture. Appending keeps the
+         * transcribed wording intact and still says the new thing.
+         */
         $this->push(
             $owner,
             'expiry',
-            "Business Permit expiring in {$threshold} {$unit}",
-            "Reminder: Your business permit will expire in {$threshold} {$unit}. Please renew your "
+            "{$name} expiring in {$threshold} {$unit}",
+            "Reminder: Your {$subject} will expire in {$threshold} {$unit}. Please renew your "
                 ."permit before the expiration date to avoid penalties. Permit {$permit->permit_number} "
-                ."expires on {$expiresOn}.",
+                ."expires on {$expiresOn}. Renewing after that date adds a 25% surcharge plus 2% "
+                .'for every month it is late (Revenue Code Secs. 8A.04 and 8A.05).',
             '/permits',
             $permit,
         );
         $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).');
+    }
+
+    /**
+     * This permit is yours, and its fee arrives in January.
+     *
+     * A clearance renewed out of season is issued UNBILLED — the city
+     * collects once a year — and until now nothing told the applicant so.
+     * They were handed a certificate, paid nothing, and met the charge
+     * months later on a bill they had no reason to expect, which is how a
+     * correct rule becomes a complaint at the counter.
+     *
+     * The surcharge is named separately when there is one. Lumping it into
+     * the fee would hide the one figure the applicant might dispute, and
+     * this message is the first and best chance to raise it — months
+     * before the bill, while the filing dates are still checkable.
+     */
+    public function permitIssuedUnbilled(Permit $permit, float $fee, float $penalty): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+
+        $permit->loadMissing('permitType');
+        $name = $permit->permitType?->name ?? 'Permit';
+        $money = fn (float $v) => '₱'.number_format($v, 2);
+
+        $body = "Your {$name} ({$permit->permit_number}) has been issued. "
+            ."There is nothing to pay today: its fee of {$money($fee)} is collected "
+            .'with your next business permit renewal in January.';
+
+        if ($penalty > 0.0) {
+            $body .= " A late-renewal surcharge of {$money($penalty)} is included, "
+                .'because this permit was renewed after it expired.';
+        }
+
+        $this->push($owner, 'payment', "{$name} issued — fee due in January", $body, '/permits', $permit);
     }
 
     public function permitExpired(Permit $permit): void
@@ -484,58 +630,6 @@ class NotificationService
             $permit,
         );
         $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} has expired.");
-    }
-
-    /**
-     * A renewal follow-up an OFFICER asked for, from the Renewal Risk screen.
-     *
-     * Same path as every notification above — push() into the owner's in-app
-     * list and e-mail, then fanOut() to the SMS log — because the
-     * applicant should not be able to tell "the system chased me" from "a
-     * person chased me" by which channels answered. What differs is only the
-     * words, and the words differ for two reasons:
-     *
-     *  - **It cannot quote a threshold.** permitExpiring() names one of the
-     *    30/15/7/1-day buckets, which is true only because ScanPermits only
-     *    ever calls it when a bucket has fired. An officer can press this on a
-     *    permit with 47 days left, and "expires in 30 days" would then be a
-     *    plain falsehood in a message to a business owner. The exact date is
-     *    stated instead, which is true at any distance.
-     *  - **It says a person sent it.** "An officer at the BPLO" is not
-     *    decoration: it tells the reader there is somebody to ring back, and
-     *    it is what distinguishes this from the automatic reminders in the
-     *    same list. It is also simply what happened.
-     *
-     * `$urgent` follows the row's band — the spec's "Immediate follow-up" for
-     * High and "Send reminder" for Moderate. It changes the tone and nothing
-     * else; both are one notification, and neither claims anything about the
-     * index that produced it. The score is an internal ranking and no message
-     * from this method quotes it.
-     */
-    public function renewalFollowUp(Permit $permit, bool $urgent = false): void
-    {
-        $owner = $this->permitOwner($permit);
-        if (! $owner) {
-            return;
-        }
-
-        $expiresOn = $permit->valid_until->format('j M Y');   // cast to a date on the model
-        $lapsed = $permit->valid_until->startOfDay()->isPast();
-
-        $title = $urgent ? 'Renewal follow-up from the BPLO' : 'Renewal reminder from the BPLO';
-
-        $body = $lapsed
-            ? "An officer at the BPLO is following up on permit {$permit->permit_number}, which expired on "
-                ."{$expiresOn}. Please file a renewal as soon as you can to avoid further penalties."
-            : "An officer at the BPLO is reminding you that permit {$permit->permit_number} expires on "
-                ."{$expiresOn}. Please renew before that date to avoid penalties.";
-
-        $this->push($owner, 'expiry', $title, $body, '/permits', $permit);
-
-        $this->fanOut(
-            $owner,
-            "BizTrack: the BPLO is following up on permit {$permit->permit_number} (expires {$expiresOn}).",
-        );
     }
 
     public function renewalDue(Permit $permit): void

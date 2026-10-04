@@ -12,8 +12,11 @@ import { expect, test } from '@playwright/test'
  *     certificates at all.
  *  2. *"fix the layout of virtual permits"* — on a phone the permit number
  *     rendered one character per line.
- *  3. *"implement email verification in the change password"* — the current
- *     password alone was enough, and the change signs every other device out.
+ *  3. *"implement email verification in the change password"* — covered by
+ *     PasswordChangeCodeTest and password-change.spec.ts. When this branch was
+ *     merged on 2 October 2026, the team kept the other implementation of the
+ *     same ask (the code is asked for only while e-mail is switched on), so the
+ *     tests for this branch's two-step dialog went with it.
  */
 
 test.use({ storageState: 'e2e/.auth/default/owner.json' })
@@ -166,124 +169,5 @@ test.describe('the virtual permit', () => {
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
     await page.emulateMedia({ media: 'screen' })
-  })
-})
-
-test.describe('changing the password', () => {
-  test('will not change it on one press any more', async ({ page }) => {
-    await page.goto('/settings')
-    await page.getByRole('button', { name: /Reset Password/i }).click()
-
-    const dialog = page.getByRole('dialog')
-    await expect(dialog.getByRole('heading')).toContainText('Change Password')
-
-    /*
-     * The button asks for a CODE now. It said "Save Changes", and pressing it
-     * changed the password — which is what made a session left open at a
-     * shared counter enough to take the account.
-     */
-    await expect(dialog.getByRole('button', { name: 'Email me a code' })).toBeVisible()
-    await expect(dialog.getByRole('button', { name: 'Save Changes' })).toHaveCount(0)
-
-    // And it says so before anything is typed.
-    await expect(dialog).toContainText(/six-digit code to confirm it is you/i)
-  })
-
-  test('holds the code button until the new password is usable', async ({ page }) => {
-    await page.goto('/settings')
-    await page.getByRole('button', { name: /Reset Password/i }).click()
-
-    const dialog = page.getByRole('dialog')
-    const send = dialog.getByRole('button', { name: 'Email me a code' })
-
-    // Nothing typed: held, and `aria-disabled` rather than the native
-    // attribute, so the reason stays reachable (AGENTS.md 6.2).
-    await expect(send).toHaveAttribute('aria-disabled', 'true')
-
-    await dialog.getByLabel(/current password/i).fill('biztrack1')
-    await dialog.getByLabel(/enter new password/i).fill('Malabon-City-2026!')
-    // Mismatched confirmation: still held.
-    await dialog.getByLabel(/confirm new password/i).fill('Malabon-City-2027!')
-    await expect(send).toHaveAttribute('aria-disabled', 'true')
-
-    await dialog.getByLabel(/confirm new password/i).fill('Malabon-City-2026!')
-    await expect(send).not.toHaveAttribute('aria-disabled', 'true')
-  })
-
-  test('asks for the code, warns the wrong reader, and goes back without losing anything', async ({
-    page,
-  }) => {
-    let sent = false
-    await page.route('**/auth/password/code', async (route) => {
-      sent = true
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ message: 'ok', email: 'o••••@biztrack.local', expires_in_minutes: 10 }),
-      })
-    })
-
-    await page.goto('/settings')
-    await page.getByRole('button', { name: /Reset Password/i }).click()
-
-    const dialog = page.getByRole('dialog')
-    await dialog.getByLabel(/current password/i).fill('biztrack1')
-    await dialog.getByLabel(/enter new password/i).fill('Malabon-City-2026!')
-    await dialog.getByLabel(/confirm new password/i).fill('Malabon-City-2026!')
-    await dialog.getByRole('button', { name: 'Email me a code' }).click()
-
-    expect(sent).toBe(true)
-
-    // The masked address, so the reader knows which mailbox to open — and not
-    // the whole one, which would hand it to whoever took the session.
-    await expect(dialog).toContainText('o••••@biztrack.local')
-    await expect(dialog).not.toContainText('owner@biztrack.local')
-
-    /*
-     * The warning for the reader who did NOT do this. "Ignore this" is the
-     * wrong advice: whoever asked already holds a signed-in session.
-     */
-    await expect(dialog).toContainText(/someone else is signed in to your account/i)
-
-    // Six digits, and the button waits for all six.
-    const confirm = dialog.getByRole('button', { name: 'Change my password' })
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-    await dialog.getByLabel(/six-digit code/i).fill('12345')
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-    await dialog.getByLabel(/six-digit code/i).fill('123456')
-    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
-
-    /*
-     * Back keeps what was typed. A code arriving at an address the reader did
-     * not expect is the commonest reason to go back, and retyping a password
-     * to fix an email is punishment for the wrong mistake.
-     */
-    await dialog.getByRole('button', { name: 'Back' }).click()
-    await expect(dialog.getByLabel(/enter new password/i)).toHaveValue('Malabon-City-2026!')
-  })
-
-  test('keeps letters out of the code box', async ({ page }) => {
-    // `inputMode="numeric"`, not `type="number"`: that one drops a leading
-    // zero, and one code in ten starts with one.
-    await page.route('**/auth/password/code', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ message: 'ok', email: 'o••••@biztrack.local', expires_in_minutes: 10 }),
-      }),
-    )
-
-    await page.goto('/settings')
-    await page.getByRole('button', { name: /Reset Password/i }).click()
-    const dialog = page.getByRole('dialog')
-    await dialog.getByLabel(/current password/i).fill('biztrack1')
-    await dialog.getByLabel(/enter new password/i).fill('Malabon-City-2026!')
-    await dialog.getByLabel(/confirm new password/i).fill('Malabon-City-2026!')
-    await dialog.getByRole('button', { name: 'Email me a code' }).click()
-
-    const box = dialog.getByLabel(/six-digit code/i)
-    await box.fill('')
-    await box.type('0a1b2c3')
-    await expect(box).toHaveValue('0123')
   })
 })

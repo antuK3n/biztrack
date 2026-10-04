@@ -98,6 +98,94 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : dateFmt.format(d)
 }
 
+/**
+ * The date a value was superseded, for the one-line revision notes.
+ *
+ * The only short date in the app, and named for its one job rather than
+ * offered as a general `formatDateShort` — which the note above refuses, and
+ * rightly: "the second helper is the one that quietly spreads."
+ *
+ * This is the screen the same note allows for. A revision note sits INSIDE a
+ * record box — `was 111111 · 29 Sep 2026` under a field that may be 13rem
+ * wide — and the long form wrapped it onto a second and third line, which is
+ * what the client reported on 29 September 2026. Nobody transcribes one onto
+ * a printed form; it is an at-a-glance marker of when something changed, so
+ * the reason for spelling the month out does not apply to it.
+ */
+const versionDateFmt = new Intl.DateTimeFormat('en-PH', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+})
+
+/**
+ * A calendar date the server sends bare ("2027-01-25"), as "January 25, 2027".
+ *
+ * Not formatDate(): `new Date('2027-01-25')` is midnight UTC, which a browser
+ * west of Greenwich prints as the 24th. A date with no time is the same day
+ * everywhere, so it is read as one.
+ */
+export function formatCalendarDate(ymd: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd ?? '')
+  if (!m) return '—'
+  return dateFmt.format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+}
+
+export function formatVersionDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+
+  return Number.isNaN(d.getTime()) ? '—' : versionDateFmt.format(d)
+}
+
+/**
+ * A date and time small enough for a list tile.
+ *
+ * The second named short format, and named for its job rather than offered
+ * as a general one — see the note above, which refuses a generic
+ * `formatDateShort` because "the second helper is the one that quietly
+ * spreads".
+ *
+ * A draft tile is about 200px wide and carries two dated lines, Started and
+ * Last opened. The long form is "September 29, 2026 at 5:38 PM", which wraps
+ * each of them onto two lines and buries a one-line title under four lines
+ * of metadata. Nobody transcribes a draft's timestamps onto a paper form,
+ * which is the reason the long form exists at all.
+ */
+const tileDateTimeFmt = new Intl.DateTimeFormat('en-PH', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+/*
+ * The same thing without the year, for a date in the current one.
+ *
+ * "Last opened: Sep 29, 2026, 10:15 PM" wrapped a tile and left "PM" on a
+ * line of its own. Dropping the year saves six characters and drops the
+ * part of the answer the reader already knows — and only while they know
+ * it: a draft from another year still carries its year, which is when that
+ * digit is the whole point.
+ */
+const tileThisYearFmt = new Intl.DateTimeFormat('en-PH', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+export function formatTileDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+
+  return d.getFullYear() === new Date().getFullYear()
+    ? tileThisYearFmt.format(d)
+    : tileDateTimeFmt.format(d)
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -175,6 +263,8 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   gcash: 'GCash',
   maya: 'Maya',
   card: 'Card',
+  qrph: 'QR Ph',
+  gotyme: 'GoTyme',
 }
 
 export function paymentMethodLabel(method: string): string {
@@ -216,53 +306,4 @@ export function initialsOf(name: string | null | undefined): string {
   if (parts.length === 0) return '?'
 
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
-}
-
-/**
- * How a line of business READS — the applicant's own words first.
- *
- * ── The certificate that said "Other (not listed)" ──────────────────────────
- *
- * A Mayor's Permit printed its Line of Business as *Other (not listed)*,
- * because the face was built from the PSIC title and a hardware store had been
- * filed under the catch-all code 00000. The client's question is the whole
- * specification: *"pwede ba yon? make sure na meron kung ano nilagay nya o
- * ininput"* [1 October 2026].
- *
- * The words were never missing — the wizard REQUIRES them on a catch-all line
- * and stores them on `business_lines.line_of_business`. What was missing was
- * agreement about which of the two to show, and the expression `typed || title`
- * had been written separately in `carriedOver.ts` and in the wizard's summary
- * while three server-side readers did the opposite. This is that rule, named
- * once; the API's own copy is `BusinessLine::tradeName()`.
- */
-export function tradeName(
-  line: { line_of_business?: string | null; psic_code?: { title: string } | null } | null,
-): string | null {
-  return line?.line_of_business?.trim() || line?.psic_code?.title || null
-}
-
-/**
- * The same, for a reader who also needs the CLASSIFICATION — a reviewer
- * checking that the trade was sorted into the right PSIC code.
- *
- * The applicant's words lead and the code follows in parentheses, so the line
- * reads as a description with a reference rather than as a reference that has
- * swallowed the description. The title is left out when it would only repeat
- * what is already on the left.
- */
-export function lineOfBusinessText(
-  line: {
-    line_of_business?: string | null
-    psic_code?: { title: string; code: string } | null
-  } | null,
-): string {
-  const trade = tradeName(line)
-  const psic = line?.psic_code
-
-  if (!psic) return trade ?? ''
-
-  const classification = psic.title === trade ? psic.code : `${psic.title} (${psic.code})`
-
-  return trade ? `${trade} — ${classification}` : classification
 }

@@ -280,6 +280,28 @@ final class OfficeFormAnswers
                 $existingBusiness => 'FSIC for Business Permit (Renewal of Business)',
                 default => 'FSIC for Business Permit (New Business)',
             };
+
+            /*
+             * ── The two boxes both papers print ──────────────────────────
+             *
+             * BFP-QSF-FSED-002 asks the type of occupancy and the number of
+             * storeys; so does MCG-OBO's unified form, which is one paper for
+             * the Certificate of Occupancy AND this certificate. When both
+             * permits are on the filing the applicant answers them on the OBO
+             * sheet and this one carries them.
+             *
+             * The marker is what the sheet reads to know which it is — the
+             * same shape `authorized_representative_source` uses for the
+             * question this sheet owns and CPDD's carries. Derived even when
+             * blank, so clearing the answer on the OBO sheet clears it here
+             * rather than leaving two visible fields that disagree.
+             */
+            if ($forOccupancy) {
+                $obo = self::sheetData($application, 'OCCUPANCY');
+                $derived['occupancy_shared_source'] = 'OCCUPANCY';
+                $derived['occupancy_type'] = trim((string) ($obo['occupancy_type'] ?? ''));
+                $derived['building_storeys'] = trim((string) ($obo['building_storeys'] ?? ''));
+            }
         }
         // The MARKET branch was here. Market Clearance and the CMO Market Office
         // were removed from the system on 6 September 2026 — see the note in
@@ -293,18 +315,32 @@ final class OfficeFormAnswers
 
     /**
      * The authorised representative as answered on the BFP sheet, or ''.
-     *
-     * Its own query rather than a preloaded relation because withDerived() runs
-     * for one sheet at a time and is reached from both index() and upsert(); a
-     * sheet asking for another sheet's answer is the exception, not the rule,
-     * and it only happens for ZONING.
      */
     private static function fsicRepresentative(Application $application): string
     {
+        return trim((string) (self::sheetData($application, 'FSIC')['authorized_representative'] ?? ''));
+    }
+
+    /**
+     * Another sheet's saved answers, or [] when it has never been opened.
+     *
+     * Its own query rather than a preloaded relation because `derive()` runs
+     * for ONE sheet at a time and is reached from both index() and upsert().
+     *
+     * A sheet reading another sheet is the exception and stays one: it happens
+     * for the authorised representative (FSIC → CPDD) and for the two boxes
+     * the OBO and BFP papers share (OCCUPANCY → FSIC), and in both cases
+     * because ONE paper asks a question a second paper also prints. It is not
+     * a general mechanism for copying answers around.
+     *
+     * @return array<string, mixed>
+     */
+    private static function sheetData(Application $application, string $permitTypeCode): array
+    {
         $form = ApplicationOfficeForm::where('application_id', $application->id)
-            ->whereHas('permitType', fn ($query) => $query->where('code', 'FSIC'))
+            ->whereHas('permitType', fn ($query) => $query->where('code', $permitTypeCode))
             ->first();
 
-        return trim((string) ($form?->form_data['authorized_representative'] ?? ''));
+        return is_array($form?->form_data) ? $form->form_data : [];
     }
 }

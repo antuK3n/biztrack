@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Circle,
   LayersControl,
@@ -12,6 +12,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { BARANGAY_POLYGONS, MALABON_OUTLINE } from '../lib/malabonGeo.data'
+import { barangayCentre } from '../lib/malabonGeo'
 import { ZONING_LAYERS } from '../lib/zoningLayers.data'
 import { ZoningKey, ZoningOverlay, type ZoneProperties } from './ZoningLayer'
 
@@ -131,6 +132,51 @@ function KeepInView({ latitude, longitude }: { latitude: number; longitude: numb
       map.panTo([latitude, longitude])
     }
   }, [map, latitude, longitude])
+  return null
+}
+
+/*
+ * Zooms to the barangay the applicant chose, the moment the map opens for them
+ * (checklist Zoning 7: "when unlocked it zooms to the chosen barangay").
+ *
+ * The map is locked until the trade and the barangay are both answered, so by
+ * the time it takes a click the one thing it knows for certain is which
+ * barangay the pin has to go in. Opening on City Hall at zoom 13 left an
+ * applicant in Dampalit to find Dampalit first; this puts them there.
+ *
+ * Fitted to the barangay's own polygon, then centred on its centre point
+ * (`barangayCentre`, which is always inside it) rather than on the middle of
+ * its bounding box, which for a C-shaped barangay can fall in a neighbour.
+ * Capped at zoom 16 so a small barangay does not open at roof level.
+ *
+ * Runs only when the barangay changes or the lock lifts, and only while there
+ * is no pin. A pin the applicant is looking at is never moved away from — a
+ * renewal or a reopened draft opens on its saved pin (see MapContainer's note)
+ * — and changing the barangay clears the pin anyway, so a new barangay always
+ * arrives here pinless. `hasPin` is read through a ref for exactly that
+ * reason: placing a pin must not re-run the fit and yank the map.
+ */
+function FitToBarangay({
+  name,
+  enabled,
+  hasPin,
+}: {
+  name: string | null
+  enabled: boolean
+  hasPin: boolean
+}) {
+  const map = useMap()
+  const hasPinRef = useRef(hasPin)
+  hasPinRef.current = hasPin
+  useEffect(() => {
+    if (!enabled || name === null || hasPinRef.current) return
+    const polygon = BARANGAY_POLYGONS.find((b) => b.name === name)
+    const centre = barangayCentre(name)
+    if (!polygon || !centre) return
+    const bounds = L.latLngBounds(polygon.rings[0].map(([lng, lat]) => [lat, lng] as [number, number]))
+    const zoom = Math.min(16, map.getBoundsZoom(bounds, false, L.point(24, 24)))
+    map.setView([centre[0], centre[1]], zoom, { animate: false })
+  }, [map, name, enabled])
   return null
 }
 
@@ -464,6 +510,10 @@ export function MapPicker({
             )
           })}
           {editable && <ClickCapture onPick={onPick} />}
+          {/* Only where a pin is being placed: a read-only map shows a pin. */}
+          {!readOnly && (
+            <FitToBarangay name={highlightBarangay} enabled={!locked} hasPin={hasPin} />
+          )}
           {/*
             * Circle, not CircleMarker. CircleMarker's radius is in screen pixels,
             * so it would stay the same size as the map zooms and would therefore
@@ -593,7 +643,7 @@ export function MapPicker({
             className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center bg-white/60 p-4"
             role="status"
           >
-            <p className="max-w-xs rounded-lg bg-white px-4 py-3 text-center text-xs font-medium text-ink shadow-card">
+            <p className="max-w-xs rounded-lg bg-white px-4 py-3 text-center text-sm font-semibold text-ink shadow-card">
               {lockedReason}
             </p>
           </div>

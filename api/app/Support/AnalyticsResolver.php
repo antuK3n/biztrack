@@ -15,9 +15,8 @@ use Carbon\CarbonImmutable;
  * reference implementation, PHP was a fallback that stood in when R was
  * unreachable or switched off, and the meta existed largely to keep the two
  * distinguishable so their drift could not go unnoticed. R has been removed from
- * BizTrack. `App\Support\DashboardAnalytics`, `ProcessingTimeAnalytics`,
- * `RenewalRiskAnalytics`, `BusinessGrowthAnalytics` and `RenewalModelAnalytics`
- * are now the only implementation, so there is no second engine to disagree
+ * BizTrack. `App\Support\DashboardAnalytics`, `ProcessingTimeAnalytics` and
+ * `OfficePerformanceAnalytics` are now the only implementation, so there is no second engine to disagree
  * with, no outage to survive and no drift to detect.
  *
  * What survived the removal is the thing that was never about R: analytics are
@@ -54,9 +53,9 @@ use Carbon\CarbonImmutable;
  *    page size, an offset. Computing it on request is the DESIGNED behaviour and
  *    no refresh will ever change it.
  *
- * Collapsing them was tried and had to be undone. Renewal Risk's key space
- * carries the page size, the filters and the pagination offset, so it is
- * unbounded and cannot be precomputed (see config/analytics.php). With one reason
+ * Collapsing them was tried and had to be undone. The (since removed) Renewal
+ * Risk screen's key space carried the page size, the filters and the pagination
+ * offset, so it was unbounded and could not be precomputed. With one reason
  * for both, pressing an ordinary band filter reported the same state as a refresh
  * that had never run, and the screen raised a staleness panel over a supported
  * option working exactly as designed. ComputedAt.tsx's own note is the argument

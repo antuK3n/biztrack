@@ -9,9 +9,11 @@ class AuditLog extends Model
 {
     protected $fillable = [
         'user_id', 'action', 'auditable_type', 'auditable_id', 'changes', 'ip_address',
+        // The removed record itself; written only by Audit::removed().
+        'snapshot',
     ];
 
-    protected $casts = ['changes' => 'array'];
+    protected $casts = ['changes' => 'array', 'snapshot' => 'array'];
 
     public function user(): BelongsTo
     {

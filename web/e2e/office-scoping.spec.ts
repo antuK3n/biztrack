@@ -747,11 +747,11 @@ test('the super admin’s rail does not offer the screens that are not his role'
      * A session that has quietly died bounces this page to /staff/login, where
      * there is no rail at all — and every "the rail does not offer X" assertion
      * below would then pass on an empty page. Proving one entry IS there is what
-     * separates "the super admin cannot reach Track" from "nobody is signed in".
+     * separates "the super admin cannot reach Manage Applications" from "nobody is signed in".
      */
     await expect(rail.getByRole('link', { name: 'Officer Assignment' })).toBeVisible()
 
-    for (const label of ['Track', 'Messages', 'Other Requirements']) {
+    for (const label of ['Manage Applications', 'Messages', 'Other Requirements']) {
       await expect(
         rail.getByRole('link', { name: label, exact: true }),
         `the rail still offers the super admin ${label}`,
@@ -764,8 +764,8 @@ test('the super admin’s rail does not offer the screens that are not his role'
      * tile the guard would bounce is a dead end with the client's name on it.
      */
     await expect(
-      page.getByRole('link', { name: 'Application Verification' }),
-      'the super admin’s home screen still offers an Application Verification card',
+      page.getByRole('link', { name: 'Manage Applications' }),
+      'the super admin’s home screen still offers an Manage Applications card',
     ).toHaveCount(0)
 
     /*
@@ -780,7 +780,7 @@ test('the super admin’s rail does not offer the screens that are not his role'
     await page.goto('/staff/queue')
     await expect(
       page,
-      'the super admin stayed on Application Verification by typing the address',
+      'the super admin stayed on Manage Applications by typing the address',
     ).not.toHaveURL(/\/staff\/queue$/)
   } finally {
     await context.close()

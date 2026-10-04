@@ -119,43 +119,50 @@
         "code": "CHO",
         "name": "City Health Office",
         "reviews": 2,
-        "mean_days": 4.5
+        "mean_days": 4.5,
+        "drawn": false
       },
       {
         "code": "BPLO",
         "name": "Business Permits and Licensing Office",
         "reviews": 3,
-        "mean_days": 2
+        "mean_days": 2,
+        "drawn": true
       },
       {
         "code": "BFP",
         "name": "Bureau of Fire Protection",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       },
       {
         "code": "CENRO",
         "name": "City Environment Office",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       },
       {
         "code": "OBO",
-        "name": "Office of the Building Official",
+        "name": "Office of the Local Building Official",
         "reviews": 1,
-        "mean_days": 0
+        "mean_days": 0,
+        "drawn": false
       }
     ],
     "reviews": 8,
     "mean_days": 1.9,
     "bottleneck": {
-      "code": "CHO",
-      "name": "City Health Office",
-      "mean_days": 4.5,
-      "reviews": 2,
-      "above_average_days": 2.6,
-      "share_of_reviews": 25
-    }
+      "code": "BPLO",
+      "name": "Business Permits and Licensing Office",
+      "mean_days": 2,
+      "reviews": 3,
+      "above_average_days": 0.1,
+      "share_of_reviews": 37.5
+    },
+    "min_reviews": 3,
+    "excluded": []
   },
   "compliance": [
     {
@@ -197,7 +204,7 @@
       },
       {
         "code": "SANITARY",
-        "label": "Sanitary Permit / Health Certificate"
+        "label": "Sanitary Permit"
       },
       {
         "code": "FSIC",
@@ -205,7 +212,7 @@
       },
       {
         "code": "ZONING",
-        "label": "Zoning / Locational Clearance"
+        "label": "Zoning Clearance"
       }
     ],
     "rows": [
@@ -220,7 +227,8 @@
           "FSIC": 0,
           "ZONING": 0
         },
-        "total": 2
+        "total": 2,
+        "businesses": 2
       },
       {
         "window": "next_60d",
@@ -233,7 +241,8 @@
           "FSIC": 1,
           "ZONING": 0
         },
-        "total": 4
+        "total": 4,
+        "businesses": 4
       },
       {
         "window": "next_90d",
@@ -246,7 +255,8 @@
           "FSIC": 1,
           "ZONING": 0
         },
-        "total": 6
+        "total": 6,
+        "businesses": 6
       },
       {
         "window": "expired",
@@ -259,7 +269,8 @@
           "FSIC": 1,
           "ZONING": 2
         },
-        "total": 4
+        "total": 4,
+        "businesses": 4
       }
     ]
   },
@@ -459,5 +470,32 @@
         "share": 25
       }
     ]
+  },
+  "business_movement": {
+    "rows": [
+      {
+        "month": "2026-05",
+        "registered": 7,
+        "closed": 2,
+        "net": 5,
+          "partial": false
+      },
+      {
+        "month": "2026-06",
+        "registered": 1,
+        "closed": 3,
+        "net": -2,
+          "partial": false
+      },
+      {
+        "month": "2026-07",
+        "registered": 0,
+        "closed": 0,
+        "net": 0,
+          "partial": false
+      }
+    ],
+    "registered": 8,
+    "closed": 5
   }
 }

@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Facades\DB;
+use App\Enums\ClearanceStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
@@ -80,10 +82,34 @@ function filingRoutedTo(array $codes, string $registrationNumber): int
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     foreach ($codes as $code) {
+        $departmentId = Department::where('code', $code)->value('id');
         ApplicationAssignment::firstOrCreate([
             'application_id' => $appId,
-            'department_id' => Department::where('code', $code)->value('id'),
+            'department_id' => $departmentId,
         ]);
+
+        /*
+         * And the office's own permit is with it, which is what being
+         * routed means: `startClearance` moves the permit and routes the
+         * office in one transaction, so an assignment never arrives ahead
+         * of the paperwork.
+         *
+         * Without this the row is the shape the OLD model left behind —
+         * an open assignment over a permit nobody submitted — which the
+         * queue has hidden since 30 September 2026, on the client's
+         * report of exactly such a row in CPDO's queue. These cases are
+         * about whether two accounts share one office's work, so the
+         * submitted state is scenery; it was simply wrong scenery.
+         */
+        DB::table('application_permit_types')
+            ->where('application_id', $appId)
+            ->whereIn(
+                'permit_type_id',
+                PermitType::where('issuing_department_id', $departmentId)
+                    ->where('code', '!=', PermitType::OUTCOME_CODE)
+                    ->pluck('id'),
+            )
+            ->update(['status' => ClearanceStatus::ForApproval->value]);
     }
 
     return $appId;

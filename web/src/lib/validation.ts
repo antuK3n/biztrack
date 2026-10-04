@@ -24,13 +24,13 @@ export function validateEmail(value: string): string | undefined {
   if (/\s/.test(trimmed)) return 'Remove the spaces from your email address.'
 
   const at = trimmed.split('@')
-  if (at.length === 1) return 'Add an @ sign, as in name@example.com.'
+  if (at.length === 1) return 'Add an @ sign.'
   if (at.length > 2) return 'An email address can have only one @ sign.'
 
   const [local, domain] = at
-  if (!local) return 'Add your username before the @ sign, as in name@example.com.'
-  if (!domain) return 'Add the domain after the @ sign, as in name@example.com.'
-  if (!domain.includes('.')) return 'The domain needs a dot in it, as in example.com.'
+  if (!local) return 'Add your username before the @ sign.'
+  if (!domain) return 'Add the domain after the @ sign.'
+  if (!domain.includes('.')) return 'The domain needs a dot in it.'
   if (!EMAIL_PATTERN.test(trimmed)) return 'That email address has a character that is not allowed.'
 }
 
@@ -46,7 +46,7 @@ export function validateMobile(value: string): string | undefined {
   // Compare in local 09 form so +639 and 09 report the same digit counts.
   const local = cleaned.startsWith('+63') ? `0${cleaned.slice(3)}` : cleaned
   if (!local.startsWith('09')) {
-    return 'A Philippine mobile number starts with 09, as in 09171234567.'
+    return 'A mobile number starts with 09.'
   }
   if (local.length < MOBILE_DIGITS) {
     return `That number is ${local.length} digits long, but a mobile number needs ${MOBILE_DIGITS}.`

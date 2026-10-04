@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
+import { CodeField } from '../../components/EmailCode'
+import { isSixDigits, useCooldown } from '../../lib/emailCode'
 import { InfoCircleIcon } from '../../components/icons'
+import { OfficeHoursNotice } from '../../components/OfficeHoursNotice'
 import { Alert } from '../../components/ui/Alert'
 import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
@@ -14,6 +17,8 @@ import {
   toApiError,
 } from '../../lib/api'
 import type { Portal } from '../../lib/api'
+import { emailCodes, signInOptions } from '../../lib/resources'
+import type { SignInCodeChallenge } from '../../lib/resources'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
 import { useAuth } from '../../stores/auth'
@@ -54,12 +59,49 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
    */
   const [captchaToken, setCaptchaToken] = useState('')
   const [captchaResets, setCaptchaResets] = useState(0)
+  /*
+   * Whether the SERVER checks the captcha. A site key here says the widget can
+   * be drawn; the server says whether it is wanted, because the super admin
+   * can switch a configured captcha off from the Debug page. Null until it
+   * answers, which counts as wanted: a form briefly showing a captcha it did
+   * not need is harmless, one missing a captcha it did need fails the sign-in.
+   */
+  const [serverCaptcha, setServerCaptcha] = useState<boolean | null>(null)
+  const captchaOn = captchaEnabled() && serverCaptcha !== false
   const [errors, setErrors] = useState<FormErrors>({})
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
+  /*
+   * Step two [checklist 2026-09-27, Login 5]. Set only when the API answers the
+   * password with `code_required`, which it does only while a real mailer is
+   * configured. With mail off this stays null and the page is the one-step
+   * form it always was.
+   */
+  const [challenge, setChallenge] = useState<SignInCodeChallenge | null>(null)
+  const [code, setCode] = useState('')
+  const [codeError, setCodeError] = useState<string | undefined>()
+  const [codeNote, setCodeNote] = useState<string | null>(null)
+  const [resending, setResending] = useState(false)
+  const [cooldown, setCooldown] = useCooldown(0)
   const formRef = useRef<HTMLFormElement>(null)
   const lastPath = useRef(location.pathname)
+
+  useEffect(() => {
+    if (!captchaEnabled()) return
+    let cancelled = false
+    signInOptions
+      .get()
+      .then((o) => {
+        if (!cancelled) setServerCaptcha(o.captcha)
+      })
+      .catch(() => {
+        /* unknown: keep drawing it, as before the switch existed */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
@@ -81,7 +123,81 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     setFormError(null)
     setSessionExpired(false)
     setErrors({})
+    setChallenge(null)
   }, [location.pathname])
+
+  /** A finished sign-in, from either step. */
+  function signedIn(token: string, user: User) {
+    setSession(token, user, portal)
+    /*
+     * Back to where they were headed, but only if it belongs to THIS site.
+     * `from` is set by RequireAuth on the portal being entered, so it
+     * normally does; the check is here because a stale one — a citizen path
+     * carried onto the staff door — would land them on the other site with
+     * this site's session, which reads as being signed out.
+     */
+    const from = (location.state as { from?: string } | null)?.from
+    const target = from && portalForPath(from) === portal ? from : homePathFor(portal)
+    navigate(target, { replace: true })
+  }
+
+  /** Back to the password, with the reason, when a code can no longer work. */
+  function restart(message: string) {
+    setChallenge(null)
+    setCode('')
+    setCodeError(undefined)
+    setCodeNote(null)
+    setPassword('')
+    setFormError({ variant: 'warning', title: 'Sign in again', body: message })
+  }
+
+  async function submitCode(event: FormEvent) {
+    event.preventDefault()
+    if (!challenge || loading) return
+    if (!isSixDigits(code)) {
+      setCodeError('Enter the 6 digits from the e-mail.')
+      return
+    }
+    setLoading(true)
+    setCodeError(undefined)
+    setCodeNote(null)
+    try {
+      const result = await emailCodes.verifySignIn(challenge.challenge, code)
+      signedIn(result.token, result.user)
+    } catch (error) {
+      const apiError = toApiError(error)
+      if (apiError.reason === 'code_expired') {
+        restart(apiError.message)
+      } else if (apiError.status === 429) {
+        restart(apiError.message + ' You can also reset your password below.')
+      } else {
+        setCodeError(apiError.errors.code?.[0] ?? apiError.message)
+      }
+      setLoading(false)
+    }
+  }
+
+  async function resendCode() {
+    if (!challenge || resending || cooldown > 0) return
+    setResending(true)
+    setCodeError(undefined)
+    setCodeNote(null)
+    try {
+      const result = await emailCodes.resendSignIn(challenge.challenge)
+      setCodeNote(result.message)
+      setCode('')
+      setCooldown(result.resend_after)
+    } catch (error) {
+      const apiError = toApiError(error)
+      if (apiError.reason === 'code_expired') {
+        restart(apiError.message)
+      } else {
+        setCodeError(apiError.message)
+      }
+    } finally {
+      setResending(false)
+    }
+  }
 
   function validate(): FormErrors {
     return {
@@ -92,7 +208,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
        * widget renders nothing and there is nothing to complete, which is what
        * lets local development and the e2e suite sign in — see TurnstileWidget.
        */
-      captcha: !captchaEnabled() || captchaToken ? undefined : 'Complete the security check to continue.',
+      captcha: !captchaOn || captchaToken ? undefined : 'Complete the security check to continue.',
     }
   }
 
@@ -111,7 +227,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     setFormError(null)
     setSessionExpired(false)
     try {
-      const { data } = await api.post<{ data: { token: string; user: User } }>('/auth/login', {
+      const { data } = await api.post<{ data: { token: string; user: User } | SignInCodeChallenge }>('/auth/login', {
         email: email.trim(),
         password,
         portal,
@@ -120,17 +236,16 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         // reject once a key IS configured.
         ...(captchaToken ? { captcha_token: captchaToken } : {}),
       })
-      setSession(data.data.token, data.data.user, portal)
-      /*
-       * Back to where they were headed, but only if it belongs to THIS site.
-       * `from` is set by RequireAuth on the portal being entered, so it
-       * normally does; the check is here because a stale one — a citizen path
-       * carried onto the staff door — would land them on the other site with
-       * this site's session, which reads as being signed out.
-       */
-      const from = (location.state as { from?: string } | null)?.from
-      const target = from && portalForPath(from) === portal ? from : homePathFor(portal)
-      navigate(target, { replace: true })
+      if ('code_required' in data.data) {
+        setChallenge(data.data)
+        setCode('')
+        setCodeError(undefined)
+        setCodeNote(null)
+        setCooldown(data.data.resend_after)
+        setLoading(false)
+        return
+      }
+      signedIn(data.data.token, data.data.user)
     } catch (error) {
       const apiError = toApiError(error)
       /*
@@ -198,10 +313,33 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             : 'Contact the Business Permits and Licensing Office if you think this is a mistake.',
         })
       } else if (apiError.status === 422) {
+        /*
+         * ── The server's own sentence, because 422 is not one thing ──────
+         *
+         * This printed "Check your email and password, then try again" over
+         * every 422, and the LOCKOUT is a 422: five wrong passwords set
+         * `locked_until` fifteen minutes out, and `AuthController::login`
+         * answers "Account temporarily locked. Try again in N minutes."
+         *
+         * So the one person who most needed telling was told the one thing
+         * that could not help them: check a password that was never the
+         * problem, on an account that will refuse every attempt until the
+         * quarter hour is up — and each attempt they make looks identical
+         * to the last. Every other branch on this page prints what the
+         * server said; this was the only one that argued with it.
+         *
+         * The fallback stays for a 422 that arrives with no message, which
+         * is the shape a validation failure takes when the field errors
+         * were handled above.
+         */
+        const locked = /locked/i.test(apiError.message)
         setFormError({
-          variant: 'error',
-          title: "We couldn't sign you in",
-          body: 'Check your email and password, then try again.',
+          variant: locked ? 'warning' : 'error',
+          title: locked ? 'This account is locked for now' : "We couldn't sign you in",
+          body:
+            apiError.message.trim() !== ''
+              ? apiError.message
+              : 'Check your email and password, then try again.',
         })
       } else {
         setFormError({ variant: 'error', title: 'Something went wrong', body: apiError.message })
@@ -247,11 +385,58 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         )
       }
     >
+      <OfficeHoursNotice audience={staff || admin ? 'staff' : 'owner'} />
+      {challenge ? (
+        /*
+         * Step two. Its own form, so Enter submits the code and not the
+         * password, and the password field is gone rather than hidden — a
+         * reader who needs to change account uses the link, which starts over.
+         */
+        <form onSubmit={submitCode} noValidate className="flex flex-col gap-5">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Check your email</h2>
+            <p className="mt-1 text-sm text-ink-secondary">
+              We sent a 6-digit code to <span className="font-semibold">{challenge.email}</span>. It works for{' '}
+              {challenge.expires_in_minutes} minutes.
+            </p>
+          </div>
+          {codeNote && <Alert variant="success">{codeNote}</Alert>}
+          <CodeField id="login-code" label="Sign-in code" value={code} onChange={setCode} error={codeError} />
+          <PillButton type="submit" aria-disabled={loading} className="w-full">
+            {loading ? 'Checking…' : 'Sign In'}
+          </PillButton>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+            <button
+              type="button"
+              onClick={resendCode}
+              aria-disabled={resending || cooldown > 0}
+              className="font-semibold text-royal underline-offset-2 hover:underline aria-disabled:cursor-default aria-disabled:text-ink-muted aria-disabled:no-underline"
+            >
+              {resending ? 'Sending…' : cooldown > 0 ? `Send a new code in ${cooldown}s` : 'Send a new code'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setChallenge(null)
+                setPassword('')
+                setFormError(null)
+              }}
+              className="font-semibold text-ink-secondary underline-offset-2 hover:underline"
+            >
+              Use a different account
+            </button>
+          </div>
+        </form>
+      ) : (
       <form ref={formRef} onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+        {/*
+          Plain words, one sentence [checklist 2026-09-27, Login 4]. Amber, not
+          red: being signed out on schedule is not something the reader did
+          wrong. "12 hours" is Sanctum's token lifetime (config/sanctum.php,
+          `expiration` 720 minutes); change both together.
+        */}
         {sessionExpired && !formError && (
-          <Alert variant="warning" title="Your session has expired">
-            For your security, sessions end after 12 hours. Sign in again to continue.
-          </Alert>
+          <Alert variant="warning">You were signed out after 12 hours. Please sign in again.</Alert>
         )}
         {/*
           No cross-portal link here any more. A "Go there now" anchor used to
@@ -345,7 +530,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
           signing in without a Cloudflare account. See TurnstileWidget.
         */}
         <div>
-          <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResets} />
+          {captchaOn && <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResets} />}
           {errors.captcha && (
             <p id="login-captcha-error" role="alert" className="mt-1.5 text-sm font-medium text-s-red">
               {errors.captcha}
@@ -371,6 +556,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
           </div>
         )}
       </form>
+      )}
     </AuthLayout>
   )
 }

@@ -132,29 +132,14 @@ it('brings the permits back when the business is reinstated', function () {
     expect($permit->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('bars the whole account while one of its businesses is suspended', function () {
+it('bars the suspended business from filing, and leaves the owner’s others alone', function () {
     /*
-     * ---- The scope the client asked about, twice, with two answers -------
+     * ── The scope the client asked about, pinned ─────────────────────────────
      *
-     * It was: *"Since only that business is suspended, why would other
-     * applications be affected as well?"* They were not, and this test said so
-     * — `isBlockedFromApplying` is a method on ONE business and nothing read
-     * the user.
-     *
-     * It is now: *"Bawal nya na ma-access ang iba pa sa system, kundi messages
-     * part na lang at pag view ng notif … di accessible dapat maayos muna yung
-     * pagka suspend o blacklisted nya"* [client, 30 September 2026]. A
-     * suspension bars the account outright until it is settled.
-     *
-     * So the refusal moved and changed shape. `EnforceAccountRestriction` sits
-     * in front of the route and answers 403 — this is not a fault in what was
-     * sent, and no correction to the request would be accepted — where the old
-     * rule let the request reach the controller and come back 422 against
-     * `business_id`.
-     *
-     * `isBlockedFromApplying()` is untouched and still right. It answers a
-     * narrower question (may THIS business file) that the permit-suspension
-     * case below still needs, and which the middleware never reaches.
+     * *"Since only that business is suspended, why would other applications be
+     * affected as well?"* They are not, and this is the test that says so.
+     * `isBlockedFromApplying` is a method on ONE business and both callers pass
+     * the business being filed for — nothing reads the user.
      */
     $suspended = businessHoldingPermit('Barred Store');
     $healthy = businessHoldingPermit('Untouched Store');
@@ -163,37 +148,22 @@ it('bars the whole account while one of its businesses is suspended', function (
 
     $owner = authAs('owner@biztrack.local');
 
-    $filing = fn (int $businessId) => [
-        'business_id' => $businessId,
+    $refused = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $suspended->id,
         'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
-    ];
+    ])->assertStatus(422);
 
-    test()->withHeaders($owner)
-        ->postJson('/api/v1/applications', $filing($suspended->id))
-        ->assertForbidden();
+    expect($refused->json('errors.business_id.0'))->toContain('account status');
 
-    // And the owner's OTHER business, which used to go straight through.
-    test()->withHeaders($owner)
-        ->postJson('/api/v1/applications', $filing($healthy->id))
-        ->assertForbidden();
-
-    // Lift the finding and both are filing again.
-    setBusinessStatus($suspended, 'active', 'Investigation closed.');
-
-    /*
-     * Signed in again, and it matters: setBusinessStatus() acts as the
-     * administrator, and `authAs` moves the GUARD rather than handing back a
-     * token the headers carry. Filing on the stale headers runs as the admin,
-     * who holds no `application.create` - a 403 from the permission gate that
-     * reads exactly like the restriction still standing.
-     */
-    $owner = authAs('owner@biztrack.local');
-
-    test()->withHeaders($owner)
-        ->postJson('/api/v1/applications', $filing($healthy->id))
-        ->assertCreated();
+    // The other business, same owner, same request shape, straight through.
+    test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $healthy->id,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+    ])->assertCreated();
 });
 
 it('bars a filing on a suspended PERMIT, and says what would settle it', function () {

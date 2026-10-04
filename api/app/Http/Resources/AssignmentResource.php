@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ApplicationReturnNote;
 use App\Support\ApplicationVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -195,6 +196,28 @@ class AssignmentResource extends JsonResource
              * nothing about what anyone wrote.
              */
             'returned_at' => optional($type->pivot?->returned_at)->toISOString(),
+            /*
+             * What this office last asked for, and what it said about each.
+             *
+             * The office reading its OWN open return, so that amending it can
+             * open on the fields already ticked rather than on a blank list —
+             * the pointer is replaced wholesale on every write, so an officer
+             * adding one field to a blank composer would silently drop the
+             * others.
+             *
+             * Lives on the pivot rather than the assignment: `returnClearance`
+             * writes the permit row, because one filing carries six permits
+             * and an office's question is about its own.
+             */
+            'return_target' => $type->pivot?->remarks_target,
+            'return_remark' => $type->pivot?->remarks,
+            'return_notes' => ApplicationReturnNote::where(
+                'application_id',
+                $type->pivot?->application_id,
+            )
+                ->where('permit_type_id', $type->id)
+                ->pluck('note', 'target')
+                ->all() ?: (object) [],
             /*
              * ── Has this office refused this permit before? ──────────────
              *

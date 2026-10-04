@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ChatbotConversation;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 
 function ownedTrackingId(string $email): string
 {
@@ -105,7 +106,7 @@ it('answers the offices intent with the issuing departments', function () {
 
     expect($body)->toContain('Business Permits and Licensing Office')
         ->toContain('Bureau of Fire Protection')
-        ->toContain('City Environment and Natural Resources Office');
+        ->toContain('City Environmental and Natural Resources Office');
 });
 
 it('answers the hours intent with RA 11032', function () {
@@ -169,7 +170,7 @@ it('refuses to reveal another user\'s tracking id status', function () {
 it('scopes the requirements answer to the permit type that was named', function () {
     $body = ask('what documents do I need for a sanitary permit');
 
-    expect($body)->toContain('Sanitary Permit / Health Certificate')
+    expect($body)->toContain('Sanitary Permit')
         ->toContain('Sanitary Requirements')
         // The whole point of the bug: no rundown of the other permits.
         ->not->toContain('Occupancy Permit')
@@ -182,7 +183,7 @@ it('scopes requirements for Taglish and abbreviated permit names', function () {
         ->not->toContain('Sanitary Requirements');
 
     expect(ask('health cert requirements'))
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->not->toContain('Fire Safety Requirements');
 
     expect(ask('CENRO requirements'))
@@ -193,7 +194,7 @@ it('scopes requirements for Taglish and abbreviated permit names', function () {
 it('answers zoning questions with the planning office, not a permit rundown', function () {
     expect(ask('kailangan ba ng zoning clearance?'))
         ->toContain('Zoning')
-        ->toContain('City Planning')
+        ->toContain('Planning/Zoning Office')
         ->not->toContain('Sanitary Requirements');
 });
 
@@ -201,15 +202,15 @@ it('still lists every checklist when the question really is that broad', functio
     $body = ask('give me all the requirements for all permits');
 
     expect($body)->toContain("Mayor's / Business Permit")
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->toContain('Fire Safety Inspection Certificate')
         ->toContain('Occupancy Permit')
-        ->toContain('Zoning / Locational Clearance');
+        ->toContain('Zoning Clearance');
 });
 
 it('scopes fees to the named permit and separates late-payment penalties', function () {
     $sanitary = ask('magkano ang sanitary permit');
-    expect($sanitary)->toContain('Sanitary Permit / Health Certificate')
+    expect($sanitary)->toContain('Sanitary Permit')
         ->toContain('Tax Order of Payment');
 
     $penalty = ask('how much is the penalty if I pay late?');
@@ -275,7 +276,7 @@ it('scopes the offices answer to the named permit', function () {
     // 6 September 2026. Any permit with its own office proves the same rule.
     $body = ask('who handles the zoning clearance?');
 
-    expect($body)->toContain('City Planning and Development Office')
+    expect($body)->toContain('Planning/Zoning Office')
         ->not->toContain('Bureau of Fire Protection');
 });
 
@@ -286,7 +287,7 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
         ->toContain('inspection')
         ->toContain('3 working days for simple')
         ->not->toContain('10 working days')
-        ->not->toContain('Office of the Building Official');
+        ->not->toContain('Office of the Local Building Official');
 });
 
 it('scopes renewal answers to the named permit validity', function () {
@@ -300,7 +301,7 @@ it('scopes renewal answers to the named permit validity', function () {
 it('answers a bare permit name with what it can tell you about it', function () {
     $body = ask('sanitary permit');
 
-    expect($body)->toContain('Sanitary Permit / Health Certificate')
+    expect($body)->toContain('Sanitary Permit')
         ->toContain('City Health Office')
         ->not->toContain('Fire Safety Requirements');
 });
@@ -385,7 +386,7 @@ it('explains fields on the fire and occupancy sheets', function () {
 
     expect(ask('what is the building permit no field for?'))
         ->toContain('Building Permit No.')
-        ->toContain('Office of the Building Official');
+        ->toContain('Office of the Local Building Official');
 });
 
 it('explains the main wizard fields', function () {
@@ -418,7 +419,7 @@ it('says it does not know a field rather than inventing one', function () {
 it('keeps permit questions out of the field layer', function () {
     // "how much" is still a fee question even though gross sales is a field.
     expect(ask('how much is the sanitary permit'))
-        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Sanitary Permit')
         ->toContain('Tax Order of Payment')
         ->not->toContain('Business & Tax Profile step');
 
@@ -502,4 +503,44 @@ it('never splits a user thread across two conversations', function () {
         'user_id' => $userId,
         'started_at' => now(),
     ]))->toThrow(UniqueConstraintViolationException::class);
+});
+
+/*
+ * Two first messages racing: both find no conversation, the other request's
+ * insert lands first, and this one's hits the unique index. The loser is meant
+ * to re-read and carry on. On PostgreSQL a failed statement poisons the
+ * transaction around it ("current transaction is aborted"), and the insert
+ * runs inside the one that writes the two turns — so the re-read failed too
+ * and the message was lost with a 500, unless the insert is fenced by a
+ * savepoint. SQLite has no such rule, which is why this passed there.
+ */
+it('recovers when another request opens the conversation first', function () {
+    $userId = User::where('email', 'owner@biztrack.local')->value('id');
+    ChatbotConversation::where('user_id', $userId)->delete();
+
+    // The other request, committing between this one's lookup (which found
+    // nothing) and its insert. Written right after the lookup inside store()'s
+    // transaction — the test's own wraps everything, hence level 2 — so it
+    // sits outside anything the insert itself may roll back, as a real
+    // competitor's committed row would.
+    $raced = false;
+    DB::listen(function ($query) use (&$raced, $userId) {
+        if ($raced || DB::transactionLevel() < 2
+            || ! str_starts_with($query->sql, 'select * from "chatbot_conversations"')) {
+            return;
+        }
+        $raced = true;
+        DB::table('chatbot_conversations')->insert([
+            'user_id' => $userId, 'started_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    });
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => 'hello'])
+        ->assertCreated();
+
+    $conversations = ChatbotConversation::where('user_id', $userId)->get();
+    expect($raced)->toBeTrue()
+        ->and($conversations)->toHaveCount(1)
+        ->and($conversations->first()->messages()->count())->toBe(2);
 });

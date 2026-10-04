@@ -41,12 +41,20 @@ use App\Models\PsicCode;
  * and BPLO moves the account by hand. The alternative was a certificate
  * printing a name no account backs, which is a lie on a document the LGU signs.
  *
- * Worth saying plainly: nothing in this codebase moved a business between owner
- * accounts when this was written. The admin "Reassign" screen moves FILINGS
- * BETWEEN OFFICERS, which is a different thing that shares a word. Building the
- * transfer is the other half of this decision, and until it exists
- * `WorkflowService::tellBploToMoveTheAccount` is what stops an approved
- * ownership amendment from landing nowhere in silence.
+ * The other half of this decision — actually moving the account — EXISTS:
+ * `BusinessStatusController::transferOwner`, reached from Owner Status in the
+ * admin rail, which takes the new owner's e-mail and a reason.
+ * `WorkflowService::tellBploToMoveTheAccount` sends BPLO there after an
+ * approval, so the handover is prompted rather than remembered.
+ *
+ * This paragraph used to say no such thing existed — true when written, false
+ * the day the transfer shipped, and left standing long enough to mislead a
+ * reader into telling the client the feature was missing. A comment describing
+ * an ABSENCE rots silently, because nothing fails when the absence ends. Name
+ * what exists instead.
+ *
+ * Not to be confused with the admin "Reassign" screen, which moves FILINGS
+ * BETWEEN OFFICERS — a different thing that shares a word.
  *
  * ── Why `address_line1` is gone ───────────────────────────────────────────
  *
@@ -479,6 +487,20 @@ class AmendableFields
     public static function allows(string $field): bool
     {
         return array_key_exists($field, self::kinds());
+    }
+
+    /**
+     * Does approving this field change the business record?
+     *
+     * False for `owner_name` alone, which is recorded against the filing and
+     * applied by a person — see the note at the top of this class. Asked so
+     * that `applyAmendments` does not stamp `applied_at` on a row nothing
+     * was written for, which made the amendment log claim a transfer that
+     * had not happened.
+     */
+    public static function writesToRecord(string $field): bool
+    {
+        return self::allows($field) && (self::kinds()[$field]['writes'] ?? null) !== null;
     }
 
     public static function label(string $field): string

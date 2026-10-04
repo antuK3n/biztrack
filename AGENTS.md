@@ -91,6 +91,7 @@ If the developer declines, drop it — do not re-ask on the same piece of work.
 |---|---|
 | `main` | **protected on GitHub [V]** — PRs required, force-push and deletion blocked, linear history. Client merges. |
 | `dev` | shared working branch; **what the tunnel deploys from** |
+| `dev2` | the 2 October 2026 merge of `rupert-4`, `mike-2` and `ken/checklist-0927` into `dev`, with AI attribution removed from history; **what biztrack.page runs**. Kept as its own branch so `dev`'s published history was not force-pushed. |
 | `demo` | **pinned**; fast-forwarded from `dev`, never from `main` |
 | `backup/all-work-c50fbb4` | 17 commits, explicit backup — do not delete |
 | `feat/demo-autofill` | PR #50 **closed, not merged** — holds real work |
@@ -394,10 +395,14 @@ opens a Cloudflare quick tunnel.
   `App\Support\ApplicationVisibility` is the predicate and every office-scoped
   read goes through it. Widening it caused a real leak — a sanitary officer saw
   115 filings of which 38 were theirs.
-- Analytics is split: `analytics.view` (BPLO — dashboard, renewal risk, business
-  growth) and `analytics.processing_time` (super admin — that screen only).
-  Neither role holds both, deliberately: Processing Time measures the
-  departments, BPLO among them.
+- Analytics: `analytics.view` (every office admin, BPLO and the super admin —
+  the dashboard and Reports) and `analytics.processing_time` (super admin only —
+  Office Performance, Processing Time). Holding `analytics.view` is not a
+  register-wide read: `App\Support\AnalyticsOffice` answers an office account
+  with its own office and refuses any other; only `application.view_any_office`
+  holders (BPLO, super admin) may switch office or view all. BPLO still does not
+  hold `analytics.processing_time`: that screen measures the departments, BPLO
+  among them. (Checklist 2026-09-27, items 1 and 6.)
 
 ---
 

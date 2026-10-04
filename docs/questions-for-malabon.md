@@ -324,6 +324,14 @@ Saturdays and Sundays and nothing else, because we have no holiday calendar.
 Around a long weekend it therefore counts more working days than really
 elapsed, which makes the office look slower than it was.
 
+The same list now also decides the "City offices are closed now" notice
+(checklist 2026-09-27). `api/config/office_hours.php` has a `holidays` list,
+left empty, so on a holiday the notice wrongly says nothing. We did not type
+the list in from memory: several dates move every year.
+
+**What we assumed meanwhile.** Weekends only. Once BPLO confirms the year's
+proclaimed dates, they go into that list and nothing else changes.
+
 ## A12. May the Revenue Code section numbers be shown to applicants?
 
 Item 18 of the testing checklist said "revenue code sections must not be
@@ -647,19 +655,75 @@ outside the software. Guessing at them and shipping a Revoke button would put
 an enforcement action behind a control nobody authorised, recorded in a way
 nobody agreed, with an audit trail we invented.
 
-**What we assumed meanwhile.** Nothing — the action is not built and the screen
-says so rather than offering a disabled control. The three statuses the register
-actually holds are the only ones the permit table filters on, so the UI makes no
-claim to a capability the system does not have. When the answers arrive, the
-work is: a `permit.revoke` permission in `RbacSeeder`, a writer that sets the
-status with `revoked_at` / `revoked_reason` and an `Audit` entry naming the
-officer, a `NotificationService` message to the owner, and a `revoked` branch on
-the public verify endpoint. The table's Revoke control is the last and smallest
-part of it.
+**What we assumed meanwhile.** Revoke is now built (checklist item 23, 27
+September 2026), on Ken's answer to question 1 — **BPLO and the super admin**,
+through a `permit.revoke` permission — and on these guesses at the rest, each of
+which changes if the City answers otherwise:
+
+- **Any certificate type** can be revoked by those two roles, not only the
+  Mayor's Permit; whether BFP should revoke its own FSIC, and so on, is open.
+- **Only a permit in force** (Active or Suspended) can be revoked. There is **no
+  un-revoke**: the remedy is a fresh application.
+- **A reason is required.** It is audited, and it is **told to the owner** in
+  the notice (and its e-mail copy). It is **not shown publicly**.
+- **The public verify page says Revoked**, with the date. It shows the business
+  and trade name, address, type and validity, and **not the owner's name**.
+- There is no show-cause, hearing or appeal step in the software (question 2).
+
+The work is: `permit.revoke` in `RbacSeeder` and a migration granting it,
+`WorkflowService::revokePermit` (status, `revoked_at`, `revoked_reason`, an
+`Audit` entry naming the officer), `NotificationService::permitRevoked`, and
+the revoked branch on `/verify`. See `RevokePermitTest`.
 
 **Related.** **A2** asks the same kind of question one step earlier — what
 happens when an office refuses to issue a clearance at all. An answer to one
 probably constrains the other.
+
+## A27. Does BPLO need the owner's home address checked, and should filing wait until it is given?
+
+Since 28 September 2026 every business owner's account carries a home address
+(checklist item Register 2, "make sure that profile details are complete, like
+home details"). A new owner cannot register without it. Owners who registered
+before that date have none, and the system cannot make one up for them. Two
+things are not ours to decide:
+
+1. **Is it checked against anything?** Should a clerk compare it with a
+   government ID or barangay certificate at the counter, or is what the owner
+   typed enough? Nothing in BizTrack verifies it today.
+2. **Should an owner without one be stopped from filing?** Or is a reminder
+   enough until they add it?
+
+**Why it matters.** The tester register already holds real owners with filings
+in progress. Blocking filing until the address is given would stop them
+mid-application for a detail no office has yet said it reads. Not blocking means
+some filings will reach BPLO from an owner with no home address on record. If
+BPLO relies on the home address (for a notice, a Barangay clearance check, or
+the owner section of the paper form), the second is the worse failure.
+
+**What we assumed meanwhile.** Not checked, and not blocking. An owner without
+an address sees a blue reminder on their Profile and home page linking to the
+form that adds it, and can still file. Once given, it can be corrected but not
+blanked. The address may be outside Malabon, so the barangay is typed rather
+than picked from the city's list. If BPLO answers that filing must wait, the
+submit gate that already holds a filing for an unconfirmed email
+(`EmailSwitch`, checklist Register 1) is where the same check would go.
+
+
+## A28. Are the occupancy permit and the zoning clearance renewed every year, or issued once?
+
+BizTrack treats all six permits as valid for 365 days: the business permit and
+the five clearances (sanitary, fire, building occupancy, environmental, zoning).
+
+**Why it matters.** The all-offices compliance rate counts a business as
+compliant only when every permit it has ever held is still in force. If the
+occupancy permit or the zoning clearance is really issued once for the life of
+a building or a location, BizTrack marks those businesses as lapsed a year
+later, and the citywide rate reads far lower than it is (39% against BPLO's
+own 76% on the test data). The renewal reminders for those two would also be
+wrong.
+
+**What we assumed meanwhile.** Every permit runs for one year, like the
+business permit.
 
 ---
 
@@ -877,8 +941,11 @@ records when each office received and finished its part.
 **Why it matters.** If a report is due, it is nearly free to export — the
 figures exist. If the format is a spreadsheet template, we need the template.
 
-**What we assumed meanwhile.** Nothing is exported. Office Performance shows
-the figures on screen for the administrator only.
+**What we assumed meanwhile.** Partly answered by what is built: the Reports
+tab prints and exports (CSV) a "Processing Time and Pending Applications"
+report per office and for the whole city, against the 3 / 7 / 20 working-day
+limits. It is our own layout. If ARTA requires a set template (for example the
+yearly zero-backlog report), we still need a copy of it.
 
 ## B21. Where is the City's public-holiday calendar kept?
 
@@ -955,6 +1022,75 @@ PDF. Without an owner it is an orphan.
 original" by the office; the permit is signed by the configured office
 signatory (B6); the repository is handed over as a clone with the team named
 as maintainers during the pilot.
+
+## B27. When e-mail is switched on, may sign-in depend on it?
+
+Once a real mailer is configured, every sign-in (owners, officers, the super
+admin) asks for a six-digit code sent by e-mail after the password, and an owner
+cannot file until they have confirmed their address with a code. Is MISD
+content for sign-in to depend on the mail relay, and should the super admin
+have a second way in for when it is down?
+
+**Why it matters.** If the relay fails (wrong key, Brevo's 300-a-day free
+limit spent), no code can be sent and **nobody can sign in**, including the
+administrator who would fix it. The page says the code could not be sent; it
+does not fall back to the password alone, because that fallback would be the
+way around the second step.
+
+**What we assumed meanwhile.** E-mail is off (`MAIL_MAILER=log`), so sign-in is
+the password alone and filing is not gated, exactly as before. Turning the
+mailer on turns all of it on (`App\Support\EmailSwitch`). The way back from a
+relay outage is to set `MAIL_MAILER=log` again. There is no "trust this device
+for 30 days" option yet; every sign-in asks for a code.
+
+## B28. What does the old register's export look like — and can dates come as YYYY-MM-DD?
+
+BizTrack can now import the city's existing businesses and permits, from a CSV
+in BizTrack's own template or straight from the old database over ODBC. We
+have never seen the old data (misd-questions.md Q10): its columns, how it
+spells barangays, its permit type names, or its date format.
+
+**Why it matters.** Rows whose barangay, permit type or date cannot be read are
+rejected, with the reason, in the dry run — nothing is guessed. But one case
+cannot be caught: a date written 03/04/2025. BizTrack reads a slashed date
+MONTH first (the Philippine spreadsheet default). An export written day first
+would have every row after the 12th rejected and every row up to the 12th
+silently read as the wrong date.
+
+**What we assumed meanwhile.** Slashed dates are month first; YYYY-MM-DD is
+what we ask for. A sample of the real export decides both.
+
+## B29. Is quoting a permit number and a surname enough for an owner to claim their old business online?
+
+Imported owners have no BizTrack account. At sign-up (or later) an owner
+claims their businesses by quoting a business account or permit number from
+before BizTrack, and BizTrack checks that the surname they registered with
+matches the old register's owner. Failed attempts are rate-limited.
+
+**Why it matters.** A permit number is printed on a certificate hanging on the
+shop wall, and a surname is not a secret. The check stops a stranger with a
+photo of the permit; it does not stop a relative or an employee. BPLO may want
+the claim confirmed at the counter against an ID, which would be a queue step
+rather than an instant link.
+
+**What we assumed meanwhile.** Number plus surname links the businesses at
+once, and every claim is audit-logged with the number used, so a wrong claim
+can be found and undone with the existing ownership transfer.
+
+## B30. Who may read the reporting views, and from where?
+
+BizTrack now offers three read-only views (businesses, permits, payments) for
+Excel or Power BI over ODBC, through a PostgreSQL role that can read those
+views and nothing else (docs/odbc.md). They carry owners' names but no emails,
+mobile numbers or TINs.
+
+**Why it matters.** A spreadsheet connected to the register is a copy of it that
+nobody here controls afterwards (RA 10173, see B5). Which offices get the
+login, and whether the database port is reachable beyond the server, are
+MISD's and the DPO's call.
+
+**What we assumed meanwhile.** One read-only role, created by MISD, reachable
+only from inside the city network.
 
 ---
 
@@ -1246,6 +1382,52 @@ verification + ₱345 processing.
 
 **Why it matters.** It is the only clearance fee we derive entirely from the
 2016 ordinance with no counter confirmation at all.
+
+## C11. Five barangay sheets show zones our traced map leaves out. Which is right?
+
+When the map picker draws a barangay's zones, it draws our tracing of CPDO's
+sheet (C2, C4). Checking the tracings against the sheets, five barangays have a
+zone on the sheet that our tracing does not have at all:
+
+| Barangay | On the sheet, missing from our tracing | Rough area on the sheet |
+|---|---|---|
+| Maysilo | I-1 (light industrial) | about 28.6 ha |
+| Dampalit | I-1 | about 23.7 ha |
+| Panghulo | I-1 and I-2 | about 18.5 ha each |
+| Catmon | I-1, and R-3 Max | I-1 about 17 ha; R-3 Max not measured |
+| Tinajeros | Utilities | about 13 ha |
+
+The areas are measured off the sheet images, so they are approximate.
+
+**Why it matters.** These are not slivers. An applicant whose shop is inside one
+of these areas sees the wrong zone under their pin, and for Maysilo, Dampalit,
+Panghulo and Catmon the missing zone is industrial, so a factory or warehouse
+there may be told its trade is "not on the zoning list" for that barangay when
+the sheet says the barangay has an industrial zone. The "Zones in <barangay>" card
+lists from the same readings, so it may be missing them too.
+
+**What we assumed meanwhile.** Nothing was added by hand. A zone drawn from our
+guess at a boundary would look exactly as authoritative as one traced from the
+sheet, and nobody could tell them apart. The step already says CPDO checks the
+exact spot and makes the final call. **Please confirm, for each of the five,
+whether the zone is really there and where it runs** (a marked-up sheet is
+enough), or send the vector data asked for in C2, which would settle all five at
+once. If the sheets are right, we re-trace these five and the map and the zone
+list change with them.
+
+## C12. How does a business owner appeal a zoning decision, and where?
+
+**Why it matters.** When a business type is not on the zoning list for its
+barangay, the note under the map now tells the owner that if CPDO says no, they
+may appeal in person at the City's zoning office (checklist Zoning 13). We
+wrote "at that office" because it is the office the note already names. Under
+the usual set-up an appeal goes to a zoning board (the Local Zoning Board of
+Adjustment and Appeals) rather than to CPDO itself, often filed through the
+Zoning Administrator.
+
+**What we assumed meanwhile.** That the owner starts in person at CPDO and is
+told the rest there. Tell us the real route (which office receives it, whether
+there is a form or a fee, and any deadline) and the sentence changes to say it.
 
 ---
 

@@ -175,25 +175,61 @@ class OfficeFormController extends Controller
         ]);
 
         $file = $request->file('file');
-        $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
-        $filename = Str::uuid()->toString().'.'.$ext;
-        $directory = "private/documents/{$application->id}";
+        $typeId = SheetRequirements::documentType($permitTypeCode, $documentCode)->id;
 
-        Storage::disk('local')->putFileAs($directory, $file, $filename);
+        /*
+         * The same bytes twice is not a second copy — see the longer note
+         * on `DocumentController::store`, which does this for the business
+         * permit's own requirements. A slot here takes as many files as
+         * the applicant has, and two identical ones are not two: nobody
+         * can act on the difference, because there is none.
+         *
+         * Against the NEWEST only, so A-then-B-then-A still records that
+         * the applicant went back to the first version.
+         */
+        $hash = hash_file('sha256', $file->getRealPath());
+        $sameAgain = ApplicationDocument::where('application_id', $application->id)
+            ->where('document_type_id', $typeId)
+            ->whereNull('permit_type_id')
+            ->latest('id')
+            ->first();
 
-        $document = ApplicationDocument::create([
-            'application_id' => $application->id,
-            'document_type_id' => SheetRequirements::documentType($permitTypeCode, $documentCode)->id,
-            'original_filename' => $file->getClientOriginalName(),
-            'stored_path' => "{$directory}/{$filename}",
-            'mime_type' => $file->getClientMimeType(),
-            'size_bytes' => $file->getSize(),
-        ]);
+        if ($sameAgain === null || $sameAgain->file_hash !== $hash) {
+            $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+            $filename = Str::uuid()->toString().'.'.$ext;
+            $directory = "private/documents/{$application->id}";
+
+            Storage::disk('local')->putFileAs($directory, $file, $filename);
+
+            $document = ApplicationDocument::create([
+                'application_id' => $application->id,
+                'document_type_id' => $typeId,
+                'original_filename' => $file->getClientOriginalName(),
+                'stored_path' => "{$directory}/{$filename}",
+                'mime_type' => $file->getClientMimeType(),
+                'size_bytes' => $file->getSize(),
+                'file_hash' => $hash,
+            ]);
+        } else {
+            $document = $sameAgain;
+        }
         Audit::log('document.uploaded', $document);
 
-        // One file per slot: uploading again replaces, so CPDD never has to work
-        // out which of two tax declarations is the live one.
-        $this->forgetRequirement($application, $documentCode, $document->id);
+        /*
+         * It ADDS. This replaced — `forgetRequirement(…, $document->id)`
+         * deleted every other file under the code — on the reasoning that
+         * CPDD should never have to work out which of two tax declarations
+         * is the live one.
+         *
+         * The business permit form has always taken many files per
+         * requirement, and the client asked for these to match it on 30
+         * September 2026. The old rule also destroyed silently: the second
+         * page of a lease deleted the first, with nothing said.
+         *
+         * The officer's question is answered by order instead — the list is
+         * newest first — and by Remove, which now takes one file rather
+         * than clearing the slot.
+         */
 
         return response()->json([
             'data' => [
@@ -220,7 +256,28 @@ class OfficeFormController extends Controller
     public function declarationTemplate(Request $request, Application $application, string $permitTypeCode): Response
     {
         $this->authorizeView($request, $application);
-        abort_unless($permitTypeCode === 'ZONING', 404, 'That form has no declaration.');
+
+        /*
+         * ── The sheets that hand out a sworn page ────────────────────────
+         *
+         * CPDD's Section X declaration, and BFP's affidavit of undertaking
+         * that nothing substantial about the building has changed. Both are
+         * named on their paper with no prescribed layout printed for them, so
+         * the applicant would otherwise be inventing the wording or paying a
+         * notary to.
+         *
+         * OBO's Certificate of Completion is deliberately NOT here. The
+         * Building Official issues Form B-10, prescribes its layout and wants
+         * its own copy back sealed by the architect — our rendering of it
+         * would look official, would not be, and could be refused at the
+         * counter. The checklist points at the office instead.
+         */
+        $template = match ($permitTypeCode) {
+            'ZONING' => ['pdf.zoning-declaration', 'locational-clearance-declaration'],
+            'FSIC' => ['pdf.fsic-undertaking', 'fsic-affidavit-of-undertaking'],
+            default => null,
+        };
+        abort_if($template === null, 404, 'That form has no declaration.');
 
         $application->loadMissing('business');
 
@@ -233,12 +290,12 @@ class OfficeFormController extends Controller
          * belongs to — see the note in the view for why nothing about the
          * BUSINESS itself is printed on a page that gets sworn to.
          */
-        $pdf = Pdf::loadView('pdf.zoning-declaration', [
+        $pdf = Pdf::loadView($template[0], [
             'tracking_id' => $application->tracking_id ?? '',
             'business_name' => $application->business?->name ?? '',
         ]);
 
-        return PdfFile::render($pdf)->download("locational-clearance-declaration-{$application->tracking_id}.pdf");
+        return PdfFile::render($pdf)->download("{$template[1]}-{$application->tracking_id}.pdf");
     }
 
     /** DELETE — take one checklist file back off. */
@@ -250,7 +307,27 @@ class OfficeFormController extends Controller
     ): JsonResponse {
         [$permitType] = $this->authorizeRequirementWrite($request, $application, $permitTypeCode, $documentCode);
 
-        $this->forgetRequirement($application, $documentCode, null);
+        $data = $request->validate([
+            /*
+             * WHICH file. A slot held one until 30 September 2026, so
+             * clearing the code was the same thing as removing the file;
+             * now that it holds several, Remove beside the second page of a
+             * lease would take the first page with it.
+             *
+             * Optional, so a client that has not been updated still clears
+             * the slot — which is what it has always done and what its
+             * button says. Making it required would turn an open tab into a
+             * 422 on a control that worked a minute ago.
+             */
+            'document_id' => ['sometimes', 'nullable', 'integer'],
+        ]);
+
+        $this->forgetRequirement(
+            $application,
+            $documentCode,
+            null,
+            $data['document_id'] ?? null,
+        );
 
         return response()->json([
             'data' => [
@@ -307,10 +384,27 @@ class OfficeFormController extends Controller
      * downloadable through /documents/{id}/download for as long as it is there
      * — the same reasoning, and the same failure, as HeldPermits::forget.
      */
-    private function forgetRequirement(Application $application, string $documentCode, ?int $keepId): void
-    {
+    /**
+     * Take files off a checklist slot.
+     *
+     * `$keepId` spares one — it existed for the replace-on-upload rule,
+     * which is gone. `$onlyId` removes exactly one and leaves the rest,
+     * which is what Remove means now that a slot holds several. Neither
+     * given, the whole slot is cleared, which is what an un-updated client
+     * asks for.
+     */
+    private function forgetRequirement(
+        Application $application,
+        string $documentCode,
+        ?int $keepId,
+        ?int $onlyId = null,
+    ): void {
         $query = ApplicationDocument::where('application_id', $application->id)
             ->whereHas('documentType', fn ($q) => $q->where('code', $documentCode));
+
+        if ($onlyId !== null) {
+            $query->whereKey($onlyId);
+        }
 
         if ($keepId !== null) {
             $query->whereKeyNot($keepId);
@@ -320,7 +414,7 @@ class OfficeFormController extends Controller
             if ($old->stored_path && Storage::disk('local')->exists($old->stored_path)) {
                 Storage::disk('local')->delete($old->stored_path);
             }
-            Audit::log('document.removed', $old);
+            Audit::removed('document.removed', $old);
             $old->delete();
         }
     }

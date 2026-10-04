@@ -96,7 +96,12 @@ final class ZoningRequirements
             'key' => 'FORM',
             'label' => 'Completely filled-up application form',
             'when' => 'always',
-            'note' => 'This sheet. It is ticked when you submit it.',
+            /*
+             * Its own state, in words. This row has no file and no
+             * upload box — the tick beside it WAS its status, and the
+             * checklist stopped drawing ticks on 30 September 2026.
+             */
+            'note' => 'This sheet. It counts as complete once you submit it.',
             'carried_from' => 'sheet',
         ],
         [
@@ -155,15 +160,19 @@ final class ZoningRequirements
             'note' => 'Download the template below, sign it before a notary, then upload the scan. The paper says it MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION.',
             'carried_from' => null,
             /*
-             * ── The one row on this checklist that is a gate ─────────────────
+             * ── The first row on this checklist that was a gate ──────────────
              *
-             * The panel's rule is that nothing here blocks the submit: CPDD's
-             * paper is a counter checklist a clerk ticks on receipt, and a
-             * missing lease or tax declaration is a conversation with the
-             * office rather than a reason to refuse the form. That is still
-             * right for every other row.
+             * Redundant since 30 September 2026, when every row became one —
+             * see the `blocking` default in the builder below. Kept explicit
+             * because this row would still be a gate if the default went back
+             * the other way, and because the paper says so itself.
              *
-             * This one says otherwise in its own capitals — MUST BE NOTARIZED
+             * The panel's original rule was that nothing here blocks the
+             * submit: CPDD's paper is a counter checklist a clerk ticks on
+             * receipt, and a missing lease was a conversation with the office
+             * rather than a reason to refuse the form.
+             *
+             * This one said otherwise in its own capitals — MUST BE NOTARIZED
              * PRIOR TO SUBMISSION OF APPLICATION — and the client read the
              * consequence off the screen: *"I wonder how I was able to submit
              * the Locational Clearance without submitting the Applicant
@@ -226,7 +235,10 @@ final class ZoningRequirements
         $representative = trim((string) ($answers['authorized_representative'] ?? ''));
 
         $uploaded = self::uploads($application);
+        /* Every file per slot — see ChecklistSupport::uploadsAll. */
+        $everyUpload = ChecklistSupport::uploadsAll($application, self::CODE_PREFIX);
         $carried = self::carried($application);
+        $carriedAll = ChecklistSupport::carriedAll($application);
         $submitted = self::sheetSubmitted($application);
 
         $rows = [];
@@ -256,26 +268,97 @@ final class ZoningRequirements
 
             $rows[] = [
                 'key' => $row['key'],
-                'code' => $source === 'upload' ? $code : null,
+                /*
+                 * The slot this row uploads into. Null only on a `sheet`
+                 * row, which is the form itself.
+                 *
+                 * A carried row had none until 30 September 2026 — the
+                 * business permit answered it, so asking again was asking
+                 * twice. What that missed is the applicant with a
+                 * two-page lease and one page attached, and, once every
+                 * documentary row began blocking the submit, the
+                 * applicant with an empty carried row and no way on earth
+                 * to fill it: `DocumentController::store` allows Draft and
+                 * Returned, and this stage is reached only once the filing
+                 * is paid.
+                 */
+                'code' => $source === 'sheet' ? null : $code,
                 'label' => $row['label'],
                 'note' => $row['note'],
                 'source' => $source,
-                'satisfied' => $source === 'sheet' ? $submitted : $document !== null,
                 /*
-                 * Whether an unsatisfied row stops the applicant handing the
-                 * sheet in. Absent means no, which is what every row but the
-                 * declaration wants — see the note on that row.
-                 *
-                 * Emitted per row rather than kept as a list of keys in the
-                 * browser for the reason this whole class exists: the checklist
-                 * has two consumers, the applicant's sheet and CPDD's review
-                 * screen, and a rule private to one of them is the defect this
-                 * codebase keeps paying for. The one that gates the submit and
-                 * the one that shows an officer what is outstanding now read
-                 * the same field.
+                 * The business-permit attachment that answers this row,
+                 * when one does. `code` above is null on a carried row —
+                 * there is no slot to upload into — so without this the
+                 * payload said which document is missing only in the
+                 * row's prose, which is not something a caller can act
+                 * on. Null on the rows where the question does not
+                 * arise: an upload row IS its own source, and a sheet
+                 * row is this form.
                  */
-                'blocking' => $row['blocking'] ?? false,
+                'carried_from' => $source === 'carried' ? $row['carried_from'] : null,
+                /*
+                 * A carried row is answered by the business permit's copy OR
+                 * by one added here — the second half is what keeps a
+                 * blocking carried row from being a dead end.
+                 */
+                'satisfied' => match ($source) {
+                    'sheet' => $submitted,
+                    'carried' => $document !== null || ($everyUpload[$code] ?? []) !== [],
+                    default => $document !== null,
+                },
+                /*
+                 * Whether an unsatisfied row stops the sheet being handed
+                 * in. Everything the office asks for does.
+                 *
+                 * This defaulted to FALSE until 30 September 2026, with
+                 * the declaration the one exception, on the reading that
+                 * the paper is a counter checklist a clerk ticks on
+                 * receipt rather than a gate. The client reversed it from
+                 * the Locational Clearance screen — *"Are the documentary
+                 * fields here not required? Make sure they are required"*
+                 * — and the reversal is the LGU's own logic: the office
+                 * cannot act on a filing missing the documents its
+                 * decision rests on, so accepting one only buys the
+                 * applicant a return trip and a second wait.
+                 *
+                 * Not a flat `true`. A `sheet` row IS this form, and its
+                 * `satisfied` above is $submitted — false at the moment of
+                 * submitting. Blocking on it would mean the sheet could
+                 * never be handed in, because what it waits for is the act
+                 * it is refusing. A row may still opt out by saying so.
+                 *
+                 * Emitted per row rather than kept as a list of keys in
+                 * the browser, for the reason this layer exists: the
+                 * applicant's sheet, the server's refusal and the
+                 * officer's review screen read one rule, not three.
+                 */
+                'blocking' => $row['blocking'] ?? (
+                    $source !== 'sheet' && ! ChecklistSupport::statedAsConditional($row['label'])
+                ),
                 'document' => $document,
+                /*
+                 * Every file answering this row. A carried row lists what
+                 * the business permit holds FIRST — that is the copy the
+                 * office already has — then anything added here.
+                 */
+                'documents' => match ($source) {
+                    'upload' => $everyUpload[$code] ?? [],
+                    'carried' => array_merge(
+                        $carriedAll[$row['carried_from']] ?? [],
+                        $everyUpload[$code] ?? [],
+                    ),
+                    default => [],
+                },
+                /*
+                 * Which of those belong to the business permit. Remove on
+                 * this sheet means "I attached the wrong page to this
+                 * checklist", never "take it off my business permit", so
+                 * the screen offers it on nothing in this list.
+                 */
+                'carried_document_ids' => $source === 'carried'
+                    ? array_column($carriedAll[$row['carried_from']] ?? [], 'id')
+                    : [],
             ];
         }
 
@@ -286,7 +369,9 @@ final class ZoningRequirements
     public static function accepts(string $code): bool
     {
         foreach (self::ROWS as $row) {
-            if ($row['carried_from'] === null && self::CODE_PREFIX.$row['key'] === $code) {
+            // A `sheet` row is the form itself and takes nothing; every
+            // other row has a slot, including a carried one.
+            if ($row['carried_from'] !== 'sheet' && self::CODE_PREFIX.$row['key'] === $code) {
                 return true;
             }
         }
@@ -303,6 +388,28 @@ final class ZoningRequirements
      * upload into it. The name and help text come from the row, so the officer
      * reading the filing's attachment list sees CPDD's own wording.
      */
+    /**
+     * Every slot on this checklist, whether or not a file is in one.
+     *
+     * A `sheet` row is the form itself and is not a slot. Used to declare
+     * the document types up front — see ReferenceSeeder — so the set a
+     * register holds does not depend on which offices have happened to
+     * receive an upload.
+     *
+     * @return list<string>
+     */
+    public static function slotCodes(): array
+    {
+        $out = [];
+        foreach (self::ROWS as $row) {
+            if ($row['carried_from'] !== 'sheet') {
+                $out[] = self::CODE_PREFIX.$row['key'];
+            }
+        }
+
+        return $out;
+    }
+
     public static function documentType(string $code): DocumentType
     {
         $row = collect(self::ROWS)->firstWhere('key', substr($code, strlen(self::CODE_PREFIX)));
@@ -329,14 +436,7 @@ final class ZoningRequirements
      */
     private static function uploads(Application $application): array
     {
-        return ApplicationDocument::with('documentType:id,code')
-            ->where('application_id', $application->id)
-            ->whereHas('documentType', fn ($q) => $q->where('code', 'like', self::CODE_PREFIX.'%'))
-            ->latest('id')
-            ->get()
-            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
-            ->map(fn ($group) => self::describe($group->first()))
-            ->all();
+        return ChecklistSupport::uploads($application, self::CODE_PREFIX);
     }
 
     /**
@@ -346,41 +446,23 @@ final class ZoningRequirements
      */
     private static function carried(Application $application): array
     {
-        return ApplicationDocument::with('documentType:id,code')
-            ->where('application_id', $application->id)
-            ->whereNull('permit_type_id')
-            ->whereHas('documentType', fn ($q) => $q->whereIn('code', ['DTI_SEC_CDA', 'LAND_TITLE', 'LEASE_CONTRACT', 'LOCATION_SKETCH', 'SPA_AUTHORIZATION']))
-            ->latest('id')
-            ->get()
-            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
-            ->map(fn ($group) => self::describe($group->first()))
-            ->all();
+        return ChecklistSupport::carried($application);
     }
 
     /** @return array<string, mixed> */
     private static function describe(ApplicationDocument $document): array
     {
-        return [
-            'id' => $document->id,
-            'filename' => $document->original_filename,
-            'size_bytes' => $document->size_bytes,
-            'uploaded_at' => $document->created_at?->toIso8601String(),
-        ];
+        return ChecklistSupport::describe($document);
     }
 
     private static function sheet(Application $application): ?ApplicationOfficeForm
     {
-        return ApplicationOfficeForm::where('application_id', $application->id)
-            ->whereHas('permitType', fn ($q) => $q->where('code', 'ZONING'))
-            ->first();
+        return ChecklistSupport::sheet($application, 'ZONING');
     }
 
     /** Has the applicant handed this sheet in, rather than merely saved it? */
     private static function sheetSubmitted(Application $application): bool
     {
-        return $application->permitTypes()
-            ->where('code', 'ZONING')
-            ->wherePivotNotNull('submitted_at')
-            ->exists();
+        return ChecklistSupport::sheetSubmitted($application, 'ZONING');
     }
 }

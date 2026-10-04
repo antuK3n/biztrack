@@ -154,7 +154,7 @@ final class HeldPermits
             if ($old->stored_path && Storage::disk('local')->exists($old->stored_path)) {
                 Storage::disk('local')->delete($old->stored_path);
             }
-            Audit::log('document.removed', $old);
+            Audit::removed('document.removed', $old);
             $old->delete();
             $removed++;
         }

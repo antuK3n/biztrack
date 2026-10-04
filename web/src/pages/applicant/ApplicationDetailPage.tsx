@@ -12,14 +12,15 @@ import { Alert } from '../../components/ui/Alert'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
-import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
+import { PillButton, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { mainFormTargetLabel } from '../../lib/returnTargets'
+import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
+import { MainFormCorrections } from './MainFormCorrections'
 import { OfficeFormSheet, OFFICE_FORM_META, hasOfficeForm } from './OfficeFormStep'
 import { carriedOverBusiness } from './carriedOver'
 import type { OfficeForm } from '../../lib/types'
@@ -375,6 +376,15 @@ export function ApplicationDetailPage() {
     [appId],
   )
   const { data: timeline } = useAsync<TimelineEntry[]>(() => applications.timeline(appId), [appId])
+
+  /*
+   * Is the correction dialog up?
+   *
+   * Open on arrival, because a returned filing is why the applicant is on
+   * this page — "Fix and resubmit" from the list lands here. Closable to
+   * read the rest of the filing, and reopened from the card below.
+   */
+  const [correctionsOpen, setCorrectionsOpen] = useState(true)
   /*
    * The sheets the applicant handed to the five offices (checklist item 24).
    *
@@ -389,7 +399,6 @@ export function ApplicationDetailPage() {
     [appId],
   )
 
-  const [confirmCancel, setConfirmCancel] = useState(false)
   const [showFees, setShowFees] = useState(false)
   const [action, setAction] = useState<'resubmit' | 'cancel' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -402,21 +411,6 @@ export function ApplicationDetailPage() {
       setData(updated)
       setBanner('Your application was resubmitted. An officer will review it again.')
       reload()
-    } catch (err) {
-      setActionError(toApiError(err).message)
-    } finally {
-      setAction(null)
-    }
-  }
-
-  async function runCancel() {
-    setAction('cancel')
-    setActionError(null)
-    try {
-      const updated = await applications.cancel(appId)
-      setData(updated)
-      setConfirmCancel(false)
-      setBanner('This application was cancelled.')
     } catch (err) {
       setActionError(toApiError(err).message)
     } finally {
@@ -459,10 +453,82 @@ export function ApplicationDetailPage() {
   /* Shared with the officer's progress rail so the two cannot count differently. */
   const otherPermits = otherPermitProgress(app.permit_types)
 
+  /*
+   * ── The fields BPLO ticked when it returned this filing ──────────────────
+   *
+   * Read off the assignments rather than held in their own key: the pointer
+   * has always lived on `remarks_target`, and one column that every reader
+   * parses the same way is what stops the officer's tick and the applicant's
+   * boxes drifting apart.
+   *
+   * Only while the filing is RETURNED. The pointer survives the resubmission —
+   * `returnMainForm` replaces it rather than clearing it, so the officer can
+   * still see what the last round was about — and drawing correction boxes for
+   * a filing already back with BPLO would invite an edit that cannot be sent.
+   */
+  const returnedFields =
+    status === 'returned'
+      ? app.assignments.flatMap((a) => mainFormTargets(a.remarks_target))
+      : []
+  /*
+   * ── Two fields a sole proprietor does not type ────────────────────────
+   *
+   * The form derives and locks item 15 from the proprietor's own name and
+   * item 17 from their citizenship, and the corrections endpoint re-derives
+   * both on write. Offering a box here would take an answer, send it, and
+   * silently replace it — worse than not offering one, because the
+   * applicant would believe they had answered.
+   *
+   * Moved to the SECTION list instead, where they are corrected on the form
+   * beside the field that actually drives them. Only for a sole
+   * proprietorship: a corporation's president and pooled capital are real
+   * answers nobody else knows.
+   */
+  const DERIVED_FOR_SOLE_PROPRIETOR = ['form:president_officer_name', 'form:capital_participation']
+  const derivedHere =
+    app.business?.registration_type === 'sole_proprietorship'
+      ? DERIVED_FOR_SOLE_PROPRIETOR
+      : []
+
+  const returnedScalars = returnedFields.filter(
+    (t) => t.kind === 'scalar' && !derivedHere.includes(t.value),
+  )
+
+  /*
+   * ── Documents BPLO sent back ──────────────────────────────────────────
+   *
+   * A document target is a bare `document_types.code`, which
+   * `mainFormTargets` drops — it resolves the wizard's `form:` codes and
+   * nothing else. Matched against what the applicant UPLOADED, which is
+   * also the only list the officer could have picked from.
+   */
+  const returnedDocuments =
+    status === 'returned'
+      ? (() => {
+          const named = new Set(
+            app.assignments.flatMap((a) => targetCodes(a.remarks_target)),
+          )
+
+          return [
+            ...new Map(
+              app.documents
+                .filter((d) => named.has(d.document_type.code))
+                .map((d) => [d.document_type.code, d.document_type]),
+            ).values(),
+          ]
+        })()
+      : []
+
+
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
-  const remarks: { who: string; text: string; field: string | null }[] = [
+  const remarks: {
+    who: string
+    text: string
+    fields: string[]
+    items: { label: string; note: string }[]
+  }[] = [
     ...(app.rejection_reason
-      ? [{ who: 'Reason for rejection', text: app.rejection_reason, field: null }]
+      ? [{ who: 'Reason for rejection', text: app.rejection_reason, fields: [], items: [] }]
       : []),
     ...app.assignments
       .filter((a) => a.remarks)
@@ -470,15 +536,33 @@ export function ApplicationDetailPage() {
         who: a.officer?.name ?? a.department.name,
         text: a.remarks as string,
         /*
-         * Which field the office named, when it named one.
+         * Which fields the office named, when it named any.
          *
-         * `mainFormTargetLabel` returns null for anything that is not one of the
-         * wizard's own fields — the same column also carries document codes and
-         * permit codes, and printing `CHO_SANITARY_PERMIT` under a heading that
-         * says "Fix" would read as a field name to somebody who has never seen
-         * one.
+         * `mainFormTargets` — plural — because the column has held a
+         * comma-separated list since 27 September 2026. The singular
+         * `mainFormTargetLabel` was left here when the picker became a
+         * checklist and looked the whole joined string up as one key, so a
+         * return naming three fields showed the applicant none of them.
+         *
+         * It still drops anything that is not one of the wizard's own
+         * fields: the same column also carries document codes and permit
+         * codes, and printing `CHO_SANITARY_PERMIT` under a heading that
+         * says "Fix" would read as a field name to somebody who has never
+         * seen one.
          */
-        field: mainFormTargetLabel(a.remarks_target),
+        fields: mainFormTargets(a.remarks_target).map((t) => t.label),
+        /*
+         * The office's note per named field, which is what the composed
+         * `text` above is a flattening of. Kept apart so the screen can
+         * show two returned fields as two things rather than as one
+         * sentence with a semicolon in it.
+         *
+         * Empty for a return written as plain prose, and for one whose
+         * notes predate them — both fall back to `text`.
+         */
+        items: mainFormTargets(a.remarks_target)
+          .map((t) => ({ label: t.label, note: (app.return_notes ?? {})[t.value] ?? '' }))
+          .filter((it) => it.note.trim() !== ''),
       })),
   ]
 
@@ -893,10 +977,18 @@ export function ApplicationDetailPage() {
               to a balance any more: the Tax Order of Payment prices all five up
               front.
             */}
+            {/*
+              This ended "your Business Permit is released once every one of
+              them is approved", which is not what happens: the permit is
+              issued when the payment clears — see
+              `WorkflowService::releaseOutcomePermit` and its audit note,
+              "Released on payment." The clearance screen carried the same
+              claim and the client caught it there on 29 September 2026.
+            */}
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once BPLO approves this application and you have paid. Each goes to its
-              own office, and your payment covers all five — your Business Permit is released once
-              every one of them is approved.
+              These open once BPLO approves this application and you have paid. Each is a
+              separate certificate from its own city office, and your payment already covers
+              all five.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}
@@ -967,6 +1059,54 @@ export function ApplicationDetailPage() {
           </section>
         )}
 
+        {/*
+          ── What BPLO asked you to correct ────────────────────────────────
+
+          Above Remarks on purpose. A returned filing is stopped until this is
+          answered, so it is the only thing on the page the applicant has to
+          ACT on; everything below it is history and status. See the note at
+          the head of this patch for why it lives on this page at all.
+        */}
+        {/*
+          The same dialog the five office sheets use. Its CONTENTS are
+          unchanged — the boxes, the uploads, the section note, the
+          completeness rule — and only the shell around them moved, because
+          the shell is what kept diverging from the clearance copy of it.
+        */}
+        {/*
+          A way back in. Closing the dialog to read the filing behind it must
+          not strand somebody with a return they can no longer answer.
+        */}
+        {!correctionsOpen && (returnedFields.length > 0 || returnedDocuments.length > 0) && (
+          <section className="mt-8">
+            <div className="border-b border-ink/50 pb-2">
+              <h2 className="text-2xl font-bold text-ink">What you need to correct</h2>
+            </div>
+            <div className="mt-5 rounded-xl bg-white px-6 py-5 shadow-card">
+              <p className="text-sm text-ink-secondary">
+                BPLO returned this application about{' '}
+                {returnedFields.length + returnedDocuments.length === 1
+                  ? 'one item'
+                  : `${returnedFields.length + returnedDocuments.length} items`}
+                .
+              </p>
+              <button
+                type="button"
+                onClick={() => setCorrectionsOpen(true)}
+                className="mt-3 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+              >
+                Fix and resubmit
+              </button>
+            </div>
+          </section>
+        )}
+        {correctionsOpen && (
+          <MainFormCorrections
+            app={app}
+            onClose={() => setCorrectionsOpen(false)}
+            onDone={reload}
+          />
+        )}
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (
           <section className="mt-8">
@@ -976,14 +1116,42 @@ export function ApplicationDetailPage() {
             <ul className="mt-5 space-y-4">
               {(remarks.length > 0
                 ? remarks
-                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.', field: null }]
+                : [
+                    {
+                      who: 'Reviewing office',
+                      text: 'No detailed remarks were recorded.',
+                      fields: [],
+                      items: [],
+                    },
+                  ]
               ).map((r, i) => (
                 <li
                   key={i}
                   className="flex flex-wrap items-baseline gap-x-8 gap-y-1 rounded-xl bg-white px-6 py-4 shadow-card"
                 >
                   <span className="text-sm italic text-ink-muted underline underline-offset-2">{r.who}:</span>
-                  <span className="text-sm text-ink">{r.text}</span>
+                  {/*
+                    One box per field the office named. The single `text`
+                    below is the same thing flattened — "…: Blurred; …:
+                    Blurred" — which is right for a notification and wrong
+                    here, where the applicant is working through the items
+                    one at a time.
+                  */}
+                  {r.items.length > 0 ? (
+                    <ul className="basis-full space-y-2">
+                      {r.items.map((it) => (
+                        <li
+                          key={it.label}
+                          className="rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2"
+                        >
+                          <p className="text-sm font-semibold text-ink">{it.label}</p>
+                          <p className="mt-0.5 text-sm italic text-ink-secondary">“{it.note}”</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-sm text-ink">{r.text}</span>
+                  )}
                   {/*
                     The field the office named, when it named one.
 
@@ -999,19 +1167,54 @@ export function ApplicationDetailPage() {
                     Franchise" on the form that reopens. That is the whole point
                     of the pointer: a lookup instead of a hunt.
                   */}
-                  {r.field && (
-                    <span className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink">
-                      Fix: {r.field}
-                    </span>
-                  )}
+                  {r.items.length === 0 &&
+                    r.fields.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink"
+                    >
+                      Fix: {label}
+                      </span>
+                    ))}
                 </li>
               ))}
             </ul>
             <div className="mt-5 flex justify-end">
+              {/*
+                ── The bare Resubmit is withheld while fields are open ────
+
+                It predates the corrections card and calls `resubmit`
+                straight out, so an applicant could ignore the boxes above
+                and hand the filing back unchanged: BPLO returns it over a
+                wrong registration number, they press this, and it arrives
+                at For Approval with the same wrong number. Client,
+                28 September 2026: *"DO NOT ALLOW RESUBMISSION UNTIL A FIELD
+                IS FILLED."*
+
+                Gated on there being NO boxes at all, not on the boxes being
+                filled. Gating on "filled" meant both buttons appeared the
+                moment the field was valid — two ways to do one thing, which
+                is what the client saw next. When this page has correction
+                boxes, Submit corrections IS the resubmit: it writes and
+                resubmits in one transaction.
+
+                Not deleted, because a return naming only SECTIONS — the
+                line-of-business table, the uploaded documents — has no boxes
+                here. That filing is fixed in the wizard and still needs a
+                way back.
+              */}
               {status === 'returned' ? (
-                <PillButton onClick={runResubmit} disabled={action === 'resubmit'}>
-                  {action === 'resubmit' ? 'Resubmitting…' : 'Resubmit'}
-                </PillButton>
+                /*
+                  Withheld whenever the card above is showing anything to
+                  answer — scalars OR documents. Gated on the scalars alone
+                  it appeared on a document-only return and skipped the
+                  upload, handing the filing back unchanged.
+                */
+                returnedScalars.length === 0 && returnedDocuments.length === 0 && (
+                  <PillButton onClick={runResubmit} disabled={action === 'resubmit'}>
+                    {action === 'resubmit' ? 'Resubmitting…' : 'Resubmit'}
+                  </PillButton>
+                )
               ) : (
                 <PillButton onClick={() => navigate('/apply')}>Re-apply</PillButton>
               )}
@@ -1046,32 +1249,20 @@ export function ApplicationDetailPage() {
         )}
 
         {/*
-          CLR-4 — the statuses the API will actually cancel, and only those.
+          The Cancel control stood here and is gone — 30 September 2026, on
+          the client's decision, alongside the abandonment sweep that now
+          removes a filing left untouched for its window
+          (`applications:purge-abandoned`).
 
-          This list read ['draft', 'submitted', 'under_review', 'returned'] and
-          disagreed with ApplicationController::cancel at both ends. On
-          `under_review` and `returned` the button was offered and the request
-          came back 422 "This application can no longer be cancelled" — a dead
-          control, and on a returned filing the one an applicant is most likely
-          to reach for. On `pending_payment` the API allows it and the button
-          was not there, so a filing could be abandoned only by paying for it
-          first.
-
-          Copied from the enum list in ApplicationController::cancel and worth
-          re-reading if that list moves; there is no shared source for it, which
-          is how the two drifted in the first place.
+          The ENDPOINT is still routed and still owner-authorised, so this
+          is reversible without touching the server. If it comes back, the
+          list of statuses must be derived from one source: this one read
+          ['draft', 'submitted', 'pending_payment'] while the API accepted
+          draft, for_approval, returned and pending_payment — `submitted`
+          had not been a status since September and never matched, and the
+          button was missing from the two states where a filing is actually
+          abandoned.
         */}
-        {['draft', 'submitted', 'pending_payment'].includes(status) && (
-          <div className="mt-8 text-center">
-            <button
-              type="button"
-              onClick={() => setConfirmCancel(true)}
-              className="text-sm font-semibold text-s-red underline underline-offset-2"
-            >
-              Cancel application
-            </button>
-          </div>
-        )}
 
         {/* ── Messages thread (v2) ─────────────────────────────────────── */}
         {status !== 'draft' && <MessagesPanel applicationId={app.id} />}
@@ -1079,22 +1270,6 @@ export function ApplicationDetailPage() {
 
       {showFees && <FeeDialog app={app} onClose={() => setShowFees(false)} />}
 
-      {confirmCancel && (
-        <ProtoModal
-          title="WARNING"
-          tone="red"
-          cancelLabel="Keep it"
-          confirmLabel="Cancel application"
-          confirmDisabled={action === 'cancel'}
-          onCancel={() => setConfirmCancel(false)}
-          onConfirm={runCancel}
-        >
-          <p className="text-center text-base">
-            Cancelling stops all processing for <span className="tnum font-semibold">{app.tracking_id}</span>.
-            This can’t be undone.
-          </p>
-        </ProtoModal>
-      )}
     </div>
   )
 }

@@ -9,14 +9,20 @@ use App\Http\Resources\ApplicationListResource;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\StatusHistoryResource;
 use App\Models\Application;
+use App\Models\ApplicationCorrection;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
+use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\RenewalWindow;
+use App\Support\ReturnTargets;
+use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -30,6 +36,11 @@ class ApplicationController extends Controller
 
     private array $fullEager = [
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
+        // What the applicant put right after a return — read by the officer's
+        // sheet, and empty on every filing that was never returned.
+        'corrections',
+        // And what BPLO asked about each of those fields.
+        'returnNotes',
         // What an amendment asks to change; empty on every other filing.
         'requestedChanges',
         /*
@@ -138,8 +149,8 @@ class ApplicationController extends Controller
         }
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
-                $sub->where('tracking_id', 'like', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"));
+                $sub->whereLike('tracking_id', "%{$q}%")
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
             });
         }
 
@@ -199,7 +210,23 @@ class ApplicationController extends Controller
              * restate what two existing ones say.
              */
             'data_privacy_consent' => ['sometimes', 'boolean'],
-            'permit_type_ids' => ['required', 'array', 'min:1'],
+            /*
+             * `required_without` rather than `required`.
+             *
+             * A renewal that names the permits it carries forward has
+             * already said which types it is for — a permit HAS a type —
+             * and demanding both made a caller restate a fact the first
+             * answer contains. Found on 1 October 2026 filing a renewal
+             * through the API: `prior_permit_ids: [19]` was refused with
+             * "The permit type ids field is required", about permit 19,
+             * whose type the server can read.
+             *
+             * Still accepted when sent, and still what wins: the wizard
+             * sends both, and a NEW filing has no prior permit to derive
+             * anything from, so it remains required there. Only the
+             * redundancy goes.
+             */
+            'permit_type_ids' => ['required_without_all:prior_permit_id,prior_permit_ids', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
             /*
@@ -274,7 +301,22 @@ class ApplicationController extends Controller
             'fee_profile' => $this->classifyFeeProfile($data['fee_profile'] ?? null),
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
-        $app->permitTypes()->sync($data['permit_type_ids']);
+        /*
+         * The types the caller gave, or the ones its prior permits carry.
+         *
+         * Derived only when the key is absent — a caller that sends the
+         * array means it, including a renewal adding a permit the business
+         * does not hold yet, and second-guessing that would quietly drop a
+         * permit somebody asked for.
+         *
+         * `unique`, because two prior permits of the same type is an
+         * ordinary case — last year's and the year before's — and syncing
+         * a duplicated id would not fail, it would just be untidy.
+         */
+        $typeIds = $data['permit_type_ids']
+            ?? Permit::whereIn('id', $priorIds)->pluck('permit_type_id')->unique()->values()->all();
+
+        $app->permitTypes()->sync($typeIds);
         $app->priorPermits()->sync($priorIds);
         $this->syncLineCapitalization($app);
 
@@ -289,6 +331,24 @@ class ApplicationController extends Controller
     {
         $this->authorizeView($request, $application);
 
+        /*
+         * ── When the APPLICANT opened their own draft ─────────────────
+         *
+         * The drafts list sorts on this, under an option the client asked
+         * to call "Last opened" — so it has to be opens that move it, not
+         * saves. `updated_at` answers the other question and is left alone.
+         *
+         * Narrow on purpose. Only a DRAFT, because a submitted filing is
+         * not something anybody resumes; only its OWNER, because an
+         * officer reading a filing has not opened the applicant's draft;
+         * and `timestamps: false` so this write does not move `updated_at`
+         * and turn every read into a phantom edit.
+         */
+        if ($application->status === ApplicationStatus::Draft
+            && $application->applicant_user_id === $request->user()?->id) {
+            $application->forceFill(['last_opened_at' => now()])->saveQuietly();
+        }
+
         return response()->json([
             'data' => new ApplicationResource($application->load($this->fullEager)),
         ]);
@@ -297,10 +357,35 @@ class ApplicationController extends Controller
     public function update(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
+        /*
+         * ── A RETURNED filing is editable, and that is the whole point ───
+         *
+         * Draft-only until 28 September 2026, which quietly broke half the
+         * targeted-return feature. BPLO can tick any of thirty fields when it
+         * sends a filing back; fifteen of them are single values the
+         * corrections route writes, and the other fifteen are whole sections
+         * — the line-of-business table, the uploaded documents, the owner's
+         * name parts — which only the wizard can edit. The wizard could not
+         * open a returned filing, so a return naming one of those reached the
+         * applicant with no way to answer it.
+         *
+         * "Returned for revision" means the applicant is meant to revise it.
+         * The rest of the flow already reads it that way: DocumentController,
+         * OfficeFormController and the amendment routes all pair Draft with
+         * Returned, and `resubmit` exists to carry it back. This guard was the
+         * odd one out.
+         *
+         * `submit` and `destroy` below stay Draft-only on purpose: a returned
+         * filing goes back through `resubmit`, and a filing the city has
+         * already seen is cancelled rather than deleted.
+         */
         abort_unless(
-            $application->status === ApplicationStatus::Draft,
+            in_array($application->status, [
+                ApplicationStatus::Draft,
+                ApplicationStatus::Returned,
+            ], true),
             422,
-            'Only draft applications can be edited.'
+            'Only a draft or a returned application can be edited.'
         );
 
         $data = $request->validate([
@@ -486,6 +571,41 @@ class ApplicationController extends Controller
         }
 
         /*
+         * ── And it must be renewed inside its window ─────────────────────
+         *
+         * Immediately after the gate above, because "which permit" is the
+         * more fundamental question and a filing that names none should
+         * hear that first rather than be told its unnamed permit is out of
+         * season.
+         *
+         * Both bounds are OFF by default (`config/biztrack.php`), so this
+         * refuses nothing until the LGU says what the window is — see
+         * `RenewalWindow` for why it was written before the answer arrived
+         * and why the business permit is never bound by it.
+         *
+         * Every prior permit is checked, not just the first. A renewal can
+         * carry several (`prior_permit_ids`), and passing because the one
+         * in `prior_permit_id` happened to be in season would let the rest
+         * through unexamined.
+         *
+         * At submit and on the server, for the same reasons the gate above
+         * is: drafts autosave half-answered by design, and the browser is
+         * not the only way into this endpoint.
+         */
+        if ($application->application_type === ApplicationType::Renewal) {
+            $application->loadMissing('priorPermits.permitType');
+
+            foreach ($application->priorPermits as $prior) {
+                $refusal = RenewalWindow::refusalFor($prior);
+                if ($refusal !== null) {
+                    throw ValidationException::withMessages([
+                        'prior_permit_id' => [$refusal],
+                    ]);
+                }
+            }
+        }
+
+        /*
          * ── An amendment must say what the detail changes TO ─────────────────
          *
          * Ordered AFTER the prior-permit gate deliberately. "Which permit are
@@ -630,6 +750,174 @@ class ApplicationController extends Controller
         ]);
     }
 
+    /**
+     * Correct the fields BPLO returned the filing about, then resubmit.
+     *
+     * @see App\Support\ReturnTargets for which codes this route serves and why
+     *   the section targets ("Line of business", "Uploaded documents") are not
+     *   among them.
+     */
+    public function corrections(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+
+        if ($application->status !== ApplicationStatus::Returned) {
+            throw ValidationException::withMessages([
+                'status' => ['Only a returned application can be corrected.'],
+            ]);
+        }
+
+        /*
+         * The officer's tick, from BPLO's assignment. `returnMainForm` writes
+         * it there and replaces it on every return, so this is always the
+         * CURRENT round's list and never a stale pointer from a previous one.
+         */
+        $assignment = $application->assignments()
+            ->where('department_id', app(WorkflowService::class)->bploDepartmentId())
+            ->first();
+        $open = ReturnTargets::scalars($assignment?->remarks_target);
+
+        if ($open === []) {
+            throw ValidationException::withMessages([
+                'fields' => [
+                    'This filing was not returned about any single field, so there is nothing to '
+                    .'correct here. Open the application to make the changes the remarks ask for.',
+                ],
+            ]);
+        }
+
+        $data = $request->validate([
+            'fields' => ['required', 'array', 'min:1'],
+            'fields.*' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $sent = $data['fields'];
+        $business = $application->business;
+        if ($business === null) {
+            throw ValidationException::withMessages([
+                'fields' => ['This filing has no business record to correct.'],
+            ]);
+        }
+
+        /*
+         * Refused by name. See the note above this method: an ignored field is
+         * an applicant told their correction was saved when it was not.
+         */
+        $notOpen = array_values(array_diff(array_keys($sent), $open));
+        if ($notOpen !== []) {
+            throw ValidationException::withMessages([
+                'fields' => [
+                    'These fields were not part of what BPLO asked you to correct: '
+                    .implode(', ', $notOpen).'.',
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($application, $business, $sent) {
+            /*
+             * The three records a scalar correction can land on. Resolved once
+             * rather than per field, so a filing correcting two address fields
+             * saves that row once and cannot half-write it.
+             *
+             * `owner` is the primary BusinessOwner. Nothing currently maps to
+             * it — gender went back to being a section when the enums were
+             * split out — but the relation is resolved here so that adding one
+             * is a line in ReturnTargets rather than a branch in this method.
+             */
+            $records = [
+                'business' => $business,
+                'address' => $business->address,
+                'owner' => $business->owners()->where('is_primary', true)->first(),
+            ];
+
+            foreach ($sent as $code => $value) {
+                $column = ReturnTargets::column($code);
+                $relation = ReturnTargets::relation($code);
+                $record = $records[$relation] ?? null;
+                if ($column === null || $record === null) {
+                    /*
+                     * A field whose record does not exist — a business filed
+                     * before addresses were required, say. Refused rather than
+                     * skipped: silently dropping it would tell the applicant
+                     * their correction was saved when nothing was written.
+                     */
+                    throw ValidationException::withMessages([
+                        'fields' => ["This filing has nowhere to record {$code}."],
+                    ]);
+                }
+
+                $clean = $value === null ? null : trim($value);
+                // The one field with a stored shape of its own. Applied through
+                // the same helper the wizard uses, so both doors agree.
+                if ($code === 'form:tin' && $clean !== null && $clean !== '') {
+                    $clean = Tin::normalize($clean);
+                }
+
+                $before = $record->{$column};
+                $record->{$column} = $clean === '' ? null : $clean;
+
+                /*
+                 * Recorded even when the value did not move. "The applicant
+                 * looked at this and left it as it was" is an answer, and an
+                 * officer who asked about a field needs to see that rather than
+                 * an empty list that reads as "they ignored me".
+                 */
+                ApplicationCorrection::create([
+                    'application_id' => $application->id,
+                    'target' => $code,
+                    'old_value' => $before === null ? null : (string) $before,
+                    'new_value' => $record->{$column} === null ? null : (string) $record->{$column},
+                ]);
+            }
+
+            /*
+             * ── The sole proprietor's derived pair ──────────────────────
+             *
+             * Re-derived BEFORE the save, so a correction cannot leave the
+             * record holding a value the form would have refused — see the
+             * note at the head of this patch. A no-op for every other
+             * structure, and a no-op for a sole proprietorship whose
+             * citizenship and owner name were not touched.
+             */
+            if ($business->registration_type === 'sole_proprietorship') {
+                $citizenship = trim((string) $business->citizenship);
+                if ($citizenship !== '') {
+                    $business->capital_participation_filipino =
+                        strtolower($citizenship) === 'filipino' ? 100 : 0;
+                }
+
+                $primary = $records['owner'];
+                if ($primary !== null) {
+                    $full = trim(implode(' ', array_filter([
+                        trim((string) $primary->given_name),
+                        trim((string) $primary->middle_name),
+                        trim((string) $primary->surname),
+                        trim((string) $primary->suffix),
+                    ], fn (string $part) => $part !== '')));
+                    if ($full !== '') {
+                        $business->president_officer_name = $full;
+                    }
+                }
+            }
+
+            foreach ($records as $record) {
+                if ($record !== null && $record->isDirty()) {
+                    $record->save();
+                }
+            }
+
+            Audit::log('application.corrected', $application, [
+                'targets' => array_keys($sent),
+            ]);
+
+            app(WorkflowService::class)->resubmit($application->fresh());
+        });
+
+        return response()->json([
+            'data' => new ApplicationResource($application->fresh()->load($this->fullEager)),
+        ]);
+    }
+
     public function cancel(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
@@ -697,6 +985,7 @@ class ApplicationController extends Controller
     {
         $this->authorizeView($request, $application);
 
+        // The filing's own moves; `statusHistory` is scoped to them.
         $rows = $application->statusHistory()->with('changedBy:id,name')->get();
 
         return response()->json([
@@ -723,7 +1012,9 @@ class ApplicationController extends Controller
             'Documents can only be removed while the application is a draft or has been returned to you.'
         );
 
-        Audit::log('document.removed', $document);
+        // The row itself goes into the audit log (Audit Log 1): once deleted,
+        // the file name, requirement and upload date exist nowhere else.
+        Audit::removed('document.removed', $document);
 
         if ($document->stored_path && Storage::disk('local')->exists($document->stored_path)) {
             Storage::disk('local')->delete($document->stored_path);
@@ -782,10 +1073,14 @@ class ApplicationController extends Controller
 
         // Logged BEFORE the delete, so the audit row is written while the thing
         // it describes is still there to be described.
-        Audit::log('application.draft_deleted', $application, [
+        //
+        // With the whole draft copied in (Audit Log 1) — its permit types and
+        // the documents it held — because a soft-deleted draft is hidden from
+        // every reader, and "what was in it" should not need a database shell.
+        Audit::removed('application.draft_deleted', $application, [
             'application_type' => $application->application_type?->value,
             'business_id' => $application->business_id,
-        ]);
+        ], with: ['permitTypes', 'documents']);
 
         $application->delete();
 

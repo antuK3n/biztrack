@@ -246,6 +246,48 @@ class ClearanceService
             'return_note' => $this->pivotRow($application, $type)?->remarks,
             'return_target' => $this->pivotRow($application, $type)?->remarks_target,
             /*
+             * The note belonging to EACH returned row, keyed by the same
+             * code as `return_target`.
+             *
+             * The officer's screen refuses to send an office return until
+             * every ticked row has one, and until 30 September 2026 nothing
+             * stored them — so three notes were typed and the applicant got
+             * one paragraph with all three run together, above three rows
+             * that said nothing. BPLO's main-form return has shown them per
+             * field since 27 September; this is the same thing for the five
+             * offices.
+             *
+             * Scoped by permit type, so one office's instructions never
+             * appear under another's checklist.
+             */
+            'return_notes' => \App\Models\ApplicationReturnNote::where('application_id', $application->id)
+                ->where('permit_type_id', $type->id)
+                ->pluck('note', 'target')
+                ->all(),
+            /*
+             * What the applicant changed on the rows this office last asked
+             * about — was and now, per row.
+             *
+             * The office half of BPLO's "Corrected after your return".
+             * Without it a resubmitted sheet looks exactly like the one the
+             * office sent back, including when the file it called wrong has
+             * come back identical — which is the case the resubmit gate
+             * deliberately does NOT block, because blocking it would trap
+             * an applicant whose document was right.
+             *
+             * Newest first, so a row returned twice reads top-down.
+             */
+            'corrections' => \App\Models\ApplicationCorrection::where('application_id', $application->id)
+                ->where('permit_type_id', $type->id)
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn ($c) => [
+                    'target' => $c->target,
+                    'old_value' => $c->old_value,
+                    'new_value' => $c->new_value,
+                    'at' => optional($c->created_at)->toISOString(),
+                ])->all(),
+            /*
              * When it was last sent back. The applicant's card says "asked for
              * changes 3 days ago" from this — elapsed time, never a deadline,
              * because RA 11032 fixes the office's clock and not the citizen's
@@ -746,10 +788,16 @@ class ClearanceService
              * with BPLO; until it is answered, withdrawing an optional permit
              * costs what it cost.
              */
+            // One row at a time rather than a bulk delete, so each removed
+            // assignment is copied into the audit log first (Audit Log 1).
             ApplicationAssignment::where('application_id', $application->id)
                 ->where('department_id', $type->issuing_department_id)
                 ->where('status', AssignmentStatus::Pending->value)
-                ->delete();
+                ->get()
+                ->each(function (ApplicationAssignment $assignment) use ($type) {
+                    Audit::removed('assignment.removed', $assignment, ['permit_type' => $type->code]);
+                    $assignment->delete();
+                });
 
             Audit::log('clearance.unapplied', $application, ['permit_type' => $type->code]);
         });

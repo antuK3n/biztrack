@@ -31,6 +31,8 @@ class AuditLogController extends Controller
             'auditable_type' => ['sometimes', 'nullable', 'string', 'max:60'],
             'auditable_id' => ['sometimes', 'nullable', 'integer'],
             'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            // Only the rows that kept a removed record (Audit Log 1).
+            'removed' => ['sometimes', 'boolean'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -40,7 +42,7 @@ class AuditLogController extends Controller
             ->orderByDesc('id');
 
         if ($action = $request->query('action')) {
-            $query->where('action', 'like', "%{$action}%");
+            $query->whereLike('action', "%{$action}%");
         }
 
         /*
@@ -77,6 +79,14 @@ class AuditLogController extends Controller
         if ($userId = $request->query('user_id')) {
             $query->where('user_id', (int) $userId);
         }
+        /*
+         * "Removed": every delete or retire, which is exactly the rows
+         * Audit::removed() (or a retire passing a snapshot) wrote — a copy of
+         * the record is what makes a row a removal, so that is what is asked.
+         */
+        if ($request->boolean('removed')) {
+            $query->whereNotNull('snapshot');
+        }
 
         $logs = $query->paginate($this->perPage($request, default: 25));
 
@@ -87,6 +97,7 @@ class AuditLogController extends Controller
             'auditable_type' => $log->auditable_type,
             'auditable_id' => $log->auditable_id,
             'changes' => $log->changes,
+            'snapshot' => $log->snapshot,
             'created_at' => optional($log->created_at)->toISOString(),
         ]);
 

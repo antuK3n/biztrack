@@ -1,5 +1,8 @@
-import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useId, useRef } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ConfirmEmailCard } from '../components/EmailCode'
+import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { roleLabel } from '../components/AppShell'
 import {
   AlertCircleIcon,
@@ -10,11 +13,13 @@ import {
 } from '../components/icons'
 import { PageTitle, ProtoCard } from '../components/ui/Proto'
 import { activePortal, portalPath } from '../lib/api'
-import { formatDate } from '../lib/format'
+import { formatDate, formatMoney } from '../lib/format'
+import { formatHomeAddress } from '../lib/homeAddress'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
-import type { User } from '../lib/types'
+import type { PageMeta, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useHoldings } from './applicant/permitHoldings'
+import { PaymentHistory } from './applicant/PaymentsPage'
 
 /*
  * Profile — the read-only account record behind the avatar menu (PDF p24–26).
@@ -125,6 +130,153 @@ function BriefcaseIcon({ size = 28 }: { size?: number }) {
 
 /* ── Page ─────────────────────────────────────────── */
 
+/**
+ * Permits issued to this owner that nobody has billed yet.
+ *
+ * ── Why an applicant needs telling at all ──────────────────────────────
+ *
+ * A clearance renewed outside January is issued UNBILLED by rule: the city
+ * collects once a year, so a sanitary permit renewed in June is handed over
+ * with nothing to pay and its fee waits for the January renewal. Being
+ * handed a certificate and asked for no money reads as "paid", and until
+ * 1 October 2026 the only screen that said otherwise was the ADMIN Owners
+ * page. The applicant met the charge months later, on a bill they had no
+ * reason to expect.
+ *
+ * ── Not an alarm ───────────────────────────────────────────────────────
+ *
+ * Nothing here is overdue and the applicant has done nothing wrong, so this
+ * is the ordinary card border rather than the red of a warning. What it has
+ * to carry is WHEN — "with your January renewal" — because a figure with no
+ * date reads as a demand.
+ *
+ * The late surcharge is its own column where there is one. It is the figure
+ * a business would dispute, and folding it into the fee would leave them
+ * nothing to point at.
+ */
+function UnbilledFeesCard({ unbilled }: { unbilled: PageMeta['unbilled_fees'] }) {
+  // Absent means an officer's payload; empty means nothing owed. Neither
+  // is worth a card that says zero.
+  if (unbilled === undefined || unbilled.items.length === 0) return null
+
+  const anyLate = unbilled.items.some((i) => i.surcharge > 0)
+
+  return (
+    <ProtoCard className="mb-6 overflow-hidden">
+      <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">
+        Fees due with your January renewal
+      </h2>
+      <p className="px-6 pt-4 text-sm text-ink-secondary">
+        These permits are already issued and there is nothing to pay today. The city
+        collects once a year, so their fees appear on your next business permit
+        renewal.
+      </p>
+      <ul className="mt-3 divide-y divide-line border-t border-line">
+        {unbilled.items.map((item, i) => (
+          <li
+            key={`${item.permit_type ?? 'permit'}-${item.incurred_at ?? i}`}
+            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-6 py-3"
+          >
+            <span className="text-sm font-semibold text-ink">
+              {item.permit_type ?? 'Permit'}
+              {item.incurred_at !== null && (
+                <span className="ml-2 font-normal text-ink-muted">
+                  issued {formatDate(item.incurred_at)}
+                </span>
+              )}
+            </span>
+            <span className="text-sm text-ink">
+              {formatMoney(item.amount)}
+              {item.surcharge > 0 && (
+                <span className="ml-2 font-semibold text-s-red">
+                  + {formatMoney(item.surcharge)} late
+                  {item.months_late > 0 && ` (${item.months_late} mo)`}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="flex items-baseline justify-between border-t border-line px-6 py-3.5">
+        <span className="text-sm font-bold text-ink">Total to be billed</span>
+        <span className="display-serif text-xl text-ink">{formatMoney(unbilled.total)}</span>
+      </p>
+      {anyLate && (
+        <p className="border-t border-line px-6 py-3 text-xs text-ink-secondary">
+          A permit renewed after it expired carries a 25% surcharge plus 2% for every
+          month it was late (Revenue Code Secs. 8A.04 and 8A.05).
+        </p>
+      )}
+    </ProtoCard>
+  )
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+/*
+ * Account and Payment history, for owners [checklist 2026-09-27, View Payment
+ * History 1]. The tab lives in the address (`?tab=payments`) so /payments can
+ * redirect straight to it, and so Back and a reload keep the reader where they
+ * were.
+ *
+ * The WAI-ARIA tabs pattern: one tab stop, arrow keys move between tabs,
+ * `aria-selected` says which is open. Solid means selected, as on every pill
+ * in the app (FilterPills), and the selected tab also carries an underline so
+ * the state is not colour alone.
+ */
+const TABS = [
+  { value: 'account', label: 'Account' },
+  { value: 'payments', label: 'Payment history' },
+] as const
+type TabValue = (typeof TABS)[number]['value']
+
+function ProfileTabs({ value, onChange, idBase }: { value: TabValue; onChange: (v: TabValue) => void; idBase: string }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = TABS.length - 1
+    const next =
+      event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
+      : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : null
+    if (next === null) return
+    event.preventDefault()
+    onChange(TABS[next].value)
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div role="tablist" aria-label="Profile sections" className="mb-6 flex gap-2.5 border-b border-line pb-3">
+      {TABS.map((tab, i) => {
+        const active = tab.value === value
+        return (
+          <button
+            key={tab.value}
+            ref={(el) => {
+              refs.current[i] = el
+            }}
+            type="button"
+            role="tab"
+            id={`${idBase}-tab-${tab.value}`}
+            aria-selected={active}
+            aria-controls={`${idBase}-panel-${tab.value}`}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(tab.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            className={`rounded-full border-2 border-royal px-5 py-1.5 text-sm font-semibold transition-colors ${
+              active ? 'bg-royal text-white underline underline-offset-4' : 'bg-white text-royal hover:bg-royal-tint'
+            }`}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ProfilePage() {
   const user = useAuth((s) => s.user) as ProfileUser | null
   const photoUrl = useProfilePhoto(user?.has_photo ?? false)
@@ -142,7 +294,13 @@ export function ProfilePage() {
    */
   const isOfficeAccount = (user?.department ?? null) !== null
   const portal = activePortal()
-  const { groups, loading, error } = useHoldings(isOwner)
+  const { groups, unbilled, loading, error } = useHoldings(isOwner)
+  const [params, setParams] = useSearchParams()
+  const tabIdBase = useId()
+  // Payment history is an owner's tab; anyone else only ever sees Account.
+  const tab: TabValue = isOwner && params.get('tab') === 'payments' ? 'payments' : 'account'
+  const setTab = (next: TabValue) =>
+    setParams(next === 'account' ? {} : { tab: next }, { replace: true })
 
   if (!user) return null
 
@@ -174,6 +332,39 @@ export function ProfilePage() {
         )}
       </ProtoCard>
 
+      {isOwner && <ProfileTabs value={tab} onChange={setTab} idBase={tabIdBase} />}
+
+      {tab === 'payments' ? (
+        <div role="tabpanel" id={`${tabIdBase}-panel-payments`} aria-labelledby={`${tabIdBase}-tab-payments`}>
+          <PaymentHistory />
+        </div>
+      ) : (
+      <div
+        {...(isOwner
+          ? { role: 'tabpanel', id: `${tabIdBase}-panel-account`, 'aria-labelledby': `${tabIdBase}-tab-account` }
+          : {})}
+      >
+      {/*
+        Confirm the address, here beside it, when filing is waiting on that
+        [checklist 2026-09-27, Register 1]. Only while the API has a real
+        mailer; with mail off `email_verification_required` is always false.
+      */}
+      {user.email_verification_required && (
+        <div className="mb-6">
+          <ConfirmEmailCard user={user} />
+        </div>
+      )}
+
+      {/* Above the record it completes [checklist 2026-09-28, Register 2]. */}
+      {isOwner && user.home_address_missing && <HomeAddressPrompt className="mb-6" />}
+
+      {/*
+        Above Account details, below the identity card: it is money, which
+        outranks a name and an e-mail the owner already knows, and it is
+        about the permits on My Permits.
+      */}
+      {isOwner && !loading && !error && <UnbilledFeesCard unbilled={unbilled} />}
+
       <ProtoCard className="overflow-hidden">
         <h2 className="border-b border-line px-6 py-3.5 text-sm font-bold text-ink">Account details</h2>
         <dl>
@@ -189,6 +380,14 @@ export function ProfilePage() {
             </span>
           </DetailRow>
           <DetailRow label="Mobile number">{user.mobile_number || 'Not set'}</DetailRow>
+          {/*
+            Owners only: staff are never asked for a home address, and a row
+            reading "Not given yet" on an officer's record would suggest they
+            owe one.
+          */}
+          {isOwner && (
+            <DetailRow label="Home address">{formatHomeAddress(user) ?? 'Not given yet'}</DetailRow>
+          )}
           {/* Shown because it is now editable on Settings. A field the account
               holds but no screen prints is the other half of item 74. */}
           <DetailRow label="Gender">{GENDER_LABELS[user.gender] ?? 'Not specified'}</DetailRow>
@@ -285,10 +484,14 @@ export function ProfilePage() {
             <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />
           </Link>
           <p className="mt-2 text-xs text-ink-muted">
-            Name, gender, mobile number and password are on the Settings page. Your email is your
-            sign-in ID — the City BPLO changes it for you.
+            {isOwner
+              ? 'Name, gender, mobile number, home address and password are on the Settings page.'
+              : 'Name, gender, mobile number and password are on the Settings page.'}{' '}
+            Your email is your sign-in ID — the City BPLO changes it for you.
           </p>
         </>
+      )}
+      </div>
       )}
     </div>
   )

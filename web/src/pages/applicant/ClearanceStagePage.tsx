@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
@@ -11,6 +11,7 @@ import { clearanceStarted, clearanceWithOffice } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import {
   OfficeFormSheet,
+  WhatToCorrect,
   hasOfficeForm,
   officeFormMissing,
   type CarriedOverBusiness,
@@ -21,6 +22,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import { carriedOverBusiness } from './carriedOver'
 import type {
   Application,
+  ApplicationType,
   Clearance,
   ClearanceMeta,
   OfficeFormRequirement,
@@ -241,8 +243,37 @@ export function feeAmount(preview: string | null): string {
  */
 interface ClearanceStageProps {
   applicationId: number
+  /**
+   * Which permit's correction dialog to open over the cards, or null.
+   *
+   * `?correct=ZONING`, set by Fix and resubmit. Deliberately not the
+   * same thing as `openCode`: that opens the office FORM, and the whole
+   * point of this one is that the form is not loaded. The office named
+   * one document; fifty questions behind an overlay was the complaint.
+   */
+  correctCode: OfficeFormCode | null
+  /** Dismiss the dialog, clearing `?correct` with it. */
+  onCorrectionsClose: () => void
+  /** Open it for one permit, from a returned card on this stage. */
+  onCorrect: (code: string) => void
+  /**
+   * Which office's sheet is open, straight off the URL.
+   *
+   * Null is the card grid. This was component state until 30 September
+   * 2026; it moved into the address bar so a returned clearance could be
+   * linked to directly — and so Back leaves the sheet rather than the
+   * filing, and a reload keeps it open.
+   */
+  openCode: OfficeFormCode | null
+  /** Open a sheet, or null for the cards. Navigates; see `openCode`. */
+  onOpenChange: (code: OfficeFormCode | null) => void
   /** The business as every office sheet carries it, for the sheets opened here. */
   business: CarriedOverBusiness
+  /**
+   * Which kind of filing this is, because a NEW one may not hand in a
+   * permit it already holds — see `mayUploadHeldCopy` below.
+   */
+  applicationType: ApplicationType
 }
 
 /*
@@ -278,7 +309,29 @@ interface ClearanceStageProps {
  * somewhere else the seam should already exist rather than be cut out of a
  * page under deadline.
  */
-export function ClearanceStage({ applicationId, business }: ClearanceStageProps) {
+export function ClearanceStage({
+  applicationId,
+  business,
+  applicationType,
+  openCode,
+  onOpenChange,
+  correctCode,
+  onCorrectionsClose,
+  onCorrect,
+}: ClearanceStageProps) {
+  /**
+   * May this filing hand in a certificate it already holds?
+   *
+   * Not on a new one. The LGU's rule, relayed by the client on 29
+   * September 2026: a business cannot already hold these before it applies
+   * to BPLO, and one business may not hand in another's certificate.
+   *
+   * `startClearance` refuses it server-side, which is where the rule
+   * actually lives; this keeps a control off the screen that the server
+   * would reject. A renewal keeps it, which is the case the mode exists
+   * for — the visit behind last year's certificate already happened.
+   */
+  const mayUploadHeldCopy = applicationType !== 'new'
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
   const [rows, setRows] = useState<Clearance[] | null>(null)
@@ -335,7 +388,16 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
    */
 
   /* The office form sheet on screen, when this component owns the sheets. */
-  const [formCode, setFormCode] = useState<OfficeFormCode | null>(null)
+  /*
+   * The open sheet lives in the URL, not here.
+   *
+   * `setFormCode` keeps its name and every call site keeps its shape —
+   * it navigates instead of setting state. Holding it in both places
+   * would be two writers of one fact, which is how the sheet on screen
+   * and the address bar come to disagree.
+   */
+  const formCode = openCode
+  const setFormCode = onOpenChange
   /**
    * The sheet awaiting a "yes, send it" — the client's asked-for last look.
    *
@@ -812,8 +874,140 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   }
 
   /** Hand the open sheet to its office. Only ever called on a complete one. */
-  async function saveForm() {
-    if (!formCode) return
+  /**
+   * Hand a sheet to its office.
+   *
+   * Takes the code rather than reading `formCode`, because there are two
+   * callers and only one of them has a sheet open. The correction dialog is
+   * reached from the clearance CARDS, where `formCode` is null — so
+   * `if (!formCode) return` meant that confirming a resubmission from there
+   * did nothing whatsoever, without a word. See `submitPromptModal`.
+   */
+  /*
+   * ── The last look before a one-way press, reachable from BOTH screens ──
+   *
+   * Defined here and rendered in both returns, because this file draws two
+   * different screens and the submission can start on either: the office
+   * SHEET has a Submit button, and the clearance CARDS have a correction
+   * dialog whose Submit does the same thing.
+   *
+   * It sat inside the `if (formCode)` branch, which is the sheet's. Pressing
+   * Submit corrections on the cards set `submitPrompt` and the component
+   * re-rendered — into the branch that has no modal in it. Nothing mounted,
+   * nothing was sent, nothing was said. The applicant pressed a blue button
+   * and watched it do nothing.
+   *
+   * That is the SECOND time this exact fault has been reported against this
+   * modal. On 17 September 2026 it was the other way round — the modal lived
+   * in the cards branch and only the sheet could open it — and the fix moved
+   * it into the sheet's branch, which broke the corrections path the moment
+   * that path started using it. Moving it a third time would just wait for
+   * the next caller. One definition, mounted in both places, cannot be
+   * reached from a screen that does not render it.
+   *
+   * Blue, not red. Nothing is destroyed and nothing is wrong — this is the
+   * applicant doing what they came to do. What it adds is the one fact the
+   * button cannot: that this is the last moment to change anything.
+   */
+  /*
+   * ── Which act is being confirmed ────────────────────────────────────
+   *
+   * The same modal serves two of them. Answering a RETURN is not handing
+   * a form in for the first time: the office has already read this sheet,
+   * asked for one thing, and is waiting on that one thing. Told "Have you
+   * finished reviewing your Zoning Clearance? … you will not be able to
+   * change your answers", an applicant who corrected a single blurry
+   * photograph is being asked about a form they are not submitting, and
+   * warned about losing answers they did not touch.
+   *
+   * `correctCode` is what the corrections dialog is open on, so the two
+   * cases are told apart by the state that opened them rather than by a
+   * flag somebody has to remember to set.
+   */
+  const promptIsCorrection = submitPrompt !== null && submitPrompt === correctCode
+  const promptRow = rows?.find((r) => r.permit_type.code === submitPrompt)
+  const promptPermitName = promptRow?.permit_type.name ?? 'application form'
+  const promptOfficeName = promptRow?.permit_type.department?.name ?? 'the issuing office'
+
+  const submitPromptModal = submitPrompt !== null && (
+          /*
+            ── The last look before a one-way press ───────────────────────
+
+            The client asked for it by name: "before submitting each form,
+            please create a modal that will ask them if they are already
+            finished reviewing before submitting."
+
+            It earns its place on the same test the two dialogs above pass —
+            something happens here that cannot be undone from this screen.
+            Once it is sent the sheet is the office's again, and getting it
+            back means asking them to return it a second time.
+
+            Blue, not red. Nothing is destroyed and nothing is wrong — this
+            is the applicant doing the thing they came to do, and dressing
+            it as a warning would say otherwise.
+          */
+          <ProtoModal
+            title={promptIsCorrection ? 'SEND YOUR CORRECTIONS' : 'SUBMIT THIS FORM'}
+            cancelLabel="Keep checking"
+            confirmLabel={promptIsCorrection ? 'Yes, send them' : 'Yes, submit it'}
+            onCancel={() => setSubmitPrompt(null)}
+            onConfirm={() => {
+              /*
+               * `submitPrompt`, not the default. It is the code that opened
+               * this dialog and the only one true on BOTH screens — on the
+               * cards `formCode` is null, which is what made the default
+               * silently do nothing.
+               */
+              const code = submitPrompt
+              setSubmitPrompt(null)
+              void saveForm(code)
+            }}
+          >
+            <p className="text-center text-base text-ink">
+              {promptIsCorrection ? (
+                <>
+                  Send your corrections to{' '}
+                  <span className="font-bold">{promptOfficeName}</span>?
+                </>
+              ) : (
+                <>
+                  Have you finished reviewing your{' '}
+                  <span className="font-bold">{promptPermitName}</span>?
+                </>
+              )}
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              {promptIsCorrection ? (
+                <>
+                  Only what they asked you to fix is being sent back for another look.
+                  Everything else you already filed stays exactly as it is.
+                </>
+              ) : (
+                <>
+                  Once you submit it, <span className="font-semibold text-ink">{promptOfficeName}</span>{' '}
+                  receives it and you will not be able to change your answers. You can still read
+                  them back at any time.
+                </>
+              )}
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              {promptIsCorrection ? (
+                <>
+                  If you spot something else afterwards, message the office from this
+                  clearance&rsquo;s card and they can send it back to you again.
+                </>
+              ) : (
+                <>
+                  If you spot a mistake after submitting, message the office from this
+                  clearance&rsquo;s card and they can send the form back to you.
+                </>
+              )}
+            </p>
+          </ProtoModal>
+  )
+
+  async function saveForm(code: OfficeFormCode | null = formCode) {
+    if (!code) return
     setFormSaving(true)
     setFormError(null)
     try {
@@ -827,9 +1021,15 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
        * only thing left to do is hand them over. The button is shut while
        * anything is missing, so a call reaching here is a complete sheet.
        */
-      await officeForms.save(applicationId, formCode, officeData[formCode] ?? {}, true)
-      savedSheets.current[formCode] = JSON.stringify(officeData[formCode] ?? {})
+      await officeForms.save(applicationId, code, officeData[code] ?? {}, true)
+      savedSheets.current[code] = JSON.stringify(officeData[code] ?? {})
       setFormCode(null)
+      /*
+       * And shut the correction dialog, where that is what opened this.
+       * Left standing it would go on showing the return the applicant has
+       * just answered, over a card that now reads For Approval.
+       */
+      onCorrectionsClose()
       // The sheet being complete is part of the row, so re-read it.
       await load()
     } catch (err) {
@@ -851,7 +1051,13 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
    * `uploads.ts` gives: the API's refusal of an empty PDF is "Upload a PDF, JPG,
    * or PNG file", which is true of the file and useless to the person holding it.
    */
-  async function changeRequirement(code: string, documentCode: string, file: File | null) {
+  async function changeRequirement(
+    code: string,
+    documentCode: string,
+    file: File | null,
+    /* Which file to remove; a row holds several since 30 September 2026. */
+    documentId?: number,
+  ) {
     setReqBusy(documentCode)
     setReqError(null)
     try {
@@ -865,7 +1071,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       const result =
         file !== null
           ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
-          : await officeForms.removeRequirement(applicationId, code, documentCode)
+          : await officeForms.removeRequirement(applicationId, code, documentCode, documentId)
       setRequirements((prev) => ({ ...prev, [code]: result.requirements }))
     } catch (err) {
       setReqError(file !== null ? uploadErrorMessage(err) : toApiError(err).message)
@@ -888,7 +1094,9 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       await officeForms.declaration(
         applicationId,
         code,
-        'locational-clearance-declaration.pdf',
+        code === 'FSIC'
+          ? 'fsic-affidavit-of-undertaking.pdf'
+          : 'locational-clearance-declaration.pdf',
       )
     } catch (err) {
       setReqError(toApiError(err).message)
@@ -969,11 +1177,17 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
    *   "I wonder how I was able to submit the Locational Clearance without
    *    submitting the Applicant Declaration."
    *
+   * On 30 September 2026 the exception became the rule — the client again,
+   * on the same screen: *"Are the documentary fields here not required? Make
+   * sure they are required."* Every documentary row gates now. Nothing in
+   * this file changed for that, which is the point of the line below.
+   *
    * So the two sources are added together here rather than inside
    * `officeFormMissing`, which takes answers and has no business fetching a
    * document list. Which rows gate is the SERVER's call — see `blocking` on
-   * `OfficeFormRequirement` — so this adds no rule of its own; it only stops
-   * ignoring the one it is handed.
+   * `OfficeFormRequirement`, and `WorkflowService::submitClearanceForm`,
+   * which refuses what this merely greys out — so this adds no rule of its
+   * own; it only stops ignoring the one it is handed.
    */
   const formMissing = formCode
     ? [
@@ -1029,9 +1243,23 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
    */
   const visibleRows = rows
 
-  /* The sheet, when this component owns it — it replaces the cards rather than
-   * sitting under them, so the applicant is on one thing at a time. */
-  if (formCode) {
+  /*
+   * The sheet, when this component owns it — it replaces the cards rather
+   * than sitting under them, so the applicant is on one thing at a time.
+   *
+   * `openRow` has to exist. The code now comes off the URL, so a sheet can
+   * be asked for on a permit the applicant has never applied for — a stale
+   * bookmark, a link in an old notification, a hand-edited address. There
+   * is no clearance row behind such a code, so every write the sheet makes
+   * would be addressed to nothing: the applicant would type into a form
+   * that silently refuses to save. Until 30 September 2026 the sheet could
+   * only open through `apply()`, which had just created the row, and the
+   * router gives no such guarantee.
+   *
+   * Falls back to the cards rather than to an error: a link that has gone
+   * stale should land the applicant where the decision is made.
+   */
+  if (formCode && openRow) {
     return (
       <div>
         {formError && (
@@ -1041,6 +1269,24 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             </Alert>
           </div>
         )}
+        {/*
+          What the office asked for, above the sheet and on the page rather
+          than inside the sheet's card — the shape BPLO's has on
+          /applications/:id, which is what the client asked to be copied.
+
+          Not while the sheet is locked: a submitted copy has already
+          answered the return, and the panel would be telling somebody to
+          fix what they have just sent.
+        */}
+        {/*
+          The correction dialog is NOT here.
+
+          It opens over the CARDS — see the cards branch below — because
+          loading fifty questions to put an overlay on top of them was the
+          client's complaint on 30 September 2026: *"Why is there still a
+          page opening even with the modal?"* This sheet is for an
+          applicant who came to read or change the form itself.
+        */}
         <OfficeFormSheet
           code={formCode}
           data={officeData[formCode] ?? {}}
@@ -1057,6 +1303,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
            * always the one whose card is open, so the row is in hand.
            */
           returnTarget={rows?.find((r) => r.permit_type.code === formCode)?.return_target ?? null}
+          returnNotes={rows?.find((r) => r.permit_type.code === formCode)?.return_notes ?? null}
           /*
            * The keys still showing last year's answer, computed rather than
            * stored: a key is carried only while its current value is the one
@@ -1075,8 +1322,13 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           )}
           requirementBusy={reqBusy}
           requirementError={reqError}
-          onRequirementChange={(documentCode, file) =>
-            void changeRequirement(formCode, documentCode, file)
+          onRequirementChange={(documentCode, file, documentId) =>
+            /*
+              Returned, not voided. OfficeFormStep awaits this once per
+              file so a multi-file pick uploads one at a time; swallowing
+              the promise here would put the race straight back.
+            */
+            changeRequirement(formCode, documentCode, file, documentId)
           }
           onDeclarationTemplate={() => void downloadDeclaration(formCode)}
         />
@@ -1175,71 +1427,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             </>
           )}
         </div>
-        {submitPrompt && (
-          /*
-            ── The last look before a one-way press ─────────────────────────────
-
-          It lives HERE, inside the `if (formCode)` branch, and that is the
-          whole of the bug reported on 17 September 2026: "why does this submit
-          button not work?"
-
-          It did work. It set `submitPrompt` and the component re-rendered —
-          and this file returns early at `if (formCode)` to draw the open
-          sheet, while the modal sat in the FINAL return, the branch that draws
-          the clearance cards. So the state changed and nothing mounted. Only
-          the sheet carries the Submit button, so only the sheet can set that
-          state: the copy down there was unreachable from the day it was
-          written, and no test noticed because a modal that never opens looks
-          exactly like a modal nobody asked for.
-
-            The client asked for it by name: "before submitting each form, please
-            create a modal that will ask them if they are already finished
-            reviewing before submitting."
-
-            It earns its place on the same test the two dialogs above pass —
-            something happens here that cannot be undone from this screen. Once
-            submitted the sheet is the office's and the applicant cannot change
-            it; getting it back means messaging the office and asking them to
-            return it. Until today that press was the same size as saving a draft.
-
-            Blue, not red. Nothing is destroyed and nothing is wrong — this is the
-            applicant doing the thing they came to do, and dressing it as a
-            warning would say otherwise. What the dialog adds is the one fact the
-            button cannot: that this is the last moment to change anything.
-          */
-          <ProtoModal
-            title="SUBMIT THIS FORM"
-            cancelLabel="Keep checking"
-            confirmLabel="Yes, submit it"
-            onCancel={() => setSubmitPrompt(null)}
-            onConfirm={() => {
-              setSubmitPrompt(null)
-              void saveForm()
-            }}
-          >
-            <p className="text-center text-base text-ink">
-              Have you finished reviewing your{' '}
-              <span className="font-bold">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
-                  'application form'}
-              </span>
-              ?
-            </p>
-            <p className="mt-3 text-center text-sm text-ink-secondary">
-              Once you submit it,{' '}
-              <span className="font-semibold text-ink">
-                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
-                  ?.name ?? 'the issuing office'}
-              </span>{' '}
-              receives it and you will not be able to change your answers. You can still read them
-              back at any time.
-            </p>
-            <p className="mt-3 text-center text-sm text-ink-secondary">
-              If you spot a mistake after submitting, message the office from this clearance&rsquo;s
-              card and they can send the form back to you.
-            </p>
-          </ProtoModal>
-        )}
+        {submitPromptModal}
       </div>
     )
   }
@@ -1262,8 +1450,72 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   const balance = pesoToNumber(meta.balance_due)
   const owesMoney = Number.isFinite(balance) && balance > 0
 
+  /*
+   * How far along the five are — what a settled filing shows instead of a
+   * ledger reading 1987.25 / 1987.25 / 0.
+   *
+   * `rows` is null while the stage is loading, and then the count is not
+   * unknown so much as not yet asked; the card falls back to the sentence
+   * alone rather than claiming "0 of 0".
+   */
+  const approvedCount = (rows ?? []).filter((r) => r.state === 'approved').length
+  const totalCount = (rows ?? []).length
+
+  /*
+   * The permit the applicant pressed Fix and resubmit on, if it is still
+   * returned. Re-checked against the rows rather than trusted from the
+   * URL: a link sent yesterday, or a second tab that has already answered
+   * the return, must not raise a dialog about something now settled.
+   */
+  const correctRow =
+    correctCode === null
+      ? undefined
+      : rows?.find(
+          (r) =>
+            r.permit_type.code === correctCode &&
+            (r.return_target ?? '') !== '',
+        )
+
   return (
     <div>
+      {/*
+        What the office asked for, over the cards.
+
+        The office form is deliberately not loaded: the office named one
+        document and the applicant has one thing to do, so the fifty
+        questions behind it were cost with no return. Closing leaves them
+        on the cards, where the sheet is one press away if they want it.
+      */}
+      {correctRow !== undefined && correctCode !== null && (
+        <WhatToCorrect
+          code={correctCode}
+          targets={(correctRow.return_target ?? '')
+            .split(',')
+            .map((t) => t.trim())
+            .filter((t) => t !== '')}
+          notes={correctRow.return_notes ?? null}
+          requirements={requirements[correctCode]}
+          data={officeData[correctCode] ?? {}}
+          set={(key, value) =>
+            setOfficeData((d) => ({
+              ...d,
+              [correctCode]: { ...(d[correctCode] ?? {}), [key]: value },
+            }))
+          }
+          onRequirementChange={(documentCode, file, documentId) =>
+            changeRequirement(correctCode, documentCode, file, documentId)
+          }
+          requirementBusy={reqBusy}
+          onClose={onCorrectionsClose}
+          /*
+           * Straight to the confirmation the sheet's own Submit opens, so
+           * a resubmission from here and one from the form are the same
+           * act with the same wording and the same server call.
+           */
+          onSubmit={() => setSubmitPrompt(correctCode)}
+          submitting={formSaving}
+        />
+      )}
       {/*
         The lock, in the API's own words and ONLY the API's own words.
 
@@ -1327,34 +1579,77 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         widths.
       */}
       <div className="mb-6 rounded-xl bg-white px-5 py-4 shadow-card">
-        <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
-          <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              Assessed
-            </dt>
-            <dd className="tnum mt-0.5 text-base font-semibold text-ink">{meta.total_assessed}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Paid</dt>
-            <dd className="tnum mt-0.5 text-base font-semibold text-ink">{meta.total_paid}</dd>
-          </div>
-          <div>
-            {/*
-              The balance is the one that decides something, so it is the one
-              that is bigger and coloured. The other two are here to make it
-              checkable — a balance with no assessed and paid beside it is a
-              number the applicant has to trust rather than one they can verify.
-            */}
-            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              Balance due
-            </dt>
-            <dd
-              className={`tnum mt-0.5 text-xl font-bold ${owesMoney ? 'text-royal' : 'text-s-green'}`}
-            >
-              {meta.balance_due}
-            </dd>
-          </div>
-        </dl>
+        {/*
+          ── Money while it is owed, progress once it is not ──────────────
+
+          Settled, the ledger read 1987.25 / 1987.25 / 0: two identical
+          figures and a zero, in the most prominent position on a screen
+          about something else. The balance earns that treatment because it
+          is the one that decides something, and at zero it decides nothing.
+
+          What the applicant wants here instead is how far along the five
+          are. The amounts are on Payment History, which is where a receipt
+          belongs and has always been the record of them.
+        */}
+        {owesMoney ? (
+          <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Assessed
+              </dt>
+              <dd className="tnum mt-0.5 text-base font-semibold text-ink">
+                {meta.total_assessed}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Paid
+              </dt>
+              <dd className="tnum mt-0.5 text-base font-semibold text-ink">{meta.total_paid}</dd>
+            </div>
+            <div>
+              {/*
+                The balance is the one that decides something, so it is the one
+                that is bigger and coloured. The other two are here to make it
+                checkable — a balance with no assessed and paid beside it is a
+                number the applicant has to trust rather than one they can verify.
+              */}
+              <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Balance due
+              </dt>
+              <dd className="tnum mt-0.5 text-xl font-bold text-royal">{meta.balance_due}</dd>
+            </div>
+          </dl>
+        ) : (
+          totalCount > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Permits approved
+              </p>
+              <p className="tnum mt-0.5 text-xl font-bold text-s-green">
+                {approvedCount} of {totalCount}
+              </p>
+              {/*
+                A bar as well as the count, because "2 of 5" is read and a
+                bar is seen — and this is the one thing on the page somebody
+                returns to check without reading anything.
+
+                `aria-hidden`: the figures above already say it, and a
+                progressbar role would have a screen reader announce the
+                same fact twice.
+              */}
+              <div
+                aria-hidden="true"
+                className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-line/60"
+              >
+                <div
+                  className="h-full rounded-full bg-s-green transition-[width]"
+                  style={{ width: `${Math.round((approvedCount / totalCount) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )
+        )}
         {/*
           What the balance means, stated wherever it is shown.
 
@@ -1377,21 +1672,24 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           may raise the assessment. It says what is owed and stops promising
           what applying will cost.
         */}
-        <p className="mt-3 text-sm text-ink-secondary">
-          {owesMoney ? (
-            <>
-              Your Business Permit is <span className="font-semibold text-ink">not released</span>{' '}
-              while this balance is unpaid. Applying for the clearances below adds nothing to it —
-              your Tax Order of Payment already covered them.
-            </>
-          ) : (
-            <>
-              Nothing is outstanding — your Tax Order of Payment covered every permit below, so
-              applying for them costs nothing further. Your Business Permit is released once all
-              of them are approved.
-            </>
-          )}
-        </p>
+        {/*
+          Only while money is owed. A settled card shows "0 of 5" and a bar,
+          and a line under it reporting that nothing is owed answers a
+          question nobody asks of a card with no figures on it — the money
+          left this card when the ledger did.
+
+          The sentence that stood here when settled also promised the
+          Business Permit on all five approvals, which is not what happens:
+          `releaseOutcomePermit` issues it when the payment clears, audit
+          note "Released on payment."
+        */}
+        {owesMoney && (
+          <p className="mt-3 text-sm text-ink-secondary">
+            Your Business Permit is <span className="font-semibold text-ink">not released</span>{' '}
+            while this balance is unpaid. Applying for the clearances below adds nothing to it —
+            your Tax Order of Payment already covered them.
+          </p>
+        )}
       </div>
 
       {actionError && (
@@ -1429,12 +1727,25 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         a form you fill in or a certificate you already hold — so that is what
         the line says.
       */}
+      {/*
+        A guide, which is the one thing this screen never said.
+
+        The cards name each certificate and its office but never say what
+        the SET is for, and the sentence that used to stand here explained
+        the money — already explained on the card above it — and then
+        promised a Business Permit the applicant is already holding.
+      */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Every one of these is required, and all five were covered by the payment you have already
-        made. <span className="font-semibold text-ink">Apply</span> opens that office&rsquo;s own
-        form for you to fill in;{' '}
-        <span className="font-semibold text-ink">Upload an existing copy</span> hands them a
-        certificate you already hold. Neither costs anything further.
+        Each of these is a separate certificate for your premises, issued and inspected by its
+        own city office. All five are required.
+        {mayUploadHeldCopy && (
+          <>
+            {' '}
+            <span className="font-semibold text-ink">Apply</span> opens that office&rsquo;s own
+            form; <span className="font-semibold text-ink">Upload an existing copy</span> hands
+            them a certificate you already hold.
+          </>
+        )}
       </p>
 
       {/*
@@ -1524,6 +1835,15 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
            * Submit on the one card the applicant still had work to do on.
            */
           const handedIn = clearanceWithOffice(row.state)
+          /*
+           * Does the correction dialog answer this card?
+           *
+           * True only when the office RETURNED it and NAMED what is wrong.
+           * A return written as plain prose has nothing for the dialog to
+           * list, so the sheet stays the way in — which is why this asks
+           * about the pointer and not only about the state.
+           */
+          const answersReturn = row.state === 'returned' && (row.return_target ?? '') !== ''
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
@@ -1915,7 +2235,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   * `View submitted form` beside it is the control that still means
                   * something here.
                   */}
-                {!handedIn && (
+                {!handedIn && mayUploadHeldCopy && (
                 <button
                   type="button"
                   disabled={busy}
@@ -1978,6 +2298,18 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   {held ? 'Copy uploaded' : 'Upload a copy'}
                 </button>
                 )}
+                {/*
+                  The form button gives way to the correction dialog on a
+                  returned card. "Finish form" describes work the applicant
+                  has already done — the form was submitted, which is how
+                  the office came to return it — and two buttons on a card
+                  naming one problem is a choice nobody asked for.
+
+                  Only when the office NAMED rows. A return written as
+                  plain prose opens no dialog, so the sheet stays the way
+                  in and the button stays with it.
+                */}
+                {!answersReturn && (
                 <button
                   type="button"
                   disabled={busy}
@@ -2033,7 +2365,31 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                         ? 'Finish form'
                         : 'Apply'}
                 </button>
+                )}
               </div>
+
+              {/*
+                A returned card answers the return.
+
+                It drew the rose panel naming what the office asked for and
+                then offered "Finish form" — the control for a half-filled
+                sheet — so the applicant opened a whole form to replace one
+                document. The dialog that answers exactly that already
+                existed; this stage just never offered it.
+
+                Beside the form button rather than instead of it: an office
+                that returned an ANSWER is answered on the sheet, and an
+                applicant may simply want to re-read what they sent.
+              */}
+              {answersReturn && (
+                <button
+                  type="button"
+                  onClick={() => onCorrect(row.permit_type.code)}
+                  className="mt-2 w-full rounded-sm border-2 border-royal bg-royal px-3 py-2 text-sm font-semibold text-white underline underline-offset-2 transition-colors hover:bg-royal-hover"
+                >
+                  Fix and resubmit →
+                </button>
+              )}
             </li>
           )
         })}
@@ -2209,6 +2565,12 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         </ProtoModal>
       )}
 
+      {/*
+        The same modal the sheet branch mounts, and that is the whole point:
+        Submit corrections on a card sets `submitPrompt`, and until today
+        nothing in THIS branch rendered it, so the press did nothing.
+      */}
+      {submitPromptModal}
     </div>
   )
 }
@@ -2229,8 +2591,45 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
  * route's.
  */
 export function ClearanceStagePage() {
-  const { id = '' } = useParams()
+  const { id = '', code } = useParams()
   const appId = Number(id)
+  const navigate = useNavigate()
+  const [search, setSearch] = useSearchParams()
+
+  /*
+   * `?correct=ZONING` — which returned permit the applicant pressed Fix
+   * and resubmit on. Validated like `code` below: a URL anybody can type
+   * must not hand the stage a permit it has no sheet for.
+   */
+  const correctParam = search.get('correct')
+  const correctCode =
+    correctParam !== null && hasOfficeForm(correctParam) ? correctParam : null
+
+  /*
+   * Which sheet the URL is asking for.
+   *
+   * Validated rather than cast: `/clearances/NONSENSE` is a URL anybody
+   * can type, and an unchecked cast would hand the stage a code it has no
+   * sheet for. An unknown one shows the cards, which is what the applicant
+   * would have wanted from a link that no longer resolves.
+   */
+  const openCode = code !== undefined && hasOfficeForm(code) ? code : null
+
+  /*
+   * Opening and closing a sheet is a navigation, so Back leaves the sheet
+   * rather than the filing — which is what the button appears to promise
+   * once a sheet has its own address.
+   */
+  const onOpenChange = useCallback(
+    (next: OfficeFormCode | null) => {
+      navigate(
+        next === null
+          ? `/applications/${appId}/clearances`
+          : `/applications/${appId}/clearances/${next}`,
+      )
+    },
+    [appId, navigate],
+  )
 
   const app = useAsync<Application>(() => applications.get(appId), [appId])
 
@@ -2286,7 +2685,46 @@ export function ClearanceStagePage() {
         the filing has been submitted and paid for, so the record IS the
         freshest copy. One source, and it is the authoritative one.
       */}
-      <ClearanceStage applicationId={application.id} business={carriedOver} />
+      <ClearanceStage
+        applicationId={application.id}
+        business={carriedOver}
+        applicationType={application.application_type}
+        openCode={openCode}
+        onOpenChange={onOpenChange}
+        correctCode={correctCode}
+        /*
+          Clears the parameter rather than holding "dismissed" in state,
+          so the dialog does not come back on every re-render and the
+          URL stops claiming something that is no longer on screen.
+        */
+        onCorrectionsClose={() =>
+          setSearch(
+            (prev) => {
+              const next = new URLSearchParams(prev)
+              next.delete('correct')
+
+              return next
+            },
+            { replace: true },
+          )
+        }
+        /*
+          Opened from a returned card. Writes the same `?correct` the
+          tracking page links to, so the dialog has one way in however the
+          applicant got here — and a reload keeps it open.
+        */
+        onCorrect={(code) =>
+          setSearch(
+            (prev) => {
+              const next = new URLSearchParams(prev)
+              next.set('correct', code)
+
+              return next
+            },
+            { replace: true },
+          )
+        }
+      />
     </div>
   )
 }

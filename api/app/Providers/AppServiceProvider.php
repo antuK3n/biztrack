@@ -4,8 +4,12 @@ namespace App\Providers;
 
 use App\Services\Sms\LogSmsChannel;
 use App\Services\Sms\SmsChannel;
+use App\Support\ReportViews;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -37,5 +41,10 @@ class AppServiceProvider extends ServiceProvider
                 ? Limit::none()
                 : Limit::perMinute(10)->by($request->ip());
         });
+
+        // The reporting views step aside while migrations run, so a later
+        // `->change()` can alter the tables they read. See ReportViews.
+        Event::listen(MigrationsStarted::class, fn (MigrationsStarted $e) => ReportViews::suspend($e));
+        Event::listen(MigrationsEnded::class, fn (MigrationsEnded $e) => ReportViews::resume($e));
     }
 }

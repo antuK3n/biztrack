@@ -79,24 +79,31 @@ enum ApplicationStatus: string
             self::ForApproval => 'For Approval',
             self::PendingPayment => 'Pending Payment',
             /*
-             * "Permit Released", renamed 24 September 2026.
+             * "Approved" — the third name this stage has carried, and the one
+             * that finally agrees with the rest of the product.
              *
-             * It was "Awaiting Other Permits", which described the filing
-             * accurately and described the APPLICANT'S POSITION wrongly the
-             * moment the LGU moved the release: *"after payment, business
-             * permit is already released."* The filing is still waiting on
-             * five offices, but the person reading the tracker is not waiting
-             * for anything they can act on — they are holding their permit —
-             * and a status headed "Awaiting" over a certificate they have
-             * already downloaded is the tracker contradicting the vault.
+             * "Awaiting Other Permits" until 24 September 2026, when the LGU
+             * moved the release (*"after payment, business permit is already
+             * released"*) and a status headed "Awaiting" started contradicting
+             * a certificate the applicant had already downloaded. Then "Permit
+             * Released", which was true and was the only place in the product
+             * using those words — so the progress rail said "Permit Released"
+             * while the Mayor's Permit row eight lines below said "Approved",
+             * one event under two names.
              *
-             * The old words are kept where they are still true: BPLO's queue
-             * tab is "Awaiting Other Permits", because from that seat the
-             * filing genuinely is out with the other offices and that is what
-             * the officer is waiting for. Same fact, two seats, and only one
-             * of them is waiting.
+             * Client's decision, 26 September 2026: *"Approved does not mean it
+             * is Completed, and it is similar to the other permits where
+             * Approved means the permit was released already."* Exactly — the
+             * five clearances have always used "Approved" for GRANTED, and this
+             * stage is the Mayor's Permit being granted. The word was already
+             * in the product meaning this; only the filing was spelling it
+             * differently.
+             *
+             * It does not collide with `Approved` below, which is "Completed":
+             * granted and finished are different facts and now have different
+             * words, rather than one word doing both jobs badly.
              */
-            self::AwaitingOtherPermits => 'Permit Released',
+            self::AwaitingOtherPermits => 'Approved',
             self::ForFinalApproval => 'For Final Approval',
             /*
              * "Completed", renamed 24 September 2026.
@@ -278,6 +285,43 @@ enum ApplicationStatus: string
     public function canTransitionTo(self $to): bool
     {
         return in_array($to, $this->allowedNext(), true);
+    }
+
+    /**
+     * Is this filing waiting on the APPLICANT rather than on an office?
+     *
+     * The question the abandonment sweep asks, and the reason it is here
+     * rather than in the command: a status added later is somebody's move,
+     * and whoever adds it should decide whose while they are looking at
+     * this table.
+     *
+     * ── What is deliberately NOT on this list ──────────────────────────
+     *
+     * `ForApproval` — BPLO is reading the form. An applicant who filed and
+     * waited has done everything asked of them, and a sweep that removed
+     * their filing would be punishing them for the office's backlog. That
+     * is also the one case RA 11032 puts a clock on, and the clock runs
+     * against the city.
+     *
+     * `AwaitingOtherPermits` — mixed. The applicant applies for each
+     * clearance, but the offices then hold them for days at a time, and
+     * from the outside a filing sitting there may be waiting on either.
+     * Sweeping it would eventually delete a filing whose last five days
+     * were CENRO's.
+     *
+     * `ForFinalApproval` — BPLO's, by definition.
+     *
+     * Written as a list of the applicant's states rather than "not one of
+     * the office's", so a status added later is nobody's until somebody
+     * says so — the safe default for a rule that removes records.
+     */
+    public function awaitsApplicant(): bool
+    {
+        return in_array($this, [
+            self::Draft,
+            self::Returned,
+            self::PendingPayment,
+        ], true);
     }
 
     /**

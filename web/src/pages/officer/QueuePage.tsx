@@ -2,12 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { InboxIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import {
-  FilterPills,
-  PageTitle,
-  SortFilter,
-  type SortFilterOption,
-} from '../../components/ui/Proto'
+import { PageTitle, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { applications, assignments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
@@ -23,7 +18,7 @@ import type {
 } from '../../lib/types'
 
 /*
- * Application Verification (PDF p61/p80) — the officer queue restyled to the
+ * Manage Applications (PDF p61/p80) — the officer queue restyled to the
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
@@ -114,7 +109,18 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
    */
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
-  { value: 'gathering', label: 'Awaiting Other Permits' },
+  /*
+   * Read off the status table rather than written here, which is what stops
+   * this tab drifting a fourth time.
+   *
+   * It said "Awaiting Other Permits" until 26 September 2026, on the argument
+   * that the officer's seat sees a wait the applicant does not. That stopped
+   * being true when the permit started being issued at payment: the five
+   * offices working afterwards can suspend it, not grant it, so nothing here
+   * waits for permits. Hardcoding the replacement would have set up the same
+   * drift again, so it does not.
+   */
+  { value: 'gathering', label: applicationStatusMeta('awaiting_other_permits').label },
   { value: 'inspection', label: 'For Inspection' },
   { value: 'final', label: 'For Final Approval' },
 ]
@@ -824,6 +830,19 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
   return `${item.trackingId} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
 }
 
+/**
+ * How a filing type reads on a row.
+ *
+ * Its own table rather than `TYPE_PLURAL` reused: that one exists for the
+ * empty state's sentence ("No renewals are at this stage") and is plural
+ * and lower case for that reason. A chip wants the singular.
+ */
+const TYPE_LABEL: Record<string, string> = {
+  new: 'New',
+  renewal: 'Renewal',
+  amendment: 'Amendment',
+}
+
 /*
  * The card, as a COLUMN rather than a horizontal band.
  *
@@ -848,11 +867,21 @@ const CARD = 'flex h-full flex-col overflow-hidden rounded-lg bg-white shadow-ca
 function QueueRow({
   item,
   ownPermit,
+  showType,
   onClaim,
   onRelease,
   claiming,
 }: {
   item: QueueItem
+  /**
+   * Draw the New / Renewal / Amendment chip?
+   *
+   * False once the officer has filtered by type: every row is then that
+   * type, and the chip is a word repeated down the page. Decided by the
+   * list rather than by the row, because only the list knows what the
+   * filter is set to.
+   */
+  showType: boolean
   /** True in a clearance office's seat, false in BPLO's. See `badge` below. */
   ownPermit: boolean
   onClaim?: (item: QueueItem) => void
@@ -937,8 +966,20 @@ function QueueRow({
           * that case is the one that explains the heading. Either way the row
           * carries the tracking ID exactly once.
           */}
-        <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+          {/*
+            A quiet outline, not a second coloured chip: the row already has
+            one on the right and it means the STAGE. Two coloured chips would
+            compete and invite being read as one scale. Beside the tracking
+            ID, which is the other thing here that identifies rather than
+            progresses.
+          */}
+          {showType && item.type && (
+            <span className="rounded border border-royal/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
+              {TYPE_LABEL[item.type] ?? item.type}
+            </span>
+          )}
         </p>
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
@@ -1121,7 +1162,21 @@ export function QueuePage() {
   /** '' means the whole tab; otherwise one status inside it. */
   const [statusFilter, setStatusFilter] = useState('')
   /** '' means every kind of filing; otherwise new, renewal or amendment (item 97). */
-  const [filingType, setFilingType] = useState<'' | ApplicationType>('')
+  /*
+   * The filing types ticked. Empty means all of them, which is what the
+   * "All filings" box says and what every reader below already treats a
+   * blank filter as.
+   */
+  const [filingTypes, setFilingTypes] = useState<ApplicationType[]>([])
+  /*
+   * The single value the wire and the browser filter still speak in.
+   *
+   * `/applications` takes a comma-separated `type` and the browser filter
+   * matches a set as easily as a value, so this is a join rather than a
+   * narrowing — but the empty string still means "no filter", which is the
+   * shape four other places already read.
+   */
+  const filingType = filingTypes.join(',') as '' | ApplicationType
   /** The search the SERVER has been asked for. Pending Payment only; see below. */
   const [serverQuery, setServerQuery] = useState('')
   /*
@@ -1455,11 +1510,26 @@ export function QueuePage() {
    * re-matched in the browser, and throwing them away to ask for them again
    * would be a blank list and a round trip for a filter that is already local.
    */
-  function selectFilingType(next: '' | ApplicationType) {
-    if (next === filingType) return
-    const wasDeep = !typeOnServer && filingType !== ''
-    const nowDeep = !typeOnServer && next !== ''
-    setFilingType(next)
+  /*
+   * Tick or untick ONE type. '' is the "All filings" box, which clears the
+   * rest rather than joining them — "all" and "new and renewal" are two
+   * answers to one question, not three ticks.
+   */
+  function toggleFilingType(next: '' | ApplicationType) {
+    const chosen: ApplicationType[] =
+      next === ''
+        ? []
+        : filingTypes.includes(next)
+          ? filingTypes.filter((t) => t !== next)
+          : [...filingTypes, next]
+
+    const before = filingType
+    const after = chosen.join(',')
+    if (after === before) return
+
+    const wasDeep = !typeOnServer && before !== ''
+    const nowDeep = !typeOnServer && after !== ''
+    setFilingTypes(chosen)
     if (typeOnServer || wasDeep !== nowDeep) restart()
   }
 
@@ -1532,7 +1602,12 @@ export function QueuePage() {
     .filter((item) => matchesSearch(item, browserNeedle))
     // Empty on Pending Payment, where `/applications?type=` has already done it
     // — matching the same rule twice would only re-apply it over fewer rows.
-    .filter((item) => !browserType || item.type === browserType)
+    /*
+     * Any of the ticked types. `browserType` is the joined list, so this
+     * splits it back rather than comparing against a string that may hold
+     * two values — which would match neither.
+     */
+    .filter((item) => browserType === '' || browserType.split(',').includes(item.type))
     // Copied before sorting: `rows` is state, and Array.prototype.sort is in
     // place — sorting it directly would rewrite the accumulated pages.
     .slice()
@@ -1656,7 +1731,7 @@ export function QueuePage() {
     if (statusFilter) selectStatus('')
     // Through the handler, not `setFilingType`, so the restart-only-when-the-
     // request-changes rule is applied here too rather than restated.
-    if (filingType) selectFilingType('')
+    if (filingType) toggleFilingType('')
     if (!searchesOnServer && isDeep('', sort, serverSort) !== isDeep(search, sort, serverSort)) restart()
   }
 
@@ -1698,7 +1773,7 @@ export function QueuePage() {
           </span>
         }
       >
-        Application Verification
+        Manage Applications
       </PageTitle>
 
       {/*
@@ -1745,24 +1820,149 @@ export function QueuePage() {
         * who meets them one button at a time has nothing to tell them apart
         * by at all. The label is what says which question this row answers.
         */}
-      <div className="mb-3" role="group" aria-label="Filter by filing type">
-        <FilterPills options={typePills} value={filingType} onChange={selectFilingType} />
-      </div>
+      {/*
+        ── The filters, as a sidebar of checkboxes ────────────────────────
 
-      <div className="mb-5">
-        <FilterPills options={tabs} value={tab} onChange={selectTab} />
-      </div>
+        Three stacked rows of pills across the full width, which the client
+        called messy and which cost a third of the screen above the first
+        result. On the side they cost nothing vertical, and a box says
+        "several of these" where a pill only ever looked like a tab.
 
-      {tab !== 'payment' && (
-        <div className="mb-5">
-          <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
-          {holder !== '' && (
-            <p className="mt-2 text-xs text-ink-muted">
-              {tabLabel(tab, !canReadEveryOffice)} — {HOLDER_HINT[holder]}.
-            </p>
+        FILING TYPE is multi-select because it can be. STAGE is not, and
+        that is the wire rather than a choice: the five stages are two
+        endpoints and three filtering strategies — Pending Payment comes
+        from /applications, For Approval adds an assignment-status filter,
+        For Inspection a clearance-status filter, For Final Approval
+        neither, and the feeds sort by opposite rules. Ticking two would
+        mean merging, re-sorting and re-paging both, and until that is done
+        the "Showing N of M" line would be a lie. Agreed with the client as
+        its own piece of work.
+
+        Boxes for what takes several, radios for what takes one, so the
+        control says which it is before anybody presses it.
+      */}
+      <div className="lg:flex lg:items-start lg:gap-6">
+        <aside
+          className="mb-5 shrink-0 rounded-xl border border-line bg-white px-5 py-4 lg:mb-0 lg:w-60"
+          aria-label="Filters"
+        >
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+            Filters
+          </p>
+
+          <fieldset className="mb-4">
+            <legend className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+              Filing type
+            </legend>
+            <div className="space-y-1.5">
+              {typePills.map((o) => {
+                const checked = o.value === '' ? filingTypes.length === 0 : filingTypes.includes(o.value)
+
+                return (
+                  <label
+                    key={o.value}
+                    className="flex cursor-pointer items-center gap-2.5 text-sm text-ink"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleFilingType(o.value)}
+                      className="h-4 w-4 shrink-0 rounded border-input-border text-royal focus:ring-royal"
+                    />
+                    <span>{o.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="mb-4">
+            <legend className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+              Stage
+            </legend>
+            <div className="space-y-1.5">
+              {tabs.map((o) => {
+                /*
+                  For Final Approval against New only.
+
+                  A new filing's permit is released when the last clearance
+                  lands and nobody signs it afterwards, so the pair names
+                  work that does not exist.
+
+                  DISABLED, not hidden. `refreshReadiness` still parks a new
+                  filing here when BPLO's RA 11032 category was never
+                  confirmed — somebody has to set it before a permit is
+                  issued against a statutory deadline — and hiding the stage
+                  would put that filing out of reach from this screen, which
+                  is the bug fixed in this very queue today.
+                */
+                const impossible =
+                  o.value === 'final'
+                  && filingTypes.length > 0
+                  && filingTypes.every((t) => t === 'new')
+
+                return (
+                  <label
+                    key={o.value}
+                    className={`flex items-center gap-2.5 text-sm ${
+                      impossible ? 'cursor-not-allowed text-ink-muted' : 'cursor-pointer text-ink'
+                    }`}
+                    title={
+                      impossible
+                        ? 'A new filing is issued when its last clearance is approved, so none waits here.'
+                        : undefined
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="queue-stage"
+                      checked={o.value === tab}
+                      disabled={impossible}
+                      onChange={() => selectTab(o.value)}
+                      className="h-4 w-4 shrink-0 border-input-border text-royal focus:ring-royal"
+                    />
+                    <span>{o.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+
+          {/*
+            Pending Payment has no holder to ask about — nobody is assigned a
+            filing waiting on the applicant's money — so the group goes
+            rather than offering a narrowing that can only empty the list.
+          */}
+          {tab !== 'payment' && (
+            <fieldset>
+              <legend className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+                Officer in charge
+              </legend>
+              <div className="space-y-1.5">
+                {HOLDER_PILLS.map((o) => (
+                  <label
+                    key={o.value}
+                    className="flex cursor-pointer items-center gap-2.5 text-sm text-ink"
+                  >
+                    <input
+                      type="radio"
+                      name="queue-holder"
+                      checked={o.value === holder}
+                      onChange={() => selectHolder(o.value)}
+                      className="h-4 w-4 shrink-0 border-input-border text-royal focus:ring-royal"
+                    />
+                    <span>{o.label}</span>
+                  </label>
+                ))}
+              </div>
+              {holder !== '' && (
+                <p className="mt-2 text-xs text-ink-muted">{HOLDER_HINT[holder]}.</p>
+              )}
+            </fieldset>
           )}
-        </div>
-      )}
+        </aside>
+
+        <div className="min-w-0 flex-1">
 
       {claimMessage && (
         <p
@@ -1922,6 +2122,8 @@ export function QueuePage() {
                 key={item.key}
                 item={item}
                 ownPermit={!canReadEveryOffice}
+                /* Only while the list is mixed — see the prop's own note. */
+                showType={filingType === ''}
                 onClaim={claim}
                 onRelease={release}
                 claiming={claimingId === item.assignmentId}
@@ -1940,6 +2142,8 @@ export function QueuePage() {
           )}
         </>
       )}
+        </div>
+      </div>
     </div>
   )
 }

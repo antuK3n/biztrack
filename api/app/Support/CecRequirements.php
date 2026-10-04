@@ -73,7 +73,19 @@ final class CecRequirements
                 : 'The CEC you are renewing. Upload a scan of last year’s certificate; CENRO has no copy of one issued on paper.',
             'source' => $held !== null ? 'carried' : 'upload',
             'satisfied' => $held !== null || $uploaded !== null,
+            /*
+             * Required, like every other office requirement since 30
+             * September 2026. This sheet is a CEC renewal and this row is
+             * the certificate being renewed — there is nothing for CENRO
+             * to read without it.
+             */
+            'blocking' => true,
             'document' => $uploaded,
+            /*
+             * Last year's certificate, and the applicant may send more than
+             * one scan of it — a two-page certificate is two files.
+             */
+            'documents' => ChecklistSupport::uploadsAll($application, self::PREVIOUS_CEC)[self::PREVIOUS_CEC] ?? [],
             /*
              * The certificate number, when the system holds it. Not a document
              * row — a permit is not an attachment — so the screen prints the
@@ -82,6 +94,16 @@ final class CecRequirements
              */
             'reference' => $held?->permit_number,
         ]];
+    }
+
+    /**
+     * This sheet's one slot. Declared for ReferenceSeeder, like the others.
+     *
+     * @return list<string>
+     */
+    public static function slotCodes(): array
+    {
+        return [self::PREVIOUS_CEC];
     }
 
     /** Is `$code` this sheet's one slot? */

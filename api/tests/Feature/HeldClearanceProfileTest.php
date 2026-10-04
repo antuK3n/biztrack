@@ -57,10 +57,43 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
         'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 500000]],
     ])->assertCreated()->json('data.id');
 
+    /*
+     * Last year's Business Permit, so this filing has something to renew.
+     *
+     * A renewal without one is refused by the API — "Say which permit you are
+     * renewing … If it holds none, file a New Application instead" — the rule
+     * added after seven renewals of nothing reached the register.
+     */
+    $priorApp = App\Models\Application::create([
+        'business_id' => $businessId,
+        'applicant_user_id' => App\Models\User::where('email', 'owner@biztrack.local')->value('id'),
+        'application_type' => 'new',
+        'status' => 'approved',
+    ]);
+    $priorPermit = App\Models\Permit::create([
+        'application_id' => $priorApp->id,
+        'business_id' => $businessId,
+        'permit_type_id' => PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'),
+        'permit_number' => 'HELD-PRIOR-'.$businessId,
+        'issued_at' => now()->subYear(),
+        'valid_from' => now()->subYear(),
+        'valid_until' => now()->addDays(30),
+        'status' => 'active',
+    ]);
     $appId = test()->postJson('/api/v1/applications', [
         'business_id' => $businessId,
         'data_privacy_consent' => true,
-        'application_type' => 'new',
+        /*
+         * A RENEWAL, because handing in a certificate you already hold is
+         * only possible on one. `WorkflowService::startClearance` refuses
+         * `upload` on a new filing since 29 September 2026 — the LGU's rule
+         * that a business cannot hold these before it applies to BPLO.
+         *
+         * These tests are about held copies, not about which filing types
+         * may have them, so the fixture moves to where the feature lives.
+         */
+        'application_type' => 'renewal',
+        'prior_permit_id' => $priorPermit->id,
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
         'fee_profile' => [
             'gross_sales' => 2000000,

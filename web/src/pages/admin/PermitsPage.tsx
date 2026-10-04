@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
-import { businessName } from '../../lib/format'
+import { businessName, formatDate } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit, PermitRegisterRow } from '../../lib/types'
+import { BusinessMapPage } from './BusinessMapPage'
 import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
@@ -75,17 +77,25 @@ import {
  * buttons — an unsortable header that looked pressable would be a control that
  * appears to work.
  *
- * ── Revoke is still not on this screen ─────────────────────────────────────
+ * ── Revoke ─────────────────────────────────────────────────────────────────
  *
- * Unchanged, and still decided rather than unfinished. `PermitStatus::Revoked`
- * and `permits.revoked_at` / `revoked_reason` exist, nothing writes them, and
- * the live register holds no row in that state. A revoked permit means a
- * business is trading unlawfully — an enforcement act with a real-world
- * consequence, needing the City to say who may do it and on what grounds.
+ * On this screen since checklist item 23, for BPLO and the super admin only
+ * (`permit.revoke`) — Ken settled question A26's "who". It was held back
+ * until then on purpose: a revoked permit means a business is trading
+ * unlawfully, and a button with no audit, no notice and no public effect
+ * behind it would have documented an act nobody authorised. The server does
+ * all three now (WorkflowService::revokePermit), so the control exists, on
+ * rows that are in force, behind a dialog that names the permit and business
+ * and will not proceed without a reason.
  *
- * What DID change: the table now carries "Revoked on" and "Revocation reason"
- * as columns. The day a writer exists, a revoked permit reads as one rather
- * than rendering as an ordinary row whose status chip quietly turned red.
+ * ── Three things this screen answers besides the table ─────────────────────
+ *
+ *   Other offices   the five clearances as one view, apart from BPLO's own
+ *                   Mayor's Permits (checklist item 18) — an Office choice.
+ *   Retired         businesses removed from the register, hidden unless the
+ *                   Filter asks for them (checklist item 21).
+ *   Map             every business at its pin, by the state of its Mayor's
+ *                   Permit (checklist item 16) — BPLO and the super admin.
  */
 
 /** Rows per request. Matches Records and Owner Status. */
@@ -95,22 +105,54 @@ const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 300
 
 /**
- * The status filter, and why it is not simply the PermitStatus enum.
+ * The status filter — every state a permit can be in.
  *
- * Only the three states the register actually holds are offered. A pill for
- * Revoked would return an empty table on every press — and worse, it would
- * advertise a capability this system does not have, which is the same claim
- * the missing Revoke button is careful not to make. Add the pill in the same
- * change that adds the writer, not before.
+ * It offered three while nothing wrote Revoked, on the rule "add the option in
+ * the same change that adds the writer". This is that change, and Suspended —
+ * written since the business permit began being suspended when another office
+ * refuses — comes with it.
  */
-type StatusFilter = '' | 'active' | 'expired' | 'superseded'
+type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'revoked' | 'superseded'
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'expired', label: 'Expired' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'revoked', label: 'Revoked' },
   { value: 'superseded', label: 'Superseded' },
 ]
+
+/**
+ * The Office choice, which is an office's code or one of two groupings.
+ *
+ * `''` is the whole register, every office's sheet side by side — the long
+ * table the client asked for. `OTHER` is checklist item 18's "other permits in
+ * a separate view": BPLO's own table is the Mayor's Permit, and the five
+ * clearances the other offices issue are the second view, asked of the server
+ * as "every type but BUSINESS" rather than five requests.
+ */
+type OfficeChoice = OfficeCode | '' | typeof OTHER_OFFICES
+
+const OTHER_OFFICES = 'OTHER'
+
+/**
+ * Retired businesses — removed from the register, their certificates kept
+ * (checklist item 21). Hidden by default: a clerk working the register is
+ * working live businesses, and a retired one's permits are history.
+ */
+type RetiredFilter = 'hide' | 'include' | 'only'
+
+const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
+  { value: 'hide', label: 'Hidden' },
+  { value: 'include', label: 'Shown with the rest' },
+  { value: 'only', label: 'Only retired businesses' },
+]
+
+/** A permit that is in force — the only kind Revoke is offered on. */
+function revocable(permit: PermitRegisterRow): boolean {
+  return permit.status === 'active' || permit.status === 'suspended'
+}
 
 /**
  * Status tones, in the tints the other admin tables already use.
@@ -223,7 +265,18 @@ export function PermitsPage() {
   const department = useAuth((s) => s.user?.department?.code)
 
   const readsEveryOffice = permissions?.includes('application.view_any_office') ?? false
+  const canRevoke = permissions?.includes('permit.revoke') ?? false
   const ownOffice = permitCodeForDepartment(department)
+
+  /*
+   * A link can open this page already searching — the Business Map's "Find in
+   * register" does, with `?q=<permit no.>&office=all`, so the permit it names
+   * is found whichever office the reader would otherwise open on. Read once,
+   * as initial state; after that the controls own it.
+   */
+  const [params] = useSearchParams()
+  const linkedQuery = params.get('q') ?? ''
+  const linkedAllOffices = params.get('office') === 'all'
 
   /*
    * A reader who sees one office is locked to it. `null` falls back to the
@@ -232,22 +285,18 @@ export function PermitsPage() {
    */
   const locked: OfficeCode | null = readsEveryOffice ? null : ownOffice
 
-  const [search, setSearch] = useState('')
-  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState(linkedQuery)
+  const [query, setQuery] = useState(linkedQuery)
   const [status, setStatus] = useState<StatusFilter>('')
+  const [retired, setRetired] = useState<RetiredFilter>('hide')
   /*
-   * No issued-date range. The Filter panel carried a From / To pair over
-   * `issued_at` and the client took it out [1 October 2026].
-   *
-   * The register is already ordered by issuance, newest first, and the Sort
-   * menu offers that column in both directions — so the question the pair
-   * answered is one the table answers by scrolling, at the cost of two date
-   * inputs that are the only typing in a menu of choices.
-   *
-   * `issued_from` / `issued_to` remain on the API (see PermitController), so
-   * nothing server-side is lost and a reader that wants the range back needs
-   * only the control.
+   * Table or Map. The map is BPLO's and the super admin's (the endpoint is
+   * gated on the same `application.view_any_office`), so a single-office
+   * reader never gets the switch.
    */
+  const [mode, setMode] = useState<'table' | 'map'>('table')
+  const [issuedFrom, setIssuedFrom] = useState('')
+  const [issuedTo, setIssuedTo] = useState('')
   /*
    * ── Where the picker starts ──────────────────────────────────────────────
    *
@@ -269,13 +318,16 @@ export function PermitsPage() {
    * render the unfiltered table first and then narrow it, which is a visible
    * flash of the whole register and a wasted request.
    */
-  const [chosen, setChosen] = useState<OfficeCode | ''>(() => ownOffice ?? '')
+  const [chosen, setChosen] = useState<OfficeChoice>(() => (linkedAllOffices ? '' : (ownOffice ?? '')))
   const [sort, setSort] = useState<Sort | null>(null)
   const [page, setPage] = useState(1)
 
   // What the table is actually showing: the reader's own office when they have
   // one, otherwise whatever the picker says.
-  const office: OfficeCode | '' = locked ?? chosen
+  const choice: OfficeChoice = locked ?? chosen
+  // The columns to draw. The Other offices view is the register minus the
+  // Mayor's Permit, which has no sheet, so it draws the register's columns.
+  const office: OfficeCode | '' = choice === OTHER_OFFICES ? '' : choice
 
   /*
    * Which row's certificate is being fetched, and what went wrong if it did.
@@ -296,19 +348,32 @@ export function PermitsPage() {
   const [liftReason, setLiftReason] = useState('')
   const [liftBusy, setLiftBusy] = useState(false)
   const [liftError, setLiftError] = useState<string | null>(null)
+  /*
+   * The permit being revoked, or null. Whole row for the same reason as
+   * `lifting`: the dialog names the certificate and the business, so the
+   * officer confirms the row they meant rather than an id.
+   */
+  const [revoking, setRevoking] = useState<PermitRegisterRow | null>(null)
+  const [revokeReason, setRevokeReason] = useState('')
+  const [revokeBusy, setRevokeBusy] = useState(false)
+  const [revokeError, setRevokeError] = useState<string | null>(null)
 
   const { data, loading, error, reload } = useAsync(
     () =>
       permits.register({
         q: query || undefined,
         status: status || undefined,
-        permit_type: office || undefined,
+        permit_type: choice === OTHER_OFFICES ? undefined : choice || undefined,
+        exclude_permit_type: choice === OTHER_OFFICES ? 'BUSINESS' : undefined,
+        retired,
+        issued_from: issuedFrom || undefined,
+        issued_to: issuedTo || undefined,
         sort: sort?.key,
         dir: sort?.dir,
         page,
         per_page: PAGE_SIZE,
       }),
-    [query, status, office, sort?.key, sort?.dir, page],
+    [query, status, choice, retired, issuedFrom, issuedTo, sort?.key, sort?.dir, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -329,14 +394,15 @@ export function PermitsPage() {
     setPage(1)
   }
 
-  function selectOffice(next: OfficeCode | '') {
+  function selectOffice(next: OfficeChoice) {
     setChosen(next)
     setPage(1)
     /*
      * A sort on a column that is about to disappear would keep ordering the
-     * table by something the reader can no longer see. Only office columns
-     * vanish and none of them is sortable, so the sort always survives — the
-     * page reset is the whole of what changing office costs.
+     * table by something the reader can no longer see. Choosing the Mayor's
+     * Permit drops Valid until and the certificate column, both sortable, so
+     * the render below clears a sort on either rather than this handler
+     * guessing which columns the next office keeps.
      */
   }
 
@@ -350,8 +416,11 @@ export function PermitsPage() {
    */
   const narrowed = [
     status !== '',
+    issuedFrom !== '',
+    issuedTo !== '',
     query !== '',
     locked === null && chosen !== '',
+    retired !== 'hide',
   ].filter(Boolean).length
 
   /*
@@ -367,12 +436,33 @@ export function PermitsPage() {
    * issued first — the menu's first entry, and a true description rather than
    * a selection the page had to invent on arrival.
    */
+  const columns = useMemo(() => columnsFor(office), [office])
+
+  /*
+   * Only the orderings whose column is on screen. BPLO's own table has no
+   * Valid until (checklist item 17), and an "Expiring soonest" that reordered
+   * the rows by a date nobody can see reads as a sort that did nothing — the
+   * reason the BAN ordering left with the BAN column.
+   */
+  const sortOptions = SORT_OPTIONS.filter((o) => columns.some((c) => c.sort === o.key))
+
+  /*
+   * A sort on a column that has just left the table (BPLO switching to its own
+   * office while sorted by expiry) is dropped rather than kept ordering the
+   * rows by something invisible. Done while rendering, which is React's
+   * pattern for state that follows other state, rather than in an effect that
+   * would draw one frame of the wrong order first.
+   */
+  if (sort !== null && !columns.some((c) => c.sort === sort.key)) {
+    setSort(null)
+  }
+
   const sortValue = sort
-    ? (SORT_OPTIONS.find((o) => o.key === sort.key && o.dir === sort.dir)?.value ?? '')
+    ? (sortOptions.find((o) => o.key === sort.key && o.dir === sort.dir)?.value ?? '')
     : SORT_OPTIONS[0].value
 
   function selectSort(value: string) {
-    const picked = SORT_OPTIONS.find((o) => o.value === value)
+    const picked = sortOptions.find((o) => o.value === value)
     if (!picked) return
     /*
      * The default ordering is expressed as NO sort rather than as
@@ -424,38 +514,60 @@ export function PermitsPage() {
     }
   }
 
-  const columns = useMemo(() => columnsFor(office), [office])
   const rows = data?.data ?? []
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
 
   const filterLabel = STATUS_FILTERS.find((f) => f.value === status)?.label ?? 'All'
-  const officeLabel = office === '' ? 'every office' : officeOf(office)
+  const officeLabel =
+    choice === OTHER_OFFICES ? 'every office but BPLO' : office === '' ? 'every office' : officeOf(office)
+
+  /** Find a permit the map pointed at: back to the table, the whole register, searched. */
+  function findInRegister(permitNumber: string) {
+    setMode('table')
+    setChosen('')
+    setStatus('')
+    setRetired('include')
+    setSearch(permitNumber)
+    setQuery(permitNumber)
+    setPage(1)
+  }
+
+  async function confirmRevoke() {
+    if (revoking === null || revokeBusy || revokeReason.trim() === '') return
+    setRevokeBusy(true)
+    setRevokeError(null)
+    try {
+      await permits.revoke(revoking.id, revokeReason.trim())
+      closeRevoke()
+      reload()
+    } catch (err) {
+      setRevokeError(toApiError(err).message)
+    } finally {
+      setRevokeBusy(false)
+    }
+  }
+
+  function closeRevoke() {
+    setRevoking(null)
+    setRevokeReason('')
+    setRevokeError(null)
+  }
   const sortedColumn = sort ? columns.find((c) => c.sort === sort.key)?.label : null
 
   return (
     <div>
       <PageTitle
         right={
+          /* The table's controls; the map carries its own, so none of these would act on it. */
+          mode === 'map' && readsEveryOffice ? undefined : (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
             {/*
               A placeholder is not an accessible name — it disappears on the
               first keystroke — so the field carries a real label, and that
-              label names EVERYTHING `q` matches.
-
-              The PLACEHOLDER no longer tries to. It read "Permit no., BAN,
-              business, owner or tracking ID…", which is forty-six characters
-              in a 320px box: it was clipped mid-list on the screen it was
-              written for, so the reader got "…business, owner or tracki" and
-              could not tell whether the sixth thing they wanted to search by
-              was in the part they could not see.
-
-              The list is still told, twice, in the two places it is wanted:
-              here for a screen reader, and in the empty state — "Search
-              matches the permit number, the BAN, the business name, the
-              owner, the tracking ID and the permit type" — which is the
-              moment a correct query looks like missing data and the only
-              moment the full list changes what the reader does next.
+              label names EVERYTHING `q` matches. The list grew with the table:
+              a box that shows a value it will not match makes a correct query
+              look like missing data.
             */}
             <label htmlFor="permits-search" className="sr-only">
               Search permits by permit number, BAN, business name, owner, tracking ID or permit type
@@ -465,7 +577,7 @@ export function PermitsPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search permits…"
+              placeholder="Permit no., BAN, business, owner or tracking ID…"
               className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
             {/*
@@ -484,7 +596,7 @@ export function PermitsPage() {
             <SortFilter
               sort={{
                 value: sortValue,
-                options: SORT_OPTIONS.map(({ value, label }) => ({ value, label })),
+                options: sortOptions.map(({ value, label }) => ({ value, label })),
                 onChange: selectSort,
               }}
               filter={{
@@ -501,12 +613,35 @@ export function PermitsPage() {
                         options: [
                           { value: '', label: 'All offices — every column' },
                           ...OFFICES.map((o) => ({ value: o.code, label: `${o.office} — ${o.name}` })),
+                          /*
+                           * Last, after the six, because it is a grouping of
+                           * five of them — read after the list it summarises.
+                           */
+                          { value: OTHER_OFFICES, label: 'Other offices — every permit but the Mayor’s' },
                         ],
-                        onChange: (v: string) => selectOffice(v as OfficeCode | ''),
+                        onChange: (v: string) => selectOffice(v as OfficeChoice),
                       },
                     ]
                   : []),
+                {
+                  label: 'Retired businesses',
+                  value: retired,
+                  options: RETIRED_FILTERS,
+                  onChange: (v: string) => {
+                    setRetired(v as RetiredFilter)
+                    setPage(1)
+                  },
+                },
               ]}
+              dateRange={{
+                from: issuedFrom,
+                to: issuedTo,
+                onChange: (from: string, to: string) => {
+                  setIssuedFrom(from)
+                  setIssuedTo(to)
+                  setPage(1)
+                },
+              }}
             />
             <button
               type="button"
@@ -522,10 +657,46 @@ export function PermitsPage() {
               Refresh
             </button>
           </span>
+          )
         }
       >
         Permits
       </PageTitle>
+
+      {/*
+        Table or Map, for the two readers the map is for. A tab strip in the
+        style the Analytics screens use, with the selected view marked by
+        `aria-pressed` as well as fill, so the choice is not colour alone.
+      */}
+      {readsEveryOffice && (
+        <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
+          {(
+            [
+              { value: 'table', label: 'Table' },
+              { value: 'map', label: 'Map' },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={mode === tab.value}
+              onClick={() => setMode(tab.value)}
+              className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
+                mode === tab.value
+                  ? 'border-royal bg-royal text-white'
+                  : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {mode === 'map' && readsEveryOffice ? (
+        <BusinessMapPage embedded onFindInRegister={findInRegister} />
+      ) : (
+      <>
 
 
       {/*
@@ -730,6 +901,27 @@ export function PermitsPage() {
                         The permit number is in the accessible name for the
                         reason the View button beside it gives.
                       */}
+                      {/*
+                        ── Revoke, on rows that are in force ─────────────────
+
+                        Checklist item 23, for BPLO and the super admin. Drawn
+                        only on Active and Suspended rows — an expired or
+                        superseded certificate has already stopped being valid,
+                        and the server refuses to revoke it — and only for a
+                        reader holding `permit.revoke`. Red, because it is the
+                        destructive act on this row (DESIGN.md, Red Means
+                        Stop); the dialog behind it is the confirmation.
+                      */}
+                      {canRevoke && revocable(permit) && (
+                        <button
+                          type="button"
+                          onClick={() => setRevoking(permit)}
+                          aria-label={`Revoke ${permit.permit_number}`}
+                          className="ml-2 rounded-full border border-s-red px-4 py-1.5 text-xs font-semibold text-s-red hover:bg-s-red hover:text-white"
+                        >
+                          Revoke
+                        </button>
+                      )}
                       {permit.status === 'suspended' && (
                         <button
                           type="button"
@@ -833,6 +1025,72 @@ export function PermitsPage() {
             </div>
           )}
 
+          {revoking !== null && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="revoke-heading"
+                aria-describedby="revoke-consequence"
+                className="w-full max-w-md rounded-xl bg-white p-6 shadow-raised"
+              >
+                <h2 id="revoke-heading" className="text-base font-bold text-ink">
+                  Revoke {revoking.permit_number}?
+                </h2>
+                {/*
+                  The certificate and the business by name, then what happens
+                  — each consequence once. An officer confirming an enforcement
+                  act should not have to trust that they clicked the row they
+                  meant, or guess who is told.
+                */}
+                <p id="revoke-consequence" className="mt-2 text-sm leading-relaxed text-ink-secondary">
+                  {revoking.permit_type?.name ?? 'This permit'} for{' '}
+                  <span className="font-semibold text-ink">{businessName(revoking.business)}</span> stops
+                  being valid today. The owner is notified with your reason, and anyone who scans the
+                  permit’s QR code sees it as revoked. This cannot be undone.
+                </p>
+                <label className="mt-4 block">
+                  <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">
+                    Reason for revoking
+                  </span>
+                  <textarea
+                    value={revokeReason}
+                    onChange={(e) => setRevokeReason(e.target.value)}
+                    rows={3}
+                    aria-required="true"
+                    className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                  />
+                </label>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Recorded in the audit log against your account.
+                </p>
+                {revokeError !== null && (
+                  <p role="alert" className="mt-2 text-xs font-medium text-s-red">
+                    {revokeError}
+                  </p>
+                )}
+                <div className="mt-5 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeRevoke}
+                    className="rounded-full border border-line px-5 py-2 text-sm font-semibold text-ink hover:bg-shell-deep"
+                  >
+                    Cancel
+                  </button>
+                  {/* aria-disabled, never disabled (AGENTS.md §6.2). */}
+                  <button
+                    type="button"
+                    aria-disabled={revokeBusy || revokeReason.trim() === '' || undefined}
+                    onClick={confirmRevoke}
+                    className="rounded-full bg-s-red px-5 py-2 text-sm font-semibold text-white hover:brightness-110 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  >
+                    {revokeBusy ? 'Revoking…' : 'Revoke permit'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
             <div>
               {/*
@@ -843,7 +1101,12 @@ export function PermitsPage() {
               <p role="status" aria-live="polite" className="text-sm text-ink-muted">
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
-                {office !== '' && ` issued by ${officeOf(office)}`}
+                {choice === OTHER_OFFICES
+                  ? ' issued by every office but BPLO'
+                  : office !== '' && ` issued by ${officeOf(office)}`}
+                {retired === 'only' && ' held by retired businesses'}
+                {issuedFrom && ` issued from ${formatDate(issuedFrom)}`}
+                {issuedTo && ` issued up to ${formatDate(issuedTo)}`}
                 {query && ' matching your search'}
               </p>
               <p className="mt-1 text-xs text-ink-muted">
@@ -859,6 +1122,7 @@ export function PermitsPage() {
                   : 'Ordered by issue date, newest first.'}
                 {office === '' &&
                   ' Every office’s form is shown; pick an office above to see only its own columns.'}
+                {retired === 'hide' && ' Retired businesses are hidden.'}
                 {locked !== null &&
                   ` These are ${officeOf(locked)}’s certificates — the ones filed with this office.`}
               </p>
@@ -892,6 +1156,8 @@ export function PermitsPage() {
             </div>
           </div>
         </ProtoCard>
+      )}
+      </>
       )}
     </div>
   )

@@ -416,44 +416,33 @@ test.describe('Other Requirements list controls', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toContainText('oldest first')
   })
 
-  test('a dialog waiting on an answer says so when pressed, rather than greying out', async ({ page }) => {
+  test('a dialog waiting on an answer keeps its Confirm reachable', async ({ page }) => {
     /*
-     * ---- What this test used to assert, and why it asserts more now ------
+     * AGENTS.md §6.2, and ProtoModal's own comment argued for it twenty lines
+     * above the line breaking it: a `disabled` button leaves the tab order, so
+     * a screen-reader user never reaches the one control that would tell them
+     * the dialog is waiting on something, and a sighted user gets a greyed
+     * button with no stated reason (WCAG 3.3.1/3.3.3).
      *
-     * It held ProtoModal's confirm to `aria-disabled` plus a place in the tab
-     * order: AGENTS.md 6.2, because a `disabled` button leaves the tab order
-     * and a screen-reader user never reaches the one control that would tell
-     * them the dialog is waiting on something.
-     *
-     * This dialog has since moved to the stronger of the two patterns the
-     * component documents - `confirmDescribedBy`. Confirm is not merely
-     * reachable, it is PRESSABLE, and pressing it with the box empty names
-     * what is missing (WCAG 3.3.1 identify the error, 3.3.3 suggest the fix).
-     * A greyed button with no stated cause satisfies neither; it sends the
-     * reader back to the letter hunting for what they left out.
-     *
-     * The `aria-disabled` contract is still the shared component's, and is
-     * still asserted - on the dialogs that use it, in confirm-dialogs.spec.ts.
+     * This is the confirm button of EVERY dialog in the app — Edit Profile,
+     * Change Status, Deactivate, Reassign, Add officer — so it was the same
+     * dead end on each. Asserted here on the requirement reason dialog, which
+     * is one instance of it; the fix is in the shared component.
      */
     await page.locator('tbody tr', { hasText: 'Water potability test' }).getByRole('button').click()
     await page.getByRole('button', { name: 'Mark Rejected' }).click()
 
-    const confirm = page.getByRole('button', { name: /^Yes, mark/ })
+    const confirm = page.getByRole('button', { name: 'Save status' })
     await expect(confirm).toBeVisible()
 
-    // Reachable, pressable, and native `disabled` nowhere near it.
+    // Announced as unavailable, and still in the tab order to say why.
+    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
     expect(await confirm.evaluate((el) => el.hasAttribute('disabled'))).toBe(false)
     expect(await confirm.evaluate((el) => (el as HTMLElement).tabIndex)).toBe(0)
-    await expect(confirm).toBeEnabled()
 
-    // Pressed with nothing written: the dialog stays, and says why.
-    await confirm.click()
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await expect(page.getByText(/Say why first/i)).toBeVisible()
-
-    // Answer it and the warning goes with the answer.
+    // Answer the question and it becomes pressable.
     await page.locator('div.fixed.inset-0 textarea').fill('The scan is cut off at the seal.')
-    await expect(page.getByText(/Say why first/i)).toHaveCount(0)
+    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
   })
 
   test('an empty filter blames the filter, not the register', async ({ page }) => {
@@ -603,9 +592,9 @@ const OWNER_OFFICES = [
   { code: 'BPLO', name: 'Business Permits and Licensing Office' },
   { code: 'CHO', name: 'City Health Office' },
   { code: 'BFP', name: 'Bureau of Fire Protection' },
-  { code: 'OBO', name: 'Office of the Building Official' },
-  { code: 'CENRO', name: 'City Environment and Natural Resources Office' },
-  { code: 'CPDO', name: 'City Planning and Development Office (Zoning)' },
+  { code: 'OBO', name: 'Office of the Local Building Official' },
+  { code: 'CENRO', name: 'City Environmental and Natural Resources Office' },
+  { code: 'CPDO', name: 'Planning/Zoning Office' },
   // Retired 6 September 2026; its old requirements are still in the register.
   { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
 ]

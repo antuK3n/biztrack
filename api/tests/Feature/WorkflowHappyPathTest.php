@@ -125,6 +125,12 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
         // Nobody new: applying opened a form, it did not file a permit.
         expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe($routed);
 
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],
@@ -239,18 +245,9 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
      * the suite runs, where `toBe(365)` only held between January and the end
      * of the year and `toBe(126)` would hold on one day.
      *
-     * The five clearances end on 31 DECEMBER of the year they were issued, and
-     * that is asserted just below. They used to keep 365 days — renew any time,
-     * continue an unexpired term — until the client asked for a fixed year-end:
-     * *"ang expiration ay always end of a year, so laging December 31, 202X"*
-     * [1 October 2026].
-     *
-     * Put to them with the consequence — a certificate expiring on 31 December
-     * leaves its holder uncovered for the twenty days of January in which the
-     * LGU accepts renewals — they kept 20 January for the business permit and
-     * took 31 December for the rest. The window is Sec. 2N's and Sec. 2N is
-     * about the business permit; the clearances have no window to stay inside
-     * and so no gap to leave.
+     * The five clearances keep 365 days — they renew any time and continue an
+     * unexpired term — and that is asserted where they are issued rather than
+     * bundled in here.
      */
     /*
      * `->toDateString()` on both sides: `valid_until` is a DATE CAST on the
@@ -264,20 +261,6 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     );
     expect($businessPermit->valid_until->format('m-d'))
         ->toBe('01-20', 'the business permit year no longer ends on 20 January');
-
-    /*
-     * And every other certificate ends on the last day of the year it was
-     * issued in — the client's rule, and the split described above.
-     */
-    $clearances = $permits->where('permit_type_id', '!=', $businessPermit->permit_type_id);
-    expect($clearances)->toHaveCount(5);
-
-    foreach ($clearances as $clearance) {
-        expect($clearance->valid_until->format('m-d'))
-            ->toBe('12-31', 'a clearance no longer ends on 31 December')
-            ->and($clearance->valid_until->year)
-            ->toBe($clearance->valid_from->year, 'a clearance ran past the year it was issued in');
-    }
 });
 
 it('routes one queue item per office, and only as that office’s permit is filed', function () {
@@ -340,6 +323,12 @@ it('routes one queue item per office, and only as that office’s permit is file
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1);
 
     foreach (array_keys(HAPPY_PATH_OFFICE) as $code) {
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],

@@ -117,6 +117,27 @@ it('counts an inspection by every office towards the combined total', function (
     expect($after['passed'])->toBe($before['passed'] + count($offices));
 });
 
+it('counts a rescheduled visit as scheduled and a cancelled one not at all', function () {
+    $before = DashboardAnalytics::build()['inspections']['combined'];
+    $application = Application::whereNull('deleted_at')->firstOrFail();
+    $office = Department::where('code', inspectingOfficeCodes()[0])->firstOrFail();
+
+    foreach ([InspectionStatus::Rescheduled, InspectionStatus::Cancelled] as $status) {
+        Inspection::create([
+            'application_id' => $application->id,
+            'department_id' => $office->id,
+            'status' => $status,
+            'scheduled_at' => CarbonImmutable::now()->addDay(),
+        ]);
+    }
+
+    $after = DashboardAnalytics::build()['inspections']['combined'];
+
+    // One more owed visit (the rescheduled one); the cancelled one is not work.
+    expect($after['scheduled'])->toBe($before['scheduled'] + 1)
+        ->and($after['completed'])->toBe($before['completed']);
+});
+
 /**
  * Backdate a copy of a real filing to a date the old 1-January cutoff excluded.
  *

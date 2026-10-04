@@ -8,7 +8,9 @@ import {
   SortFilter,
   type SortFilterOption,
 } from '../../components/ui/Proto'
-import { businessName, formatDate, formatRelative } from '../../lib/format'
+import { ClearanceCorrections } from './ClearanceCorrections'
+import { MainFormCorrections } from './MainFormCorrections'
+import { businessName, formatDateTime } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
 import {
   AMENDMENT_NOTE,
@@ -34,6 +36,7 @@ import type {
   ApplicationStatus,
   Inspection,
   InspectionResult,
+  PermitStatusChange,
   PermitType,
   ServerClearanceStatus,
 } from '../../lib/types'
@@ -326,6 +329,19 @@ function permitChip(
   const own = appStateChip(appStatus)
   if (own) return own
 
+  /*
+   * ── The Mayor's Permit before BPLO has accepted the form ───────────────
+   *
+   * Checked BEFORE the not-started branch below, because that branch is
+   * right about the five clearances and wrong about this one. See the note
+   * above the function.
+   */
+  if (permitCode === 'BUSINESS' && (!permitStatus || permitStatus === 'not_started')) {
+    const meta = applicationStatusMeta(appStatus)
+
+    return { tone: meta.tone, label: meta.label }
+  }
+
   // No pivot row: the permit is not on this filing. Nothing to report.
   // The same words and the same colour as a permit that IS on the filing and
   // has not been begun — because to the applicant it is the same situation.
@@ -375,6 +391,17 @@ function permitChip(
     }
   }
 
+  /*
+   * No special case for the Mayor's Permit at `approved`, and that is now
+   * deliberate rather than an omission.
+   *
+   * One stood here for an hour on 26 September 2026 labelling it "Permit
+   * Released" to match the rail. The client took the opposite and better
+   * view: *"Approved does not mean it is Completed, and it is similar to the
+   * other permits where Approved means the permit was released already."*
+   * So the FILING moved to "Approved" instead, and this row falls through to
+   * `clearanceStatusMeta` with the other five — one word, six rows, no case.
+   */
   if (permitStatus === 'for_inspection' && office) {
     /*
      * Two outcomes of a visit, and the tones are borrowed from the two statuses
@@ -485,6 +512,139 @@ function RejectionNote({
       >
         Open this application
       </Link>
+    </div>
+  )
+}
+
+/**
+ * "BPLO sent this back" — the returned filing's own line on Track.
+ *
+ * ── Why the card needed one ─────────────────────────────────────────────────
+ *
+ * A returned filing looked exactly like a filing under review: a status pill
+ * and a count of approved permits. The one difference that matters — the
+ * office is waiting on YOU — was visible only after opening it.
+ *
+ * `RejectionNote` directly above solves the same shape of problem for the
+ * other status an applicant must act on, so this follows it rather than
+ * inventing a second treatment.
+ *
+ * ── It does not name the fields, and that is not laziness ───────────────────
+ *
+ * `ApplicationListItem` carries no assignments — the list payload is lean on
+ * purpose, since it is fetched for every filing the applicant has — so the
+ * pointer that names the returned fields is not here to read. Fattening the
+ * list to print them on a card would buy a sentence and cost every row.
+ *
+ * The card's job is to say YOU are the hold-up and get them one click from
+ * the boxes. The status page names each field beside its own input, which is
+ * where naming them is actually useful.
+ */
+function ReturnedNote({
+  app,
+  onCorrect,
+}: {
+  app: ApplicationListItem
+  /** Open the correction dialog here, rather than navigating to it. */
+  onCorrect: () => void
+}) {
+  return (
+    <div className="mt-2 rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-4 py-3">
+      <p className="text-sm font-bold text-ink">BPLO sent this back for correction</p>
+      <p className="mt-0.5 text-sm text-ink-secondary">
+        Open it to see which fields to correct, then resubmit.
+      </p>
+      {/*
+        Opens here, not on the filing's page. The client, 30 September 2026:
+        the page behind the dialog was doing nothing the dialog did not.
+      */}
+      <button
+        type="button"
+        onClick={onCorrect}
+        aria-label={`Fix and resubmit the application for ${businessName(app.business)}`}
+        className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+      >
+        Fix and resubmit →
+      </button>
+    </div>
+  )
+}
+
+/**
+ * One or more office clearances sent back, on a collapsed card.
+ *
+ * `ReturnedNote` above, for the other five offices. The client asked for it
+ * on 30 September 2026 — *"I also want it to have something like this, not
+ * just for BPLO returns"* — and the reasoning that put the BPLO one here
+ * carries across whole: a card showing a status pill and a permit count
+ * looks the same whether an office is working on the filing or waiting on
+ * the applicant, and that is the one difference worth seeing from the list.
+ *
+ * Separate from `ReturnedNote` because the repair is somewhere else. A
+ * returned form is fixed on the status page where the correction boxes are;
+ * a returned clearance is fixed on that office's own sheet.
+ *
+ * With more than one returned, the link goes to the clearance stage rather
+ * than picking one of them — the applicant has two repairs to make and the
+ * grid is where both are reachable.
+ */
+function ReturnedClearanceNote({
+  app,
+  returned,
+  onCorrect,
+}: {
+  app: ApplicationListItem
+  /** The clearances sitting at `returned`; never empty. */
+  returned: ApplicationListItem['permit_types']
+  /** Open the correction dialog here, rather than navigating to it. */
+  onCorrect: (code: string) => void
+}) {
+  const one = returned.length === 1 ? returned[0] : null
+
+  return (
+    <div className="mt-2 rounded-lg border-l-4 border-s-rose bg-s-rose-tint/40 px-4 py-3">
+      <p className="text-sm font-bold text-ink">
+        {/*
+          Refused reads differently from returned, and the difference
+          matters to the applicant: a refusal suspends their Business
+          Permit while it stands. Both are answered the same way.
+        */}
+        {one !== null
+          ? `${one.name} was ${one.status === 'rejected' ? 'refused' : 'sent back for correction'}`
+          : `${returned.length} clearances need your attention`}
+      </p>
+      <p className="mt-0.5 text-sm text-ink-secondary">
+        {/*
+          The list payload has no room for the officer's words — see the
+          note on ReturnedNote for why it is not widened — so this says
+          where they are rather than inventing a summary of them.
+        */}
+        Open{' '}
+        {one !== null ? 'the form' : 'them'} to see what to correct, then resubmit.
+      </p>
+      {/*
+        Opens here, not on another page. One returned clearance is answered
+        in the dialog; several go to the stage, because the applicant has
+        two repairs to make and the grid is where both are reachable.
+      */}
+      {one !== null ? (
+        <button
+          type="button"
+          onClick={() => onCorrect(one.code)}
+          aria-label={`Fix and resubmit ${one.name} for ${businessName(app.business)}`}
+          className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+        >
+          Fix and resubmit →
+        </button>
+      ) : (
+        <Link
+          to={`/applications/${app.id}/clearances`}
+          aria-label={`Fix and resubmit the clearances for ${businessName(app.business)}`}
+          className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+        >
+          Fix and resubmit →
+        </Link>
+      )}
     </div>
   )
 }
@@ -834,6 +994,12 @@ function StatusGuide() {
           The detours, under their own heading and off the rail. See Detour.
           Per flow, because For Final Approval is a STEP on a renewal and not an
           interruption — which is what put it under this heading by mistake.
+
+          The list is the derived ones PLUS Suspended, and the difference is
+          worth knowing before reading `statusDetoursFor` and finding its
+          output one short: that function returns ApplicationStatuses, and a
+          suspension happens to the PERMIT. It could not have produced this row
+          however correct it is.
         */}
         <h3 className="mt-4 border-t border-line pt-3 text-xs font-bold uppercase tracking-wide text-ink-secondary">
           If something interrupts it
@@ -842,6 +1008,32 @@ function StatusGuide() {
           {statusDetoursFor(flow).map((status) => (
             <Detour key={status} status={status} />
           ))}
+          {/*
+            Last, because it is the only one that can arrive after everything
+            has gone right — and NEW filings only: a suspension follows one of
+            the other permits being refused, which an amendment never gathers.
+
+            Red, matching the notice PermitDetailPage prints on a suspended
+            certificate — NOT the purple a suspended BUSINESS wears in
+            BUSINESS_STATUS wears. That one is an admin action against the whole
+            account for a different reason, and one word in two colours is the
+            confusion this row exists to prevent.
+          */}
+          {flow === 'new' && (
+            <li className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-1 sm:flex-nowrap">
+              <span aria-hidden="true" className="shrink-0 pt-0.5 text-ink-muted">
+                <ChevronRightIcon size={14} />
+              </span>
+              <span
+                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${TONE_CLASSES.danger}`}
+              >
+                Suspended
+              </span>
+              <span className="text-[13px] leading-snug text-ink-secondary">
+                A rejected permit puts your Mayor&rsquo;s Permit on hold until it is settled.
+              </span>
+            </li>
+          )}
         </ul>
       </div>
     </section>
@@ -853,15 +1045,72 @@ function ApplicationRow({
   permitTypesByCode,
   detail,
   onExpand,
+  onChanged,
 }: {
   app: ApplicationListItem
   permitTypesByCode: Map<string, PermitType>
   detail: Application | undefined
   onExpand: (id: number) => void
+  /** Re-read this filing after the applicant has resubmitted something. */
+  onChanged: () => void
 }) {
+  /*
+   * Which permit timelines are open, as "<application id>:<permit code>".
+   *
+   * A Set rather than one open row: the applicant comparing why two permits
+   * are behind should not have the first close when they open the second.
+   * Not persisted — it is a reading position, not an answer.
+   */
+  const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
+  const toggleHistory = (key: string) =>
+    setOpenHistory((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+
+      return next
+    })
   const [open, setOpen] = useState(false)
   const pending = app.status === 'pending_payment'
   const rejected = app.status === 'rejected'
+  /*
+   * The clearances an office has sent back.
+   *
+   * BUSINESS is excluded: it is the filing's outcome rather than one of the
+   * five, and a returned MAIN FORM is `app.status`, which `ReturnedNote`
+   * already answers. Counting it here would put two rose banners on one card
+   * saying the same thing twice.
+   */
+  /*
+   * Clearances waiting on the applicant: returned, and — since 30 September
+   * 2026 — refused. Both are answered the same way, by changing what the
+   * office asked about and sending the sheet back, and both now carry the
+   * pointer that says which rows those are.
+   *
+   * BUSINESS is excluded: it is the filing's outcome rather than one of the
+   * five, and a returned MAIN FORM is `app.status`, which `ReturnedNote`
+   * already answers.
+   */
+  const returnedClearances = (app.permit_types ?? []).filter(
+    (pt) =>
+      (pt.status === 'returned' || pt.status === 'rejected') && pt.code !== 'BUSINESS',
+  )
+  /*
+   * Which returned clearance the applicant is answering, or null.
+   *
+   * Held here rather than in the URL: the dialog belongs to this card, and
+   * the tracking page shows every filing the applicant has. A query
+   * parameter would have to name the filing as well as the permit to say
+   * which card it meant.
+   */
+  const [correcting, setCorrecting] = useState<string | null>(null)
+  /*
+   * And the MAIN FORM's own return, which is a different dialog: BPLO names
+   * fields on the application, not documents on an office checklist.
+   *
+   * Needs the DETAIL payload — the pointer is on the assignments — so the
+   * press asks for it if the card has not already fetched it.
+   */
+  const [correctingForm, setCorrectingForm] = useState(false)
   /*
    * ── The block stopped being about payment ─────────────────────────────────
    *
@@ -964,6 +1213,31 @@ function ApplicationRow({
       : [{ code: '—', name: 'Business Permit', status: null, status_label: null }]
 
   /*
+   * Counted off `rows` — the very permits listed below — rather than off
+   * `otherPermitProgress`, which excludes the business permit and counts only
+   * the required clearances. Both are correct about different things, and the
+   * one this badge needs is the one the reader can check by looking: a card
+   * showing six rows with one Approved must not say "0 of 5".
+   */
+  const approvedCount = rows.filter((pt) => pt.status === 'approved').length
+  /**
+   * What the badge says: how many of this filing's permits are approved.
+   *
+   * On EVERY card, open or closed, whatever the filing's status. Client,
+   * 26 September 2026: *"i told you to change all of those to 'n of 6
+   * approved'."*
+   *
+   * An earlier attempt showed the count only after payment and kept the
+   * status word before it, reasoning that "0 of 6 approved" says nothing
+   * about whether a filing is new, returned or rejected. That is true and it
+   * was not the instruction; the statuses it was protecting are all still
+   * legible on the card — a returned filing carries its note, a rejected one
+   * its rejection panel — and the count is what the client wants read at a
+   * glance down a list.
+   */
+  const permitCount = `${approvedCount} of ${rows.length} approved`
+
+  /*
    * Has at least one office already been and gone?
    *
    * Asked of the DATA, not of the chip labels: a boolean derived from
@@ -990,11 +1264,21 @@ function ApplicationRow({
   return (
     <li className="space-y-3">
       <div className="flex items-stretch overflow-hidden rounded-xl bg-white shadow-card">
+        {/*
+          Client, 26 September 2026: *"make even the business title box
+          reactive too, just like the other boxes."* It has always been a
+          button — the triangle says so — and it has never looked like one.
+
+          The same tint and the same `cursor-pointer` the permit rows use, so
+          the card and its rows answer a hover the same way. `focus-visible`
+          rather than `focus`, so a keyboard user gets the ring and a mouse
+          user does not get one on every click.
+        */}
         <button
           type="button"
           onClick={toggle}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-5 px-6 py-5 text-left"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-5 px-6 py-5 text-left transition-colors hover:bg-royal-tint/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
         >
           <Triangle open={open} />
           <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
@@ -1031,7 +1315,12 @@ function ApplicationRow({
             className={`${badgeCls} ${TONE_CLASSES[meta.tone]} border-l hover:brightness-95`}
           >
             <span className="text-center leading-tight">
-              {meta.label}
+              {permitCount}
+              {/*
+                The action stays. This badge is a link to the payment page and
+                the only route to it on this screen — the count replaced the
+                LABEL above it, not this.
+              */}
               <span className="mt-0.5 block text-[11px] font-bold uppercase tracking-wide underline underline-offset-2">
                 Pay online
               </span>
@@ -1060,11 +1349,109 @@ function ApplicationRow({
             * a red badge beside the rejection note is the clearest the row has
             * ever been about what happened.
             */
-          <span className={`${badgeCls} ${TONE_CLASSES[meta.tone]} border-l`}>{meta.label}</span>
+          /*
+            ── Closed it states the status; open it counts the permits ──────
+
+            Client, 26 September 2026: *"Why is the Mayor's Permit tagged
+            Approved while Johnny's Fried Chicken was tagged Permit
+            Released?"*
+
+            They were never in conflict — one is the FILING's status and the
+            other is one permit's — but nothing on screen said so. Two chips
+            of the same shape, in the same permit-flavoured words, eight
+            pixels apart, inviting exactly that question.
+
+            The duplication only exists once the rows are showing, and that
+            is precisely when the badge has nothing left to add: every permit
+            below states its own status. So open, it becomes the one thing
+            the rows cannot say at a glance — how many of them are done.
+
+            Closed, the badge stays, because it is then the only thing
+            telling the applicant how this filing is doing. Removing it
+            outright would leave a list of business names.
+          */
+          <span className={`${badgeCls} bg-shell text-ink-secondary border-l`}>
+            {permitCount}
+          </span>
         )}
       </div>
 
       {rejected && <RejectionNote app={app} detail={detail} />}
+
+      {/*
+        A returned filing is waiting on the APPLICANT, and the card alone did
+        not say so — it showed a status pill and a permit count, the same as a
+        filing nobody is waiting on.
+
+        CLOSED ONLY. Open, the Mayor's Permit row below carries the same
+        message with the officer's actual words and the field they named, so
+        this one becomes a worse duplicate stacked on top of a better one —
+        which is what the client saw on 28 September 2026. The row cannot
+        replace it outright, though: it is inside `open`, and a collapsed card
+        would go back to showing nothing to act on.
+      */}
+      {app.status === 'returned' && !open && (
+        <ReturnedNote
+          app={app}
+          onCorrect={() => {
+            /*
+              The banner shows on a COLLAPSED card, which has not fetched the
+              filing yet — and the dialog is drawn from the detail payload.
+              Asking for it on the press is what makes opening in place
+              possible at all; the dialog appears when it lands.
+            */
+            onExpand(app.id)
+            setCorrectingForm(true)
+          }}
+        />
+      )}
+      {/*
+        And the same for the other five offices.
+
+        CLOSED ONLY, for the reason above: open, each returned permit's own
+        row carries the officer's actual words and the field they named, so
+        this would be a worse duplicate stacked on a better one.
+
+        Not while the FORM is returned. Both can be true at once — BPLO
+        sends the form back while a clearance is already out — and two rose
+        banners on one card is a card that has stopped saying anything. The
+        form is the one that blocks everything else, so it speaks first.
+      */}
+      {app.status !== 'returned' && !open && returnedClearances.length > 0 && (
+        <ReturnedClearanceNote
+          app={app}
+          returned={returnedClearances}
+          onCorrect={setCorrecting}
+        />
+      )}
+      {/*
+        The correction dialog, on this page. The office named one document;
+        it does not need a page of its own, which is what the client kept
+        arriving at. The filing's pointer and checklist are fetched on the
+        press — see ClearanceCorrections for why they cannot come off the
+        list payload.
+      */}
+      {/*
+        BPLO's return, on this page. `detail` is fetched lazily per card, so
+        the press asks for it first — the dialog cannot be drawn from the
+        list payload, which carries no assignments.
+      */}
+      {correctingForm && detail !== undefined && (
+        <MainFormCorrections
+          app={detail}
+          onClose={() => setCorrectingForm(false)}
+          onDone={onChanged}
+        />
+      )}
+      {correcting !== null && (
+        <ClearanceCorrections
+          applicationId={app.id}
+          code={correcting}
+          onClose={() => setCorrecting(null)}
+          /* The row behind the dialog still says Returned until it is re-read. */
+          onDone={onChanged}
+        />
+      )}
 
       {open && (
         <>
@@ -1110,7 +1497,15 @@ function ApplicationRow({
                * so on this screen null means nothing was written, and the row
                * falls back to naming the office rather than inventing a reason.
                */
-              const returned = pt.status === 'returned'
+              /*
+               * A main-form return sets the APPLICATION to returned and
+               * leaves every pivot alone, so this row's Returned chip comes
+               * from `permitChip`'s BUSINESS branch while its note and link
+               * were looking at the pivot. Same condition as that branch,
+               * written out rather than read back off the rendered chip.
+               */
+              const mainFormReturned = pt.code === 'BUSINESS' && app.status === 'returned'
+              const returned = pt.status === 'returned' || mainFormReturned
               /*
                * The list payload's permit_types is the narrow shape — code,
                * name, status, status_label — so the note and the date come from
@@ -1120,17 +1515,55 @@ function ApplicationRow({
                * register to render a panel that only opens on one.
                */
               const full = detail?.permit_types.find((row) => row.code === pt.code)
-              const note = full?.remarks?.trim() ?? ''
-              const returnedAt = full?.returned_at ?? null
+              const note = mainFormReturned
+                ? (detail?.assignments?.find((a) => a.remarks)?.remarks?.trim() ?? '')
+                : (full?.remarks?.trim() ?? '')
+              const historyKey = `${app.id}:${pt.code}`
+              const historyOpen = openHistory.has(historyKey)
 
               return (
                 <li
                   key={pt.code}
-                  className={`rounded-lg bg-white px-4 py-2.5 shadow-card ${
-                    returned ? 'border-l-4 border-s-rose' : ''
-                  }`}
+                  /*
+                    `relative` for the covering button; `transition-colors`
+                    so the tint arrives rather than snaps. The hover is the
+                    royal tint at half strength — enough to read as a
+                    response, not enough to compete with the status chip,
+                    which is the one coloured thing on the row that MEANS
+                    something.
+                  */
+                  /*
+                    No rose bar on a returned row, since 30 September 2026.
+                    The badge says Returned in rose and the note underneath
+                    says who asked and for what; the bar was the same fact a
+                    third time, and the client had the two rows side by side
+                    and asked for one shape.
+                  */
+                  className="relative rounded-lg bg-white px-4 py-2.5 shadow-card transition-colors hover:bg-royal-tint/50"
                 >
-                  <div className="flex items-center gap-4">
+                  {/*
+                    The row's own control, under the content and over the
+                    background. Its accessible name says what it does and
+                    which permit it does it to — "History" alone, repeated six
+                    times down a list, names nothing.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => toggleHistory(historyKey)}
+                    aria-expanded={historyOpen}
+                    aria-controls={`history-${app.id}-${pt.code}`}
+                    className="absolute inset-0 z-0 cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                  >
+                    <span className="sr-only">
+                      {historyOpen ? 'Hide' : 'Show'} history for {pt.name}
+                    </span>
+                  </button>
+                  {/*
+                    `pointer-events-none` so a click on the chip or the name
+                    reaches the button beneath; the two links below put it
+                    back for themselves.
+                  */}
+                  <div className="pointer-events-none relative z-10 flex items-center gap-4">
                     {/*
                     The same badge shape the filing's own status wears, two rows
                     up — `TONE_CLASSES` and nothing of its own. `StatusChip`
@@ -1150,36 +1583,77 @@ function ApplicationRow({
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
                       {pt.name}
                     </span>
-                    {canStart ? (
+                    {/*
+                      ── A button, now that the row behind it is one too ──────
+
+                      Client, 26 September 2026: *"Create a reactive box too for
+                      'Apply or upload a copy' to make the button
+                      distinguishable."* Right — an underlined link sitting
+                      inside a box that is itself clickable is two controls
+                      wearing one appearance, and the applicant cannot tell
+                      which one a click will hit.
+
+                      So it gets a border and a fill of its own: the row tints
+                      on hover, this fills, and the two no longer read as the
+                      same surface. It is the only thing on the row that leaves
+                      the page, which is worth looking different.
+                    */}
+                    {canStart && (
                       <Link
                         to={`/applications/${app.id}/clearances`}
-                        className="shrink-0 text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                        className="pointer-events-auto relative z-20 shrink-0 rounded-md border border-royal/40 bg-white px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal hover:text-white"
                       >
                         Apply or upload a copy
                       </Link>
-                    ) : (
-                      /*
-                       * The APPLICATION's submission date, and it only belongs on
-                       * a permit that has actually been started. It was printed on
-                       * every row unconditionally, so five permits nobody had
-                       * touched each claimed to have been submitted on the day the
-                       * main form was — which is a large part of why the rows read
-                       * as though they were already being worked.
-                       */
-                      pt.status !== 'not_started' && (
-                        <span className="shrink-0 text-xs italic text-ink-muted">
-                          Filed: {formatDate(app.submitted_at)}
-                        </span>
-                      )
                     )}
+                    {/*
+                      ── "Filed: 24 September" was here ───────────────────────
+
+                      Client, same day: *"remove the 'Filed' beside Mayor's
+                      Permit because it is just redundant with the Application
+                      submitted."* It is — the history that opens under this row
+                      now leads with "Application submitted" and the same date,
+                      with the time as well.
+
+                      Worth recording what it was for, because the reasoning
+                      still holds and only the placement changed: it was drawn
+                      ONLY for a permit that had actually been started, after a
+                      spell when every row printed it and five permits nobody
+                      had touched each claimed to have been submitted on the day
+                      the main form was.
+                    */}
+                    {/*
+                      The affordance, now that the whole row is the control:
+                      a chevron that turns when it opens. `aria-hidden` —
+                      the button covering the row already announces the
+                      state, and a second announcement of the same fact is
+                      noise.
+                    */}
+                    <span
+                      aria-hidden="true"
+                      className={`shrink-0 text-ink-muted transition-transform ${
+                        historyOpen ? 'rotate-90' : ''
+                      }`}
+                    >
+                      <ChevronRightIcon />
+                    </span>
                     <Link
                       to={`/applications/${app.id}`}
-                      className="shrink-0 text-ink-secondary transition-colors hover:text-royal"
+                      className="pointer-events-auto relative z-20 shrink-0 text-ink-secondary transition-colors hover:text-royal"
                       aria-label={`View ${pt.name} status`}
                     >
                       <MessageIcon />
                     </Link>
                   </div>
+
+                  {historyOpen && (
+                    <div id={`history-${app.id}-${pt.code}`}>
+                      <PermitHistory
+                        history={full?.history ?? []}
+                        submittedAt={app.submitted_at}
+                      />
+                    </div>
+                  )}
 
                   {returned && (
                     /*
@@ -1187,18 +1661,37 @@ function ApplicationRow({
                      * the note reads as belonging to the permit above it rather
                      * than to the row below.
                      */
-                    <div className="mt-2 pl-[7rem]">
+                    /*
+                      `relative z-20` is what makes the link inside CLICKABLE.
+
+                      The whole row is a stretched link: a covering button at
+                      `absolute inset-0 z-0`. A POSITIONED element paints above
+                      non-positioned siblings whatever the DOM order, so this
+                      block sat underneath the button and every click on "Fix
+                      and resubmit" opened or closed the row instead. Reported
+                      on 28 September 2026 — and it had been true of the
+                      clearance return since that block was written.
+                    */
+                    <div className="relative z-20 mt-2 pl-[7rem]">
                       <p className="text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
-                          This office asked for changes
                           {/*
-                          `?? null` first, then a null test. `full` is undefined
-                          until the detail lands, and `full?.returned_at !== null`
-                          is TRUE for undefined — which would have printed the
-                          word "changes" followed by a stray space and a colon
-                          while the fetch was in flight.
-                        */}
-                          {returnedAt !== null && ` ${formatRelative(returnedAt)}`}:
+                            No date, since 30 September 2026.
+
+                            It was printed only when `returned_at` was on the
+                            payload — true of a clearance row, not of the main
+                            form's — so one line of code said "asked for changes
+                            17 minutes ago" on one row and "asked for changes" on
+                            the next, decided by which endpoint happened to carry
+                            a column rather than by anything the applicant did.
+                            The client put the two side by side and asked for one
+                            shape, following BPLO's.
+
+                            Nothing is lost that was worth keeping here: the line
+                            is about WHO asked and WHAT for, and the history
+                            behind the row carries when.
+                          */}
+                          {mainFormReturned ? 'BPLO' : 'This office'} asked for changes:
                         </span>{' '}
                         {/*
                         The officer's own words, in quotes so it is plainly a
@@ -1213,12 +1706,49 @@ function ApplicationRow({
                       */}
                         {note !== '' && <span className="italic">“{note}”</span>}
                       </p>
+                      {/*
+                        A returned CLEARANCE is fixed on that office's own
+                        sheet; a returned FORM is fixed on the status page,
+                        where the correction boxes are. One link, two
+                        destinations, because they are two different repairs.
+
+                        The clearance half pointed at the card GRID until 30
+                        September 2026, which is a menu rather than a repair:
+                        the client pressed it expecting the form they had been
+                        asked to correct and got six cards. `pt.code` names the
+                        permit this row is about, so two offices returning the
+                        same filing give two rows pointing at two sheets.
+                      */}
+                      {/*
+                        A returned CLEARANCE opens the dialog here; a
+                        returned FORM still goes to the status page, where
+                        its own correction boxes are. Two repairs, two
+                        destinations — and only one of them needs a page.
+                      */}
+                      {!mainFormReturned && (
+                        <button
+                          type="button"
+                          onClick={() => setCorrecting(pt.code)}
+                          aria-label={`Fix and resubmit ${pt.name} for ${businessName(app.business)}`}
+                          className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                        >
+                          Fix and resubmit →
+                        </button>
+                      )}
+                      {mainFormReturned && (
                       <Link
-                        to={`/applications/${app.id}/clearances`}
-                        className="mt-1 inline-block text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                        to={`/applications/${app.id}`}
+                        /*
+                          A real control, not underlined text: the client asked
+                          for the same reactive treatment the permit boxes got —
+                          hand cursor, and a tint that arrives on hover so the
+                          press is acknowledged before it lands.
+                        */
+                        className="mt-1.5 inline-flex cursor-pointer items-center gap-1 rounded-md border border-royal/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
                       >
                         Fix and resubmit →
                       </Link>
+                      )}
                     </div>
                   )}
                 </li>
@@ -1235,6 +1765,94 @@ function ApplicationRow({
         </>
       )}
     </li>
+  )
+}
+
+/**
+ * One permit's status history, and the filing's submission above it.
+ *
+ * ── Why it is a row that opens, and not a page or a dialog ───────────────────
+ *
+ * Client, 26 September 2026: *"put a tracking history PER PERMIT ... ensure
+ * proper user interface and don't overload them with texts. Just be
+ * straightforward."*
+ *
+ * The permits are already a list of rows, each carrying the status this history
+ * explains. Opening in place keeps the two together: the answer to "why does
+ * this say Returned" appears directly under the word Returned. A dialog would
+ * cover the other five, and a page would lose the comparison that makes the
+ * list worth having — which of my six permits is behind.
+ *
+ * It costs nothing closed, which is what lets all six rows carry one.
+ *
+ * ── What is on it ────────────────────────────────────────────────────────────
+ *
+ * The status and when it changed. Not who changed it, not the office's note,
+ * not the previous status — all three are available and all three were left
+ * out. An applicant reading six of these wants the shape of the delay, and the
+ * office's own words already have a home: the returned-permit panel on this
+ * same row prints them, in full, when there are any.
+ *
+ * ── Why submission leads ─────────────────────────────────────────────────────
+ *
+ * *"Also put there when its application was submitted."* It is the filing's
+ * event rather than the permit's, so it is drawn from `submitted_at` and marked
+ * as the start of the line rather than stored as a seventh history row against
+ * every permit. A permit nobody has touched then still has a timeline with one
+ * true entry on it, which reads better than "no history" on a filing the
+ * applicant submitted weeks ago.
+ */
+function PermitHistory({
+  history,
+  submittedAt,
+}: {
+  history: PermitStatusChange[]
+  submittedAt: string | null
+}) {
+  const entries = [
+    ...(submittedAt ? [{ key: 'filed', label: 'Application submitted', at: submittedAt }] : []),
+    ...history.map((h) => ({
+      key: `${h.to_status}-${h.created_at}`,
+      label: clearanceStatusMeta(h.to_status).label,
+      at: h.created_at,
+    })),
+  ]
+
+  if (entries.length === 0) {
+    return (
+      <p className="mt-2 pl-[7rem] text-xs text-ink-muted">
+        Nothing has happened on this permit yet.
+      </p>
+    )
+  }
+
+  return (
+    <ol className="mt-2 space-y-1.5 pl-[7rem]">
+      {entries.map((e, i) => (
+        <li key={e.key} className="flex items-baseline gap-3 text-xs">
+          {/*
+            The dot marks the latest entry, so the eye lands on where the permit
+            IS before reading how it got there. `aria-hidden` because "filled
+            circle" is not information — the entry is last in the list either
+            way, and a screen reader reads it last.
+          */}
+          <span
+            aria-hidden="true"
+            className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+              i === entries.length - 1 ? 'bg-royal' : 'bg-line-strong'
+            }`}
+          />
+          {/*
+            A column, not a spread. `flex-1` here pinned the date to the far
+            edge of the card and left the middle empty — see the note above
+            the component.
+          */}
+          <span className="min-w-[11rem] shrink-0 font-medium text-ink">{e.label}</span>
+          {/* `tnum` so the column of dates lines up digit for digit. */}
+          <span className="tnum text-ink-muted">{formatDateTime(e.at)}</span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -1259,6 +1877,19 @@ export function ApplicationsPage() {
    * below does — both see an empty cache and both fetch.
    */
   const [requested] = useState(() => new Set<number>())
+
+  /*
+   * Re-read one filing after the applicant has changed it.
+   *
+   * `loadDetail` fetches once and remembers, which is right for expanding a
+   * row and wrong after a resubmission: the row behind the dialog still says
+   * Returned until both the list and the detail are read again.
+   */
+  function refreshFiling(id: number) {
+    requested.delete(id)
+    loadDetail(id)
+    void reload()
+  }
 
   function loadDetail(id: number) {
     if (requested.has(id)) return
@@ -1452,6 +2083,7 @@ export function ApplicationsPage() {
                 permitTypesByCode={permitTypesByCode}
                 detail={detailCache[app.id]}
                 onExpand={loadDetail}
+                onChanged={() => refreshFiling(app.id)}
               />
             ))}
           </ul>

@@ -111,7 +111,7 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
         // Renamed 24 September 2026 when the LGU moved the release to payment;
         // the reasoning is on the enum. BPLO's QUEUE TAB keeps the old words,
         // which is a different string in QueuePage and not this one.
-        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Permit Released')
+        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Approved')
         ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')
         // Renamed the same day; the reasoning is on the enum. The CLEARANCE
         // below keeps "Approved", which is now the only thing that word means.

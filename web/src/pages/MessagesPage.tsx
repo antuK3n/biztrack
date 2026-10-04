@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ArrowLeftIcon, MailIcon, SearchIcon } from '../components/icons'
+import { MailIcon, SearchIcon, XIcon } from '../components/icons'
 import { MessageThreadView } from '../components/MessagesPanel'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
-import { PageTitle, SortFilter, StatusChip } from '../components/ui/Proto'
+import { PageTitle, SortFilter } from '../components/ui/Proto'
 import { formatDate, formatListStamp, initialsOf } from '../lib/format'
 import { messages as messagesApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
-import type { CounterpartyStanding, MessageThreadSummary } from '../lib/types'
+import type { MessageThreadSummary } from '../lib/types'
 
 /*
  * Messages (revised GUI screens 8-10 applicant, 101-102 staff): the dedicated
@@ -75,69 +75,6 @@ const NARROW_EMPTY: Record<Narrow, string> = {
   quiet: 'Every filing has a conversation started',
 }
 
-/*
- * ---- Permits, and the people ---------------------------------------------
- *
- * "Can you do another button para sa general inquiry" [client, 1 October 2026].
- *
- * An office's Messages page is two lists that happen to share a shape. One is
- * the caseload: a row per permit assigned to them, which is what they work
- * from. The other is the people they may hear from - a row per owner, whether
- * or not anybody has written, because the row is how the office OPENS a
- * conversation.
- *
- * They were merged, and the second buried the first. BPLO's list is every
- * registered account: on a register of any size the permits an officer is
- * actually holding would sit below a hundred citizens who have never written
- * to anybody.
- *
- * So they are two views of one screen, and the button says which you are in.
- * An applicant sees neither control - their inbox is their own filings and
- * their one enquiry, and there is nothing to choose between.
- */
-type Shelf = 'permits' | 'enquiries' | 'admin'
-
-/**
- * What each shelf holds, and the row kind it is built from.
- *
- * The administrator's line got its own [client, 1 October 2026]. It was pinned
- * to the top of the permits shelf, where it belonged to neither list - it is
- * the officer's OWN account, not a permit and not an applicant - and every
- * officer carries exactly one of it.
- *
- * Its own button is better than a pin for the same reason the enquiries got
- * one: a row that is always first is a row that is always in the way, and an
- * officer scanning their caseload was reading past their own account details
- * every time.
- */
-const SHELVES: {
-  value: Shelf
-  /** The full name, for the tooltip and the accessible name. */
-  label: string
-  /** What fits on a third of a narrow column without wrapping. */
-  short: string
-  kind: MessageThreadSummary['kind']
-}[] = [
-  { value: 'permits', label: 'Permits', short: 'Permits', kind: 'application' },
-  { value: 'enquiries', label: 'General enquiries', short: 'Enquiries', kind: 'general' },
-  { value: 'admin', label: 'System Administrator', short: 'Admin', kind: 'admin' },
-]
-
-/**
- * What to call what is on a shelf, in the plural the count needs.
- *
- * Written out rather than assembled from the label: "1 general enquiries" and
- * "1 System Administrators" are what a template produces, and the third shelf
- * holds exactly one row for every officer alive, so its singular is the only
- * form anybody will ever read.
- */
-function shelfNoun(shelf: Shelf, count: number): string {
-  if (shelf === 'admin') return count === 1 ? 'conversation with the System Administrator' : 'conversations with the System Administrator'
-  if (shelf === 'enquiries') return count === 1 ? 'general enquiry' : 'general enquiries'
-
-  return count === 1 ? 'permit' : 'permits'
-}
-
 /** Royal circle with a person glyph, the GUI's conversation avatar. */
 function Avatar({ size = 44 }: { size?: number }) {
   return (
@@ -151,60 +88,6 @@ function Avatar({ size = 44 }: { size?: number }) {
         <path d="M12 13.6c-4.1 0-6.6 2.5-6.6 6.4h13.2c0-3.9-2.5-6.4-6.6-6.4Z" />
       </svg>
     </span>
-  )
-}
-
-/**
- * A finding against the person this office is talking to.
- *
- * ---- Why an officer is shown this at all ----------------------------------
- *
- * "Paki lagyan din ng note sa other admin offices sa messages page kung ang
- * kumokontak sa kanya ay currently suspended, flagged, blacklisted" [client,
- * 30 September 2026].
- *
- * An office reading its mail cannot otherwise tell: a blacklisted owner and one
- * in good standing write identical rows, and the reply differs. Somebody barred
- * from filing should not be told to file.
- *
- * ---- Why it is not red -----------------------------------------------------
- *
- * DESIGN.md: red means STOP. This is a fact about the sender, not a refusal or
- * a danger to the reader, and a scarlet chip beside somebody's name reads as an
- * accusation rather than a note. The tints carry the weight instead — red-tint
- * for the bar, yellow-tint for the watch — which is the same vocabulary the
- * owner register uses for the same three words.
- *
- * Never shown to an applicant. `standing` is absent from every row they read;
- * their own standing is delivered by the restriction notice, which explains it
- * and offers somewhere to take it.
- */
-function StandingNote({ standing }: { standing: CounterpartyStanding }) {
-  const tone = standing.kind === 'flagged' ? 'tint-yellow' : 'tint-red'
-
-  /*
-   * "Pwede rin i-note doon na may isa, dalawa, ... syang business na
-   * suspended" [client, 1 October 2026].
-   *
-   * Only past the first, and only on a suspension. One suspended business is
-   * already what the chip says, so "1 of their businesses" would be the same
-   * fact twice; the number earns its place when it says the finding is not
-   * isolated. A blacklisting carries no count - the cascade leaves none of
-   * their businesses suspended - and a flag is a watch on this shopfront,
-   * not a tally.
-   */
-  const alsoSuspended = standing.kind === 'suspended' && standing.suspended_count > 1
-
-  return (
-    <StatusChip tone={tone} className="shrink-0 px-2 py-0.5 text-[10px]">
-      {standing.label}
-      {alsoSuspended && (
-        <span className="ml-1 font-bold">
-          · {standing.suspended_count} of theirs
-          <span className="sr-only"> are suspended</span>
-        </span>
-      )}
-    </StatusChip>
   )
 }
 
@@ -357,13 +240,6 @@ function ThreadCard({
 
   const unread = thread.unread_count > 0
   const quiet = thread.messages_count === 0
-  /*
-   * Only an office is told. The server omits `standing` from every row an
-   * APPLICANT reads - their own standing reaches them through the restriction
-   * notice, which explains it and offers somewhere to take it, rather than as
-   * a chip on their own conversation.
-   */
-  const standing = thread.counterparty.standing ?? null
 
   return (
     <li>
@@ -443,19 +319,9 @@ function ThreadCard({
             Both facts are still here, in the order a reader wants them: which
             filing, then whose desk it is on.
           */}
-          {(identity || handledBy || standing) && (
-            <span className="mt-0.5 flex items-center gap-1.5">
-              {/*
-                The finding first, and outside the truncation. It is the one
-                thing on this line an officer must not miss, and a tracking
-                number long enough to cut it off is the ordinary case.
-              */}
-              {standing && <StandingNote standing={standing} />}
-              {(identity || handledBy) && (
-                <span className="min-w-0 truncate text-xs text-ink-muted">
-                  {[identity, handledBy].filter(Boolean).join(' · ')}
-                </span>
-              )}
+          {(identity || handledBy) && (
+            <span className="mt-0.5 block truncate text-xs text-ink-muted">
+              {[identity, handledBy].filter(Boolean).join(' · ')}
             </span>
           )}
 
@@ -504,12 +370,6 @@ export function MessagesPage() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
   const [narrow, setNarrow] = useState<Narrow>('all')
-  /*
-   * Which half of the office's mail is on screen. An applicant never sees the
-   * control and never leaves 'permits', which for them means "everything" -
-   * their enquiry is one row among their filings and belongs with them.
-   */
-  const [shelf, setShelf] = useState<Shelf>('permits')
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<MessageThreadSummary[]>([])
 
@@ -560,103 +420,55 @@ export function MessagesPage() {
    * same conversation; the enquiry uses the literal 'general', which
    * Number() reads as NaN and no filing can collide with.
    */
-  /*
-   * A row is identified by a KEY, not by an application id - an enquiry with
-   * no filing has no id to be identified by. Filings keep their numeric id as
-   * their key, so a link someone already has (?application=12) still opens the
-   * same conversation; the enquiry uses the literal 'general', which Number()
-   * reads as NaN and no filing can collide with.
-   *
-   * Briefly this was `general-<office>`, while each office had an inbox row of
-   * its own. The office is a choice inside the one conversation now [client,
-   * 30 September 2026], so there is one key again - and the old form is still
-   * accepted below, because links to it exist.
-   */
-  const rowKey = (t: MessageThreadSummary) => {
-    if (t.kind === 'admin') return 'admin'
-    if (t.kind !== 'general') return String(t.application_id)
-
+  const rowKey = (t: MessageThreadSummary) =>
     /*
-     * ---- An enquiry's key depends on WHO is reading -------------------
+     * An enquiry is keyed by its OFFICE. It used to be the bare word
+     * 'general', which was right while an owner had exactly one - their line
+     * to BPLO. They have one per office now [client, 28 September 2026], and
+     * a shared key made every enquiry row select every other one: eight rows
+     * highlighting together, all opening whichever the list happened to find
+     * first.
      *
-     * An applicant has exactly one enquiry row - one conversation, the office
-     * chosen inside it - so the bare word is its key, and a link somebody
-     * already holds (`?application=general`, which the restriction notice and
-     * the BPLO shortcut both use) keeps working.
-     *
-     * An OFFICE has one row per owner it may hear from, and they were all
-     * given that same bare word. Two consequences, both seen on screen:
-     *
-     *  - `selected` is a `find` on this key, so pressing Juan Ramos opened
-     *    Nena Makiling - whichever row the list happened to hold first;
-     *  - React had duplicate keys in one list, so switching shelves left an
-     *    orphaned row behind: the Administrator shelf showed a general enquiry
-     *    above the one conversation it holds, while the count beside it
-     *    correctly said one.
-     *
-     * The owner id is what tells those rows apart, so it is what keys them.
+     * The bare word is still honoured when a row somehow has no office, so a
+     * ?application=general link that predates this keeps working.
      */
-    return readerIsOfficer && t.user_id ? `general-${t.user_id}` : 'general'
-  }
+    t.kind === 'general'
+      ? t.department_id
+        ? `general-${t.department_id}`
+        : 'general'
+      : t.kind === 'admin'
+        ? 'admin'
+        : String(t.application_id)
 
   const selectedKey = params.get('application')
   const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
 
   /*
-   * Changing shelf lets go of the conversation.
+   * On a wide screen an empty pane is wasted space: open the newest
+   * CONVERSATION.
    *
-   * Without this the two halves of the screen disagreed: the Administrator
-   * shelf listed its one row on the left while the right still held the
-   * general enquiry opened a moment before, which reads as the list having
-   * lost something rather than as the reader having moved.
+   * Not simply `threads[0]`. Since every office has a front door, the newest
+   * row is often an enquiry nobody has written in - and the rows are sorted
+   * by when they last moved, so creating a thread by merely LOOKING at one
+   * pushed it to the top and made it the thing the screen opened on next
+   * time. An owner with live correspondence was landing in an empty "write to
+   * the fire office" box, which is not where they were going.
    *
-   * The wide-screen effect below then opens the newest conversation on the
-   * shelf just chosen, so the pane follows rather than emptying.
-   */
-  function pickShelf(next: Shelf) {
-    /*
-     * Looked at, even when it is the shelf already open: pressing the button
-     * that carries the badge and having the badge stay is the one thing this
-     * must not do.
-     */
-    markSeen(next)
-
-    if (next === shelf) return
-
-    setShelf(next)
-    setParams({}, { replace: true })
-  }
-
-  /*
-   * The shelf being read never badges itself.
+   * It also stopped the page settling. The auto-open wrote one office into
+   * the URL, a press wrote another, and the transcript mounted twice in a
+   * row - losing anything typed into the first.
    *
-   * "Something is waiting over there" is the whole of what this badge says, so
-   * saying it about the list already on screen is noise - and the rows below
-   * are carrying their own unread marks while it does.
-   *
-   * On `threads` so it holds as pages load and as the poll brings new rows in:
-   * anything that arrives on the shelf you are reading is marked looked-at,
-   * because you are looking at it.
+   * Nothing said yet in ANY of them is a real state (a new account), and then
+   * there is nothing to open and the empty pane is honest.
    */
   useEffect(() => {
-    if (threads.length > 0) markSeen(shelf)
-    // `markSeen` is rebuilt every render; listing it would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threads, shelf])
+    if (selectedKey || threads.length === 0) return
 
-  /** Remember what the rows on this shelf had been said on, as of now. */
-  function markSeen(which: Shelf) {
-    const kind = SHELVES.find((sh) => sh.value === which)?.kind
-
-    setSeen((prev) => {
-      const next = { ...prev }
-      for (const t of threads) {
-        if (t.kind === kind) next[rowKey(t)] = t.updated_at ?? ''
-      }
-
-      return next
-    })
-  }
+    const newest = threads.find((t) => t.kind !== 'general' || t.messages_count > 0)
+    if (newest && window.matchMedia('(min-width: 1024px)').matches) {
+      setParams({ application: rowKey(newest) }, { replace: true })
+    }
+  }, [selectedKey, threads, setParams])
 
   /*
    * Search stays in the browser; the Filter does not.
@@ -668,12 +480,6 @@ export function MessagesPage() {
    * you can already see, and moving it to the server would put a round trip on
    * every keystroke to no benefit. The honest cost is that a search only looks
    * at the loaded page, which is why the count below names both numbers.
-   */
-  /*
-   * The shelf is applied AFTER the search and the sort, not before: a search
-   * narrows what is on the shelf you are looking at, and swapping shelves
-   * keeps the search you typed. Doing it the other way round would clear the
-   * query every time the button was pressed.
    */
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -719,99 +525,31 @@ export function MessagesPage() {
     return pinned.length > 0 ? [...pinned, ...byDate.filter((t) => t.kind !== 'admin')] : byDate
   }, [threads, query, sort])
   /*
-   * ---- Which half of the office's mail is on screen --------------------
+   * ---- Conversations, and doors into ones that do not exist yet ---------
    *
-   * Applied AFTER the search and the sort, so swapping shelves keeps the query
-   * you typed and a search narrows the shelf you are looking at.
+   * An enquiry with nothing in it is not a conversation. It is an invitation
+   * to start one, and the two want different shapes on the page - see the
+   * "Ask an office" section below for what happened when they shared one.
    *
-   * The administrator's line stays with the permits, which is the shelf the
-   * page opens on. It belongs to neither list - it is the officer's own
-   * account, not a permit and not an applicant - and filing it under general
-   * enquiries would hide the one row that is pinned precisely so it cannot be
-   * missed.
-   *
-   * An applicant has no shelves. Their inbox is their filings and their one
-   * enquiry, and there is nothing to choose between.
+   * `messages_count` and not `last_message`: the count is what the server
+   * filters and sorts on, so splitting on the same number keeps the screen
+   * and the API agreeing about which rows are which.
    */
-  const onShelf = useMemo(() => {
-    if (!readerIsOfficer) return visible
-
-    const kind = SHELVES.find((sh) => sh.value === shelf)?.kind ?? 'application'
-
-    return visible.filter((t) => t.kind === kind)
-  }, [visible, shelf, readerIsOfficer])
-
+  const started = visible.filter((t) => t.kind !== 'general' || t.messages_count > 0)
   /*
-   * On a wide screen an empty pane is wasted space: open the newest
-   * conversation.
+   * The doors are sorted by NAME, not by when they last moved.
    *
-   * It skipped untouched enquiries for a while, back when each office had a
-   * row of its own: the rows sort by when they last moved, and merely LOOKING
-   * at one created its thread and pushed it to the top, so the screen kept
-   * opening on an empty "write to the fire office" box. One enquiry row
-   * [client, 30 September 2026] takes that away - it sorts by the last thing
-   * actually said, like every other row.
+   * Everything else on this screen is ordered by recency, and that is right
+   * for a conversation. It is wrong for a list of offices: a thread is
+   * created the moment an enquiry is OPENED, so merely looking at one pushed
+   * it to the top and the list reshuffled itself under the reader between
+   * visits. A directory should be where you left it.
    */
-  useEffect(() => {
-    // The newest on the SHELF being read, not in the inbox as a whole: on the
-    // Administrator shelf the inbox's newest row is somebody else's permit.
-    if (selectedKey || onShelf.length === 0) return
-    if (window.matchMedia('(min-width: 1024px)').matches) {
-      setParams({ application: rowKey(onShelf[0]) }, { replace: true })
-    }
-  }, [selectedKey, onShelf, setParams])
-
-  /*
-   * ---- What is waiting on the shelves you are not looking at -------------
-   *
-   * A shelf behind a button is a shelf you can miss, and the administrator's
-   * line is the one that was PINNED precisely so it could not be: an officer
-   * cannot change their own details and has to be able to find where to ask.
-   * Moving it behind a button without this would have answered the client's
-   * request by undoing the reason the row exists.
-   *
-   * ---- And why looking is enough to clear it ---------------------------
-   *
-   * "Paki lagyan ng parang notif tas number kung may new messages sa part
-   * dyan, once clicked mawawala na dapat" [client, 1 October 2026].
-   *
-   * So the badge is not a second copy of the unread count - the rows carry
-   * that, and so does the rail. It answers one narrower question: is there
-   * something over there I have not looked at? Pressing the shelf answers it,
-   * and the badge goes.
-   *
-   * It is NOT cleared by marking anything read. An officer who glances at the
-   * Enquiries shelf and leaves has still not read those conversations, and the
-   * rows keep saying so in bold with their own counts. Only the nag stops.
-   *
-   * `seen` remembers what each row had been said on WHEN the shelf was
-   * looked at, so a genuinely new message brings the badge back: the stored
-   * timestamp no longer matches. Remembering the keys alone would silence a
-   * shelf for good after one visit.
-   *
-   * Counted from the rows that are loaded, which is what the list itself
-   * shows. It is not the server's total - the inbox is paged at fifty - so it
-   * can undercount a register deep enough to page, and undercounting is the
-   * safe direction: the number never promises more than the reader can find.
-   */
-  const [seen, setSeen] = useState<Record<string, string>>({})
-
-  const waitingOn = useMemo(() => {
-    const counts: Record<Shelf, number> = { permits: 0, enquiries: 0, admin: 0 }
-
-    for (const sh of SHELVES) {
-      counts[sh.value] = threads.filter(
-        (t) =>
-          t.kind === sh.kind &&
-          t.unread_count > 0 &&
-          seen[rowKey(t)] !== (t.updated_at ?? ''),
-      ).length
-    }
-
-    return counts
-  }, [threads, seen])
-
-
+  const doors = visible
+    .filter((t) => t.kind === 'general' && t.messages_count === 0)
+    .slice()
+    .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name))
+  const conversationTotal = Math.max(total - doors.length, started.length)
 
   /*
    * ── The grouping is gone, and why ────────────────────────────────────────
@@ -846,30 +584,10 @@ export function MessagesPage() {
     .map((n) => ({ value: n, label: NARROW_LABELS[n] }))
 
   const list = (
-    /*
-     * ---- The column scrolls; the page does not ------------------------
-     *
-     * "Gawin yung mga nasa left, may scroll bar na lang tulad sa office
-     * messages ng admin" [client, 30 September 2026] - the shape the Office
-     * Messages screen already has, and the shape every messaging app people
-     * use already has.
-     *
-     * What it fixes: this page scrolled as a whole, so reading down to the
-     * ninth conversation took the transcript, its composer and the search box
-     * off the top of the screen. The title, the search and the filters are
-     * chrome - they belong where you left them - and only the conversations
-     * move.
-     *
-     * `min-h-0` on the column and on the scroller: a flex item's automatic
-     * minimum is its content, so without it the column grows to fit every row
-     * and the page scrolls after all. It is the single thing most often
-     * missing when a layout like this nearly works.
-     */
-    <div className={`flex min-h-0 flex-col ${selected ? 'hidden lg:flex' : ''}`}>
+    <div className={selected ? 'hidden lg:block' : ''}>
       <PageTitle
         right={
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <SortFilter
+          <SortFilter
             sort={{
               value: sort,
               options: [
@@ -883,217 +601,94 @@ export function MessagesPage() {
               options: narrowOptions,
               onChange: (v) => narrowTo(v as Narrow),
             }}
-            />
-          </span>
+          />
         }
       >
         Messages
       </PageTitle>
 
-      {/*
-        ---- One control, three segments, on a row of its own --------------
+      <label className="relative mb-5 block">
+        <span className="sr-only">Search messages</span>
+        <SearchIcon
+          size={18}
+          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-secondary"
+        />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search messages"
+          className="w-full rounded-full bg-royal-tint py-2.5 pl-11 pr-4 text-sm text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-royal"
+        />
+      </label>
 
-        Three rounded pills of three different widths wrapped onto two lines in
-        a 26rem column and pushed Sort and Filter onto a third, so the chrome
-        stood 150px tall before the search box began - on a screen whose whole
-        point is the list underneath it.
-
-        A segmented control is the right shape for this: the three are mutually
-        exclusive views of one inbox, which is what a single bordered group of
-        equal parts says and what three free-floating pills do not. Equal
-        thirds, so the control does not reflow as the labels take their counts.
-
-        Only an office has anything to choose between. For an applicant the
-        control is absent rather than disabled: one meaningful position is not
-        a choice.
-      */}
-      {readerIsOfficer && (
-        <div
-          role="group"
-          aria-label="Which conversations"
-          className="mb-3 grid shrink-0 grid-cols-3 gap-1 rounded-xl bg-canvas p-1"
-        >
-          {SHELVES.map((sh) => {
-            const active = sh.value === shelf
-            const waiting = waitingOn[sh.value]
-
-            return (
+      {firstLoad ? (
+        <SkeletonList rows={4} />
+      ) : error ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : visible.length === 0 ? (
+        /*
+         * Three different nothings, and they need three different answers.
+         * "No conversations yet" told a clerk whose Unread filter was empty
+         * that the city had never written to them — the filter is checked
+         * first because it is the one the reader is least likely to remember
+         * setting.
+         */
+        narrow !== 'all' && !query ? (
+          <EmptyState
+            icon={MailIcon}
+            title={NARROW_EMPTY[narrow]}
+            description="Your other conversations are still here — this is the filter, not the inbox."
+            action={
               <button
-                key={sh.value}
                 type="button"
-                onClick={() => pickShelf(sh.value)}
-                aria-pressed={active}
-                title={sh.label}
-                /*
-                  The FULL name to anybody listening, and the short one on the
-                  glass. `title` alone does not do this: an element with text
-                  content takes its accessible name from the text, so a screen
-                  reader would have announced "Admin" - which is the
-                  abbreviation, and the abbreviation only fits because the
-                  sighted reader has two other segments beside it for context.
-
-                  The count goes in it too. It is a superscript badge visually,
-                  and "System Administrator 2" announced as two separate things
-                  is a number with nothing attached to it.
-                */
-                aria-label={waiting > 0 ? `${sh.label}, ${waiting} waiting` : sh.label}
-                className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold transition-colors ${
-                  active
-                    ? 'bg-white text-royal shadow-card'
-                    : 'text-ink-secondary hover:bg-white/60 hover:text-ink'
-                }`}
+                onClick={() => narrowTo('all')}
+                className="rounded-full bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
               >
-                {/*
-                  The short name on the control and the full one in `title` and
-                  in the sentence below it. "System Administrator" across a
-                  third of a 26rem column is three lines; the segment has to
-                  stay one.
-                */}
-                <span className="truncate">{sh.short}</span>
-                {waiting > 0 && (
-                  <span
-                    className={`tnum shrink-0 rounded-full px-1.5 text-[10px] font-bold leading-4 ${
-                      active ? 'bg-royal text-white' : 'bg-royal/15 text-royal'
-                    }`}
-                  >
-                    {waiting}
-                  </span>
-                )}
+                Show all conversations
               </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/*
-        ── One panel, the height of the row ────────────────────────────────
-
-        The search, the count and the conversations now sit inside a single
-        white card that fills the column, instead of the card being drawn
-        behind the rows alone.
-
-        What that fixes is the thing the client was looking at: with the white
-        stopping at the last conversation, the left column ended 160px short of
-        the transcript beside it and the two halves of the screen did not line
-        up. The shorter the inbox, the worse it read — a seven-row list left a
-        pane-sized hole under it.
-
-        It is also the shape asked for in the first place: "tulad sa office
-        messages ng admin" [30 September 2026]. The transcript is one panel
-        with its own furniture pinned and its middle scrolling; this is the
-        same, so the two columns are a matched pair rather than a card and a
-        list that happen to be side by side.
-      */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white shadow-card">
-        {/* Chrome: fixed. Everything below it is what moves. */}
-        <label className="relative block shrink-0 border-b border-line p-4">
-          <span className="sr-only">Search messages</span>
-          <SearchIcon
-            size={18}
-            className="pointer-events-none absolute left-8 top-1/2 -translate-y-1/2 text-ink-secondary"
+            }
           />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search messages"
-            className="w-full rounded-full bg-royal-tint py-2.5 pl-11 pr-4 text-sm text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-royal"
-          />
-        </label>
-
-        {/*
-          The scroller. The foot padding stops the last conversation sitting
-          flush against the bottom of the panel.
-        */}
-        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {firstLoad ? (
-          <SkeletonList rows={4} />
-        ) : error ? (
-          <ErrorState error={error} onRetry={reload} />
-        ) : onShelf.length === 0 ? (
-          /*
-           * Three different nothings, and they need three different answers.
-           * "No conversations yet" told a clerk whose Unread filter was empty
-           * that the city had never written to them — the filter is checked
-           * first because it is the one the reader is least likely to remember
-           * setting.
-           */
-          narrow !== 'all' && !query ? (
-            <EmptyState
-              icon={MailIcon}
-              title={NARROW_EMPTY[narrow]}
-              description="Your other conversations are still here — this is the filter, not the inbox."
-              action={
-                <button
-                  type="button"
-                  onClick={() => narrowTo('all')}
-                  className="rounded-full bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
-                >
-                  Show all conversations
-                </button>
-              }
-            />
-          ) : (
-            <EmptyState
-              icon={MailIcon}
-              title={query ? 'No conversations match' : 'No conversations yet'}
-              description={
-                query
-                  ? 'Try a different name, business, or tracking number.'
-                  : 'Messages about an application will show up here once the conversation starts.'
-              }
-            />
-          )
         ) : (
-          /*
-           * A flat list of cards. Each one names the business it is about and the
-           * filing it belongs to — two filings of one business differ by their
-           * tracking number, which is why the card prints it rather than leaning
-           * on a heading to separate them. See the note on the deleted grouping.
-           */
-          <div className="flex flex-col gap-4 px-4 pt-3">
-            {/*
-              Both numbers named (§6.4). "50 conversations" reads as the whole
-              inbox; "50 of 137" is the only version that tells a clerk there is
-              more of it, which is what this page never said.
+          <EmptyState
+            icon={MailIcon}
+            title={query ? 'No conversations match' : 'No conversations yet'}
+            description={
+              query
+                ? 'Try a different name, business, or tracking number.'
+                : 'Messages about an application will show up here once the conversation starts.'
+            }
+          />
+        )
+      ) : (
+        /*
+         * A flat list of cards. Each one names the business it is about and the
+         * filing it belongs to — two filings of one business differ by their
+         * tracking number, which is why the card prints it rather than leaning
+         * on a heading to separate them. See the note on the deleted grouping.
+         */
+        <div className="flex flex-col gap-4">
+          {/*
+            Both numbers named (§6.4). "50 conversations" reads as the whole
+            inbox; "50 of 137" is the only version that tells a clerk there is
+            more of it, which is what this page never said.
 
-            */}
-            <p className="-mb-2 px-1 text-sm text-ink-muted" role="status">
-              {/*
-                On a SHELF the two numbers stop being comparable, so they stop
-                being joined by "of". `onShelf.length` counts one half of the
-                mail and `total` counts all of it, and "Showing 8 of 10" read
-                as two permits missing rather than two enquiries on the other
-                shelf.
-
-                Both are still named (§6.4) - the shelf's own count, and the
-                inbox total that says there is more of it - but as two facts
-                rather than one ratio, because that is what they are. An
-                applicant has no shelves and keeps the sentence it always had.
-              */}
-              {readerIsOfficer ? (
-                <>
-                  Showing {onShelf.length.toLocaleString()} {shelfNoun(shelf, onShelf.length)}
-                  {' · '}
-                  {total.toLocaleString()} conversation{total === 1 ? '' : 's'} in all
-                </>
-              ) : (
-                <>
-                  Showing {onShelf.length.toLocaleString()} of {total.toLocaleString()} conversation
-                  {total === 1 ? '' : 's'}
-                </>
-              )}
-              {narrow !== 'all' ? ` (${NARROW_LABELS[narrow].toLowerCase()})` : ''}
-              {query ? ', searched within the ones loaded' : ''}.
-            </p>
-            {/*
-              No card of its own any more — the panel around the whole column
-              is the card now, so a second rounded white box inside it would
-              draw a border nobody needs and inset the rows from their own
-              scroller.
-            */}
-            <ul aria-label="Conversations" className="divide-y divide-line">
-              {onShelf.map((t) => (
+            The unopened front doors are subtracted from both sides. They are
+            not conversations - nothing has been said in them - and counting
+            them told an owner with nothing in their inbox that they had six.
+          */}
+          <p className="-mb-2 px-1 text-sm text-ink-muted" role="status">
+            Showing {started.length.toLocaleString()} of {conversationTotal.toLocaleString()}{' '}
+            conversation{conversationTotal === 1 ? '' : 's'}
+            {narrow !== 'all' ? ` (${NARROW_LABELS[narrow].toLowerCase()})` : ''}
+            {query ? ', searched within the ones loaded' : ''}.
+          </p>
+          {started.length > 0 && (
+            <ul
+              aria-label="Conversations"
+              className="divide-y divide-line overflow-hidden rounded-xl bg-white shadow-card"
+            >
+              {started.map((t) => (
                 <ThreadCard
                   key={rowKey(t)}
                   thread={t}
@@ -1103,26 +698,102 @@ export function MessagesPage() {
                 />
               ))}
             </ul>
+          )}
 
-            {hasMore && (
-              <button
-                type="button"
-                // aria-disabled, never `disabled`: a screen reader skips a
-                // disabled control and takes its label with it, so the guard is
-                // in the handler instead.
-                aria-disabled={loading}
-                onClick={() => {
-                  if (!loading) setPage((p) => p + 1)
-                }}
-                className="rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas aria-disabled:cursor-wait aria-disabled:text-ink-muted"
+          {doors.length > 0 && (
+            /*
+             * ---- The offices you have not written to yet -----------------
+             *
+             * Every office has a front door now, not just BPLO [client, 28
+             * September 2026]. Rendered as conversation cards, that put five
+             * or six identical rows saying "No messages yet. Start the
+             * conversation." at the top of an inbox, each the size of a real
+             * exchange and each carrying a date that was not a date. An owner
+             * with one live conversation had to find it among six invitations
+             * to start another.
+             *
+             * So a door is drawn as a door. Small, quiet, one line each, under
+             * a heading that says what they are - and below the conversations,
+             * because what you are already discussing outranks what you might
+             * ask. The moment one is used it stops being a door and joins the
+             * list above, which is why the split is on `messages_count` rather
+             * than on a flag.
+             */
+            <section aria-labelledby="ask-an-office" className="mt-2">
+              <h2
+                id="ask-an-office"
+                className="px-1 text-xs font-bold uppercase tracking-wide text-ink-muted"
               >
-                {loading ? 'Loading…' : 'Load more conversations'}
-              </button>
-            )}
-          </div>
-        )}
+                Ask an office
+              </h2>
+              <p className="mb-2.5 mt-1 px-1 text-sm text-ink-secondary">
+                A question that is not about one permit. Pick the office it is for.
+              </p>
+              {/*
+                One column, not two. Two fitted the offices into half the
+                width of an already narrow pane and truncated every name that
+                mattered: "Office of t…", "City Envi…", "Bureau of F…". A
+                list of offices whose names are cut off is not a list of
+                offices.
+              */}
+              <ul className="flex flex-col gap-2">
+                {doors.map((t) => (
+                  <li key={rowKey(t)}>
+                    <button
+                      type="button"
+                      onClick={() => open(rowKey(t))}
+                      aria-current={rowKey(t) === selectedKey ? 'true' : undefined}
+                      /*
+                        A border rather than a shadow, and canvas rather than
+                        white: the conversations above are raised cards, and a
+                        door that matched them would read as one more of them.
+                        Selected still gets the royal ring the cards use, so
+                        "which one am I in" is answered the same way everywhere.
+                      */
+                      className={`flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left transition-colors ${
+                        rowKey(t) === selectedKey
+                          ? 'border-royal bg-royal-tint ring-2 ring-royal'
+                          : 'border-line bg-white hover:border-royal/40 hover:bg-canvas'
+                      }`}
+                    >
+                      {/*
+                        A fixed width on the code, so the names line up down
+                        the column instead of stepping in and out with the
+                        length of "OBO" against "CENRO".
+                      */}
+                      <span
+                        aria-hidden="true"
+                        className="tnum w-14 shrink-0 rounded-md bg-canvas py-1 text-center text-[11px] font-bold text-royal"
+                      >
+                        {t.responsible_office?.code ?? '—'}
+                      </span>
+                      <span className="min-w-0 flex-1 text-sm font-semibold leading-snug text-ink">
+                        {t.counterparty.name}
+                      </span>
+                      <span className="shrink-0 text-xs font-semibold text-royal">Write</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              // aria-disabled, never `disabled`: a screen reader skips a
+              // disabled control and takes its label with it, so the guard is
+              // in the handler instead.
+              aria-disabled={loading}
+              onClick={() => {
+                if (!loading) setPage((p) => p + 1)
+              }}
+              className="rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas aria-disabled:cursor-wait aria-disabled:text-ink-muted"
+            >
+              {loading ? 'Loading…' : 'Load more conversations'}
+            </button>
+          )}
         </div>
-      </div>
+      )}
     </div>
   )
 
@@ -1150,19 +821,8 @@ export function MessagesPage() {
    * is in the queue is a question for the filing, not for its mail.
    */
   const paneOffice = selected ? officeLine(selected) : null
-  /*
-   * Nothing HANDLES a general enquiry, so nothing says so.
-   *
-   * The row carries the office that spoke last, which is worth printing on a
-   * card in a list of seven. In the pane it read "Handled by Bureau of Fire
-   * Protection" directly above a picker with that office already selected —
-   * the same fact twice, and the first telling of it untrue: an enquiry has no
-   * filing, so there is nobody it is assigned to.
-   */
   const handledElsewhere =
-    selected?.kind !== 'general' && paneOffice && paneOffice !== selected?.counterparty.name
-      ? paneOffice
-      : null
+    paneOffice && paneOffice !== selected?.counterparty.name ? paneOffice : null
 
   /*
    * What to call the open pane — and why it stopped being the counterparty.
@@ -1216,14 +876,7 @@ export function MessagesPage() {
   const pane = selected ? (
     <section
       aria-label={`Messages about ${paneTitle}`}
-      /*
-        No height of its own any more: the row it sits in has one, and a pane
-        that also declared `100dvh-9rem` was measuring the viewport from
-        inside a box already measured from the viewport - which is how it came
-        to hang past the bottom of the screen by exactly the height of the
-        header above it.
-      */
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-card"
+      className="flex min-h-[32rem] flex-col overflow-hidden rounded-xl bg-white shadow-card lg:h-[calc(100dvh-9rem)]"
     >
       {/*
         * Two lines, not three.
@@ -1237,18 +890,7 @@ export function MessagesPage() {
       <header className="flex items-center gap-3 bg-royal-tint px-5 py-3">
         <Avatar size={38} />
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2">
-            <span className="min-w-0 truncate text-base font-bold text-ink">{paneTitle}</span>
-            {/*
-              Repeated here, and not only on the row behind it. An officer
-              reading a conversation has the list hidden on a phone and
-              scrolled past on a desktop, and the finding matters most while
-              they are composing the reply.
-            */}
-            {selected.counterparty.standing && (
-              <StandingNote standing={selected.counterparty.standing} />
-            )}
-          </p>
+          <p className="truncate text-base font-bold text-ink">{paneTitle}</p>
           {(handledElsewhere || paneSubtitle) && (
             <p className="truncate text-xs text-ink-secondary">
               {handledElsewhere && (
@@ -1259,31 +901,13 @@ export function MessagesPage() {
             </p>
           )}
         </div>
-        {/*
-          ---- Back on a phone, and nothing at all on a desktop -------------
-
-          This was an X, on every width. On a desktop the list and the
-          transcript are side by side, so closing the conversation empties half
-          the screen and gives the reader nothing - "nonsense", and it is
-          [client, 1 October 2026].
-
-          On a phone it is not nothing: the list is hidden while a conversation
-          is open, so this was the only way back to it. Deleting it outright
-          would have left a phone reader with the browser's own back button and
-          no control on the page.
-
-          So it survives where it does something, and says what it does. An X
-          reads as "dismiss this" - it was closing a conversation nobody asked
-          to close; an arrow and the word read as "back to the list", which is
-          where it actually goes.
-        */}
         <button
           type="button"
           onClick={() => setParams({})}
-          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-royal hover:bg-white/60 lg:hidden"
+          aria-label="Close conversation"
+          className="shrink-0 rounded-md p-1 text-royal hover:bg-white/60"
         >
-          <ArrowLeftIcon size={18} aria-hidden="true" />
-          Back
+          <XIcon size={22} />
         </button>
       </header>
 
@@ -1293,7 +917,11 @@ export function MessagesPage() {
           selected.kind === 'admin'
             ? { kind: 'admin' }
             : selected.kind === 'general'
-              ? { kind: 'general', userId: selected.user_id }
+              ? {
+                  kind: 'general',
+                  userId: selected.user_id,
+                  officeId: selected.department_id,
+                }
               : { kind: 'application', applicationId: selected.application_id! }
         }
         className="flex-1 px-5 pb-5 pt-4"
@@ -1302,9 +930,7 @@ export function MessagesPage() {
       />
     </section>
   ) : (
-    // `h-full min-h-0`: it fills the row like the real pane does, rather than
-    // shrinking to its one sentence and leaving the column half empty.
-    <div className="hidden h-full min-h-0 items-center justify-center rounded-xl bg-white p-10 shadow-card lg:flex">
+    <div className="hidden items-center justify-center rounded-xl bg-white p-10 shadow-card lg:flex">
       <p className="text-sm text-ink-secondary">
         Choose a conversation on the left to read and reply.
       </p>
@@ -1313,26 +939,15 @@ export function MessagesPage() {
 
   return (
     /*
-     * The screen is one viewport tall and does not scroll; the two columns
-     * inside it do.
-     *
-     * The height is taken from the viewport rather than from the content:
-     * `100dvh` less the shell's own padding (`pt-8` plus `pb-28` on a phone,
-     * `lg:pb-16` on a desktop). `dvh` and not `vh`, because a phone's address
-     * bar shrinks and grows as you scroll and `vh` measures the tall state -
-     * which puts the composer under the browser's own furniture.
-     *
      * `minmax(0,1fr)` at every width, not just lg. A grid item's automatic
      * minimum size is its min-content, and a thread title is one nowrap line,
      * so the single mobile column sized itself to the longest subject — 732px
      * on a 390px screen. The `truncate` on the titles only ever took effect
      * once the column was told it may be narrower than they are.
      */
-    <div className="flex h-[calc(100dvh-9rem)] flex-col overflow-hidden lg:h-[calc(100dvh-6rem)]">
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-        {list}
-        {pane}
-      </div>
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+      {list}
+      {pane}
     </div>
   )
 }
