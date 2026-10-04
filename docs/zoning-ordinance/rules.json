@@ -2622,7 +2622,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:300",
+        "check": "api/app/Support/Zoning/Ordinance.php:102",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -2911,7 +2911,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:546",
+        "check": "api/app/Support/Zoning/Ordinance.php:104",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -2963,7 +2963,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:546",
+        "check": "api/app/Support/Zoning/Ordinance.php:105",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::sends a use found only in Basic R-3 to CPDO where the inheritance skips it"
       },
       "also_question": {
@@ -8509,7 +8509,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/ZoningCheck.php:782",
+        "check": "api/app/Support/Zoning/TradeUses.php:192",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::reads a hotel whose rooms have kitchens as a hotel apartment"
       }
     },

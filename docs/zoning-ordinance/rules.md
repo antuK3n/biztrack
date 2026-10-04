@@ -430,7 +430,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.3-INH** · Art. V §2.3 · p. 29 — **Maximum R-2 takes in R-1 and Basic R-2 uses, on the Zoning Administrator’s conditions** · _Implemented_
   Every R-1 and Basic R-2 use is allowed in Maximum R-2, with conditions the Zoning Administrator sets.
   > All uses allowed in R-1 Zone and Basic R-2 Zone with the conditions deemed appropriate by the Zoning Administrator and applicable to Maximum R-2 Zoning District.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:300`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:102`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.3-EAT** · Art. V §2.3 · p. 29 — **Small eateries in Maximum R-2: a customer area, no street dining** · _Implemented_
   A carinderia, lugawan or take-home kiosk must give customers a waiting or dining area inside, may not use the road, street or alley for it, and may be asked for more.
   > Small scale eatery, carinderia, lugawan, take home kiosk and other related stores provided that the following regulations shall be strictly observed: Must provide waiting area/dining area for customers. Prohibited from using the Road/Street/Alleys for dining/waiting area. Other requirement that maybe required
@@ -474,7 +474,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.5-INH** · Art. V §2.5 · p. 31 — **Maximum R-3 takes in R-1, Basic R-2 and Maximum R-2 uses, but not Basic R-3** · _Implemented_
   Maximum R-3 inherits R-1, Basic R-2 and Maximum R-2 uses. It does not name Basic R-3, so a use listed only there is not inherited; BizTrack sends that case to CPDO.
   > All uses allowed in R-1, Basic R-2 Zone, Maximum R-2 Zone
-  checked at `api/app/Support/Zoning/ZoningCheck.php:546`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/Ordinance.php:104`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
 - **V-2.6-BP220** · Art. V §2.6 · p. 32 — **Socialized Housing zone: uses per BP 220** · _Question for Malabon_
   The Socialized Housing zone allows what BP 220 allows; the ordinance lists nothing itself, so a business there is for CPDO to judge.
   > All uses allowed according to the provisions of BP 220.
@@ -482,7 +482,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.7-INH** · Art. V §2.7 · p. 34 — **C-1 takes in R-1, Basic R-2, Maximum R-2 and Maximum R-3 uses, but not Basic R-3** · _Implemented_
   C-1 inherits every R-1, Basic R-2, Maximum R-2 and Maximum R-3 use. Basic R-3 is not named, so a use listed only there goes to CPDO.
   > All uses allowed in R-1, Basic R-2, Maximum R-2, and Maximum R-3 Zones
-  checked at `api/app/Support/Zoning/ZoningCheck.php:546`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/Ordinance.php:105`; proved by `ZoningOrdinanceRulesTest.php` — “sends a use found only in Basic R-3 to CPDO where the inheritance skips it” Also asked: [C18](../questions-for-malabon.md).
 - **V-2.7-WH** · Art. V §2.7 · p. 32 — **Warehouses in C-1: up to 200 m², safe goods, for an existing Malabon business** · _Implemented_
   A warehouse in C-1 may store only non-pollutive, non-hazardous finished products for an existing commercial activity in the city, may not exceed 200 m² of floor area, needs parking and loading space per the NBC, and may not use the street or sidewalk for parking.
   > Warehouse/storage facility for non-pollutive/non-hazardous finished products in support to existing commercial activity within the City provided that the floor area shall not exceed two hundred square meters (200 sq.m.), with adequate parking lot and proper loading and unloading space as per National Building Code (NBC); adjacent streets, roads, sidewalks shall not be used for parking.
@@ -1383,7 +1383,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **A-44** · Annex A item 44 · p. 72 — **A hotel has no cooking in its rooms** · _Implemented_
   A hotel has rooms for hire with a general kitchen and dining room, and no cooking in any room. One whose rooms have their own cooking is a hotel apartment (item 45), which the lists name separately.
   > 44. Hotel : a building or part thereof with rooms occupied or intended to be occupied or intended to be occupied for hire as temporary aboding place of individuals with a general kitchen and public dining room service, but no provisions for cooking in any individuals suite or room.
-  checked at `api/app/Support/Zoning/ZoningCheck.php:782`; proved by `ZoningOrdinanceRulesTest.php` — “reads a hotel whose rooms have kitchens as a hotel apartment”
+  checked at `api/app/Support/Zoning/TradeUses.php:192`; proved by `ZoningOrdinanceRulesTest.php` — “reads a hotel whose rooms have kitchens as a hotel apartment”
 - **A-45** · Annex A item 45 · p. 73 — **Hotel apartments** · _Shown_
   A hotel apartment is an apartment that may give dining and other services to its own tenants.
   > 45. Hotel apartment: an apartment which may furnish dining room service and other services for the exclusive use of its tenants.
