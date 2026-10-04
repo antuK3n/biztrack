@@ -8083,13 +8083,20 @@ export function ApplyWizard() {
      */
     true
 
-  /** Push every section entered so far in one go. */
-  async function autosave(target: string) {
+  /**
+   * Push every section entered so far in one go.
+   *
+   * Answers with the failure's message, or null — `submit` waits on this and
+   * must not file what the server never received (see `flushAutosave`).
+   */
+  async function autosave(target: string): Promise<string | null> {
     // A step change is already writing; come back once it has finished.
     if (inFlightRef.current) {
       setAutosaveNonce((n) => n + 1)
-      return
+      return null
     }
+    // Already written — by Submit's flush, ahead of this debounce.
+    if (savedSnapshotRef.current === target) return null
     inFlightRef.current = true
     setSaving(true)
     try {
@@ -8150,6 +8157,7 @@ export function ApplyWizard() {
       savedSnapshotRef.current = target
       setDirty(false)
       setSubmitError(null)
+      return null
     } catch (err) {
       // Leave the draft dirty: the indicator keeps saying so, and the next
       // edit tries again.
@@ -8184,6 +8192,7 @@ export function ApplyWizard() {
       if (failure.status !== 422) {
         setSubmitError(failure.message)
       }
+      return failure.message
     } finally {
       inFlightRef.current = false
       setSaving(false)
@@ -8963,11 +8972,41 @@ export function ApplyWizard() {
    *
    * Payment is `PayPage`'s again, reached from the filing once BPLO approves.
    */
+  /**
+   * Land the edit still waiting on the autosave debounce, before Submit.
+   *
+   * Autosave waits a moment after the last keystroke, and Submit did not wait
+   * for it. An owner who changed Business Area on Review from 120 to 3000 and
+   * pressed Submit → Yes at once filed — and was billed — on 120; the save
+   * arrived after the filing had left Draft and was refused in silence
+   * (scenario run, owner-apply-new 18). Ken, 5 October 2026: Submit waits
+   * for the save. Nothing on screen changes.
+   *
+   * A write already under way (a step change, or the debounce firing) is
+   * waited out first, then whatever is still unsaved is written now. Null
+   * once the server holds what is on screen; otherwise the save's own
+   * failure, and the filing is not submitted on answers it never got.
+   */
+  async function flushAutosave(): Promise<string | null> {
+    // Same rule as autosave: a draft we failed to read is never written.
+    if (hydrateFailed) return null
+    while (inFlightRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    if (savedSnapshotRef.current === snapshot) return null
+    return autosave(snapshot)
+  }
+
   async function submit() {
     if (!applicationId) return
-    setSaving(true)
     setSubmitError(null)
     setNeedsEmailCode(false)
+    const unsaved = await flushAutosave()
+    if (unsaved !== null) {
+      setSubmitError(unsaved)
+      return
+    }
+    setSaving(true)
     try {
       /*
        * A returned filing RESUBMITS. `submit` is draft-only on the API and
