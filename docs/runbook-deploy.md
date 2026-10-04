@@ -18,6 +18,8 @@ cp api/.env.example api/.env.production
 #   DB_USERNAME=biztrack DB_PASSWORD=<strong>
 #   QUEUE_CONNECTION=database  MAIL_MAILER=log  SMS_DRIVER=log
 #   PAYMENT_DRIVER=simulated   DEMO_PASSWORD=<demo pw>
+#   GEMINI_KEY=<key>   optional; blank = the chatbot answers from its rules alone.
+#                      Check it after deploy: php artisan biztrack:chatbot-check
 ```
 Web API base is baked at build time: `web/.env.production` → `VITE_API_URL=http://<host>/api/v1`,
 rebuild `web/dist` if the host changes.
