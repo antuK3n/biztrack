@@ -682,6 +682,8 @@ export interface ApplicationListItem {
     name: string
     status: ServerClearanceStatus | null
     status_label: string | null
+    /** The issued certificate's own status (active, suspended, …); null until issued. */
+    permit_status?: string | null
   }[]
   created_at: string
   /**
@@ -1036,22 +1038,22 @@ export interface Assignment {
    * acts are told apart by the APPLICATION's status instead.
    */
   /**
-   * This office's current SITE VISIT on the filing, and who is holding it.
+   * This office's current SITE VISIT on the filing, and the inspector's name
+   * typed on it.
    *
-   * Distinct from `officer` above, which holds the paperwork review. The two
-   * are different columns and may be different people: an inspector is named
-   * when the visit is booked, an admin can move them, and whoever conducts
-   * the visit claims it. Null when this office has no visit on the filing —
-   * which is most rows, and also a permit whose visit is DUE but not yet
-   * booked.
+   * `officer` above holds the visit as it holds the review — the officer in
+   * charge books and decides it. The inspector is a name typed "just for the
+   * record" (client, 5 October 2026), since an inspector may have no account.
+   * Null when this office has no visit on the filing — which is most rows,
+   * and also a permit whose visit is DUE but not yet booked.
    */
   inspection: {
     id: number
     status: string | null
     scheduled_at: string | null
-    inspector: { id: number; name: string } | null
-    can_claim: boolean
-    can_act: boolean
+    inspector_name: string | null
+    /** Same office, `inspection.manage`, clearance still open. */
+    can_name_inspector: boolean
   } | null
   clearance: {
     code: string
@@ -1162,7 +1164,15 @@ export interface Inspection {
    * — the guarded half was guarded and the fallback was not.
    */
   department: { code: string; name: string } | null
+  /** An account named on older visits only; nothing new writes it. */
   inspector: { id: number; name: string } | null
+  /**
+   * Who inspected, as the office typed it (client, 5 October 2026: "just for
+   * the record"). Null when blank, and always null for the applicant.
+   */
+  inspector_name?: string | null
+  /** May the reader type or change `inspector_name` now? */
+  can_name_inspector?: boolean
   /**
    * The filing the visit belongs to, when the response carried it.
    *

@@ -372,7 +372,16 @@ function permitChip(
   permitStatus: ServerClearanceStatus | null,
   office: OfficeProgress | undefined,
   permitCode: string,
+  issuedStatus: string | null = null,
 ): Chip {
+  /*
+   * A suspended certificate outranks everything, the filing's own state
+   * included: the pivot still reads approved, the filing may be decided, and
+   * neither is what the applicant needs to know. Client, 5 October 2026, on a
+   * Mayor's Permit row reading "Approved" beside a rejected Sanitary Permit.
+   */
+  if (issuedStatus === 'suspended') return { tone: 'danger', label: 'Suspended' }
+
   // A decided or unpaid filing answers for all of its permits at once.
   const own = appStateChip(appStatus)
   if (own) return own
@@ -1560,6 +1569,7 @@ function ApplicationRow({
                 pt.status,
                 detail ? officeProgressFor(pt.code) : undefined,
                 pt.code,
+                pt.permit_status ?? null,
               )
               /*
                * A permit the applicant has not begun, on a filing where they

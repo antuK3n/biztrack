@@ -114,6 +114,9 @@ class ApplicationController extends Controller
         // composer cannot name who it is writing to (item 89).
         $query = Application::with([
             'business:id,name', 'applicant:id,name', 'permitTypes:id,code,name',
+            // The issued certificates, for the Track row to say "Suspended" on
+            // a Mayor's Permit whose pivot still reads approved (5 October 2026).
+            'permits:id,application_id,permit_type_id,status',
         ]);
 
         // Owners see their own; an office sees the filings routed to it; BPLO
