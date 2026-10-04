@@ -252,16 +252,58 @@
         .fsic-copy { border: 1px solid #2b2b2b; padding: 2px 6px; font-size: 9.5px; font-weight: bold; font-style: italic; }
         .fsic-motto { font-weight: bold; font-size: 13px; }
 
+        /*
+         * ── The CPDO's Zoning Clearance ─────────────────────────────────────
+         *
+         * Portrait Letter, set to the issued sheet [client, 5 October 2026]:
+         * a centred city head, the underlined title, a ruled box of
+         * fill-in lines with bold caps values, the ticked conditions, one
+         * signature, and the public-view line at the foot. The city seal sits
+         * faint behind it, as the office's seal does on the paper.
+         */
+        body.zoning .sheet { padding: 22px 34px 20px; }
+        .zoning-watermark { position: absolute; top: 300px; left: 160px; width: 400px; opacity: 0.07; }
+        .zoning-seal-cell { width: 108px; vertical-align: middle; }
+        .zoning-seal { height: 78px; }
+        .zoning-head { text-align: center; font-family: "DejaVu Serif", serif; font-size: 12px; line-height: 1.35; padding-top: 14px; }
+        .zoning-city { font-weight: bold; font-size: 14px; }
+        .zoning-office { font-weight: bold; font-size: 12px; }
+        .zoning-title { text-align: center; font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 22px; text-decoration: underline; margin-top: 28px; }
+        .zoning-subtitle { text-align: center; font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 11.5px; margin-top: 2px; }
+        .zoning-box { border: 1.5px solid #2b2b2b; padding: 16px 22px 18px; margin-top: 22px; }
+        table.zoning-line { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        table.zoning-line td { vertical-align: bottom; padding: 0; }
+        .zoning-label { width: 1%; white-space: nowrap; font-size: 12px; padding-right: 8px !important; }
+        .zoning-label-right { padding-left: 14px !important; }
+        .zoning-value { border-bottom: 1px solid #2b2b2b; font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 11px; padding: 0 6px 1px !important; }
+        .zoning-value.zoning-big { font-size: 15px; }
+        .zoning-half { width: 30%; text-align: center; }
+        .zoning-nowrap { white-space: nowrap; }
+        .zoning-decision { font-size: 12px; margin-top: 14px; }
+        .zoning-decision b { font-family: "DejaVu Serif", serif; }
+        .zoning-conditions-title { font-weight: bold; font-size: 12px; margin: 26px 0 0 24px; }
+        table.zoning-conditions { width: 560px; border-collapse: collapse; margin: 8px 0 0 44px; font-size: 11.5px; line-height: 1.35; }
+        table.zoning-conditions td { vertical-align: top; padding: 0 0 3px; }
+        td.zoning-tick { width: 16px; font-size: 10px; padding-top: 1px !important; }
+        .zoning-sign { width: 400px; margin: 84px auto 0; text-align: center; }
+        .zoning-sig-name { font-weight: bold; font-size: 13px; font-family: "DejaVu Serif", serif; }
+        .zoning-sig-name.blank { color: transparent; }
+        .zoning-sig-line { border-bottom: 1px solid #2b2b2b; margin-top: 1px; }
+        .zoning-sig-role { font-weight: bold; font-size: 10.5px; font-family: "DejaVu Serif", serif; margin-top: 3px; }
+        .zoning-public { text-align: center; font-family: "DejaVu Serif", serif; font-size: 12px; margin-top: 96px; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : '')) }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : ''))) }}">
 <div class="sheet">
 @if($is_fsic ?? false)
     @include('pdf.fsic')
+@elseif($is_zoning ?? false)
+    @include('pdf.zoning')
 @else
     {{-- Header: city block left, verification QR right. --}}
     <table class="row">

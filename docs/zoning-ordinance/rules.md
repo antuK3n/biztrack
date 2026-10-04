@@ -1277,7 +1277,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-14-1a** · Art. IX §14 · p. 67 — **The Zoning Administrator acts on every locational clearance** · _Implemented_
   The Zoning Administrator (CPDO’s zoning officer) acts on every application for locational clearance. BizTrack routes the zoning sheet to CPDO and only CPDO approves or returns it.
   > Pursuant to the provisions of EO 72 implementing RA 7160 in relation to Sec. 5, Paragraph a and d, and Section 7 of Executive Order No. 648 dated 07 February 1981, the Zoning Administrator shall perform the following: 1. Enforcement a. Act on all applications for Locational Clearance
-  checked at `api/database/seeders/RbacSeeder.php:254`; proved by `ZoningOfficerTest.php` — “lets the zoning officer clear its own assignment but not end the application”
+  checked at `api/database/seeders/RbacSeeder.php:260`; proved by `ZoningOfficerTest.php` — “lets the zoning officer clear its own assignment but not end the application”
 - **IX-14-1b** · Art. IX §14 · p. 67 — **The Zoning Administrator issues Notices of Non-Conformance** · _Shown_
   The Zoning Administrator issues Notices of Non-Conformance.
   > Issuance of Notice of Non-Conformance to owners/ operators of uses, buildings or structures that are non-conforming to the applicable provisions of this Ordinance.
