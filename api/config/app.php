@@ -79,12 +79,23 @@ return [
     |--------------------------------------------------------------------------
     |
     | Here you may specify the default timezone for your application, which
-    | will be used by the PHP date and date-time functions. The timezone
-    | is set to "UTC" by default as it is suitable for most use cases.
+    | will be used by the PHP date and date-time functions.
+    |
+    | Asia/Manila, not Laravel's UTC default (5 October 2026). Browser testing
+    | found every date stamped between midnight and eight in the morning
+    | printed a day early — a permit's valid_from and "Date of issue", the
+    | office sheets' Date of Application, an unbilled fee's incurred date —
+    | because `now()->toDateString()` and `startOfDay()` cut the UTC day, and
+    | the City's day starts eight hours earlier. Each of those is a Manila
+    | date on a Manila document, so the clock is Manila's.
+    |
+    | Timestamps are stored as written, with no zone, so rows written before
+    | this change hold UTC wall-clock times and read eight hours early until
+    | they are shifted. Instants sent to the browser still carry their offset.
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => 'Asia/Manila',
 
     /*
     |--------------------------------------------------------------------------

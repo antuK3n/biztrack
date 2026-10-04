@@ -157,7 +157,12 @@ final class FilingMover
             'type' => $app->application_type?->value,
             'type_label' => $app->application_type?->label(),
             'status' => $app->status?->value,
-            'status_label' => $app->status?->label(),
+            // `statusLabel()`, not the enum's: a paid filing still gathering
+            // its permits wears `approved` and is not "Completed" yet.
+            'status_label' => $app->statusLabel(),
+            // Whether the city has finished with it — the panel's "Completed"
+            // reads this, not the status (5 October 2026).
+            'decided' => $app->isDecided(),
             // Soft-deleted businesses and applicants leak nulls (AGENTS.md §11).
             'business' => $app->business?->name,
             'applicant' => $app->applicant?->fullName(),
@@ -227,6 +232,11 @@ final class FilingMover
             }
         }
 
+        /*
+         * Only a filing already standing at For Final Approval: since
+         * 5 October 2026 a new filing or renewal closes on its last clearance
+         * (WorkflowService::refreshReadiness) and never parks here.
+         */
         if ($status === ApplicationStatus::ForFinalApproval && $bplo !== null) {
             $steps[] = $this->step($app, self::BPLO_APPROVE);
         }

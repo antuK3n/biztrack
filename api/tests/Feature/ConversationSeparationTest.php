@@ -43,6 +43,7 @@ function separationApplication(string $businessName, string $registrationNumber)
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return [$appId, Application::find($appId)->tracking_id];

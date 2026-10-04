@@ -138,6 +138,7 @@ it('chains a permit issued by the real approval path', function () {
         'prior_permit_id' => $prior->id,
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $application = Application::findOrFail($appId);

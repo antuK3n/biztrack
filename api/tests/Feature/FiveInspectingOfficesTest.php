@@ -86,6 +86,7 @@ function filingWithEveryClearance(): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);
@@ -155,7 +156,7 @@ function bookVisitFor(Application $app, string $officeCode): int
 
     return test()->withHeaders(authAs($email))
         ->postJson("/api/v1/applications/{$app->id}/permits/{$permitCode}/inspection", [
-            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+            'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
         ])->assertCreated()->json('data.id');
 }
 

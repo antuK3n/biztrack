@@ -108,6 +108,7 @@ it('ignores a "none of these" declaration — the paper escape is retired', func
 it('refuses to submit a renewal that names no permit and does not say why', function () {
     ['application_id' => $appId] = renewalDraft();
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
         ->assertJsonValidationErrors('prior_permit_id');
@@ -128,6 +129,7 @@ it('refuses to submit an amendment that names no permit either', function () {
         'amendment_location' => true,
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
         ->assertJsonValidationErrors('prior_permit_id');
@@ -137,6 +139,7 @@ it('submits a renewal that names its permit', function () {
     ['business' => $business] = renewalDraft();
     ['application_id' => $appId] = renewalDraft($business->permits()->firstOrFail()->id);
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 });
 
@@ -151,6 +154,7 @@ it('refuses a renewal that names no permit, however loudly the applicant says so
         'declared_none' => true,
     ])->assertOk();
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
         ->assertJsonValidationErrors('prior_permit_id');
@@ -167,6 +171,7 @@ it('tells the applicant where to go instead of naming a permit that does not exi
      */
     ['application_id' => $appId] = renewalDraft();
 
+    attachRequiredDocuments($appId);
     $message = $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
         ->json('errors.prior_permit_id.0');
@@ -185,6 +190,7 @@ it('reopens the question when a named permit is cleared', function () {
         'prior_permit_id' => null,
     ])->assertOk()->assertJsonPath('data.prior_permit_id', null);
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertStatus(422);
 });
 

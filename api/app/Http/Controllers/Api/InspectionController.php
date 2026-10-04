@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\InspectionResult;
-use App\Enums\InspectionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\InspectionResource;
@@ -185,11 +184,9 @@ class InspectionController extends Controller
             'scheduled_at' => ['required', 'date'],
         ]);
 
-        $inspection->update([
-            'scheduled_at' => $data['scheduled_at'],
-            'status' => InspectionStatus::Rescheduled,
-        ]);
-        Audit::log('inspection.rescheduled', $inspection, ['scheduled_at' => $data['scheduled_at']]);
+        // In the service since 5 October 2026, so the move refuses a past
+        // date and tells the applicant, as the first booking does.
+        $inspection = $this->workflow->rescheduleInspection($inspection, $data['scheduled_at']);
 
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),

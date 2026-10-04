@@ -4,6 +4,7 @@ use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\PermitStatus;
 use App\Models\Application;
+use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -59,6 +60,7 @@ function paidNewFiling(): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
     test()->withHeaders($owner)
@@ -117,6 +119,7 @@ function filingAtForApproval(): Application
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return Application::findOrFail($appId)->fresh();
@@ -215,7 +218,7 @@ function reapplyAndGrant(Application $app, string $permitCode): void
 
     $visitId = test()->withHeaders(authAs($office))
         ->postJson("/api/v1/applications/{$app->id}/permits/{$permitCode}/inspection", [
-            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+            'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
         ])->assertCreated()->json('data.id');
 
     test()->withHeaders(authAs($office))
@@ -540,7 +543,7 @@ it('does not let an office un-issue a permit it has already granted', function (
 
     $visitId = test()->withHeaders(authAs('cenro@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/permits/CEC/inspection", [
-            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+            'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
         ])->assertCreated()->json('data.id');
 
     test()->withHeaders(authAs('cenro@biztrack.local'))
@@ -669,4 +672,49 @@ it('refuses a refusal before the inspection, and names the alternatives', functi
     expect($app->fresh()->permitTypes->firstWhere('code', 'SANITARY')->pivot->status)
         ->toBe(ClearanceStatus::ForApproval)
         ->and($permit->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('completes the filing by itself when the last clearance is issued, category or none', function () {
+    /*
+     * Client, 5 October 2026: *"No, close it automatically."* A filing whose
+     * RA 11032 category no officer had put a name to used to go to For Final
+     * Approval here, "BPLO must confirm this filing's processing category",
+     * with nothing on BPLO's screen to confirm it with. The category is
+     * cleared below to make that the case under test.
+     */
+    $app = paidNewFiling();
+    $app->update(['complexity_set_by_user_id' => null]);
+
+    $offices = [
+        'SANITARY' => 'sanitary@biztrack.local',
+        'FSIC' => 'fire@biztrack.local',
+        'ZONING' => 'zoning@biztrack.local',
+        'OCCUPANCY' => 'obo@biztrack.local',
+        'CEC' => 'cenro@biztrack.local',
+    ];
+    foreach ($offices as $code => $email) {
+        $assignmentId = officeAssignmentFor($app->fresh(), $code);
+        test()->withHeaders(authAs($email))->postJson("/api/v1/assignments/{$assignmentId}/approve")->assertOk();
+        $visitId = test()->withHeaders(authAs($email))
+            ->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", ['scheduled_at' => now()->toDateTimeString()])
+            ->assertCreated()->json('data.id');
+        test()->withHeaders(authAs($email))
+            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    }
+
+    $app = $app->fresh();
+    expect($app->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->isDecided())->toBeTrue()
+        ->and($app->statusLabel())->toBe('Completed')
+        ->and($app->statusHistory()->where('to_status', 'for_final_approval')->exists())->toBeFalse()
+        ->and($app->statusHistory()->reorder()->latest('id')->value('note'))->toContain('closed')
+        ->and(AppNotification::where('user_id', $app->applicant_user_id)
+            ->where('title', 'Permit issued')->exists())->toBeTrue();
+});
+
+it('records the BPLO officer, not the payer, as issuer of the business permit released at payment', function () {
+    $app = paidNewFiling();
+    $permit = businessPermitOf($app);
+
+    expect($permit->issued_by_user_id)->not->toBe($app->applicant_user_id);
 });

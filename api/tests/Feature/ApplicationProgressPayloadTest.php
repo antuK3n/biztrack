@@ -70,6 +70,7 @@ function progressFiling(array $permitCodes): int
         'permit_type_ids' => PermitType::whereIn('code', $permitCodes)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);

@@ -16,6 +16,7 @@ use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\AmendmentScope;
 use App\Support\Audit;
 use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
@@ -291,6 +292,35 @@ class ApplicationController extends Controller
             abort(422, $refusal);
         }
 
+        /*
+         * And it must still be the permit to renew: not already replaced,
+         * not already being renewed by another submitted filing
+         * (`RenewalWindow::claimRefusal`, 5 October 2026). Here as well as at
+         * submit because the picker hides such a permit and the API should
+         * not take what the screen would never offer.
+         */
+        if ($data['application_type'] === ApplicationType::Renewal->value) {
+            foreach (Permit::with('permitType')->whereKey($priorIds)->get() as $prior) {
+                if ($refusal = RenewalWindow::claimRefusal($prior)) {
+                    throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
+                }
+            }
+        }
+
+        /*
+         * An amendment names the Business Permit and nothing else, and one
+         * may be open per business at a time (`AmendmentScope`, 5 October
+         * 2026). Checked at create so an API caller hears it before filling
+         * in a form that could never be approved.
+         */
+        if ($data['application_type'] === ApplicationType::Amendment->value) {
+            $refusal = AmendmentScope::refusal($priorIds, $data['permit_type_ids'] ?? null)
+                ?? AmendmentScope::openRefusal($business->id);
+            if ($refusal !== null) {
+                throw ValidationException::withMessages(['application_type' => [$refusal]]);
+            }
+        }
+
         $app = Application::create([
             'business_id' => $business->id,
             'applicant_user_id' => $request->user()->id,
@@ -443,6 +473,11 @@ class ApplicationController extends Controller
             $application->update(['business_id' => $business->id]);
         }
         if (isset($data['permit_type_ids'])) {
+            // The same door store() guards, for an amendment's types.
+            if ($application->application_type === ApplicationType::Amendment
+                && ($refusal = AmendmentScope::refusal([], $data['permit_type_ids']))) {
+                throw ValidationException::withMessages(['permit_type_ids' => [$refusal]]);
+            }
             $application->permitTypes()->sync($data['permit_type_ids']);
         }
         if (array_key_exists('fee_profile', $data)) {
@@ -625,12 +660,30 @@ class ApplicationController extends Controller
             $application->loadMissing('priorPermits.permitType');
 
             foreach ($application->priorPermits as $prior) {
-                $refusal = RenewalWindow::refusalFor($prior);
+                $refusal = RenewalWindow::refusalFor($prior, null, $application);
                 if ($refusal !== null) {
                     throw ValidationException::withMessages([
                         'prior_permit_id' => [$refusal],
                     ]);
                 }
+            }
+        }
+
+        /*
+         * ── An amendment is of the Business Permit, one at a time ────────
+         *
+         * `AmendmentScope` (5 October 2026). Again at submit, because a
+         * draft can outlive the check at create: the other amendment may
+         * have been submitted since, and the types may have been edited.
+         */
+        if ($application->application_type === ApplicationType::Amendment) {
+            $application->loadMissing('priorPermits');
+            $refusal = AmendmentScope::refusal(
+                [$application->prior_permit_id, ...$application->priorPermits->pluck('id')->all()],
+                $application->permitTypes()->pluck('permit_types.id')->all(),
+            ) ?? AmendmentScope::openRefusal($application->business_id, $application);
+            if ($refusal !== null) {
+                throw ValidationException::withMessages(['application_type' => [$refusal]]);
             }
         }
 
@@ -664,6 +717,22 @@ class ApplicationController extends Controller
                     'Fill in at least one new detail under New Details. An amendment has to say '
                     .'what the detail should say now, not only that it changed.',
                 ],
+            ]);
+        }
+
+        /*
+         * ── The required documents are uploaded ──────────────────────────
+         *
+         * Last of the gates, because "which permit" and "what changes" are
+         * answers the list itself depends on (an amendment's documents follow
+         * its boxes). Server-side since 5 October 2026, when a filing with no
+         * documents at all was submitted through the API; see
+         * `RequiredDocuments` for why it reads the wizard's own list.
+         */
+        $missing = \App\Support\RequiredDocuments::missingFor($application);
+        if ($missing->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'documents' => ['Upload: '.$missing->pluck('name')->implode(', ').'.'],
             ]);
         }
 

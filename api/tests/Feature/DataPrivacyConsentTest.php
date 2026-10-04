@@ -91,6 +91,7 @@ it('lets the applicant take the consent back', function () {
 it('refuses to submit an application nobody consented to', function () {
     $id = draftWithConsent(false);
 
+    attachRequiredDocuments($id);
     $res = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$id}/submit");
 
@@ -106,6 +107,7 @@ it('refuses to submit an application nobody consented to', function () {
 it('submits once the consent is there', function () {
     $id = draftWithConsent(true);
 
+    attachRequiredDocuments($id);
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$id}/submit")
         ->assertOk();

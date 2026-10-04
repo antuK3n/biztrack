@@ -47,6 +47,7 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);
@@ -111,6 +112,7 @@ it('lets the zoning officer clear its own assignment but not end the application
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);

@@ -82,6 +82,7 @@ function parallelFiling(array $openCodes, string $name): Application
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO reads the form before the applicant is asked for money, and
     // `bploApprovesForm` also puts an officer's name to the RA 11032 category —
@@ -144,7 +145,7 @@ function bookOfficeVisit(Application $app, string $code): int
 
     return test()->withHeaders(authAs($email))
         ->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", [
-            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+            'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
         ])->assertCreated()->json('data.id');
 }
 
@@ -349,7 +350,7 @@ it('refuses a second visit to an office that already holds one', function () {
 
     test()->withHeaders(authAs(PARALLEL_OFFICE['SANITARY'][1]))
         ->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", [
-            'scheduled_at' => now()->addDays(4)->toDateTimeString(),
+            'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
         ])->assertStatus(422);
 
     expect(Inspection::where('application_id', $app->id)->count())->toBe(1);

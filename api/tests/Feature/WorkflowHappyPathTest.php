@@ -77,6 +77,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
      * nobody can act on would start five service-time clocks over work that has
      * not been handed to them.
      */
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     expect(Application::find($appId)->status->value)->toBe('for_approval');
     expect(Application::find($appId)->permitTypes()->count())->toBe(6);
@@ -171,7 +172,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
 
         $visitId = $this->withHeaders($officer)
             ->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
-                'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+                'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
             ])->assertCreated()->json('data.id');
 
         $this->withHeaders($officer)
@@ -319,6 +320,7 @@ it('routes one queue item per office, and only as that office’s permit is file
         'permit_type_ids' => $allTypeIds,
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();

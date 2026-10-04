@@ -3,6 +3,7 @@
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
+use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Inspection;
 use App\Models\Permit;
@@ -91,6 +92,7 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*
@@ -145,7 +147,7 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
         // Approving the paperwork books nothing. The office says when.
         test()->withHeaders($officer)
             ->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
-                'scheduled_at' => now()->addWeekdays(2)->startOfHour()->toDateTimeString(),
+                'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
             ])->assertCreated();
     }
 
@@ -243,6 +245,8 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     expect(clearancePermitsIssued($appId))->toBe(4);
     expect(Application::find($appId)->status->value)->toBe('approved');
 
+    // On the day it was booked for: a result cannot predate its visit.
+    test()->travelTo(now()->addWeekdays(5)->setTime(9, 0));
     test()->withHeaders($officer)
         ->postJson("/api/v1/inspections/{$reinspectionId}/conduct", ['result' => 'passed', 'findings' => 'extinguisher installed'])
         ->assertOk();
@@ -326,6 +330,8 @@ it('refuses a second re-inspection booked from a superseded failure', function (
 
     // The current visit may fail again and be re-inspected again, though —
     // failing twice is not a reason to strand the filing a second time.
+    // On the day it was booked for: a result cannot predate its visit.
+    test()->travelTo(now()->addWeekdays(5)->setTime(9, 0));
     test()->withHeaders($officer)
         ->postJson("/api/v1/inspections/{$second}/conduct", ['result' => 'failed', 'findings' => 'still blocked'])
         ->assertOk();
@@ -476,4 +482,86 @@ it('refuses the super admin a re-inspection: it belongs to the office that faile
     test()->withHeaders(authAs($deptEmail['BFP']))
         ->postJson("/api/v1/inspections/{$fire->id}/reinspect", $payload)
         ->assertCreated();
+});
+
+/*
+ * ── The visit's date is a real date ─────────────────────────────────────────
+ *
+ * Browser testing, 5 October 2026: a visit could be booked in the past, a
+ * result recorded two days before the day it was booked for (booked 6 October,
+ * "conducted" the 4th), and moving a visit told the applicant nothing.
+ */
+
+it('refuses to book or move a visit to a day already gone', function () use ($deptEmail) {
+    [, $visits] = filingAwaitingInspection($deptEmail, 'Yesterday Eatery');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->subDay()->toDateString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'Pick today or a later date.');
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->subDays(3)->toIso8601String()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'Pick today or a later date.');
+
+    // Today itself is fine, at any hour.
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->startOfDay()->toIso8601String()])
+        ->assertCreated();
+});
+
+it('refuses a first booking in the past too', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'First Booking Bistro');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    // Clear the fixture's booking so the office has a first one to make.
+    Inspection::whereKey($fire->id)->delete();
+
+    test()->withHeaders(authAs($deptEmail['BFP']))
+        ->postJson("/api/v1/applications/{$appId}/permits/FSIC/inspection", ['scheduled_at' => now()->subDay()->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'Pick today or a later date.');
+});
+
+it('refuses a result recorded before the day the visit is booked for', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Early Bird Grill');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+    $booked = now()->addDays(2)->setTime(14, 0);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => $booked->toDateTimeString()])
+        ->assertOk();
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'The visit is booked for '.$booked->format('d M Y').'.');
+    expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
+
+    // On the morning of the booked day it can be recorded, before the hour.
+    test()->travelTo($booked->copy()->setTime(8, 0));
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
+        ->assertOk();
+});
+
+it('tells the applicant when a visit is moved', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Moved Visit Cafe');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $to = now()->addDays(3);
+
+    test()->withHeaders(authAs($deptEmail['BFP']))
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => $to->toDateTimeString()])
+        ->assertOk();
+
+    $owner = Application::findOrFail($appId)->applicant_user_id;
+    expect(AppNotification::where('user_id', $owner)
+        ->where('body', 'like', '%inspection has been moved to '.$to->format('d M Y').'.')
+        ->exists())->toBeTrue();
 });
