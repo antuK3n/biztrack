@@ -572,6 +572,37 @@ class OfficeFormController extends Controller
             }
         }
 
+        /*
+         * ── Only the officer on the case, and only until the permit is out ──
+         *
+         * Ken, 5 October 2026 (office-review-obo 3). The correction above had
+         * no holder or status gate: a colleague refused Approve on a case held
+         * by another officer could still rewrite its answers, and the office
+         * could rewrite the sheet behind a certificate it had already issued.
+         *
+         * "Holds" is the reading `authorizeHolder` and the review page's
+         * `can_act` already give it: held by this officer, or by nobody yet.
+         * The issuance dates are not answers and stay open as they always were.
+         */
+        if (array_diff_key($corrected, array_flip(self::OFFICER_KEYS)) !== []) {
+            $reviews = $application->assignments()->where('department_id', $user->department_id)->get();
+            abort_if(
+                $reviews->isNotEmpty() && $reviews->every(
+                    fn ($review) => $review->officer_user_id !== null && $review->officer_user_id !== $user->id,
+                ),
+                403,
+                'This filing is with another officer. Only the system administrator can move it.'
+            );
+            abort_if(
+                $application->permitTypes()
+                    ->where('permit_types.id', $permitType->id)
+                    ->wherePivot('status', ClearanceStatus::Approved->value)
+                    ->exists(),
+                422,
+                'This permit has been issued, so the answers on its sheet can no longer be changed.'
+            );
+        }
+
         $formData = OfficeFormAnswers::derive($application, $permitType->code, $formData);
 
         $form = ApplicationOfficeForm::updateOrCreate(

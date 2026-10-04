@@ -320,6 +320,82 @@ it('lets the office that issues the permit correct the applicant’s answers, an
         ]);
 });
 
+/** An OBO filing with a sheet on it and OBO's review routed, held by `$holder`. */
+function oboSheetHeldBy(?User $holder): Application
+{
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001'],
+    ]);
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'OBO')->value('id'),
+        'officer_user_id' => $holder?->id,
+        'status' => 'pending',
+        'assigned_at' => now(),
+    ]);
+
+    return $app;
+}
+
+it('refuses the correction to an officer of the office who does not hold the case', function () {
+    /*
+     * Ken, 5 October 2026 (office-review-obo 3): only the officer holding the
+     * case may correct the answers. A colleague refused Approve on it could
+     * still rewrite them. The issuance dates are not answers, so they stay open.
+     */
+    $colleague = User::create([
+        'name' => 'Other Obo',
+        'first_name' => 'Other',
+        'last_name' => 'Obo',
+        'gender' => 'F',
+        'email' => 'other.obo@biztrack.local',
+        'mobile_number' => '09170000003',
+        'password' => 'biztrack1',
+        'department_id' => Department::where('code', 'OBO')->value('id'),
+        'is_active' => true,
+    ]);
+    $app = oboSheetHeldBy($colleague);
+    $obo = authAs('obo@biztrack.local');
+
+    $this->withHeaders($obo)
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001-A'],
+        ])
+        ->assertForbidden()
+        ->assertJsonPath('message', 'This filing is with another officer. Only the system administrator can move it.');
+
+    $this->withHeaders($obo)
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001', 'fsec_date' => '2026-01-06'],
+        ])
+        ->assertOk();
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+        ->and(savedForm($app, 'OCCUPANCY')['fsec_date'])->toBe('2026-01-06');
+});
+
+it('refuses the correction once the office has issued the permit', function () {
+    // The holder too: the certificate was issued on the answers as they stand.
+    $app = oboSheetHeldBy(User::where('email', 'obo@biztrack.local')->firstOrFail());
+    $app->permitTypes()->updateExistingPivot(
+        PermitType::where('code', 'OCCUPANCY')->value('id'),
+        ['status' => ClearanceStatus::Approved->value],
+    );
+
+    $this->withHeaders(authAs('obo@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001-A'],
+        ])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This permit has been issued, so the answers on its sheet can no longer be changed.');
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+        ->and(AuditLog::where('action', 'office_form.corrected_by_office')->count())->toBe(0);
+});
+
 it('refuses the super admin the write outright', function () {
     /*
      * The gate is the department that ISSUES the permit, strictly. The super
