@@ -419,7 +419,7 @@ function permitChip(
    *
    * A label of its own rather than a ClearanceStatus one, which is the
    * established shape here: "Not Yet Submitted", "Inspection Passed" and
-   * "Inspection Failed" are all this function's own words for a situation the
+   * "Rejected" (for a failed visit) are all this function's own words for a situation the
    * status alone does not describe.
    */
   if (
@@ -470,7 +470,15 @@ function permitChip(
      * went on 17 September 2026 — and the lookup would have fallen through to
      * the neutral default, quietly painting a failed inspection grey.
      */
-    if (office.inspection === 'failed') return { tone: 'danger', label: 'Inspection Failed' }
+    /*
+     * "Rejected", not "Inspection Failed", since 5 October 2026. The office
+     * records the outcome with a button called Reject, and the client reads
+     * it as one: *"Inspection Failed should be named Rejected, right??"* It
+     * also suspends the Business Permit now, exactly as a refused clearance
+     * does, so the two outcomes wear one word; the row's note says which
+     * way back applies (a re-inspection here, a new application there).
+     */
+    if (office.inspection === 'failed') return { tone: 'danger', label: 'Rejected' }
     if (office.inspection === 'passed' || office.inspection === 'conditional')
       return { tone: clearanceStatusMeta('approved').tone, label: 'Inspection Passed' }
   }
