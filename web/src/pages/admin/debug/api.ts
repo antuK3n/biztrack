@@ -1,6 +1,7 @@
 import { api } from '../../../lib/api'
 import type {
   PaymentGatewayCharge,
+  PaymentGatewayConfirm,
   PaymentGatewayMode,
   PaymentGatewayStatus,
   PaymentGatewayTestResult,
@@ -33,7 +34,7 @@ export const debugPanel = {
 export const debugPayments = {
   status: () => unwrap<PaymentGatewayStatus>(api.get('/debug/payments')),
   /** Either switch or both; the answer is the status after the change. */
-  update: (body: { mode?: PaymentGatewayMode; charge?: PaymentGatewayCharge }) =>
+  update: (body: { mode?: PaymentGatewayMode; charge?: PaymentGatewayCharge; confirm?: PaymentGatewayConfirm }) =>
     unwrap<PaymentGatewayStatus>(api.put('/debug/payments', body)),
   /** One signed call to KwikPay. Changes nothing. */
   test: () => unwrap<PaymentGatewayTestResult>(api.post('/debug/payments/test')),

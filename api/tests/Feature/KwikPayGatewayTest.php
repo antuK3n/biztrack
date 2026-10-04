@@ -434,6 +434,8 @@ it('leaves a fresh payment alone for the first two minutes', function () {
 });
 
 it('completes a payment KwikPay reports as 5 when reconciling', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
     kpQueryAnswers('5', (float) $payment->amount);
@@ -472,7 +474,58 @@ it('asks about a payment with no check scheduled before an overdue one', functio
         && $r['order_id'] === $overdue->gateway_order_id);
 });
 
+/*
+ * The default since 4 October 2026: KwikPay's answer to /api/query settles
+ * nothing, because the gateway answered "5" for an order that expired unpaid.
+ * Only the signed callback marks a payment paid.
+ */
+it('by default marks nothing paid or failed from KwikPay\'s answer when reconciling', function (string $answer) {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers($answer, (float) $payment->amount);
+
+    $this->travel(3)->minutes();
+    $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($payment->fresh()->check_attempts)->toBe(1)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+})->with(['5', '3']);
+
+it('by default sets a payment aside without completing it, whatever KwikPay answers', function () {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    kpQueryAnswers('5', (float) $payment->amount);
+
+    app(KwikPayGateway::class)->abandon($payment);
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
+        ->and($payment->fresh()->abandoned_at)->not->toBeNull()
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+});
+
+it('by default still completes a payment on KwikPay\'s signed callback', function () {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+
+    kpPostCallback(kpCallback($payment))->assertOk();
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Completed)
+        ->and(PaymentMode::confirm())->toBe(PaymentMode::CONFIRM_CALLBACK);
+});
+
+it('switches what marks a payment paid from the server, audit-logged', function () {
+    $this->artisan('biztrack:payment-gateway', ['action' => 'trust-query'])->assertSuccessful();
+    expect(PaymentMode::confirm())->toBe(PaymentMode::CONFIRM_QUERY);
+
+    $this->artisan('biztrack:payment-gateway', ['action' => 'callback-only'])->assertSuccessful();
+    expect(PaymentMode::confirm())->toBe(PaymentMode::CONFIRM_CALLBACK)
+        ->and(AuditLog::where('action', 'payment_gateway.confirm_switched')->count())->toBe(2);
+});
+
 it('fails a payment KwikPay reports as 3 when reconciling', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $payment = kpOpen(kpFiling());
     kpQueryAnswers('3');
 
@@ -526,6 +579,8 @@ it('flags a payment still pending after a day for staff, and does not fail it', 
 });
 
 it('ignores a late callback for a payment reconciliation already completed', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
     kpQueryAnswers('5', (float) $payment->amount);
@@ -540,6 +595,8 @@ it('ignores a late callback for a payment reconciliation already completed', fun
 });
 
 it('lets the owner ask once for their payment status', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $payment = kpOpen(kpFiling());
     kpQueryAnswers('5', (float) $payment->amount);
 
@@ -639,6 +696,8 @@ it('tests the connection with one signed call to /api/me', function () {
 });
 
 it('still confirms a KwikPay payment after the switch is turned off', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
 
@@ -682,6 +741,8 @@ function kpAbandon(Payment $payment)
 }
 
 it('completes instead of setting aside when KwikPay says the payment went through', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
     kpQueryAnswers('5', (float) $payment->amount);
@@ -694,6 +755,8 @@ it('completes instead of setting aside when KwikPay says the payment went throug
 });
 
 it('marks the payment failed and frees a new one when KwikPay says it failed', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
     kpQueryAnswers('3');
@@ -706,6 +769,8 @@ it('marks the payment failed and frees a new one when KwikPay says it failed', f
 });
 
 it('sets the payment aside, still pending, when KwikPay says it is waiting, unknown, or does not answer', function (string $answer) {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     $app = kpFiling();
     $payment = kpOpen($app);
     kpQueryAnswers($answer, (float) $payment->amount, $answer === '0' ? 404 : 200);
@@ -1071,6 +1136,8 @@ it('still confirms a test-charge payment for ₱1 after the switch moves to the 
 });
 
 it('still confirms a full-bill payment for the full bill after the switch moves to the test charge', function () {
+    // Written for the setting where KwikPay's answer to /api/query settles a payment.
+    PaymentMode::setConfirm(PaymentMode::CONFIRM_QUERY);
     PaymentMode::switchCharge('full', 'api');
     $app = kpFiling();
     $payment = kpOpen($app);

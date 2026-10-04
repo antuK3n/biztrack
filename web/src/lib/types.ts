@@ -872,6 +872,9 @@ export type PaymentGatewayMode = 'simulated' | 'kwikpay'
 /** `test`: the payment service collects `test_amount`. `full`: the bill. */
 export type PaymentGatewayCharge = 'test' | 'full'
 
+/** What may mark a KwikPay payment paid: its signed callback only, or its status answer too. */
+export type PaymentGatewayConfirm = 'callback' | 'query'
+
 /**
  * The super admin's view of both switches (GET /admin/payment-gateway). Names
  * of missing settings, never values; the merchant key is never sent.
@@ -885,6 +888,7 @@ export interface PaymentGatewayStatus {
   default_charge: PaymentGatewayCharge
   /** What the test charge collects, "1.00". */
   test_amount: string
+  confirm: PaymentGatewayConfirm
   kwikpay: {
     configured: boolean
     /** Env keys still needed, e.g. `KWIKPAY_KEY`. */
