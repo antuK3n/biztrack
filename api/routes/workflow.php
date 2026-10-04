@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
+use App\Http\Controllers\Api\Admin\LegacyImportController;
 use App\Http\Controllers\Api\Admin\OicAssignmentController;
+use App\Http\Controllers\Api\Admin\PaymentGatewayController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AmendmentController;
 use App\Http\Controllers\Api\AnalyticsController;
@@ -12,7 +14,9 @@ use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\ClearanceController;
 use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\InspectionController;
+use App\Http\Controllers\Api\LegacyClaimController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
@@ -21,6 +25,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,26 +38,8 @@ use Illuminate\Support\Facades\Route;
 // --- PUBLIC ------------------------------------------------------------------
 Route::get('verify/{permit_number}', [VerifyController::class, 'show']);
 
-/*
- * --- Authenticated -----------------------------------------------------------
- *
- * ---- `unrestricted`, and why it is on the whole file --------------------
- *
- * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
- * pag view ng notif" [client, 30 September 2026]. A suspended or blacklisted
- * owner reaches their messages and their notices; everything else refuses
- * them until the finding is settled.
- *
- * Attached here and lifted OFF the two that stay open, rather than added to
- * each group that closes. The instruction is an allow-list - two screens - so
- * the code is an allow-list too, and the default is the safe one: a route
- * added next month is barred until somebody decides it should not be, instead
- * of being open until somebody remembers to bar it.
- *
- * It costs officers nothing. AccountRestriction::for() answers null for any
- * account without `business.manage_own`, so an officer never runs the query.
- */
-Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
+// --- Authenticated -----------------------------------------------------------
+Route::middleware('auth:sanctum')->group(function () {
 
     // Reference lookups (auth only; power the wizard)
     Route::prefix('reference')->group(function () {
@@ -74,6 +61,28 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::get('businesses', [BusinessController::class, 'index']);
         Route::post('businesses', [BusinessController::class, 'store']);
         Route::put('businesses/{business}', [BusinessController::class, 'update']);
+
+        /*
+         * ── Answers saved before they can be a draft ──────────────────
+         *
+         * The wizard cannot create a draft until the API will accept a
+         * business, which is not until its third step — so two steps of
+         * typing lived only in the tab. These hold that typing.
+         *
+         * Same permission as the three above, because it is the same
+         * people filling in the same form one step earlier. Every action
+         * is scoped to the caller's own user id inside the controller,
+         * with no id in the path: a request cannot name somebody else's
+         * row, so there is no ownership check to forget.
+         */
+        Route::get('wizard-drafts', [DraftController::class, 'index']);
+        Route::post('wizard-drafts', [DraftController::class, 'store']);
+        Route::get('wizard-drafts/{wizardDraft}', [DraftController::class, 'show']);
+        Route::put('wizard-drafts/{wizardDraft}', [DraftController::class, 'update']);
+        Route::delete('wizard-drafts/{wizardDraft}', [DraftController::class, 'destroy']);
+        // Claim businesses the old register holds under this owner's name
+        // (legacy import; see LegacyClaim). Same check as the sign-up field.
+        Route::post('businesses/claim', [LegacyClaimController::class, 'store']);
     });
     // Show allowed for owner OR officer with application.view_all (checked in controller)
     Route::get('businesses/{business}', [BusinessController::class, 'show']);
@@ -124,8 +133,16 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::middleware('permission:application.create')->group(function () {
         Route::post('applications', [ApplicationController::class, 'store']);
         Route::put('applications/{application}', [ApplicationController::class, 'update']);
-        Route::post('applications/{application}/submit', [ApplicationController::class, 'submit']);
+        // Filing waits for a confirmed address, while mail is on [Register 1].
+        Route::post('applications/{application}/submit', [ApplicationController::class, 'submit'])
+            ->middleware('email.confirmed');
         Route::post('applications/{application}/resubmit', [ApplicationController::class, 'resubmit']);
+        /*
+         * The narrow door for a returned filing: write only the fields BPLO
+         * ticked, record what changed, resubmit. Beside `resubmit` because it
+         * ends in one — see ApplicationController::corrections.
+         */
+        Route::post('applications/{application}/corrections', [ApplicationController::class, 'corrections']);
         Route::post('applications/{application}/cancel', [ApplicationController::class, 'cancel']);
         /*
          * Throw a DRAFT away. Distinct from `cancel` above, which is the right
@@ -178,36 +195,26 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     });
     Route::get('documents/{document}/download', [DocumentController::class, 'download']);
 
-    /*
-     * Messaging (per-application thread; participant check in controller).
-     *
-     * `withoutMiddleware('unrestricted')`: this is one of the two things a
-     * barred account may still do, and it is the one the refusal everywhere
-     * else points AT. Locking it would leave an owner told to message the
-     * BPLO and refused when they tried - the dead end the restriction modal
-     * was built to close.
-     */
-    Route::middleware('permission:message.participate')
-        ->withoutMiddleware('unrestricted')
-        ->group(function () {
-            // Inbox for the dedicated Messages page: one row per conversation.
-            Route::get('message-threads', [MessageController::class, 'threads']);
-            Route::get('applications/{application}/messages', [MessageController::class, 'index']);
-            Route::post('applications/{application}/messages', [MessageController::class, 'store']);
-            /*
-             * A question with no filing behind it, addressed to BPLO.
-             *
-             * No `{user}` means "mine", which is what an applicant always sends —
-             * someone who has registered no business has no application id to put
-             * in a path, and telling them to "contact the City BPLO" while giving
-             * them no way to do it is what this fixes. BPLO names the person whose
-             * enquiry it is opening; the office check is in the controller, so the
-             * two-segment form is not a way in for anybody else.
-             */
-            Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
-            Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
-            Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
-        });
+    // Messaging (per-application thread; participant check in controller)
+    Route::middleware('permission:message.participate')->group(function () {
+        // Inbox for the dedicated Messages page: one row per conversation.
+        Route::get('message-threads', [MessageController::class, 'threads']);
+        Route::get('applications/{application}/messages', [MessageController::class, 'index']);
+        Route::post('applications/{application}/messages', [MessageController::class, 'store']);
+        /*
+         * A question with no filing behind it, addressed to BPLO.
+         *
+         * No `{user}` means "mine", which is what an applicant always sends —
+         * someone who has registered no business has no application id to put
+         * in a path, and telling them to "contact the City BPLO" while giving
+         * them no way to do it is what this fixes. BPLO names the person whose
+         * enquiry it is opening; the office check is in the controller, so the
+         * two-segment form is not a way in for anybody else.
+         */
+        Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
+        Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
+        Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
+    });
 
     /*
      * ── The office's line to the System Administrator ─────────────────────
@@ -255,7 +262,23 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          */
         Route::post('applications/{application}/fee-preview', [PaymentController::class, 'feePreview']);
         Route::post('applications/{application}/pay', [PaymentController::class, 'pay']);
+        // Mode, methods on offer, and any online payment still in flight.
+        Route::get('applications/{application}/payment-options', [PaymentController::class, 'options']);
         Route::get('payments', [PaymentController::class, 'index']);
+        // The waiting screen polls this; it reads our own record only.
+        Route::get('payments/{payment}', [PaymentController::class, 'show'])->whereNumber('payment');
+        /*
+         * "Check payment status": one query to KwikPay. Throttled, because each
+         * press is a request to a third party that IP-checks and may rate
+         * limit the whole merchant account, not just this owner.
+         */
+        Route::post('payments/{payment}/check', [PaymentController::class, 'check'])
+            ->whereNumber('payment')
+            ->middleware('throttle:10,1');
+        // "Pay a different way". Its own per-application limit is in the action.
+        Route::post('payments/{payment}/abandon', [PaymentController::class, 'abandon'])
+            ->whereNumber('payment')
+            ->middleware('throttle:10,1');
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
@@ -293,6 +316,25 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::post('assignments/{assignment}/release', [AssignmentController::class, 'release']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
+        /*
+         * Change what an open return asks for, without returning again.
+         *
+         * The same permission as Return, because it is the same act by the
+         * same officer on the same case — an amendment to an instruction they
+         * have already given. A second Return is not legal (Returned goes
+         * only forward) and should not be: the filing is on the applicant's
+         * desk, and bouncing it would interrupt a repair already under way.
+         */
+        Route::post('assignments/{assignment}/amend-return', [AssignmentController::class, 'amendReturn']);
+        /*
+         * An officer corrects the filing's own answers, in Edit mode.
+         *
+         * Same permission as the rest of review, and the same validation the
+         * APPLICANT's form applies — it calls that validator rather than
+         * carrying a copy. Every changed field is audited with the officer
+         * named: a declared answer changed by somebody else has to say so.
+         */
+        Route::put('applications/{application}/fields', [BusinessController::class, 'updateAsOfficer']);
         /*
          * The office's third answer, on the same permission as its other two.
          *
@@ -385,6 +427,15 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      */
     Route::middleware('permission:permit.issue')
         ->post('permits/{permit}/lift-suspension', [PermitController::class, 'liftSuspension']);
+    /*
+     * Revoking a permit — BPLO and the super admin (checklist item 23). Its own
+     * permission rather than `permit.issue`, which the lift above uses: A26
+     * named `permit.revoke` as the thing to add, and taking a certificate away
+     * is a different act from minting one even while the same two roles hold
+     * both.
+     */
+    Route::middleware('permission:permit.revoke')
+        ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);
 
     // Chatbot (rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
@@ -397,95 +448,60 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      * seat, and an officer without that permission still has notifications.
      * The counts are scoped to the reader inside the controller.
      */
-    /*
-     * The other half of what a barred account keeps: the badge that says
-     * something is waiting, and the notices themselves - which carry the
-     * reason the restriction was recorded, and are therefore the first thing
-     * such an owner is sent to read.
-     *
-     * Marking one read is a write and stays open with them. It changes
-     * nothing about the account's standing, and a list you may read but never
-     * clear would keep telling an owner they have unopened mail they have
-     * opened.
-     */
-    Route::withoutMiddleware('unrestricted')->group(function () {
-        Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
-        Route::get('notifications', [NotificationController::class, 'index']);
-        Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
-        Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
-    });
+    Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
+    Route::get('notifications', [NotificationController::class, 'index']);
+    Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
+    Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
 
     // Analytics (analytics.view)
     Route::middleware('permission:analytics.view')->group(function () {
         Route::get('analytics/summary', [AnalyticsController::class, 'summary']);
         Route::get('analytics/export', [AnalyticsController::class, 'export']);
         /*
-         * Features 6/7 moved out of the standalone r/ project and into the site.
-         * They stay on analytics.view because they aggregate every office's
-         * assignments — an office reviewer reading these would see round the
-         * scoping in ApplicationVisibility. Checklist #78 added BPLO to that
-         * permission; BPLO is the one office role that already holds
-         * application.view_any_office, so the boundary is not new to it.
-         */
-        /*
-         * The Analytics Dashboard (spec §1). Same permission and the same reason:
-         * these panels count every office's filings, decisions, inspections and
-         * permits, and the barangay and line-of-business rankings amount to a
-         * register-wide summary.
+         * The Analytics Dashboard (spec §1), one screen for every office
+         * (checklist 2026-09-27, item 1).
+         *
+         * `analytics.view` is on every office admin, BPLO and the super admin.
+         * It is NOT a register-wide read any more: the controller asks
+         * App\Support\AnalyticsOffice which office the request is answered for,
+         * and an office account gets its own office or a 403. Only readers with
+         * `application.view_any_office` may name another office or "all".
+         * summary/export above are register-wide and refuse everyone else.
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
-        Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
-        Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
         /*
-         * Renewal Risk reads every business's permits, filings, findings and
-         * payments to rank them, so it belongs on the same permission as the
-         * rest — a barangay-level watchlist of who is about to fall out of
-         * compliance is not an ordinary office reviewer's business.
+         * Report Generation (checklist 2026-09-27, item 7): five LGU-format
+         * reports over a chosen period, as JSON for the printable screen and as
+         * CSV. Same permission and the same office boundary as the dashboard —
+         * ReportController asks AnalyticsOffice, as AnalyticsController does.
          */
-        Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
-        Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
+        Route::get('analytics/reports', [ReportController::class, 'index']);
+        Route::get('analytics/reports/{report}', [ReportController::class, 'show'])
+            ->where('report', '[a-z-]+');
+        Route::get('analytics/reports/{report}/csv', [ReportController::class, 'csv'])
+            ->where('report', '[a-z-]+');
         /*
-         * The fitted model shown beside that watchlist. Same permission and the
-         * same reader, deliberately: it is the same screen, and a reader trusted
-         * with the rule score is the reader who needs to see how far the fitted
-         * figure beside it can be trusted.
+         * Business Growth Analysis and Renewal Risk Prediction lived here, with
+         * their PDF reports, the fitted renewal model and the per-permit
+         * follow-up button. All six routes went with the two screens
+         * (checklist 2026-09-27, "Manage Approved Permits", item 6). What was
+         * worth keeping moved onto the dashboard payload — permits approaching
+         * expiry and new-versus-closed businesses per month — so it is served
+         * by `analytics/dashboard` above. To bring a screen back, restore its
+         * route, controller method, AnalyticsDatasets entry and Support class
+         * from git history together; none of them works alone.
          */
-        Route::get('analytics/renewal-model', [AnalyticsController::class, 'renewalModel']);
-        /*
-         * The Send Reminder / Immediate Follow-up button on that screen. The
-         * only route in this file that sends a message to a citizen on an
-         * officer's say-so, which is why three things are true of it:
-         *
-         *  - **It sits on `analytics.view`, not on a notification permission.**
-         *    The authority being exercised is "I have read the watchlist and
-         *    this business needs chasing", and the watchlist is what
-         *    analytics.view opens. Nobody who cannot see the row should be able
-         *    to act on it — and the super admin, which no longer holds this
-         *    permission, must not acquire it here by the back door.
-         *  - **Keyed on the permit, not the business.** A business commonly
-         *    holds three permits expiring on three dates and the watchlist has
-         *    a row per permit; the message quotes a permit number and an expiry
-         *    date, so a business-keyed route would have to guess which row the
-         *    officer was looking at.
-         *  - **Throttled.** Not for load — one send is one notification row —
-         *    but because the far end is a real person's phone. Twenty a minute
-         *    is more follow-ups than an office makes in an hour and still stops
-         *    a stuck key becoming a hundred messages. The per-permit-per-day
-         *    ledger guard in the controller is the real protection against a
-         *    double send; this is the blunt outer one.
-         */
-        Route::post('analytics/renewal-risk/{permit}/remind', [AnalyticsController::class, 'remindRenewal'])
-            ->middleware('throttle:20,1');
 
         /*
          * Manual refresh, for when waiting for the nightly run will not do — a
          * demo, or an officer who has just filed something and wants the figures
          * to include it.
          *
-         * Throttled because one call recomputes the whole register: a year of
-         * review history, the full renewal watchlist and a fitted model, over
-         * twenty dataset variants and a second or two of query and arithmetic.
+         * Throttled because one call recomputes the whole register: every
+         * dashboard window for the city and for each office, plus the two
+         * oversight screens — a few dozen variants and a few seconds of query
+         * and arithmetic.
          * It used to push all of that to a separate R service over HTTP; the
          * work is now in-process, which removes the network but not the cost.
          * Holding it to a few calls a minute stops a held-down button turning
@@ -619,5 +635,30 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);
+        /*
+         * Importing the old register (Ken's checklist, 27 September 2026).
+         * `data.import` is the super admin's alone — see RbacSeeder.
+         */
+        Route::middleware('permission:data.import')->group(function () {
+            Route::get('legacy-imports', [LegacyImportController::class, 'index']);
+            Route::get('legacy-imports/guide', [LegacyImportController::class, 'guide']);
+            Route::get('legacy-imports/template', [LegacyImportController::class, 'template']);
+            Route::post('legacy-imports/csv', [LegacyImportController::class, 'previewCsv']);
+            Route::post('legacy-imports/odbc', [LegacyImportController::class, 'previewOdbc']);
+            Route::get('legacy-imports/{legacyImport}', [LegacyImportController::class, 'show']);
+            Route::post('legacy-imports/{legacyImport}/run', [LegacyImportController::class, 'run']);
+        });
+
+        /*
+         * The payment gateway switch (docs/payment-gateway.md). Super admin
+         * only — checked by ROLE in the controller rather than by a permission,
+         * because a new permission would have to be seeded into the live
+         * register before anyone could use it, and this is exactly one role's
+         * decision by Ken's instruction.
+         */
+        Route::get('payment-gateway', [PaymentGatewayController::class, 'show']);
+        Route::put('payment-gateway', [PaymentGatewayController::class, 'update']);
+        Route::post('payment-gateway/test', [PaymentGatewayController::class, 'test'])
+            ->middleware('throttle:10,1');
     });
 });

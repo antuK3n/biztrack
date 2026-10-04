@@ -30,7 +30,7 @@ import type { Inspection } from '../lib/types'
  *
  * The visit used to have a second home at /staff/inspections/{id}, but nothing
  * on the queue linked there, and an officer who clicks a For Inspection row in
- * Application Verification lands on the review sheet, not there.
+ * Manage Applications lands on the review sheet, not there.
  *
  * ── The screen this replaced ────────────────────────────────────────────────
  *

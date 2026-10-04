@@ -111,6 +111,13 @@ function filingWithEveryClearance(): Application
     foreach (OFFICE_INSPECTOR as [$permitCode, $email]) {
         authAs('owner@biztrack.local');
         test()->postJson("/api/v1/applications/{$appId}/clearances/{$permitCode}/apply")->assertOk();
+        // Empty sheets, but not empty checklists: since 30 September 2026
+        // the submit refuses a sheet short of the documents the office
+        // asks for. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $permitCode)->firstOrFail(),
+        );
         test()->putJson("/api/v1/applications/{$appId}/office-forms/{$permitCode}", [
             'form_data' => [],
             'submit' => true,

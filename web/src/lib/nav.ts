@@ -5,18 +5,20 @@ import {
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
-  HistoryIcon,
   HomeIcon,
   InboxIcon,
   MailIcon,
   MapPinIcon,
+  PaymentsIcon,
   ShieldCheckIcon,
   TrackIcon,
+  UploadIcon,
   UsersIcon,
 } from '../components/icons'
 import { portalPath } from './api'
 import type { Portal } from './api'
-import type { AccountRestriction, User } from './types'
+import type { User } from './types'
+import { canUseDebug } from '../pages/admin/debug/access'
 
 export interface NavItem {
   label: string
@@ -59,13 +61,21 @@ export interface NavItem {
    * First match wins, in the order the keys are listed here.
    */
   toByPermission?: Record<string, string>
+  /**
+   * Show when this says so, for an entry whose rule is not a permission at
+   * all. The Debug page is the case: who may open it lives in one function
+   * (pages/admin/debug/access.ts) that the route asks too, so the rail and the
+   * route cannot drift apart. Checked before `permission`/`anyPermission`.
+   */
+  visibleWhen?: (user: User) => boolean
   /** Include in the mobile bottom tab bar (max 5 survive the filter). */
   mobile?: boolean
 }
 
 /*
  * Prototype rail registry (docs/rehaul-spec.md §2).
- * Owner rail (PDF p5): Home · Track · Drafts · Payment History.
+ * Owner rail (PDF p5): Home · Track · Drafts. The PDF's Payment History is a
+ * tab on Profile since 2026-09-27.
  * Staff rail (p61): Home · Track (verification) · Other Requirements. The PDF
  * draws an Inspections entry beside Track; it is gone on purpose — the client
  * had the two screens merged into Track's For Inspection tab. See below.
@@ -94,10 +104,24 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'My Permits', icon: ShieldCheckIcon, to: '/permits', permission: 'permit.view_own', mobile: true },
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
-  { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
+  /*
+   * No Payment History entry [checklist 2026-09-27]. It is the second tab on
+   * Profile now, behind the avatar menu, and /payments redirects there.
+   */
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
-  { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
+  /*
+   * "Track" until 27 September 2026, which was the OWNER's word for the
+   * owner's job — watching a filing move. Staff do not track filings, they
+   * act on them, and one word for two jobs made the staff rail read like a
+   * copy of the applicant's. Client: *"Track page seems to be a wrong name
+   * for this page of the admin side ... Please do so for ALL ADMINS having
+   * this page."* One entry covers all of them: every office reaches this
+   * page through `application.review`.
+   *
+   * The owner's entry above keeps "Track", which is right for what they do.
+   */
+  { label: 'Manage Applications', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
   /*
    * There is no Inspections entry any more, and its absence is the feature.
    *
@@ -113,16 +137,41 @@ const NAV_ITEMS: NavItem[] = [
    * takes nothing off their rail that Track above does not already reach. BPLO
    * and the super admin never had it.
    */
-  { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
+  /*
+   * ── The applicant could not reach their own requirements ─────────────────
+   *
+   * Gated on `request.create` alone, which is an OFFICE's permission: a
+   * Business Owner holds `request.respond` and not `request.create`
+   * (RbacSeeder). So the one person a requirement is addressed TO had no link
+   * to the page holding it — the route resolved and the reply endpoint
+   * accepted them, but nothing in the rail pointed there.
+   *
+   * Invisible until 27 September 2026, when BPLO's approval started raising a
+   * requirement on its own for a blank TIN. Before that every requirement was
+   * typed by an officer and reached the applicant as a notification they could
+   * click, so the missing rail entry only cost them a second visit; a
+   * requirement raised automatically had no such moment and simply waited.
+   *
+   * `anyPermission` rather than swapping the permission: both sides need this
+   * page and they hold different halves of it — the office raises, the owner
+   * answers.
+   */
+  {
+    label: 'Other Requirements',
+    icon: FolderIcon,
+    to: '/requests',
+    anyPermission: ['request.create', 'request.respond'],
+  },
   // Admin
   /*
    * One rail entry, two different audiences behind it.
    *
-   * BPLO holds `analytics.view` and gets the three dashboards (Analytics
-   * Dashboard, Renewal Risk, Business Growth Analysis). The super admin holds
-   * `analytics.processing_time` and gets exactly one screen. The permissions are
-   * disjoint by design, so this entry needs `anyPermission` to appear for both
-   * and `toByPermission` to send each of them somewhere they are allowed to be.
+   * Every office admin, BPLO and the super admin hold `analytics.view` and land
+   * on the one dashboard, scoped to their office (checklist 2026-09-27, item 1).
+   * The super admin also holds `analytics.processing_time` (Office Performance,
+   * Processing Time), reached from the tab strip. `toByPermission` is kept so a
+   * holder of only the second permission would still land somewhere they may
+   * be; `analytics.view` is listed first, so it wins for the super admin.
    *
    * `to` was '/analytics' — a pre-portal-split path that only resolved because
    * the legacy shim in App.tsx redirects it. The rail is inside the staff site
@@ -135,20 +184,13 @@ const NAV_ITEMS: NavItem[] = [
     to: '/analytics',
     anyPermission: ['analytics.view', 'analytics.processing_time'],
     /*
-     * The super admin now lands on Office Performance rather than Processing
-     * Time (issue #102), and the destination moved rather than a seventh rail
-     * row being added.
-     *
-     * Two reasons. A rail entry per analytics screen would give BPLO one row
-     * and the super admin two for a feature the client asks for as "Analytics";
-     * and of the super admin's two screens, this is the one that answers the
-     * question a reader arrives with. Office Performance says which office is
-     * slow; Processing Time says what that office has been doing week by week,
-     * which is the second question and is one tab away.
-     *
-     * The permission is unchanged and must stay `analytics.processing_time` —
-     * the same claim the route in App.tsx makes. If these two ever disagree the
-     * rail draws a link that RequirePermission bounces, which fails nothing.
+     * Issue #102 sent the super admin to Office Performance here, because
+     * Office Performance and Processing Time were the only analytics screens
+     * that account could open. It holds the dashboard too now, so the first
+     * key wins and it lands on the dashboard like everyone else. The second key
+     * is what a holder of `analytics.processing_time` alone would get; it must
+     * stay the same claim the route in App.tsx makes, or the rail draws a link
+     * RequirePermission bounces.
      */
     toByPermission: {
       'analytics.view': '/analytics',
@@ -264,6 +306,22 @@ const NAV_ITEMS: NavItem[] = [
    * product claims over eBOSS (PRODUCT.md §4), so the trail belongs in the rail.
    */
   { label: 'Audit Logs', icon: AuditIcon, to: '/admin/audit-logs', permission: 'audit.view' },
+  /*
+   * Importing the old register (Ken's checklist, 27 September 2026). Its own
+   * permission, `data.import`, held by the super admin alone — an import writes
+   * owners' personal data into the register in bulk, which no office does. The
+   * route in App.tsx carries the same claim.
+   */
+  { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
+  /*
+   * Debug — the super admin's on-the-fly controls for the defense: which way
+   * owners pay, and whether KwikPay collects ₱1 or the full bill [Ken,
+   * 2026-10-04]. Last on the rail, because it is for the presentation and not
+   * for the day's work. Shown only while the server says the panel is open to
+   * this account (pages/admin/debug/access.ts), which is never outside the
+   * hours somebody opened it for from the server.
+   */
+  { label: 'Debug', icon: PaymentsIcon, to: '/admin/debug', visibleWhen: canUseDebug },
 ]
 
 /**
@@ -275,33 +333,15 @@ const NAV_ITEMS: NavItem[] = [
  * rail even though both sites are built from this one list.
  */
 export function navItemsFor(user: User, portal: Portal): NavItem[] {
-  return NAV_ITEMS.filter((item) => visibleTo(user, item) && reachableBy(user, item)).map((item) => {
+  return NAV_ITEMS.filter((item) => visibleTo(user, item)).map((item) => {
     const to = destinationFor(user, item)
     return to ? { ...item, to: portalPath(portal, to) } : item
   })
 }
 
-/**
- * The destinations a SUSPENDED or BLACKLISTED account may still reach.
- *
- * "Bawal nya na maccess ang iba pa sa system, kundi messages part na lang at
- * pag view ng notif" [client, 30 September 2026].
- *
- * Notifications are not a rail entry — they are the bell in the header — so
- * this list is the one entry that survives. Everything else is removed rather
- * than disabled: a greyed rail is a promise the page behind it will not keep,
- * and the server refuses those paths anyway.
- */
-const REACHABLE_WHILE_RESTRICTED = ['/messages']
-
-function reachableBy(user: User, item: NavItem): boolean {
-  if (!user.restriction) return true
-
-  return item.to !== undefined && REACHABLE_WHILE_RESTRICTED.includes(item.to)
-}
-
-/** No permission stated = everyone. Otherwise the single claim, else any of them. */
+/** No rule stated = everyone. Otherwise its own rule, the single claim, else any of them. */
 function visibleTo(user: User, item: NavItem): boolean {
+  if (item.visibleWhen) return item.visibleWhen(user)
   if (item.permission) return user.permissions.includes(item.permission)
   if (item.anyPermission) return item.anyPermission.some((p) => user.permissions.includes(p))
   return true
@@ -337,26 +377,3 @@ function destinationFor(user: User, item: NavItem): string | undefined {
  * literal, which `Number()` reads as NaN and no filing can collide with.
  */
 export const BPLO_ENQUIRY = '/messages?application=general'
-
-/**
- * Where a restriction's warning sends the reader.
- *
- * "Magdidirect sa kanya sa specific na chat sa BPLO pag business is suspended
- * — sa business na acc nya, diba may kanya kanyang convo kada business — tas
- * pag account is blacklisted ma-direct naman dapat sa general inquiry ng
- * BPLO" [client, 30 September 2026].
- *
- * So the two findings go to two different places, and the server has already
- * worked out which: a suspension carries the suspended business's own filing,
- * a blacklisting carries null because the finding is against the person and
- * belongs in the conversation that needs no filing behind it.
- *
- * Null also arrives for a suspended business that has never filed. There is no
- * conversation to open then, and the general enquiry is the honest fallback —
- * a door that is always there, which is the reason it exists.
- */
-export function restrictionDestination(restriction: AccountRestriction): string {
-  const id = restriction.conversation.application_id
-
-  return id === null ? BPLO_ENQUIRY : `/messages?application=${id}`
-}

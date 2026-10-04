@@ -47,36 +47,6 @@ final class RenewalSeason
     public const CLOSES_DAY = 20;
 
     /**
-     * When a CLEARANCE issued on `$from` expires: 31 December of that year.
-     *
-     * ── The client's rule, and why it is not the business permit's ──────────
-     *
-     * *"Sa mga permit, ang expiration ay always end of a year, so laging
-     * December 31, 202X, depende kung anong year na ngayon"* [1 October 2026].
-     *
-     * Put to them with the one consequence that matters — a certificate
-     * expiring on 31 December leaves the holder uncovered for the twenty days
-     * of January in which the LGU accepts renewals — they kept 20 January for
-     * the Mayor's / Business Permit and took 31 December for the rest. That is
-     * the right split: the twenty-day window is Sec. 2N's, and Sec. 2N is about
-     * the business permit. The five clearances renew any time, so there is no
-     * window to stay inside and no gap to leave.
-     *
-     * It replaces continue-the-term for those five — `validFrom + 365` — which
-     * came from the 9 September reasoning that anchoring would punish renewing
-     * early. That reasoning is overruled here rather than forgotten: a fixed
-     * year-end is what the client wants to read on a certificate, and the cost
-     * is that a clearance issued in November runs about seven weeks.
-     *
-     * No branches, for the same reason `endOfTermFor` has none: "the end of the
-     * year it was issued in" has no boundary case to get wrong.
-     */
-    public static function endOfCalendarYearFor(CarbonImmutable $from): CarbonImmutable
-    {
-        return $from->setDate($from->year, 12, 31)->startOfDay();
-    }
-
-    /**
      * When a business permit issued on `$from` expires: 20 January of the
      * FOLLOWING year, always.
      *

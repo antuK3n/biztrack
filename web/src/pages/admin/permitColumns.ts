@@ -48,19 +48,40 @@ export interface PermitColumn {
  *
  * A permit belongs to an office THROUGH the certificate it is: CENRO issues
  * the CEC, BFP the FSIC. `permits` carries a permit type, never a department,
- * so the code is the permit type's and the office name is what the letterhead
- * says — CPDD for zoning, though the register still seeds that office as CPDO.
+ * so the code is the permit type's and the office name is the LGU's own.
+ *
+ * These were acronyms until 1 October 2026, and zoning's was wrong twice
+ * over: it read CPDD, the register seeds CPDO, and the city's document
+ * verification table calls the office the Planning/Zoning Office. The
+ * names here now match that table and `departments.name`, so a column
+ * heading and the office's own letterhead say the same thing.
  *
  * MARKET is not here. It was a permit type until 6 September 2026, when the
  * client confirmed with the LGU that neither it nor its office is needed.
  */
 export const OFFICES = [
-  { code: 'BUSINESS', office: 'BPLO', name: "Mayor's / Business Permit" },
-  { code: 'ZONING', office: 'CPDD', name: 'Zoning / Locational Clearance' },
-  { code: 'SANITARY', office: 'CHO', name: 'Sanitary Permit' },
-  { code: 'FSIC', office: 'BFP', name: 'Fire Safety Inspection Certificate' },
-  { code: 'OCCUPANCY', office: 'OBO', name: 'Occupancy Permit' },
-  { code: 'CEC', office: 'CENRO', name: 'City Environmental Certificate' },
+  {
+    code: 'BUSINESS',
+    office: 'Business Permits and Licensing Office',
+    name: "Mayor's / Business Permit",
+  },
+  { code: 'ZONING', office: 'Planning/Zoning Office', name: 'Zoning Clearance' },
+  { code: 'SANITARY', office: 'City Health Office', name: 'Sanitary Permit' },
+  {
+    code: 'FSIC',
+    office: 'Bureau of Fire Protection',
+    name: 'Fire Safety Inspection Certificate',
+  },
+  {
+    code: 'OCCUPANCY',
+    office: 'Office of the Local Building Official',
+    name: 'Occupancy Permit',
+  },
+  {
+    code: 'CEC',
+    office: 'City Environmental and Natural Resources Office',
+    name: 'City Environmental Certificate',
+  },
 ] as const
 
 export type OfficeCode = (typeof OFFICES)[number]['code']
@@ -199,7 +220,13 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      * answers null on an orphaned row and the helper prints "Business removed
      * from register" where a dereference would throw.
      */
-    value: (r) => businessName(r.business),
+    /*
+     * A retired business — one removed from the register (checklist item 21)
+     * — says so in words beside its name. The register lists those rows only
+     * when the Retired filter asks for them, and a reader who asked for "all"
+     * must still be able to tell which ones they are without a colour.
+     */
+    value: (r) => (r.business_retired ? `${businessName(r.business)} (retired)` : businessName(r.business)),
   },
   { key: 'trade_name', label: 'Trade Name', value: (r) => r.face?.trade_name ?? null },
   { key: 'owner_name', label: 'Owner', value: (r) => r.face?.owner_name ?? null },
@@ -426,7 +453,28 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
  * matches but the table cannot show is the right way round; the reverse — a
  * column nobody looks up — is what this removes.
  */
+/*
+ * ── BPLO's own table carries only what BPLO reads ─────────────────────────
+ *
+ * Checklist item 17: "only necessary columns, no expiry for BPLO since
+ * business permits all expire in January". Every Mayor's Permit runs to the
+ * end of the calendar year — the renewal season is January — so a Valid until
+ * column on BPLO's table is one date repeated down the page, and Days to
+ * expiry is the same number on every row. They go, and so do the two columns
+ * that name the certificate and its office: with the Mayor's Permit chosen,
+ * both are constant, and the table already says whose certificates these are.
+ *
+ * Only for BUSINESS. A clearance's term is its own — a sanitary permit or an
+ * FSIC can lapse any month — so the other offices keep their expiry columns,
+ * and the register-wide views keep everything.
+ */
+const NOT_ON_BPLO_TABLE = new Set(['permit_type', 'office', 'valid_until', 'days'])
+
 export function columnsFor(office: OfficeCode | ''): PermitColumn[] {
+  if (office === 'BUSINESS') {
+    return SHARED_COLUMNS.filter((c) => !NOT_ON_BPLO_TABLE.has(c.key))
+  }
+
   if (office !== '') {
     return [...SHARED_COLUMNS, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
   }

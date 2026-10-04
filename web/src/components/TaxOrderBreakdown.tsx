@@ -13,13 +13,21 @@ import type { FeeAssessment, FeeLineItem } from '../lib/types'
 /** Canonical collecting-office order; unknown offices append after. */
 const OFFICE_ORDER = ['BPLO', 'CTO', 'CPDO', 'CHO', 'CENRO', 'OBO', 'BFP']
 
+/*
+ * The names MCG-BPLO-FO-001 prints, with the code in brackets.
+ *
+ * Hardcoded because a Tax Order line names an office that may have
+ * charged a fee without being one of the six on the filing — so there is
+ * no row to read the name from. That is exactly why it drifted: the
+ * clearance cards read theirs from `departments`, and these did not.
+ */
 const OFFICE_LABELS: Record<string, string> = {
   BPLO: 'Business Permits & Licensing Office (BPLO)',
   CTO: "City Treasurer's Office (CTO)",
-  CPDO: 'City Planning and Development Office (CPDO)',
+  CPDO: 'Planning/Zoning Office (CPDO)',
   CHO: 'City Health Office (CHO)',
-  CENRO: 'City Environment & Natural Resources Office (CENRO)',
-  OBO: 'Office of the Building Official (OBO)',
+  CENRO: 'City Environmental and Natural Resources Office (CENRO)',
+  OBO: 'Office of the Local Building Official (OBO)',
   BFP: 'Bureau of Fire Protection (BFP)',
 }
 

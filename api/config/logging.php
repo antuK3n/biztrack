@@ -73,6 +73,20 @@ return [
             'replace_placeholders' => true,
         ],
 
+        /*
+         * Every KwikPay exchange and every callback as it arrived, kept apart
+         * from laravel.log so a payment dispute can be answered from one file
+         * (docs FAQ: support wants "the raw form fields as they arrived").
+         * Kept 90 days. Never carries the merchant key — see KwikPayGateway::log.
+         */
+        'payments' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/payments.log'),
+            'level' => 'info',
+            'days' => 90,
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

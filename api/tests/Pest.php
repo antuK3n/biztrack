@@ -2,14 +2,17 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\Barangay;
 use App\Models\Department;
+use App\Models\DocumentType;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Ra11032;
+use App\Support\SheetRequirements;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -20,6 +23,9 @@ pest()->extend(TestCase::class)
     ->in('Feature');
 
 pest()->extend(TestCase::class)->in('Unit');
+
+// Register rows with chosen timestamps, for the analytics tests.
+require_once __DIR__.'/AnalyticsFixtures.php';
 
 /**
  * Log in a seeded demo account and return its bearer token.
@@ -268,4 +274,149 @@ function choAssignmentId(int $applicationId): int
     return ApplicationAssignment::where('application_id', $applicationId)
         ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
         ->value('id');
+}
+
+/*
+ * ── Fixtures for the returned-fields work, 27 September 2026 ───────────
+ *
+ * Here rather than in the test files that first needed them, because a
+ * helper declared inside a test file does not exist until that file loads:
+ * a second file reusing it passes in a whole-suite run and fails the moment
+ * anyone runs that second file alone.
+ */
+
+/** A new filing for a business with no TIN, sitting at For Approval. */
+function filingWithoutTin(string $tin = ''): Application
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $payload = [
+        'name' => 'No TIN Trading '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'address' => ['line1' => '9 Blank Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
+    ];
+    if ($tin !== '') {
+        $payload['tin'] = $tin;
+    }
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', $payload)
+        ->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    return Application::findOrFail($appId)->fresh();
+}
+
+/** A filing returned by BPLO about the given field codes. */
+function filingReturnedAbout(string $targets): Application
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => 'Returned Fields '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'trade_name' => 'Old Trade Name',
+        'address' => ['line1' => '3 Correction Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 300000]],
+    ])->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $app = Application::findOrFail($appId);
+    app(WorkflowService::class)->returnMainForm($app, 'Please correct these.', $targets);
+
+    return $app->fresh();
+}
+
+/**
+ * Give a filing every document its office checklist asks for.
+ *
+ * Since 30 September 2026 `WorkflowService::submitClearanceForm` refuses a
+ * sheet whose checklist is not complete, on the client's instruction that the
+ * documentary requirements are required. A test about something else entirely
+ * — routing, fees, inspection order — still has to get the sheet in, and the
+ * factories build filings with no attachments at all.
+ *
+ * Production filings do not look like that: the wizard will not let a business
+ * permit application be submitted without its required documents, so by the
+ * time the applicant reaches an office sheet the carried rows are already
+ * answered. This is the test fixture catching up with that, not a way around
+ * the rule — the rule runs, and these documents satisfy it.
+ *
+ * Two kinds of row are filled. An `upload` row has a slot of its own, named by
+ * `code`. A `carried` row is answered by a business-permit attachment, named
+ * by `carried_from`. A `sheet` row is the form itself and never blocks. A row
+ * answered by a PERMIT rather than a document — CENRO's previous-year CEC — is
+ * not something a file can satisfy, so a test that needs it issues the permit.
+ */
+function satisfyChecklist(Application $application, PermitType|string $type): Application
+{
+    $code = $type instanceof PermitType ? $type->code : $type;
+
+    foreach (SheetRequirements::for($application, $code) ?? [] as $row) {
+        if (($row['blocking'] ?? false) !== true || ($row['satisfied'] ?? false) === true) {
+            continue;
+        }
+
+        $documentCode = $row['code'] ?? $row['carried_from'] ?? null;
+        if ($documentCode === null) {
+            continue;
+        }
+
+        $typeId = $row['code'] !== null
+            // An upload slot's document type is made on demand, exactly as the
+            // upload endpoint makes it.
+            ? SheetRequirements::documentType($code, $row['code'])->id
+            : DocumentType::where('code', $documentCode)->value('id');
+
+        if ($typeId === null) {
+            continue;
+        }
+
+        ApplicationDocument::create([
+            'application_id' => $application->id,
+            'document_type_id' => $typeId,
+            'original_filename' => strtolower($documentCode).'.pdf',
+            'stored_path' => 'private/documents/test/'.strtolower($documentCode).'.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+        ]);
+    }
+
+    return $application->fresh();
+}
+
+/**
+ * A complete home address, as registration has required of every business
+ * owner since 28 September 2026 [checklist Register 2]. Spread into a
+ * registration payload; override a part to test it.
+ *
+ * @return array<string, string>
+ */
+function homeAddress(array $overrides = []): array
+{
+    return array_merge([
+        'home_street' => '12 Gen. Luna St.',
+        'home_barangay' => 'Longos',
+        'home_city' => 'Malabon',
+        'home_province' => 'Metro Manila',
+        'home_postal_code' => '1472',
+    ], $overrides);
 }

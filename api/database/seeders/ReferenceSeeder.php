@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Support\SheetRequirements;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\DocumentType;
@@ -32,11 +33,11 @@ class ReferenceSeeder extends Seeder
                 'description' => 'Issues sanitary permits and health certificates.'],
             ['code' => 'BFP', 'name' => 'Bureau of Fire Protection',
                 'description' => 'Conducts fire safety inspections and issues the FSIC.'],
-            ['code' => 'CPDO', 'name' => 'City Planning and Development Office (Zoning)',
+            ['code' => 'CPDO', 'name' => 'Planning/Zoning Office',
                 'description' => 'Issues the zoning / locational clearance for the business location.'],
-            ['code' => 'OBO', 'name' => 'Office of the Building Official',
+            ['code' => 'OBO', 'name' => 'Office of the Local Building Official',
                 'description' => 'Issues occupancy permits for business premises.'],
-            ['code' => 'CENRO', 'name' => 'City Environment and Natural Resources Office',
+            ['code' => 'CENRO', 'name' => 'City Environmental and Natural Resources Office',
                 'description' => 'Issues the City Environmental Certificate.'],
             /*
              * CMO-MARKET (Office of the City Market Administrator) was here and
@@ -325,6 +326,34 @@ class ReferenceSeeder extends Seeder
             DocumentType::updateOrCreate(['code' => $code], ['name' => $name, 'help_text' => $help]);
         }
 
+        /*
+         * ── The office checklists' own slots ────────────────────────────
+         *
+         * The four office sheets each ask for documents the business permit
+         * form does not, and every one of those rows is a document type.
+         * They were created lazily, by `documentType()`, the first time a
+         * file went into a slot — a reasonable safety net and a bad only
+         * route, because it makes the set of types a register holds depend
+         * on which offices happen to have received an upload.
+         *
+         * What made it visible: AnalyticsHistorySeeder began completing
+         * checklists on 30 September 2026, and the purge round-trip test
+         * caught nineteen document types appearing that the purge then
+         * refused to remove — correctly, since purge does not delete shared
+         * reference data it did not create.
+         *
+         * Declared through the requirement classes rather than listed here.
+         * The label and the help text are the paper's wording and live on
+         * the row; copying them into this file would be two places to
+         * change whenever an office's paper does, and the second one always
+         * gets missed.
+         */
+        foreach (SheetRequirements::allSlots() as $permitCode => $slots) {
+            foreach ($slots as $slot) {
+                SheetRequirements::documentType($permitCode, $slot);
+            }
+        }
+
         // --- Permit types (7, prototype LGU Section p37; validity 365) -------
         // Manuscript names 3 (BUSINESS/SANITARY/FSIC); the rest are additive
         // per the prototype (most-recent team agreement). BUSINESS is what the
@@ -341,7 +370,7 @@ class ReferenceSeeder extends Seeder
             'base_fee' => 1000, 'per_line_surcharge' => 150,
         ]);
         $sanitary = PermitType::updateOrCreate(['code' => 'SANITARY'], [
-            'name' => 'Sanitary Permit / Health Certificate',
+            'name' => 'Sanitary Permit',
             'permit_number_prefix' => 'MCS',
             'issuing_department_id' => $dept('CHO'),
             'validity_days' => 365, 'description' => 'Health/sanitary clearance to operate.',
@@ -394,7 +423,7 @@ class ReferenceSeeder extends Seeder
             'base_fee' => 400, 'per_line_surcharge' => 0,
         ]);
         $zoning = PermitType::updateOrCreate(['code' => 'ZONING'], [
-            'name' => 'Zoning / Locational Clearance',
+            'name' => 'Zoning Clearance',
             'permit_number_prefix' => 'MCZ',
             'issuing_department_id' => $dept('CPDO'),
             'validity_days' => 365, 'description' => 'Confirms the business location conforms to the city zoning ordinance.',

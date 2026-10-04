@@ -1,10 +1,13 @@
 import { createContext, useContext, type ReactNode } from 'react'
+import { targetsInclude } from '../../lib/returnTargets'
+import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
 import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
+import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { OfficeFormRequirement } from '../../lib/types'
-import { ACCEPT_ATTR } from './uploads'
+import { ACCEPT_ATTR, MAX_UPLOAD_BYTES } from './uploads'
 
 /*
  * Per-office application form sheets (UI prototype Parts 4-7, pages 040-043).
@@ -191,6 +194,154 @@ export const OFFICE_FORM_CODES = [
 export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 
 /** Kicker + h1 + form-ref for each office form sheet (verbatim from prototype). */
+/**
+ * Keys that are machinery, not answers — never shown to a reader.
+ *
+ * Both say which OTHER sheet owns a question when two papers print it: the
+ * authorised representative (FSIC owns it, CPDD carries it) and the occupancy
+ * type and storey count (OBO owns them, BFP carries them). The applicant never
+ * sees them and the officer should not either — printed in the review grid they
+ * read as a field the applicant answered "OCCUPANCY" to.
+ */
+export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
+  'authorized_representative_source',
+  'occupancy_shared_source',
+]
+
+/**
+ * What each office's paper calls the box behind a form key.
+ *
+ * Keyed `CODE.key`, with a bare `key` as the fallback, because the same key
+ * means different things on different papers — `application_type` is Full or
+ * Partial on OBO's form and New or Renewal on CHO's. Anything absent falls
+ * through to `humanizeKey`, which is fine for a plain two-word field and wrong
+ * for an acronym, which is why the FSEC rows are named here.
+ */
+export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
+  /* Shared across sheets. */
+  application_date: 'Date of Application',
+  authorized_representative: 'Authorized Representative',
+  certified: 'Certification',
+  owner_address: 'Address of Owner',
+
+  /* BFP · BFP-QSF-FSED-002 */
+  'FSIC.certificate_applied_for': 'Certificate Applied For',
+  'FSIC.occupancy_type': 'Type of Occupancy / Business Nature',
+  'FSIC.building_storeys': 'No. of Storeys',
+
+  /* OBO · Unified Application Form */
+  'OCCUPANCY.application_type': 'Application Type (Full / Partial)',
+  'OCCUPANCY.building_permit_no': 'Building Permit No.',
+  'OCCUPANCY.building_permit_date': 'Building Permit — Date Issued',
+  'OCCUPANCY.fsec_no': 'FSEC No.',
+  'OCCUPANCY.fsec_date': 'FSEC — Date Issued',
+  'OCCUPANCY.owner_address': 'Address of Owner / Permittee',
+  'OCCUPANCY.owner_zip': 'ZIP Code',
+  'OCCUPANCY.project_name': 'Name of Project',
+  'OCCUPANCY.occupancy_type': 'Use / Character of Occupancy',
+  'OCCUPANCY.building_storeys': 'No. of Storeys',
+  'OCCUPANCY.building_units': 'No. of Units',
+  'OCCUPANCY.completion_date': 'Date of Completion',
+
+  /* CPDD · MCG-CPDD-FO-003 */
+  'ZONING.application_type': 'Nature of Application',
+  'ZONING.total_floor_area_sqm': 'Floor Area to be Utilized (sq. m.)',
+  'ZONING.building_storeys': 'No. of Storeys of Building',
+  'ZONING.site_is_rented': 'Site is Rented',
+
+  /* CHO */
+  'SANITARY.application_type': 'Nature of Application',
+}
+
+/**
+ * The order each office's paper asks its questions in.
+ *
+ * Read off the office's own form component below — ZoningFields,
+ * SanitaryFields, CecFields, FsicFields, OccupancyFields — because that is
+ * the order the applicant answered them in and the order the printed form
+ * prints them. The officer's review sheet sorts by this, so a reviewer
+ * holding the paper reads down both at once.
+ *
+ * `application_date` leads every sheet: it is the first box on all of them
+ * and it is filled in by the system rather than by the applicant, so it
+ * does not appear in the form components at all.
+ *
+ * A key not listed keeps its place after the ones that are. New questions
+ * should be added here, but a sheet that grows one and forgets is a sheet
+ * with a field at the end — not a sheet that loses it.
+ */
+export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> = {
+  ZONING: [
+    'application_date',
+    'application_type',
+    'zoning_project_description',
+    'total_floor_area_sqm',
+    'building_storeys',
+    'site_is_rented',
+    'lessor_name',
+    'lessor_address',
+    'zoning_industrial_project_type',
+    'authorized_representative',
+  ],
+  SANITARY: [
+    'application_date',
+    'application_type',
+    'sanitary_classification',
+    'workers_requiring_health_certs',
+    'water_source',
+  ],
+  CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday', 'certified'],
+  FSIC: [
+    'application_date',
+    'authorized_representative',
+    'occupancy_type',
+    'building_storeys',
+    'certificate_applied_for',
+    'certified',
+  ],
+  OCCUPANCY: [
+    'application_date',
+    'application_type',
+    'building_permit_no',
+    'fsec_no',
+    'building_permit_date',
+    'fsec_date',
+    'owner_address',
+    'owner_zip',
+    'project_name',
+    'occupancy_type',
+    'building_storeys',
+    'building_units',
+    'completion_date',
+  ],
+}
+
+/**
+ * Sort a sheet's answers into the order its paper asks them.
+ *
+ * Anything unlisted keeps its own order and follows — losing an answer off
+ * the officer's sheet because nobody added its key here would be a worse
+ * failure than showing it last.
+ */
+export function officeFormFieldRank(code: string, key: string): number {
+  const order = OFFICE_FORM_FIELD_ORDER[code as OfficeFormCode]
+  const at = order?.indexOf(key) ?? -1
+
+  return at === -1 ? Number.MAX_SAFE_INTEGER : at
+}
+
+/** The paper's name for one answer, or a humanised key when it has none. */
+export function officeFormFieldLabel(code: string, key: string): string {
+  return (
+    OFFICE_FORM_FIELD_LABELS[`${code}.${key}`] ??
+    OFFICE_FORM_FIELD_LABELS[key] ??
+    key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  )
+}
 export const OFFICE_FORM_META: Record<
   OfficeFormCode,
   { kicker: string; title: string; ref: string }
@@ -227,7 +378,7 @@ export const OFFICE_FORM_META: Record<
     ref: 'BFP-QSF-FSED-002 · Rev. 02 (08.24.20)',
   },
   OCCUPANCY: {
-    kicker: 'Office of the Building Official',
+    kicker: 'Office of the Local Building Official',
     title: 'Certificate of Occupancy & Fire Safety Inspection Certificate',
     ref: 'Unified Application Form',
   },
@@ -246,6 +397,260 @@ export const OFFICE_FORM_META: Record<
    */
 }
 
+/**
+ * The paper behind one sheet, or undefined for a code that has none.
+ *
+ * A string in, because callers hold a `permit_type_code` off the wire rather
+ * than a narrowed OfficeFormCode.
+ */
+export function officeFormMeta(code: string): { kicker: string; title: string; ref: string } | undefined {
+  return OFFICE_FORM_META[code as OfficeFormCode]
+}
+
+/**
+ * What this office sent the clearance back about, and the controls to fix it.
+ *
+ * The shape of BPLO's own "What you need to correct" panel on
+ * /applications/:id — the item, the officer's words, the control, and Submit
+ * corrections — on the client's instruction of 30 September 2026, given three
+ * times before it was built as asked.
+ *
+ * ── Why it repeats controls that are also further down ──────────────────────
+ *
+ * Because that is the point of it. A returned sheet used to open at the top of
+ * the letterhead with the only sign of the return a tinted row below the fold,
+ * and an office that had returned an ANSWER rather than a document marked
+ * nothing at all — only checklist rows carry the inline flag. The applicant
+ * had the officer's sentence and a fifty-question form.
+ *
+ * There is still one writer per value: a document goes through
+ * `onRequirementChange` and an answer through `set`, the same handlers the
+ * rows below use. This is a second view of those controls, not a second copy
+ * of their state.
+ */
+export function WhatToCorrect({
+  code,
+  targets,
+  notes,
+  requirements,
+  data,
+  set,
+  onRequirementChange,
+  requirementBusy,
+  onSubmit,
+  submitting,
+  blocked,
+  onClose,
+  error,
+}: {
+  code: OfficeFormCode
+  targets: string[]
+  notes: Record<string, string> | null
+  requirements?: OfficeFormRequirement[]
+  data: OfficeFormData
+  set: (key: string, value: string) => void
+  onChange?: never
+  onRequirementChange?: (
+    documentCode: string,
+    file: File | null,
+    documentId?: number,
+  ) => void | Promise<void>
+  requirementBusy?: string | null
+  /** Hand the sheet back to the office. The sheet's own Submit, reused. */
+  onSubmit?: () => void
+  submitting?: boolean
+  /** Why Submit will not go through yet, or null. */
+  blocked?: string | null
+  /** Dismiss the dialog. The form underneath is still there. */
+  onClose?: () => void
+  /** A failure from the last attempt, shown in the dialog footer. */
+  error?: string | null
+}) {
+  const office = REQUIREMENTS_META[code]?.office ?? 'This office'
+  /* The file just sent, per row — BPLO says "Uploaded <name>." */
+
+  /*
+   * A target is either a checklist slot or an answer key. The checklist is
+   * asked first because its label is the paper's own wording; an answer falls
+   * through to the field label, which is also the paper's.
+   */
+  const items = targets.map((target) => {
+    const row = (requirements ?? []).find((r) => r.code === target)
+
+    return {
+      target,
+      row,
+      label: row?.label ?? officeFormFieldLabel(code, target),
+      note: notes?.[target] ?? null,
+    }
+  })
+
+  return (
+    <CorrectionModal
+      office={office}
+      count={items.length}
+      onSubmit={() => onSubmit?.()}
+      onClose={() => onClose?.()}
+      submitting={submitting === true}
+      blocked={blocked ?? null}
+      error={error ?? null}
+    >
+      <div>
+        <div className="space-y-5">
+          {items.map((item) => {
+            const busy = requirementBusy === item.target
+            /*
+             * The files ON the row, which the caller keeps refreshed from
+             * each upload. Local state held their NAMES until 30 September
+             * 2026 — a worse copy of something already in hand, with no id
+             * on it, so the box could say a file had arrived and offer
+             * nothing to do with it. Reading the row also means reopening
+             * the dialog still shows them.
+             */
+            const files = item.row?.documents ?? []
+
+            return (
+              <div key={item.target}>
+                <p className="text-[13px] font-semibold text-ink">
+                  {item.label}{' '}
+                  <span aria-hidden="true" className="text-s-red">
+                    *
+                  </span>
+                  <span className="sr-only">(required)</span>
+                </p>
+                {/*
+                  The officer's own words, plainly a person speaking. Nothing
+                  invented when they left none — the heading says what happened.
+                */}
+                {item.note !== null && item.note.trim() !== '' && (
+                  <p className="mt-1.5 rounded-md border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2 text-sm italic text-ink">
+                    “{item.note}”
+                  </p>
+                )}
+
+                {item.row !== undefined ? (
+                  <>
+                    {/*
+                      The checklist row's own control, with the checklist
+                      row's own rules. `onRequirementChange` is its handler,
+                      so a file put in here lands in the same slot and shows
+                      on the row below.
+
+                      It took ONE file until 30 September 2026, which was me
+                      matching the wrong thing: the client asked for BPLO's
+                      LAYOUT and for the rules of the field each row is
+                      about, and a checklist slot takes as many as the
+                      applicant has. A two-page endorsement is two files.
+                    */}
+                    <label
+                      className={`mt-2 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-4 py-3 transition-colors hover:bg-input ${
+                        busy || onRequirementChange === undefined
+                          ? 'pointer-events-none opacity-60'
+                          : ''
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+                        <UploadIcon size={18} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-ink">
+                          {busy ? 'Uploading…' : 'Upload a replacement'}
+                        </span>
+                        {/*
+                          The checklist row's own second line: the count once
+                          there are files, the rule before that.
+                        */}
+                        <span className="mt-0.5 block text-xs text-ink-muted">
+                          {files.length > 0
+                            ? `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
+                            : `PDF, JPG or PNG, up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`}
+                        </span>
+                      </span>
+                      {files.length > 0 && !busy && (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+                          <CheckCircleFilledIcon size={16} /> Uploaded
+                        </span>
+                      )}
+                      <input
+                        type="file"
+                        accept={ACCEPT_ATTR}
+                        multiple
+                        disabled={busy || onRequirementChange === undefined}
+                        aria-label={`Re-upload ${item.label}`}
+                        onChange={async (e) => {
+                          const chosen = Array.from(e.target.files ?? [])
+                          // Let the same file be picked twice — after a
+                          // rejection the input would otherwise be inert.
+                          e.target.value = ''
+                          if (item.row?.code == null) return
+                          /*
+                            One at a time, awaited. Fired together they race
+                            — each response is a full snapshot and the last
+                            to arrive wins, so three files commonly showed
+                            one, with the rest on disk and invisible.
+                          */
+                          for (const file of chosen) {
+                            await onRequirementChange?.(item.row.code, file)
+                          }
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
+                    {/*
+                      What is on the row, with the three things its own
+                      checklist entry offers. Sending the wrong scan is the
+                      easiest mistake here, and until now the applicant
+                      could not open what they had just sent to check it.
+                    */}
+                    {files.length > 0 && (
+                      <ul className="mt-2 space-y-2">
+                        {files.map((file) => (
+                          <li
+                            key={file.id}
+                            className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-3 py-2"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                              {file.filename}
+                            </span>
+                            <DocumentActions id={file.id} filename={file.filename} />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onRequirementChange?.(item.row!.code!, null, file.id)
+                              }
+                              disabled={busy}
+                              aria-label={`Remove ${file.filename}`}
+                              className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  /*
+                    An answer. `set` is the sheet's own setter, so this writes
+                    the same value the field below shows and autosave carries
+                    it like any other keystroke.
+                  */
+                  <input
+                    type="text"
+                    value={String(data[item.target] ?? '')}
+                    onChange={(e) => set(item.target, e.target.value)}
+                    aria-label={`Correct ${item.label}`}
+                    className="mt-1.5 block w-full rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:border-royal focus:outline-none"
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </CorrectionModal>
+  )
+}
 /** True if a permit-type code renders a prototype office form. */
 export function hasOfficeForm(code: string): code is OfficeFormCode {
   return (OFFICE_FORM_CODES as readonly string[]).includes(code)
@@ -336,8 +741,27 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('owner_address')) missing.push('Owner’s Address')
     if (data.certified !== 'yes') missing.push('The certification that the details are correct')
   }
+  if (code === 'FSIC') {
+    /*
+     * The two the BFP header asks and nothing else answers. Occupancy type
+     * and storeys are asked on the OBO sheet when that permit is on the
+     * filing and derived onto this one, so they are checked through the
+     * DERIVED payload rather than the typed one — `has` reads what the sheet
+     * holds, which is the same thing either way.
+     */
+    if (!has('occupancy_type')) missing.push('Type of Occupancy / Business Nature')
+    if (!has('building_storeys')) missing.push('No. of Storeys')
+    if (data.certified !== 'yes') {
+      missing.push('The certification that the details and attachments are correct')
+    }
+  }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
+    if (!has('project_name')) missing.push('Name of Project')
+    if (!has('occupancy_type')) missing.push('Use / Character of Occupancy')
+    if (!has('building_storeys')) missing.push('No. of Storeys')
+    if (!has('building_units')) missing.push('No. of Units')
+    if (!has('completion_date')) missing.push('Date of Completion')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
@@ -518,15 +942,18 @@ function DerivedField({
   label,
   value,
   hint,
+  className,
 }: {
   label: ReactNode
   value: string
   hint?: string
+  /** Sizes the cell inside its section's wrap — see the note on the grids. */
+  className?: string
 }) {
   // The <label> stops at the input: the hint sits outside it so that a long
   // explanatory sentence is not read out as part of the field's name.
   return (
-    <div>
+    <div className={className}>
       <label className="block">
         <FieldLabel>{label}</FieldLabel>
         {/*
@@ -580,20 +1007,31 @@ function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
         From your earlier answers. Change it on Business Information or Location &amp; Zoning and every
         office form follows.
       </p>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />
+      {/*
+        No `FromApplicationTag` on these four. The sentence directly above says
+        exactly what the tag says, and saying it again beside every label put
+        "(from your application)" on screen five times in one block — which is
+        also what made the labels wrap and the rows tall. The tag stays where a
+        carried field sits AMONG asked ones and the reader cannot tell which is
+        which; here they are all carried and the heading says so.
+      */}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <DerivedField className="grow basis-[15rem]" label="Business Name" value={business.name} />
         {business.tradeName !== '' && (
           <DerivedField
-            label={<>Trade Name / Franchise<FromApplicationTag /></>}
+            className="grow basis-[13rem]"
+            label="Trade Name / Franchise"
             value={business.tradeName}
           />
         )}
         <DerivedField
-          label={<>Business Address<FromApplicationTag /></>}
+          className="grow basis-[18rem]"
+          label="Business Address"
           value={business.address}
         />
         <DerivedField
-          label={<>Line of Business<FromApplicationTag /></>}
+          className="grow basis-[18rem]"
+          label="Line of Business"
           value={business.lineOfBusiness}
         />
       </div>
@@ -1122,31 +1560,38 @@ const DENR_GLOSSARY: { code: string; meaning: string }[] = [
  * exists to answer: uploading the wrong scan is the easiest mistake here, and
  * it was the one mistake the screen would not let you check for.
  *
- * ── One row here blocks the submit button, and only one ───────────────────
+ * ── Every row here blocks the submit button ───────────────────────────────
  *
- * The paper is a counter checklist a clerk ticks on receipt, not a gate, so a
- * missing lease or tax declaration is shown, said plainly, and submitted
- * anyway. A document the applicant is still chasing from another office is not
- * a reason to refuse them the form.
+ * The client, 30 September 2026, reading this panel on the Locational
+ * Clearance form: *"Are the documentary fields here not required? Make sure
+ * they are required."* They are, now — all of them.
  *
- * The notarised Applicant Declaration was excepted from that on 17 September
- * 2026, on the client's report: *"I wonder how I was able to submit the
- * Locational Clearance without submitting the Applicant Declaration."* Its own
- * line on the paper is in capitals — MUST BE NOTARIZED PRIOR TO SUBMISSION OF
- * APPLICATION — and unlike the others nothing downstream repairs it: a zoning
- * application whose declaration is not sworn is not one CPDD can act on, so
- * letting it through buys the applicant a return trip.
+ * It went the other way twice before, so the history is worth keeping. The
+ * first reading was that the paper is a counter checklist a clerk ticks on
+ * receipt rather than a gate, so a missing lease was shown, said plainly, and
+ * submitted anyway — a document still being chased from another office is not
+ * a reason to refuse somebody the form. The notarised Applicant Declaration
+ * was excepted from that on 17 September, again on the client's report:
+ * *"I wonder how I was able to submit the Locational Clearance without
+ * submitting the Applicant Declaration."*
  *
- * The earlier reasoning here was that notarisation "cannot be a precondition of
- * an online form" because how it works in this flow is an open question with
- * the LGU (questions-for-malabon C9 item 2). That question is still open and
- * this does not close it — what is settled is that the SCAN must be here,
- * whatever route the signing takes.
+ * What the exception turned out to prove is the rule. The reason given for it
+ * — a zoning application whose declaration is missing is not one CPDD can act
+ * on, so letting it through buys the applicant a return trip and a second
+ * wait — is true of the lease and the tax declaration in exactly the same
+ * way. The kindness of accepting an incomplete sheet was the applicant's own
+ * loss, because the office has to send it back regardless.
  *
- * Which rows gate is `blocking` on each row, decided by
- * `App\Support\ZoningRequirements` and read by both this panel and CPDD's
- * review screen. The gate itself is applied in ClearanceStagePage, beside the
- * answer check it is added to.
+ * Notarisation itself is still an open question with the LGU
+ * (questions-for-malabon C9 item 2) and none of this closes it. What is
+ * settled is that the scan has to BE here, whatever route the signing takes.
+ *
+ * Which rows gate is `blocking` on each row, decided by the requirement
+ * classes behind `App\Support\SheetRequirements` — a `sheet` row is exempt,
+ * because it IS this form and cannot be satisfied before it is submitted.
+ * This panel, CPDD's review screen and `WorkflowService::submitClearanceForm`
+ * all read that one field, and the last of those is what enforces it: the
+ * gate in ClearanceStagePage only disables a button.
  */
 /**
  * The heading and the office's own name, per sheet.
@@ -1158,14 +1603,36 @@ const DENR_GLOSSARY: { code: string; meaning: string }[] = [
  * in the copy beneath it is worse, because the applicant would go and ask them.
  */
 const REQUIREMENTS_META: Partial<Record<OfficeFormCode, { title: string; office: string }>> = {
-  ZONING: { title: 'Checklist of Requirements', office: 'CPDD' },
-  CEC: { title: 'Requirements for Application', office: 'CENRO' },
+  /*
+   * ── The office's name, as the LGU writes it ──────────────────────────
+   *
+   * These were acronyms, and one of them was not even ours: the zoning
+   * office read "CPDD" while the register seeds it as CPDO and the city's
+   * own verification table calls it the Planning/Zoning Office. An
+   * applicant reading "CPDD returned this about one item" is being told
+   * which office sent their filing back in letters they have never seen.
+   *
+   * Taken from the client's own document-verification table (1 October
+   * 2026), which is the same list `departments.name` holds:
+   *
+   *   Occupancy Permit                   Office of the Local Building Official
+   *   Sanitary Permit/Health Certificate City Health Office
+   *   City Environmental Certificate     City Environmental and Natural Resources Office
+   *   Fire Safety Inspection Certificate Bureau of Fire Protection
+   *   Zoning Clearance                   Planning/Zoning Office
+   */
+  ZONING: { title: 'Checklist of Requirements', office: 'Planning/Zoning Office' },
+  CEC: {
+    title: 'Requirements for Application',
+    office: 'City Environmental and Natural Resources Office',
+  },
 }
 
 function RequirementsChecklist({
   code,
   rows,
   returnTarget = null,
+  returnNotes = null,
   busy,
   error,
   onChange,
@@ -1173,11 +1640,21 @@ function RequirementsChecklist({
 }: {
   code: OfficeFormCode
   rows: OfficeFormRequirement[]
-  /** The row an office pointed at on a return; see OfficeFormStep. */
+  /** The rows an office pointed at on a return; see OfficeFormStep. */
   returnTarget?: string | null
+  /** What the office said about each named row, keyed by its code. */
+  returnNotes?: Record<string, string> | null
   busy: string | null
   error: string | null
-  onChange?: (documentCode: string, file: File | null) => void
+  /**
+   * A file to add, or null to remove one.
+   *
+   * `documentId` says WHICH to remove, because a row holds several now.
+   * Without it the endpoint clears the whole slot — which is what Remove
+   * meant when a slot held one file, and would now take the first page of
+   * a lease off with the second.
+   */
+  onChange?: (documentCode: string, file: File | null, documentId?: number) => void | Promise<void>
   onDeclarationTemplate?: () => void
 }) {
   const ro = useReadOnly()
@@ -1186,9 +1663,11 @@ function RequirementsChecklist({
    * The rows that stop the submit, named. `blocking` is the server's flag (see
    * the note above the panel), so this reads it rather than deciding it.
    *
-   * Named and not counted: "1 is still missing" makes the applicant hunt down
-   * the list for which one, and the one that stops them is precisely the one
-   * worth spending the words on.
+   * Named while there are one or two: "1 is still missing" makes the applicant
+   * hunt down the list for which. Past that the naming stops helping — a
+   * sentence listing eight documents is a list in the wrong place, and the
+   * list in the right place is directly underneath, every row saying for
+   * itself whether it is filled.
    */
   const blocked = rows.filter((r) => r.blocking === true && !r.satisfied).map((r) => r.label)
   const meta = REQUIREMENTS_META[code] ?? {
@@ -1208,29 +1687,25 @@ function RequirementsChecklist({
         */}
         {!ro && <OriginalsNotice />}
         <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+          {/*
+            Required, and said once. Every row blocks now, so the old
+            three-way sentence — these stop you, the rest you can add later —
+            drew a distinction that no longer exists, and its second half made
+            the promise the client had already tested and found untrue.
+          */}
           {ro
             ? `What ${meta.office} received with this application.`
             : outstanding === 0
               ? `Everything on ${meta.office}’s list is here.`
-              : blocked.length > 0
-                ? /*
-                     The blocking row leads, because until it is dealt with
-                     nothing else on this list matters. The old sentence — "you
-                     can submit the form now and add them, but the office will
-                     ask" — was the promise the client tested and found untrue
-                     of this row, so it is no longer made about a sheet that
-                     cannot be submitted.
-                  */
-                  `${blocked.join(' and ')} ${blocked.length === 1 ? 'has' : 'have'} to be uploaded before you can submit this form.${
-                    outstanding > blocked.length
-                      ? ` The rest you can add later, though ${meta.office} will ask.`
-                      : ''
-                  }`
-                : `${meta.office} asks for ${rows.length === 1 ? 'this' : 'these'} with the application. ${outstanding} ${
+              : blocked.length > 0 && blocked.length <= 2
+                ? `${blocked.join(' and ')} ${blocked.length === 1 ? 'is' : 'are'} still missing. ${
+                    blocked.length === 1 ? 'It has' : 'They have'
+                  } to be uploaded before you can submit this form.`
+                : `${meta.office} asks for all of ${rows.length === 1 ? 'this' : 'these'} with the application. ${outstanding} ${
                     outstanding === 1 ? 'is' : 'are'
-                  } still missing — you can submit the form now and add ${
-                    outstanding === 1 ? 'it' : 'them'
-                  }, but the office will ask.`}
+                  } still missing, and the form cannot be submitted until ${
+                    outstanding === 1 ? 'it is' : 'they are'
+                  } here.`}
         </p>
       </div>
 
@@ -1252,13 +1727,34 @@ function RequirementsChecklist({
              * Matched on `code`, the document type — the same value the office
              * picked from and the same one this row uploads into. Never on the
              * label, which is prose and is translated and reworded.
+             *
+             * `targetsInclude` and not `===`: the column has held a
+             * comma-separated list since the picker became a checklist on
+             * 27 September 2026, and an office ticking two rows produced a
+             * pointer equal to neither of them, so nothing was highlighted.
              */
-            flagged={returnTarget !== null && row.code === returnTarget}
+            /*
+             * `row.code` is nullable — a row already answered by a
+             * business-permit attachment uploads nothing of its own — so it
+             * cannot be a lookup key or a needle without being checked. The
+             * `===` this replaced tolerated null by accident.
+             */
+            flagged={row.code !== null && targetsInclude(returnTarget, row.code)}
+            /* What the office said about THIS row, when it said something. */
+            flagNote={(row.code ? returnNotes?.[row.code] : null) ?? null}
             busy={busy === row.code}
             readOnly={ro}
             onChange={onChange}
             onDeclarationTemplate={
-              row.key === 'DECLARATION' ? onDeclarationTemplate : undefined
+              /*
+                The two rows that hand out a sworn page: CPDD's Section X
+                declaration and BFP's affidavit of undertaking. Both are named
+                on their paper with no layout printed for them, so the wording
+                is the thing worth giving.
+              */
+              row.key === 'DECLARATION' || row.key === 'NO_CHANGES_AFFIDAVIT'
+                ? onDeclarationTemplate
+                : undefined
             }
           />
         ))}
@@ -1271,6 +1767,7 @@ function RequirementsChecklist({
 function RequirementRow({
   row,
   flagged = false,
+  flagNote = null,
   busy,
   readOnly,
   onChange,
@@ -1279,12 +1776,51 @@ function RequirementRow({
   row: OfficeFormRequirement
   /** Did the office point at THIS row when it sent the permit back? */
   flagged?: boolean
+  /**
+   * The office's own remark for this row.
+   *
+   * Beside the row it is about rather than in one paragraph above the
+   * sheet — the same reasoning as the wizard's per-field boxes. Null on a
+   * return that named rows without commenting on each.
+   */
+  flagNote?: string | null
   busy: boolean
   readOnly: boolean
-  onChange?: (documentCode: string, file: File | null) => void
+  /**
+   * A file to add, or null to remove one.
+   *
+   * `documentId` says WHICH to remove, because a row holds several now.
+   * Without it the endpoint clears the whole slot — which is what Remove
+   * meant when a slot held one file, and would now take the first page of
+   * a lease off with the second.
+   */
+  onChange?: (documentCode: string, file: File | null, documentId?: number) => void | Promise<void>
   onDeclarationTemplate?: () => void
 }) {
-  const takesFile = row.source === 'upload' && row.code !== null && !readOnly && onChange
+  /*
+   * Any row but the sheet itself takes files — a carried one included.
+   *
+   * It did not until 30 September 2026: the business permit answered a
+   * carried row, so asking again was asking twice. That missed the
+   * applicant with a two-page lease and one page attached, and it became a
+   * trap the moment every documentary row began blocking the submit, since
+   * business permit documents cannot be added once the filing is paid and
+   * this stage begins after payment. `code` is null on the sheet row and
+   * non-null on the rest, so it carries the distinction on its own.
+   */
+  const takesFile = row.code !== null && !readOnly && onChange
+  /*
+   * Every file on this row. `documents` is the list the API sends now;
+   * `document` is its first, and the fallback keeps a row rendering if a
+   * payload from before 30 September 2026 is still in a tab.
+   */
+  const files = row.documents ?? (row.document === null ? [] : [row.document])
+  /*
+   * The copies that belong to the business permit. Remove here means "I
+   * attached the wrong page to this checklist", never "take it off my
+   * business permit", so it is not offered on these.
+   */
+  const fromPermit = new Set(row.carried_document_ids ?? [])
 
   return (
     <div
@@ -1293,137 +1829,196 @@ function RequirementRow({
        * already carries its own tick or box, and a second status chip on it
        * would compete with the one that says whether the document is there.
        */
-      className={flagged ? '-mx-3 rounded-md border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2' : undefined}
+      /*
+        Named so the panel at the top of the sheet can take the applicant
+        straight to it. Only on a flagged row: an id per requirement would
+        be six anchors nobody links to.
+      */
+      id={flagged && row.code !== null ? `return-${row.code}` : undefined}
+      className={flagged ? '-mx-3 scroll-mt-4 rounded-md border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2' : undefined}
     >
       {flagged && (
         <p className="mb-1 text-xs font-bold text-ink">This is what the office asked about</p>
       )}
-      <p className="flex items-center gap-2 text-sm font-bold text-ink">
-        {row.satisfied ? (
-          <CheckCircleFilledIcon size={16} className="shrink-0 text-s-green" />
-        ) : (
-          <span
-            aria-hidden
-            className="h-3.5 w-3.5 shrink-0 rounded-[3px] border border-ink-muted"
+      {flagged && flagNote && (
+        <p className="mb-1.5 text-xs text-ink-secondary">{flagNote}</p>
+      )}
+      {/*
+        ── No tick column ──────────────────────────────────────────
+
+        A drawn checkbox and a green circle stood here, mirroring the
+        box a clerk ticks on the paper. Neither could be clicked — the
+        square was `aria-hidden` decoration — and both said what the row
+        below already shows: a file line means the document is there, a
+        dropzone means it is not.
+
+        Client, 30 September 2026: *"make the format/layout of this
+        similar to the documentary requirements of the business permit
+        application form (no checkboxes)"* — which is a bold name, a
+        note, and then the control. The 22px indents went with the
+        marker they were clearing.
+      */}
+      {/*
+        ── The form's own shape, where there is something to upload ─────────
+
+        On the business permit form the dashed box IS the requirement: the
+        name sits inside it, it stays one row tall however many files are
+        attached, and the files list underneath. Copied here on the client's
+        instruction of 30 September 2026.
+
+        A `sheet` or `carried` row has no upload, so it keeps a plain heading
+        — a dropzone with a name in it and nothing to drop would be copying
+        the picture rather than the meaning.
+      */}
+      {takesFile ? (
+        <label
+          className={`flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
+            busy ? 'pointer-events-none opacity-60' : ''
+          }`}
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+            <UploadIcon size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold text-ink">
+              {row.label}
+              {/*
+                Section C's own mark, and read off the same flag that
+                refuses the submit so the two cannot drift apart.
+              */}
+              {row.blocking === true && <span className="ml-1 text-s-red">*</span>}
+            </span>
+            {/*
+              The note when there is nothing yet, the count once there is —
+              the form's own wording, because the count is what tells an
+              applicant the earlier pages are still attached.
+
+              Not truncated, unlike the form's: a checklist note is a sentence
+              explaining what the office wants ("A letter from the owner of
+              the lot agreeing to the business being run there"), and cutting
+              it at the tile edge would lose the half that says why.
+            */}
+            <span className="mt-0.5 block text-xs leading-relaxed text-ink-muted">
+              {busy
+                ? 'Uploading…'
+                : files.length > 0
+                  ? `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
+                  : row.note}
+            </span>
+          </span>
+          {files.length > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+              <CheckCircleFilledIcon size={16} /> Uploaded
+            </span>
+          )}
+          <input
+            type="file"
+            accept={ACCEPT_ATTR}
+            /*
+              As many as they have. The office slot took one and DELETED the
+              previous on every press, so the second page of a lease silently
+              destroyed the first — see `storeRequirement`, which adds now.
+            */
+            multiple
+            className="sr-only"
+            disabled={busy}
+            onChange={async (e) => {
+              const chosen = Array.from(e.target.files ?? [])
+              // Let the same file be picked twice — after a rejection the
+              // input would otherwise be inert.
+              e.target.value = ''
+              if (!row.code) return
+              /*
+                ONE AT A TIME, awaited.
+
+                Fired together they raced: every file reached the server,
+                but each response carries a full snapshot of this row and
+                the handler assigns it wholesale, so the panel ended up
+                showing whichever response arrived last rather than every
+                file that had landed. Picking two commonly showed one, and
+                the other was on disk the whole time — a refresh proved it.
+                Which is the worst shape for this to fail in: the applicant
+                concludes the upload did not work and picks the file again.
+              */
+              for (const file of chosen) {
+                await onChange!(row.code, file)
+              }
+            }}
           />
-        )}
-        <span className="min-w-0">{row.label}</span>
-      </p>
-      <p className="mt-1 pl-[22px] text-xs leading-relaxed text-ink-muted">{row.note}</p>
+        </label>
+      ) : (
+        <>
+          <p className="text-sm font-bold text-ink">{row.label}</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{row.note}</p>
+        </>
+      )}
 
       {/*
         The declaration template, beside the row that asks for the scan of it.
-        Section X is sworn before a notary and nothing in this flow can do that,
-        so what the system CAN hand over is the exact page the notary expects —
-        with the filing already named on it, so the scan that comes back is
-        matchable to an application rather than to a business name.
+        Section X is sworn before a notary and nothing in this flow can do
+        that, so what the system CAN hand over is the exact page the notary
+        expects — with the filing already named on it, so the scan that comes
+        back is matchable to an application rather than to a business name.
       */}
       {onDeclarationTemplate !== undefined && (
         <button
           type="button"
           onClick={onDeclarationTemplate}
-          className="ml-[22px] mt-2 inline-flex items-center gap-1.5 rounded-md border border-royal px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:bg-royal-tint"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-royal px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:bg-royal-tint"
         >
           <DownloadIcon size={14} />
           Download the template
         </button>
       )}
 
-      {/* The file already on the filing, with the same controls the wizard gives it. */}
-      {row.document !== null && (
-        <div className="ml-[22px] mt-2 flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5">
-          <span className="min-w-0 flex-1 truncate text-sm text-ink">
-            {row.document.filename}
-          </span>
-          {row.document.size_bytes !== null && (
-            <span className="tnum shrink-0 text-xs text-ink-muted">
-              {formatBytes(row.document.size_bytes)}
-            </span>
-          )}
-          {/*
-            Labelled by filename, not by the requirement: two rows can name the
-            same document (an owner's title answers TCT and a lessee's lease
-            answers Contract of Lease, both from LEASE_TITLE), so "View
-            Transfer Certificate of Title" twice over would name one file two
-            ways to a screen reader.
-          */}
-          <DocumentActions id={row.document.id} filename={row.document.filename} />
-          {takesFile && (
-            <button
-              type="button"
-              onClick={() => onChange!(row.code!, null)}
-              disabled={busy}
-              aria-label={`Remove ${row.document.filename}`}
-              className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+      {/* The files themselves, under the box that adds them. */}
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-2 pl-4">
+          {files.map((file) => (
+            <li
+              key={file.id}
+              className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5"
             >
-              {busy ? 'Removing…' : 'Remove'}
-            </button>
-          )}
-        </div>
+              <span className="min-w-0 flex-1 truncate text-sm text-ink">{file.filename}</span>
+              {file.size_bytes !== null && (
+                <span className="tnum shrink-0 text-xs text-ink-muted">
+                  {formatBytes(file.size_bytes)}
+                </span>
+              )}
+              {/*
+                Labelled by filename, not by the requirement: two rows can name
+                the same document — an owner's title answers TCT and a lessee's
+                lease answers Contract of Lease, both from LEASE_TITLE — so
+                "View Transfer Certificate of Title" twice over would name one
+                file two ways to a screen reader.
+              */}
+              <DocumentActions id={file.id} filename={file.filename} />
+              {takesFile && !fromPermit.has(file.id) && (
+                <button
+                  type="button"
+                  onClick={() => void onChange!(row.code!, null, file.id)}
+                  disabled={busy}
+                  aria-label={`Remove ${file.filename}`}
+                  className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                >
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
-      {/*
-        A `carried` row satisfied by something that is not a file — CENRO's
-        previous-year CEC, which is a certificate the register issued. Its
-        number is printed because there is nothing to open: a permit is not an
-        attachment, and the office reads it off the filing.
-      */}
-      {row.reference != null && row.reference !== '' && (
-        <p className="ml-[22px] mt-2 text-xs text-ink-secondary">
+      {row.reference && (
+        <p className="mt-2 text-xs text-ink-secondary">
           On file: <span className="tnum font-medium text-ink">{row.reference}</span>
         </p>
       )}
 
-      {/*
-        A `carried` row has no dropzone: the document is attached with the
-        business permit requirements and changing it there changes it here. A
-        second upload box for one file is a second file the office has to choose
-        between.
-      */}
-      {row.source === 'carried' && row.document === null && !row.satisfied && (
-        <p className="ml-[22px] mt-2 text-xs font-medium text-s-orange">
+      {row.source === 'carried' && files.length === 0 && !row.satisfied && (
+        <p className="mt-2 text-xs font-medium text-s-orange">
           Not attached yet. Add it to your business permit documents and it appears here.
         </p>
-      )}
-
-      {takesFile && (
-        <label
-          className={`ml-[22px] mt-2 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3 transition-colors hover:bg-input ${
-            busy ? 'pointer-events-none opacity-60' : ''
-          }`}
-        >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
-            <UploadIcon size={16} />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-royal">
-              {busy
-                ? 'Uploading…'
-                : row.document !== null
-                  ? 'Upload a different file'
-                  : 'Upload a file'}
-            </span>
-            <span className="block text-xs text-ink-muted">
-              {row.document !== null
-                ? 'This replaces the file above.'
-                : 'file type: png, jpg, pdf only'}
-            </span>
-          </span>
-          <span className="sr-only">{row.label}</span>
-          <input
-            type="file"
-            accept={ACCEPT_ATTR}
-            className="sr-only"
-            disabled={busy}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              // Let the same file be picked twice — after a rejection the input
-              // would otherwise be inert.
-              e.target.value = ''
-              if (file && row.code) onChange!(row.code, file)
-            }}
-          />
-        </label>
       )}
     </div>
   )
@@ -1783,7 +2378,11 @@ function CecFields({
               </FieldError>
             )}
           </div>
-          <DerivedField label={<>Sex<FromApplicationTag /></>} value={business.ownerSex} />
+          {/* The word. `ownerSex` carries the stored 'M' or 'F'. */}
+          <DerivedField
+            label={<>Sex<FromApplicationTag /></>}
+            value={genderLabel(business.ownerSex)}
+          />
         </div>
 
         {/* LINE OF BUSINESS | PRODUCTS/SERVICES | CONTACT NUMBERS */}
@@ -1866,16 +2465,24 @@ function CecFields({
 function FsicFields({
   data,
   set,
+  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
+  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
+  /*
+   * The Occupancy sheet owns the occupancy type and the storey count when it
+   * is on the filing — one paper asks both, and the client chose shared
+   * answers over a merged sheet. See the note above the component.
+   */
+  const sharedWithObo = get(data, 'occupancy_shared_source') === 'OCCUPANCY'
   return (
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <ControlNoField
             label={
               <>
@@ -1885,7 +2492,23 @@ function FsicFields({
             }
             placeholder="FSIC-________"
           />
-          <label className="block">
+          {/*
+            "NAME OF OWNER" on the BFP form. Carried, not asked: it is the
+            name already given on the business permit application, and the
+            establishment name and exact address beside it come from the same
+            place through CarriedOverSection above.
+          */}
+          <DerivedField
+            className="grow basis-[14rem]"
+            label={
+              <>
+                Name of Owner
+                <FromApplicationTag />
+              </>
+            }
+            value={business.ownerName}
+          />
+          <label className="block grow basis-[14rem]">
             <FieldLabel>Authorized Representative</FieldLabel>
             {/*
              * Item 70 — the placeholder used to carry the rule ("Auto-filled
@@ -1915,7 +2538,88 @@ function FsicFields({
       </section>
 
       <section className="space-y-3">
-        <SectionMarker letter="B" label="Certificate Applied For" />
+        <SectionMarker letter="B" label="The Premises" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          {/*
+            "TYPE OF OCCUPANCY / BUSINESS NATURE". Seeded from the line of
+            business and editable, because BFP's vocabulary is not PSIC's — a
+            restaurant is "Assembly" to a fire officer — and the applicant is
+            the one who knows which.
+          */}
+          {sharedWithObo ? (
+            <DerivedField
+              className="grow basis-[16rem]"
+              label={
+                <>
+                  Type of Occupancy / Business Nature
+                  <span className="font-normal text-ink-muted"> (from your Occupancy form)</span>
+                </>
+              }
+              value={get(data, 'occupancy_type')}
+            />
+          ) : (
+            <label className="block grow basis-[16rem]">
+              <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
+              <input
+                value={get(data, 'occupancy_type') || business.lineOfBusiness}
+                onChange={(e) => set('occupancy_type', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. Mercantile, Assembly, Business"
+                className={inputCls}
+              />
+              <CarriedTag field="occupancy_type" />
+            </label>
+          )}
+          {sharedWithObo ? (
+            <DerivedField
+              className="shrink-0"
+              label={
+                <>
+                  No. of Storeys
+                  <span className="font-normal text-ink-muted"> (from Occupancy)</span>
+                </>
+              }
+              value={get(data, 'building_storeys')}
+            />
+          ) : (
+            <label className="block shrink-0">
+              <FieldLabel required>No. of Storeys</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'building_storeys')}
+                onChange={(e) => set('building_storeys', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. 2"
+                className={`${inputCls} tnum w-[7rem]`}
+              />
+              <CarriedTag field="building_storeys" />
+            </label>
+          )}
+          {/*
+            The three the applicant has already given. Floor area is the same
+            figure the zoning sheet is assessed on — item 1 of Business
+            Operation — so it is carried rather than asked a third time.
+          */}
+          <DerivedField
+            className="shrink-0"
+            label="Total Floor Area (sq. m.)"
+            value={business.businessAreaSqm}
+          />
+          <DerivedField
+            className="grow basis-[12rem]"
+            label="Contact Number"
+            value={business.mobile || business.landline}
+          />
+          <DerivedField
+            className="grow basis-[14rem]"
+            label="E-mail Address"
+            value={business.proprietorEmail}
+          />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="Certificate Applied For" />
         {/*
          * The permits you picked and the application type already decide this,
          * so the BFP sheet carries it without asking the applicant to repeat it.
@@ -1931,6 +2635,38 @@ function FsicFields({
           hint="Set from the permits and application type you chose in step 1. To change it, go back to Permit Selection."
         />
       </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="D" label="Certification" />
+        {/*
+          The sentence above the signature on BFP's form. It gates the submit —
+          see `officeFormMissing` — because a sheet handed in without it is one
+          the office gives back, and being stopped here costs a tick where
+          being stopped there costs a trip.
+        */}
+        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={get(data, 'certified') === 'yes'}
+              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
+              disabled={ro}
+              aria-disabled={ro}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              I hereby certify the correctness of the information provided above and the
+              completeness of the attached documents.
+            </span>
+          </label>
+          <div className="mt-3 sm:w-2/3">
+            <DerivedField
+              label={<>Printed Name of Owner<FromApplicationTag /></>}
+              value={business.ownerName}
+            />
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -1938,21 +2674,23 @@ function FsicFields({
 function OccupancyFields({
   data,
   set,
+  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
+  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
   return (
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application & Permit Details" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           {/*
            * Full vs Partial is how much of the building will be occupied — a
            * real applicant decision, not the new/renewal the system knows.
            */}
-          <div>
+          <div className="shrink-0">
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
               options={OCCUPANCY_SCOPES}
@@ -1982,15 +2720,183 @@ function OccupancyFields({
             />
             <CarriedTag field="fsec_no" />
           </div>
+          {/*
+            The paper prints a Date Issued under each of the two numbers, so
+            each sits beside the number it belongs to — see the note on this
+            change for why they are asked here and not on the officer's sheet.
+          */}
+          <label className="block shrink-0">
+            <FieldLabel>Building Permit — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'building_permit_date')}
+              onChange={(e) => set('building_permit_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="building_permit_date" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>FSEC — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'fsec_date')}
+              onChange={(e) => set('fsec_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="fsec_date" />
+          </label>
         </div>
-        {/*
-         * The dates these documents were issued are recorded by the office that
-         * issued them, during review (ReviewPage "For Office Use Only").
-         */}
-        <p className="text-xs text-ink-muted">
-          The dates these documents were issued are filled in by the reviewing office. Just give the
-          numbers here.
-        </p>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="B" label="Owner / Permittee" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <DerivedField
+            className="grow basis-[14rem]"
+            label={
+              <>
+                Name of Owner / Permittee
+                <FromApplicationTag />
+              </>
+            }
+            value={business.ownerName}
+          />
+          {/*
+            Asked, not carried, and the distinction matters on this one box.
+            The paper wants where the OWNER lives; BizTrack holds where the
+            BUSINESS is, and on a filing whose premises is rented those are
+            different places. Prefilling the business address here would put a
+            wrong answer on a form the Building Official posts to.
+          */}
+          <label className="block grow basis-[18rem]">
+            <FieldLabel>Address of Owner / Permittee</FieldLabel>
+            <input
+              value={get(data, 'owner_address')}
+              onChange={(e) => set('owner_address', e.target.value)}
+              readOnly={ro}
+              placeholder="If not the business address"
+              className={inputCls}
+            />
+            <CarriedTag field="owner_address" />
+          </label>
+          {/* Printed beside the address on the paper; the OBO posts to it. */}
+          <label className="block shrink-0">
+            <FieldLabel>ZIP Code</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'owner_zip')}
+              onChange={(e) => set('owner_zip', e.target.value)}
+              readOnly={ro}
+              placeholder="1470"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="owner_zip" />
+          </label>
+          <DerivedField
+            className="grow basis-[12rem]"
+            label={
+              <>
+                Tel. No.
+                <FromApplicationTag />
+              </>
+            }
+            value={business.mobile || business.landline}
+          />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="The Project" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          {/*
+            Seeded from the business name and editable: a project on the
+            Building Official's books is often named for the structure rather
+            than the trade in it, and only the applicant knows which it is.
+          */}
+          <label className="block grow basis-[14rem]">
+            <FieldLabel required>Name of Project</FieldLabel>
+            <input
+              value={get(data, 'project_name') || business.name}
+              onChange={(e) => set('project_name', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="project_name" />
+          </label>
+          <DerivedField
+            className="grow basis-[18rem]"
+            label={
+              <>
+                Location of Project
+                <FromApplicationTag />
+              </>
+            }
+            value={business.address}
+          />
+          {/*
+            This sheet OWNS the occupancy type and the storey count — BFP's
+            paper prints them too and carries these answers read-only. See the
+            note above the component.
+          */}
+          <label className="block grow basis-[16rem]">
+            <FieldLabel required>Use / Character of Occupancy</FieldLabel>
+            <input
+              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              onChange={(e) => set('occupancy_type', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. Mercantile, Assembly, Business"
+              className={inputCls}
+            />
+            <CarriedTag field="occupancy_type" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Storeys</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'building_storeys')}
+              onChange={(e) => set('building_storeys', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="building_storeys" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Units</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'building_units')}
+              onChange={(e) => set('building_units', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 1"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="building_units" />
+          </label>
+          <DerivedField
+            className="shrink-0"
+            label={
+              <>
+                Total Floor Area
+                <FromApplicationTag />
+              </>
+            }
+            value={business.businessAreaSqm}
+          />
+          <label className="block shrink-0">
+            <FieldLabel required>Date of Completion</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'completion_date')}
+              onChange={(e) => set('completion_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="completion_date" />
+          </label>
+        </div>
       </section>
     </div>
   )
@@ -2006,6 +2912,7 @@ export function OfficeFormSheet({
   readOnly = false,
   requirements,
   returnTarget = null,
+  returnNotes = null,
   carriedKeys = [],
   requirementBusy = null,
   requirementError = null,
@@ -2035,6 +2942,8 @@ export function OfficeFormSheet({
    * unable to resubmit and unable to say so.
    */
   returnTarget?: string | null
+  /** One note per returned row, keyed by the code `returnTarget` names. */
+  returnNotes?: Record<string, string> | null
   /**
    * Answers still showing last year's value on a renewal, offered and not yet
    * reviewed. Flagged per field by `CarriedTag`; see the note there for why it
@@ -2044,7 +2953,11 @@ export function OfficeFormSheet({
   /** The document code with an upload in flight, so one row can say so. */
   requirementBusy?: string | null
   requirementError?: string | null
-  onRequirementChange?: (documentCode: string, file: File | null) => void
+  onRequirementChange?: (
+    documentCode: string,
+    file: File | null,
+    documentId?: number,
+  ) => void | Promise<void>
   /** Fetch Section X of the CPDD paper, blank, for the applicant's notary. */
   onDeclarationTemplate?: () => void
   /**
@@ -2078,6 +2991,13 @@ export function OfficeFormSheet({
           </p>
         </div>
       )}
+      {/*
+        The correction panel is NOT here. It is a section of the page,
+        rendered above this sheet by ClearanceStagePage — because that
+        is where BPLO's is: heading on the page background, one white
+        card under it. Rendered inside this card it was a box inside a
+        box, which is the difference the client photographed.
+      */}
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">{meta.kicker}</p>
       <h1 className="mt-1.5 text-2xl font-bold text-ink">{meta.title}</h1>
       <p className="mt-1 text-xs text-ink-muted">Form Ref: {meta.ref}</p>
@@ -2141,13 +3061,14 @@ export function OfficeFormSheet({
         {code === 'ZONING' && <ZoningFields data={data} set={set} business={business} />}
         {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
         {code === 'CEC' && <CecFields data={data} set={set} business={business} />}
-        {code === 'FSIC' && <FsicFields data={data} set={set} />}
-        {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} />}
+        {code === 'FSIC' && <FsicFields data={data} set={set} business={business} />}
+        {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} business={business} />}
         {requirements !== undefined && requirements.length > 0 && (
           <RequirementsChecklist
             code={code}
             rows={requirements}
             returnTarget={returnTarget}
+            returnNotes={returnNotes}
             busy={requirementBusy}
             error={requirementError}
             onChange={onRequirementChange}

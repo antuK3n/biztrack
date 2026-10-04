@@ -199,7 +199,19 @@ class AmendmentController extends Controller
         $this->authorizeOwner($request, $application);
         $this->requireEditableAmendment($application);
 
-        $application->requestedChanges()->where('field', $field)->delete();
+        /*
+         * Each withdrawn change is copied into the audit log before it goes
+         * (Audit Log 1). This used to delete without writing any audit row at
+         * all, so an applicant's withdrawn request left no trace that it had
+         * ever been asked for.
+         */
+        foreach ($application->requestedChanges()->where('field', $field)->get() as $change) {
+            Audit::removed('amendment.change_withdrawn', $change, [
+                'application_id' => $application->id,
+                'field' => $field,
+            ]);
+            $change->delete();
+        }
 
         return $this->index($request, $application->fresh());
     }

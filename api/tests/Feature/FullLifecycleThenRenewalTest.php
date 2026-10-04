@@ -126,6 +126,30 @@ function clearanceEndToEnd(int $appId, string $code): void
 {
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
+    /*
+     * The answers go in FIRST, on their own save, and the checklist is then
+     * completed against the sheet as answered.
+     *
+     * Order matters here and did not before 30 September 2026. Some rows
+     * only EXIST once a question is answered — FSIC asks for the SPA
+     * because `authorized_representative` is filled in, and that is one of
+     * the answers in this very call — so attaching against the blank sheet
+     * misses the row the same request goes on to create, and the submit
+     * refuses a document nothing had asked for yet.
+     *
+     * It is also what the applicant's own screen does: the answers autosave
+     * as they are typed and Submit is a separate press.
+     */
+    test()->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+        'form_data' => SHEET_ANSWERS[$code] ?? [],
+    ])->assertOk();
+
+    // Then the documents that sheet asks for. See satisfyChecklist() in Pest.php.
+    satisfyChecklist(
+        Application::findOrFail($appId),
+        PermitType::where('code', $code)->firstOrFail(),
+    );
+
     test()->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
         'form_data' => SHEET_ANSWERS[$code] ?? [],
         'submit' => true,

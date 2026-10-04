@@ -34,6 +34,7 @@ it('sends a verification email when an account is registered', function () {
         'password' => 'biztrack1',
         'password_confirmation' => 'biztrack1',
         'data_privacy_consent' => true,
+        ...homeAddress(),
     ])->assertCreated();
 
     $user = User::where('email', 'marisol.ramos@example.com')->firstOrFail();
@@ -58,6 +59,7 @@ it('registers the account even when the mailer is down', function () {
         'password' => 'biztrack1',
         'password_confirmation' => 'biztrack1',
         'data_privacy_consent' => true,
+        ...homeAddress(),
     ])->assertCreated()->assertJsonStructure(['data' => ['token']]);
 
     expect(User::where('email', 'dominic.cruz@example.com')->exists())->toBeTrue();

@@ -1,293 +1,373 @@
 <?php
 
+use App\Mail\OneTimeCode;
 use App\Models\AuditLog;
 use App\Models\EmailCode;
 use App\Models\User;
-use App\Notifications\PasswordChangeCode;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Mail;
 
 /*
- * ── A password change is confirmed by email ────────────────────────────────
+ * A code by e-mail before a password change [checklist 2026-09-27, Edit
+ * Settings; closes View Profile 3].
  *
- * `PUT /auth/password` asked for the current password and nothing else. So a
- * session left open at a shared counter — or a borrowed phone, which is how
- * most people here reach this app — was enough to take the account: type the
- * password its owner had just typed in front of you, set a new one, and the
- * change itself signs every other device out. The owner's way back in is the
- * password they no longer have.
+ * Two halves, as in EmailCodeTest. With mail OFF (the demo) the current
+ * password is enough, exactly as before — ProfileTest's two password tests are
+ * that half and are left untouched. With mail ON the change also needs a code
+ * from POST /auth/password/code, which checks the current password before it
+ * sends anything.
  *
- * A code sent to the registered address breaks that, because the address is
- * the one thing the person at the counter does not have. [Client, 28 September
- * 2026: *"implement email verification in the change password"*.]
+ * Helpers are prefixed `pw` because Pest loads every test file into one
+ * process, and EmailCodeTest already declares `mailOn` and `lastCode`.
  */
 
-/** Ask for a code and read the digits back off the notification that carried them. */
-function passwordCode(string $email, string $current = 'biztrack1'): string
+function pwMailOn(): void
 {
-    Notification::fake();
-
-    test()->withHeaders(authAs($email))
-        ->postJson('/api/v1/auth/password/code', ['current_password' => $current])
-        ->assertOk();
-
-    $sent = null;
-    Notification::assertSentTo(
-        User::where('email', $email)->firstOrFail(),
-        PasswordChangeCode::class,
-        function (PasswordChangeCode $n) use (&$sent) {
-            $sent = $n->code;
-
-            return true;
-        }
-    );
-
-    return $sent;
+    config(['mail.default' => 'smtp']);
+    Mail::fake();
 }
 
-it('will not change a password without a code', function () {
-    // The whole point. The current password alone used to be enough.
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-        ])
+/** The code in the newest password-change e-mail on the faked mailer. */
+function pwLastCode(): string
+{
+    $code = null;
+    Mail::assertSent(OneTimeCode::class, function (OneTimeCode $mail) use (&$code) {
+        if ($mail->purpose === EmailCode::PASSWORD) {
+            $code = $mail->code;
+        }
+
+        return true;
+    });
+
+    return (string) $code;
+}
+
+function pwOwner(): User
+{
+    return User::where('email', 'owner@biztrack.local')->firstOrFail();
+}
+
+/**
+ * A bearer token for the owner, minted directly. With mail on, /auth/login
+ * answers with a sign-in code rather than a token, and these tests are about
+ * the step after that.
+ */
+function pwToken(): string
+{
+    return pwOwner()->createToken('web:public')->plainTextToken;
+}
+
+function pwRequestCode(string $token, string $current = 'biztrack1')
+{
+    app('auth')->forgetGuards();
+
+    return test()->withToken($token)->postJson('/api/v1/auth/password/code', ['current_password' => $current]);
+}
+
+function pwChange(string $token, ?string $code, string $new = 'brand-new-pass1')
+{
+    app('auth')->forgetGuards();
+
+    return test()->withToken($token)->putJson('/api/v1/auth/password', array_filter([
+        'current_password' => 'biztrack1',
+        'password' => $new,
+        'password_confirmation' => $new,
+        'code' => $code,
+    ], fn ($v) => $v !== null));
+}
+
+function pwWrong(string $right): string
+{
+    return $right === '000000' ? '111111' : '000000';
+}
+
+// ── Mail off: nothing new is asked for ───────────────────────────────────
+
+it('changes the password with the current password alone while mail is off, and sends nothing', function () {
+    Mail::fake();
+    $token = pwToken();
+
+    pwChange($token, null)->assertOk()
+        ->assertJsonPath('message', 'Password updated. Other signed-in devices have been logged out.');
+
+    expect(Hash::check('brand-new-pass1', pwOwner()->password))->toBeTrue();
+    Mail::assertNothingSent();
+    expect(EmailCode::count())->toBe(0);
+});
+
+it('tells the web app no code is needed while mail is off', function () {
+    $token = pwToken();
+    app('auth')->forgetGuards();
+
+    $this->withToken($token)->getJson('/api/v1/auth/me')
+        ->assertOk()->assertJsonPath('data.password_change_code_required', false);
+
+    pwRequestCode($token)->assertOk()->assertJsonPath('data.code_required', false);
+    expect(EmailCode::count())->toBe(0);
+});
+
+// ── Mail on ──────────────────────────────────────────────────────────────
+
+it('tells the web app a code is needed while mail is on', function () {
+    pwMailOn();
+    $token = pwToken();
+    app('auth')->forgetGuards();
+
+    $this->withToken($token)->getJson('/api/v1/auth/me')
+        ->assertOk()->assertJsonPath('data.password_change_code_required', true);
+});
+
+it('refuses a password change without a code while mail is on', function () {
+    pwMailOn();
+    $token = pwToken();
+
+    pwChange($token, null)->assertStatus(422)->assertJsonValidationErrors('code');
+
+    expect(Hash::check('biztrack1', pwOwner()->password))->toBeTrue();
+});
+
+it('sends a code only for the right current password', function () {
+    pwMailOn();
+    $token = pwToken();
+
+    pwRequestCode($token, 'not-the-password')
+        ->assertStatus(422)->assertJsonValidationErrors('current_password');
+
+    Mail::assertNothingSent();
+    expect(EmailCode::count())->toBe(0);
+
+    pwRequestCode($token)->assertOk()
+        ->assertJsonPath('data.code_required', true)
+        ->assertJsonPath('data.expires_in_minutes', 10);
+    Mail::assertSent(OneTimeCode::class, fn (OneTimeCode $m) => $m->hasTo('owner@biztrack.local') && $m->purpose === EmailCode::PASSWORD);
+});
+
+it('changes the password with the right code, and signs every other device out', function () {
+    pwMailOn();
+    $other = pwToken();
+    $token = pwToken();
+
+    pwRequestCode($token)->assertOk();
+    pwChange($token, pwLastCode())->assertOk();
+
+    expect(Hash::check('brand-new-pass1', pwOwner()->password))->toBeTrue();
+    expect(pwOwner()->tokens()->count())->toBe(1);
+
+    app('auth')->forgetGuards();
+    $this->withToken($other)->getJson('/api/v1/auth/me')->assertUnauthorized();
+    app('auth')->forgetGuards();
+    $this->withToken($token)->getJson('/api/v1/auth/me')->assertOk();
+});
+
+it('refuses a wrong code, says how many tries are left, and counts it against the account', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
+
+    pwChange($token, pwWrong(pwLastCode()))
         ->assertStatus(422)
-        ->assertJsonValidationErrors('code');
+        ->assertJsonValidationErrors('code')
+        ->assertJsonPath('message', 'That code is not right. You have 4 tries left.');
 
-    expect(Hash::check('biztrack1', User::where('email', 'owner@biztrack.local')->value('password')))
-        ->toBeTrue();
+    expect(pwOwner()->failed_login_attempts)->toBe(1);
+    expect(Hash::check('biztrack1', pwOwner()->password))->toBeTrue();
 });
 
-it('changes the password when the emailed code is given', function () {
-    $code = passwordCode('owner@biztrack.local');
+it('locks the account after five wrong codes, across fresh codes, as wrong sign-in codes do', function () {
+    pwMailOn();
+    $token = pwToken();
 
-    expect($code)->toMatch('/^\d{6}$/');
+    pwRequestCode($token)->assertOk();
+    foreach (range(1, 3) as $_) {
+        pwChange($token, pwWrong(pwLastCode()))->assertStatus(422);
+    }
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $code,
-        ])
-        ->assertOk();
+    // A new code does not buy new guesses: the count is on the account.
+    $this->travel(11)->minutes();
+    pwRequestCode($token)->assertOk();
+    foreach (range(1, 2) as $_) {
+        pwChange($token, pwWrong(pwLastCode()))->assertStatus(422);
+    }
 
-    expect(Hash::check('Malabon-City-2026!', User::where('email', 'owner@biztrack.local')->value('password')))
-        ->toBeTrue();
+    expect(pwOwner()->failed_login_attempts)->toBe(5);
+    expect(pwOwner()->locked_until?->isFuture())->toBeTrue();
+
+    // Locked: no more codes, no more guesses, and no sign-in elsewhere.
+    pwRequestCode($token)->assertStatus(429);
+    pwChange($token, pwLastCode())->assertStatus(429);
+    $this->postJson('/api/v1/auth/login', ['email' => 'owner@biztrack.local', 'password' => 'biztrack1'])
+        ->assertStatus(429);
 });
 
-it('will not send a code to somebody who does not know the current password', function () {
-    /*
-     * Checked before the mail goes, not only when the change lands. Otherwise
-     * anybody holding a session could make the owner's inbox ring, and the
-     * mail would warn that their password is being changed when nobody had got
-     * past the first field — a warning that fires on nothing teaches its reader
-     * to ignore the next one.
-     */
-    Notification::fake();
+it('does not charge a try for something that is not six digits', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/auth/password/code', ['current_password' => 'not-the-password'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('current_password');
+    pwChange($token, '12ab')->assertStatus(422)
+        ->assertJsonPath('message', 'Enter the 6 digits from the e-mail.');
 
-    Notification::assertNothingSent();
+    expect(pwOwner()->failed_login_attempts)->toBe(0);
+    expect(EmailCode::first()->attempts)->toBe(0);
 });
 
-it('masks the address it sent to', function () {
-    /*
-     * Enough to recognise, not enough to learn. Printing the address in full
-     * would hand it to exactly the person this feature exists to stop — they
-     * already hold the session, and the address is the one thing they lack.
-     */
-    Notification::fake();
+it('refuses a password code after ten minutes', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
+    $code = pwLastCode();
 
-    $shown = test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/auth/password/code', ['current_password' => 'biztrack1'])
-        ->assertOk()
-        ->json('email');
+    $this->travel(11)->minutes();
 
-    // Double-quoted, because `\u{…}` is only an escape there — in single
-    // quotes PHP hands back the nine literal characters.
-    expect($shown)->toBe("o\u{2022}\u{2022}\u{2022}\u{2022}@biztrack.local")
-        ->and($shown)->not->toContain('owner');
+    pwChange($token, $code)->assertStatus(422)
+        ->assertJsonPath('message', 'This code no longer works. Send yourself a new one.');
+    expect(Hash::check('biztrack1', pwOwner()->password))->toBeTrue();
 });
 
-it('refuses a wrong code and says how many tries are left', function () {
-    passwordCode('owner@biztrack.local');
+it('refuses a code once it has been used', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
+    $code = pwLastCode();
 
-    $message = test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => '000000',
-        ])
-        ->assertStatus(422)
-        ->json('errors.code.0');
+    pwChange($token, $code)->assertOk();
 
-    // A count, not "invalid": somebody mistyping a digit should know they have
-    // room to try again, and somebody being locked out should see it coming.
-    expect($message)->toContain('tries left');
+    // The password is now brand-new-pass1; change it back with the same code.
+    app('auth')->forgetGuards();
+    $this->withToken($token)->putJson('/api/v1/auth/password', [
+        'current_password' => 'brand-new-pass1',
+        'password' => 'biztrack1',
+        'password_confirmation' => 'biztrack1',
+        'code' => $code,
+    ])->assertStatus(422)->assertJsonValidationErrors('code');
 });
 
-it('burns the code after five wrong guesses', function () {
-    // Six digits is one in a million, which a script exhausts in minutes. The
-    // attempt counter is what makes the ten-minute window mean anything.
-    $code = passwordCode('owner@biztrack.local');
+it('does not accept a sign-in code for a password change', function () {
+    pwMailOn();
+    $token = pwToken();
 
-    for ($i = 0; $i < EmailCode::MAX_ATTEMPTS; $i++) {
-        test()->withHeaders(authAs('owner@biztrack.local'))
-            ->putJson('/api/v1/auth/password', [
-                'current_password' => 'biztrack1',
-                'password' => 'Malabon-City-2026!',
-                'password_confirmation' => 'Malabon-City-2026!',
-                'code' => '000000',
-            ])
+    $this->postJson('/api/v1/auth/login', ['email' => 'owner@biztrack.local', 'password' => 'biztrack1'])
+        ->assertOk()->assertJsonPath('data.code_required', true);
+    $signInCode = null;
+    Mail::assertSent(OneTimeCode::class, function (OneTimeCode $m) use (&$signInCode) {
+        $signInCode = $m->purpose === EmailCode::LOGIN ? $m->code : $signInCode;
+
+        return true;
+    });
+
+    // With no password code ever sent, the sign-in code is not one.
+    pwChange($token, $signInCode)->assertStatus(422)->assertJsonValidationErrors('code');
+
+    // And with one sent, the sign-in code still is not it.
+    pwRequestCode($token)->assertOk();
+    if ($signInCode !== pwLastCode()) {
+        pwChange($token, $signInCode)->assertStatus(422)->assertJsonValidationErrors('code');
+    }
+    expect(Hash::check('biztrack1', pwOwner()->password))->toBeTrue();
+});
+
+it('does not accept a password code at the sign-in step', function () {
+    pwMailOn();
+    $token = pwToken();
+
+    $challenge = $this->postJson('/api/v1/auth/login', ['email' => 'owner@biztrack.local', 'password' => 'biztrack1'])
+        ->assertOk()->json('data.challenge');
+    $signIn = EmailCode::where('purpose', EmailCode::LOGIN)->firstOrFail();
+
+    pwRequestCode($token)->assertOk();
+    $passwordCode = pwLastCode();
+
+    // One time in a million the two numbers are the same, and then typing it
+    // at sign-in is simply the right sign-in code.
+    if (! Hash::check($passwordCode, $signIn->code_hash)) {
+        $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => $passwordCode])
             ->assertStatus(422);
     }
-
-    // Even the RIGHT code is now refused.
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $code,
-        ])
-        ->assertStatus(422);
-
-    expect(Hash::check('biztrack1', User::where('email', 'owner@biztrack.local')->value('password')))
-        ->toBeTrue();
+    // Either way the password code is untouched by the sign-in step.
+    expect(EmailCode::where('purpose', EmailCode::PASSWORD)->first()->consumed_at)->toBeNull();
 });
 
-it('refuses a code that has expired, and says to ask for another', function () {
-    $code = passwordCode('owner@biztrack.local');
+it('makes the resend wait a minute, then sends a new code that replaces the old', function () {
+    pwMailOn();
+    $token = pwToken();
 
-    $this->travel(EmailCode::TTL_MINUTES + 1)->minutes();
+    pwRequestCode($token)->assertOk();
+    $old = pwLastCode();
 
-    $message = test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $code,
-        ])
-        ->assertStatus(422)
-        ->json('errors.code.0');
+    pwRequestCode($token)->assertStatus(429)->assertJsonStructure(['retry_after']);
 
-    // "Expired" sends the reader to the Send button; "wrong" sends them back
-    // to the mail. One message for both would send half of them the wrong way.
-    expect($message)->toContain('expired');
-});
+    $this->travel(61)->seconds();
+    Mail::fake();
+    pwRequestCode($token)->assertOk();
+    $new = pwLastCode();
 
-it('will not let a code be spent twice', function () {
-    $code = passwordCode('owner@biztrack.local');
-
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $code,
-        ])
-        ->assertOk();
-
-    // Replayed with the NEW current password, so only the spent code is what
-    // stops it.
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'Malabon-City-2026!',
-            'password' => 'Second-Change-2026!',
-            'password_confirmation' => 'Second-Change-2026!',
-            'code' => $code,
-        ])
-        ->assertStatus(422);
-
-    expect(Hash::check('Malabon-City-2026!', User::where('email', 'owner@biztrack.local')->value('password')))
-        ->toBeTrue();
-});
-
-it('keeps only one live code, so the newest mail is the one that works', function () {
-    /*
-     * Two live codes means the one the reader is looking at might not be the
-     * one that works, which is indistinguishable from the feature being
-     * broken. Asking again retires the first.
-     */
-    $first = passwordCode('owner@biztrack.local');
-
-    $this->travel(EmailCode::RESEND_SECONDS + 1)->seconds();
-    $second = passwordCode('owner@biztrack.local');
-
-    expect($first)->not->toBe($second);
-
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $first,
-        ])
-        ->assertStatus(422);
-
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $second,
-        ])
-        ->assertOk();
-});
-
-it('will not send a second code within the minute', function () {
-    // The button is otherwise an open relay: a held session can post it in a
-    // loop and bury the owner's inbox — including the warnings this very
-    // feature sends.
-    passwordCode('owner@biztrack.local');
-
-    Notification::fake();
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/auth/password/code', ['current_password' => 'biztrack1'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('code');
-
-    Notification::assertNothingSent();
-});
-
-it('never writes the code itself to the audit trail', function () {
-    // The trail records THAT a code was sent, which is what an auditor needs.
-    // The digits are a credential, and a trail anybody can read is the wrong
-    // place for one.
-    $code = passwordCode('owner@biztrack.local');
-
-    $entries = AuditLog::where('action', 'user.password_code_sent')->get();
-
-    expect($entries)->not->toBeEmpty();
-    foreach ($entries as $entry) {
-        expect(json_encode($entry->changes ?? []))->not->toContain($code);
+    expect(EmailCode::where('purpose', EmailCode::PASSWORD)->count())->toBe(1);
+    if ($new !== $old) {
+        pwChange($token, $old)->assertStatus(422);
     }
+    pwChange($token, $new)->assertOk();
 });
 
-it('still revokes the other sessions when the change goes through', function () {
-    // The behaviour that was already here, and which the code step must not
-    // have quietly dropped: a hijacked session dies with the old credential.
-    $user = User::where('email', 'owner@biztrack.local')->firstOrFail();
-    $user->createToken('other-device');
+it('keeps wrong guesses counted across a resend', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
 
-    $code = passwordCode('owner@biztrack.local');
-    $before = $user->tokens()->count();
+    pwChange($token, pwWrong(pwLastCode()))->assertStatus(422);
+    pwChange($token, pwWrong(pwLastCode()))->assertStatus(422);
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson('/api/v1/auth/password', [
-            'current_password' => 'biztrack1',
-            'password' => 'Malabon-City-2026!',
-            'password_confirmation' => 'Malabon-City-2026!',
-            'code' => $code,
-        ])
-        ->assertOk();
+    $this->travel(61)->seconds();
+    Mail::fake();
+    pwRequestCode($token)->assertOk();
 
-    expect($user->tokens()->count())->toBeLessThan($before);
+    pwChange($token, pwWrong(pwLastCode()))
+        ->assertStatus(422)->assertJsonPath('message', 'That code is not right. You have 2 tries left.');
+});
+
+it('stops resending after five e-mails for one code', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
+
+    foreach (range(2, 5) as $_) {
+        $this->travel(61)->seconds();
+        pwRequestCode($token)->assertOk();
+    }
+
+    $this->travel(61)->seconds();
+    pwRequestCode($token)->assertStatus(429);
+    Mail::assertSentCount(5);
+});
+
+it('says so, and leaves nothing open, when the code cannot be sent', function () {
+    config(['mail.default' => 'smtp']);
+    Mail::shouldReceive('to')->andThrow(new RuntimeException('535 Authentication failed'));
+    $token = pwToken();
+
+    pwRequestCode($token)->assertStatus(503);
+
+    expect(EmailCode::first()->consumed_at)->not->toBeNull();
+});
+
+it('audits the code and the change, and never writes the code or a password into the trail', function () {
+    pwMailOn();
+    $token = pwToken();
+    pwRequestCode($token)->assertOk();
+    $code = pwLastCode();
+    pwChange($token, $code)->assertOk();
+
+    $rows = AuditLog::whereIn('action', ['user.password_code_sent', 'user.password_changed'])->get();
+    expect($rows->pluck('action')->all())->toBe(['user.password_code_sent', 'user.password_changed']);
+
+    $written = $rows->map(fn ($r) => json_encode($r->changes).json_encode($r->snapshot))->implode('');
+    expect($written)->not->toContain($code)
+        ->not->toContain('biztrack1')
+        ->not->toContain('brand-new-pass1');
+});
+
+it('requires a session to ask for a code', function () {
+    pwMailOn();
+
+    $this->postJson('/api/v1/auth/password/code', ['current_password' => 'biztrack1'])->assertUnauthorized();
+    Mail::assertNothingSent();
 });

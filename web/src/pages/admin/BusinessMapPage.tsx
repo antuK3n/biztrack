@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { LayersControl, MapContainer, Marker, Polygon, Popup, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-import { api } from '../../lib/api'
+import { api, toApiError } from '../../lib/api'
+import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { formatDate } from '../../lib/format'
 import { BARANGAY_POLYGONS, MALABON_OUTLINE } from '../../lib/malabonGeo.data'
@@ -17,6 +19,11 @@ import { FilterPills, PageTitle, ProtoCard } from '../../components/ui/Proto'
  *
  * One marker per business, at the pin its owner dropped in the apply wizard,
  * shaped and coloured by the state of its Mayor's Permit today.
+ *
+ * Two homes, one component. It is the Map view on the Permits page, for BPLO
+ * and the super admin (checklist item 16), and it is still the super admin's
+ * own Business Map screen. `embedded` drops the page title when it sits under
+ * the Permits heading.
  *
  * ── What was measured before any of this was designed ────────────────────────
  *
@@ -42,10 +49,10 @@ import { FilterPills, PageTitle, ProtoCard } from '../../components/ui/Proto'
  * was rejected at this volume, and the reasons are worth keeping:
  *
  *   - Canvas can only draw circles here. CircleMarker is the only canvas-backed
- *     marker Leaflet has, so the three states could differ by fill and radius
+ *     marker Leaflet has, so the states could differ by fill and radius
  *     and by nothing else. DESIGN.md's Never Color Alone wants a difference
- *     that survives greyscale, and three silhouettes (disc / diamond / open
- *     ring) is a stronger answer than three circles.
+ *     that survives greyscale, and five silhouettes (disc, diamond, square,
+ *     cross, ring) are a stronger answer than five circles.
  *   - A canvas has no DOM, so nothing on it can be asserted by a test or
  *     reached by assistive tech. The markers below are real elements.
  *   - Panning is cheap either way: Leaflet moves the whole marker pane with one
@@ -109,6 +116,8 @@ interface MapBusiness {
   /** The barangay the owner DECLARED, which the pin may or may not be in. */
   barangay: string | null
   state: PermitState
+  /** The governing permit's id, for opening its certificate; null with no permit. */
+  permit_id: number | null
   permit_number: string | null
   valid_until: string | null
 }
@@ -119,42 +128,53 @@ interface MapMeta {
   unmapped: number
   counts: Record<PermitState, number>
   as_of: string
+  /** The server's ceiling bit — see BusinessMapController::MAX_POINTS. */
+  truncated: boolean
+  max_points: number
 }
 
-type PermitState = 'active' | 'lapsed' | 'none'
+type PermitState = 'active' | 'expired' | 'suspended' | 'revoked' | 'none'
 
 /*
- * The client asked for one thing — is the permit still active — so that
- * question owns the strongest visual channel on the screen, and it is answered
- * three ways rather than two. "Never held one" is 134 businesses here, and
- * folding it into "lapsed" would tell a clerk a certificate ran out when none
- * was ever issued. Those are different jobs: one is a renewal to chase, the
- * other is a first filing that never finished.
+ * The client asked "is the permit still active", and checklist item 16 asks
+ * for the answer in five parts rather than two, because each is a different
+ * job: active needs nothing, expired is a renewal to chase, suspended is a
+ * refused clearance to settle or a suspension to lift, revoked is enforcement,
+ * and "never held one" is a first filing that never finished. It was three
+ * states — active / lapsed / none — until a permit could be revoked; "lapsed"
+ * then folded three different desks into one word.
  *
  * ── Never Color Alone (DESIGN.md) ────────────────────────────────────────────
  *
  * Each state is a different SILHOUETTE, not a different hue of the same dot:
  *
- *   active  a filled disc          — solid, round
- *   lapsed  a filled diamond       — solid, pointed
- *   none    an open ring           — hollow
+ *   active     a filled disc              — solid, round
+ *   expired    a filled diamond           — solid, pointed
+ *   suspended  a square with pause bars   — solid, square, marked
+ *   revoked    a cross                    — no body at all, two strokes
+ *   none       an open ring               — hollow
  *
  * Print the map in greyscale, or hand it to the ~8% of men with a red/green
- * deficiency, and the three are still distinguishable: round-solid,
- * pointed-solid, empty. Colour repeats the message; it does not carry it. The
- * legend states the same three in words with their counts, and each marker's
- * popup says the state in words too.
+ * deficiency, and the five are still distinguishable. Colour repeats the
+ * message; it does not carry it. The legend states the same five in words with
+ * their counts, and each marker's popup says the state in words too.
  *
  * ── The colours ──────────────────────────────────────────────────────────────
  *
  * Royal #3242ca for active: DESIGN.md's primary, the same blue the city border
- * and the wizard's pin already use. Amber for lapsed, NOT #bd0000 — Red Means
- * Stop, and a permit that ran out is a normal state of a register, not an
- * error. Grey for never-held, because it is an absence and should recede.
+ * and the wizard's pin already use. Amber for expired and the register's own
+ * suspended purple (--color-s-purple, the tone its status chip uses).
+ *
+ * Revoked is near-black ink, NOT red. It is the one state here that is an
+ * enforcement act, and red would be the obvious reach — but Red Means Stop
+ * keeps #bd0000 off data values, and the one documented exception is the
+ * Analytics compliance map, which DESIGN.md says is not a precedent. The cross
+ * is the strongest shape on the map, which is what earns it attention instead.
+ * Grey for never-held, because it is an absence and should recede.
  *
  * Every glyph carries a white outer stroke. It is not decoration: the map has a
- * satellite base layer, and a dark amber diamond on a dark roof is invisible
- * without one.
+ * satellite base layer, and a dark glyph on a dark roof is invisible without
+ * one.
  */
 const STATES: Record<PermitState, { label: string; description: string; svg: string }> = {
   active: {
@@ -162,10 +182,20 @@ const STATES: Record<PermitState, { label: string; description: string; svg: str
     description: 'Mayor’s Permit is inside its term today.',
     svg: '<circle cx="9" cy="9" r="5.5" fill="#3242ca" stroke="#fff" stroke-width="2.5" />',
   },
-  lapsed: {
-    label: 'Permit lapsed',
+  expired: {
+    label: 'Permit expired',
     description: 'Held a Mayor’s Permit; its term has run out.',
     svg: '<path d="M9 2.5 15.5 9 9 15.5 2.5 9Z" fill="#f2a33c" stroke="#8a4a06" stroke-width="1.75" stroke-linejoin="round" />',
+  },
+  suspended: {
+    label: 'Permit suspended',
+    description: 'Inside its term, but suspended because another office refused a permit.',
+    svg: '<rect x="3" y="3" width="12" height="12" rx="1.5" fill="#7a4bd0" stroke="#fff" stroke-width="2" /><path d="M7.25 6.5v5M10.75 6.5v5" stroke="#fff" stroke-width="1.75" stroke-linecap="round" />',
+  },
+  revoked: {
+    label: 'Permit revoked',
+    description: 'The City revoked the Mayor’s Permit. The business may not trade on it.',
+    svg: '<path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#fff" stroke-width="6" stroke-linecap="round" /><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#14171d" stroke-width="3" stroke-linecap="round" />',
   },
   none: {
     label: 'No permit on file',
@@ -174,7 +204,7 @@ const STATES: Record<PermitState, { label: string; description: string; svg: str
   },
 }
 
-const STATE_ORDER: PermitState[] = ['active', 'lapsed', 'none']
+const STATE_ORDER: PermitState[] = ['active', 'expired', 'suspended', 'revoked', 'none']
 
 /*
  * One glyph definition, drawn in two places.
@@ -195,13 +225,15 @@ const MARKER_PX = 18
  * Icons are built once per state, not once per business.
  *
  * L.divIcon is a description of an icon, not an element — Leaflet clones its
- * html for every marker that uses it — so three instances cover 742 markers.
+ * html for every marker that uses it — so five instances cover 742 markers.
  * Building one per row instead was the first draft and it allocated 742 icon
  * objects on every re-render of the filter pills.
  */
 const MARKER_ICONS: Record<PermitState, L.DivIcon> = {
   active: divIconFor('active'),
-  lapsed: divIconFor('lapsed'),
+  expired: divIconFor('expired'),
+  suspended: divIconFor('suspended'),
+  revoked: divIconFor('revoked'),
   none: divIconFor('none'),
 }
 
@@ -329,7 +361,21 @@ function pinVerdict(row: MapBusiness): Exclude<PinCheck, 'all'> {
   return 'disagrees'
 }
 
-export function BusinessMapPage() {
+/** The value of the barangay select that means "every barangay". */
+const ALL_BARANGAYS = ''
+
+export function BusinessMapPage({
+  embedded = false,
+  onFindInRegister,
+}: {
+  /** Drawn inside the Permits page, under its heading, rather than as a page of its own. */
+  embedded?: boolean
+  /**
+   * Where "Find in register" goes. The Permits page passes a handler that
+   * switches its own view; the standalone screen links to the Permits page.
+   */
+  onFindInRegister?: (permitNumber: string) => void
+} = {}) {
   const { data, loading, error, reload } = useAsync(
     () => api.get<{ data: MapBusiness[]; meta: MapMeta }>('/admin/business-map').then((r) => r.data),
     [],
@@ -337,6 +383,28 @@ export function BusinessMapPage() {
 
   const [state, setState] = useState<PermitState | 'all'>('all')
   const [pinCheck, setPinCheck] = useState<PinCheck>('all')
+  const [barangay, setBarangay] = useState(ALL_BARANGAYS)
+  const [viewError, setViewError] = useState<string | null>(null)
+
+  /*
+   * The Permits page for this site. The SPA is two sites on one origin — the
+   * LGU one under /staff and the admin one at the root — and a link into the
+   * other one lands where this session's token is not sent.
+   */
+  const { pathname } = useLocation()
+  const registerPath = pathname.startsWith('/staff') ? '/staff/admin/permits' : '/admin/permits'
+
+  /** Open the certificate itself. The tab opens inside the click (popup blocker). */
+  async function viewCertificate(permitId: number) {
+    const tab = window.open('', '_blank')
+    setViewError(null)
+    try {
+      await permits.viewPdf(permitId, tab)
+    } catch (err) {
+      tab?.close()
+      setViewError(toApiError(err).message)
+    }
+  }
 
   const rows = useMemo(() => data?.data ?? [], [data])
   const meta = data?.meta ?? null
@@ -362,14 +430,29 @@ export function BusinessMapPage() {
     return counts
   }, [verdicts])
 
+  /*
+   * The barangays to offer, from the rows themselves — the barangay each owner
+   * DECLARED. Read off the data rather than the polygon set, so a barangay the
+   * register names and the shipped asset spells differently still appears, and
+   * one with no business on file is not offered as an empty choice.
+   */
+  const barangays = useMemo(
+    () =>
+      [...new Set(rows.map((r) => r.barangay).filter((b): b is string => b !== null))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [rows],
+  )
+
   const visible = useMemo(
     () =>
       rows.filter(
         (row) =>
           (state === 'all' || row.state === state) &&
+          (barangay === ALL_BARANGAYS || row.barangay === barangay) &&
           (pinCheck === 'all' || verdicts.get(row.id) === pinCheck),
       ),
-    [rows, state, pinCheck, verdicts],
+    [rows, state, barangay, pinCheck, verdicts],
   )
 
   if (loading) return <SkeletonList rows={6} />
@@ -382,7 +465,7 @@ export function BusinessMapPage() {
 
   return (
     <div>
-      <PageTitle>Business Map</PageTitle>
+      {!embedded && <PageTitle>Business Map</PageTitle>}
 
       {/*
         * One line, and it names both numbers (AGENTS.md §6.4). "742 businesses"
@@ -401,10 +484,41 @@ export function BusinessMapPage() {
             {meta.unmapped === 1 ? 'is' : 'are'} not on the map.
           </>
         )}
+        {meta.truncated && (
+          <>
+            {' '}
+            Only the first {meta.max_points.toLocaleString()} are drawn; the counts below cover
+            them all.
+          </>
+        )}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <FilterPills value={state} onChange={setState} options={statePills} />
+
+        {/*
+          * Barangay — checklist item 16's other filter. A select, because there
+          * are 21 of them and pills would wrap into a wall.
+          *
+          * It filters on the barangay the owner DECLARED, the one the popup
+          * names. The Pin check beside it is what finds the pins that sit
+          * somewhere else.
+          */}
+        <label className="flex items-center gap-2 text-sm text-ink-secondary">
+          <span>Barangay</span>
+          <select
+            value={barangay}
+            onChange={(e) => setBarangay(e.target.value)}
+            className="rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-sm text-ink"
+          >
+            <option value={ALL_BARANGAYS}>All barangays</option>
+            {barangays.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
 
         {/*
           * A select rather than a second row of pills. The permit state is the
@@ -429,6 +543,24 @@ export function BusinessMapPage() {
           </select>
         </label>
       </div>
+
+      {viewError && (
+        <p role="alert" className="mt-4 rounded-lg border border-s-red/30 bg-s-red-tint px-4 py-3 text-sm text-s-red">
+          {viewError}
+        </p>
+      )}
+
+      {/*
+        * How many markers the filters left, both numbers named (AGENTS.md
+        * §6.4) — with three filters set, "12 markers" says nothing about how
+        * many were narrowed away.
+        */}
+      {(state !== 'all' || barangay !== ALL_BARANGAYS || pinCheck !== 'all') && (
+        <p role="status" className="mt-3 text-sm text-ink-secondary">
+          Showing {visible.length} of the {meta.plotted} businesses on the map
+          {barangay !== ALL_BARANGAYS && ` in ${barangay}`}.
+        </p>
+      )}
 
       <ProtoCard className="mt-4 overflow-hidden rounded-xl p-0">
         <div className="overflow-hidden">
@@ -540,7 +672,12 @@ export function BusinessMapPage() {
                     {row.valid_until !== null && (
                       <>
                         {' · '}
-                        {row.state === 'active' ? 'valid to' : 'lapsed'} {formatDate(row.valid_until)}
+                        {row.state === 'active'
+                          ? 'valid to'
+                          : row.state === 'expired'
+                            ? 'expired'
+                            : 'term to'}{' '}
+                        {formatDate(row.valid_until)}
                       </>
                     )}
                   </span>
@@ -549,6 +686,44 @@ export function BusinessMapPage() {
                     {verdicts.get(row.id) === 'off-city' && ' · pin is outside Malabon'}
                     {verdicts.get(row.id) === 'disagrees' && ' · pin is in a different barangay'}
                   </span>
+                  {/*
+                    * The way to the details. Two, because they answer two
+                    * questions: the certificate is what was issued, the
+                    * register row is everything the office holds on it, with
+                    * the actions (Revoke, Lift) beside it. Neither exists for a
+                    * business that never held a permit, and nothing is drawn
+                    * rather than a link to an empty search.
+                    */}
+                  {row.permit_id !== null && row.permit_number !== null && (
+                    <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => viewCertificate(row.permit_id as number)}
+                        aria-label={`View certificate ${row.permit_number}`}
+                        className="font-semibold text-royal underline-offset-2 hover:underline"
+                      >
+                        View certificate
+                      </button>
+                      {onFindInRegister ? (
+                        <button
+                          type="button"
+                          onClick={() => onFindInRegister(row.permit_number as string)}
+                          aria-label={`Find ${row.permit_number} in the register`}
+                          className="font-semibold text-royal underline-offset-2 hover:underline"
+                        >
+                          Find in register
+                        </button>
+                      ) : (
+                        <Link
+                          to={`${registerPath}?q=${encodeURIComponent(row.permit_number)}&office=all`}
+                          aria-label={`Find ${row.permit_number} in the register`}
+                          className="font-semibold text-royal underline-offset-2 hover:underline"
+                        >
+                          Find in register
+                        </Link>
+                      )}
+                    </span>
+                  )}
                 </Popup>
               </Marker>
             ))}

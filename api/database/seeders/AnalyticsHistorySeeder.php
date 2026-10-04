@@ -13,6 +13,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\ApplicationPermitType;
 use App\Models\Barangay;
 use App\Models\Business;
@@ -20,6 +21,7 @@ use App\Models\BusinessAddress;
 use App\Models\BusinessLine;
 use App\Models\BusinessOwner;
 use App\Models\Department;
+use App\Models\DocumentType;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\Message;
@@ -35,6 +37,7 @@ use App\Models\User;
 use App\Services\Sms\SmsChannel;
 use App\Services\WorkflowService;
 use App\Support\Numbering;
+use App\Support\SheetRequirements;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -164,6 +167,80 @@ class AnalyticsHistorySeeder extends Seeder
      */
 
     protected const MONTHS = 36;
+
+    /**
+     * Document-type ids for checklist slots, resolved once each.
+     *
+     * `SheetRequirements::documentType()` firstOrCreates, so asking it per
+     * filing would be two queries times six rows times every filing in the
+     * window. The set of slots is fixed; only the filings vary.
+     *
+     * @var array<string, int|null>
+     */
+    private array $checklistTypeIds = [];
+
+    /**
+     * Attach whatever this office's checklist would refuse the sheet over.
+     *
+     * The seeder writes no answers — the analytics it feeds are timings and
+     * queue depths, not form content — and it wrote no documents either
+     * until `submitClearanceForm` started refusing an incomplete checklist
+     * on 30 September 2026. These are placeholders standing for the scans a
+     * real applicant attaches; nothing in the charts reads them.
+     *
+     * Only blocking, unsatisfied rows, so a row the paper marks conditional
+     * is left alone and the generated history keeps some texture: not every
+     * filing carries every optional document, which is also true of the
+     * register.
+     */
+    private function completeChecklist(Application $app, string $permitCode): void
+    {
+        $now = now();
+        $rows = [];
+
+        foreach (SheetRequirements::for($app, $permitCode) ?? [] as $row) {
+            if (($row['blocking'] ?? false) !== true || ($row['satisfied'] ?? false) === true) {
+                continue;
+            }
+
+            // An upload row has a slot of its own; a carried one is answered
+            // by a business-permit attachment it names.
+            $documentCode = $row['code'] ?? $row['carried_from'] ?? null;
+            if ($documentCode === null) {
+                continue;
+            }
+
+            $key = $permitCode.'|'.$documentCode;
+            if (! array_key_exists($key, $this->checklistTypeIds)) {
+                $this->checklistTypeIds[$key] = $row['code'] !== null
+                    ? SheetRequirements::documentType($permitCode, $row['code'])->id
+                    : DocumentType::where('code', $documentCode)->value('id');
+            }
+
+            $typeId = $this->checklistTypeIds[$key];
+            if ($typeId === null) {
+                continue;
+            }
+
+            $name = strtolower($documentCode).'.pdf';
+            $rows[] = [
+                'application_id' => $app->id,
+                'document_type_id' => $typeId,
+                'original_filename' => $name,
+                'stored_path' => "private/documents/{$app->id}/{$name}",
+                'mime_type' => 'application/pdf',
+                'size_bytes' => 1024,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        if ($rows !== []) {
+            // One write, not one per row: the window holds thousands of
+            // filings and nothing here needs a model event.
+            ApplicationDocument::insert($rows);
+        }
+    }
 
     /**
      * Monthly filing volume ramps from START to END across the window.
@@ -1517,6 +1594,18 @@ class AnalyticsHistorySeeder extends Seeder
             // new registration has nothing to hand in. Drawn either way so the
             // shared mt_rand stream does not depend on the branch.
             $upload = $this->chance(self::CLEARANCE_UPLOAD_RATE[$type === ApplicationType::New ? 0 : 1]);
+            /*
+             * Never on a new registration, which is what the comment above
+             * has always said and what `startClearance` now enforces: the
+             * LGU's rule is that a business cannot hold these before it
+             * applies to BPLO.
+             *
+             * Applied AFTER the draw, not instead of it. `chance()` pulls
+             * from the shared stream every later decision here depends on,
+             * so skipping the call would shift every subsequent value and
+             * rewrite the whole generated history.
+             */
+            $upload = $upload && $type !== ApplicationType::New;
 
             if ($openedAt->greaterThan($this->anchor)) {
                 break;
@@ -1536,6 +1625,9 @@ class AnalyticsHistorySeeder extends Seeder
             // same instant here. A real applicant spends days between them, and
             // that gap belongs to the applicant, not to the office's clock.
             if (! $upload) {
+                // The office's checklist has to be complete before the
+                // sheet goes in — see submitClearanceForm.
+                $this->completeChecklist($app->fresh(), $code);
                 $this->workflow->submitClearanceForm($app->fresh(), $this->permitTypes[$code]);
             }
         }
@@ -1704,6 +1796,7 @@ class AnalyticsHistorySeeder extends Seeder
             if ($permitCode === null) {
                 $this->workflow->resubmit($app->fresh());
             } else {
+                $this->completeChecklist($app->fresh(), $permitCode);
                 $this->workflow->submitClearanceForm($app->fresh(), $this->permitTypes[$permitCode]);
             }
             $this->counts['returned_loops']++;
@@ -1828,7 +1921,7 @@ class AnalyticsHistorySeeder extends Seeder
 
     /**
      * Closures, dated by `deleted_at` — the only honest closure date in the
-     * schema (see BusinessGrowthAnalytics). Spread across the window so both
+     * schema (see DashboardAnalytics' New and Closed Businesses). Spread across the window so both
      * the reported period and the one before it have a trend to draw.
      */
     private function closeBusinesses(): void

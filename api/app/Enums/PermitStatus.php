@@ -21,9 +21,9 @@ enum PermitStatus: string
      * Not `expired`, which was the cheaper option and the wrong one: an expired
      * permit is one whose term ran out, and rewriting `valid_until` to today to
      * make that true would put a false date in the register. The expiry
-     * analytics and the renewal-risk model both read those dates, and a permit
-     * recorded as lapsing two months before it did is a permit the model learns
-     * from. So the term stands as issued and the STATUS says what happened.
+     * analytics and the renewal-chain reading (RenewalOutcomes) both read those
+     * dates, and a permit recorded as lapsing two months before it did is a false
+     * renewal gap. So the term stands as issued and the STATUS says what happened.
      */
     case Superseded = 'superseded';
 

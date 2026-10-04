@@ -17,3 +17,17 @@ bt-board
 rehaul-check
 *.pdf
 *.png
+
+# Secrets and data never go into an image. The server's api/.env.production is
+# handed to the containers at run time (env_file), not baked into a layer.
+api/.env.*
+!api/.env.example
+api/database/*.sqlite
+api/database/*.sqlite-*
+api/storage/app/*
+web/.env
+web/.env.*
+.git
+.claude
+.planning
+graphify-out

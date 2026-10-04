@@ -67,7 +67,7 @@ const OWNER_APPS = [
     title: null,
     status: 'awaiting_other_permits',
     // Renamed 24 September 2026 with the flow — see ApplicationStatus::label().
-    status_label: 'Permit Released',
+    status_label: 'Approved',
     business: { id: 4, name: 'Dagupan Auto Supply' },
     submitted_at: '2026-07-20T00:00:00.000000Z',
     deadline_at: '2026-09-01T00:00:00.000000Z',
@@ -406,7 +406,7 @@ test.describe('officer queue', () => {
 
     await page.goto('/staff/queue')
     await expect(
-      page.getByRole('heading', { name: 'Application Verification', level: 1 }),
+      page.getByRole('heading', { name: 'Manage Applications', level: 1 }),
     ).toBeVisible()
   })
 

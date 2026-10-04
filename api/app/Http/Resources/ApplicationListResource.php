@@ -76,6 +76,13 @@ class ApplicationListResource extends JsonResource
              * still working on.
              */
             'updated_at' => optional($this->updated_at)->toISOString(),
+            /*
+             * When the applicant last OPENED it, which the drafts list
+             * sorts on. Null until they open one — not backfilled from
+             * `updated_at`, because that would put a fact in the column
+             * nothing observed. The list falls back for display.
+             */
+            'last_opened_at' => optional($this->last_opened_at)->toISOString(),
         ];
     }
 }

@@ -6,17 +6,21 @@ use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
 use App\Http\Resources\PermitResource;
+use App\Models\Application;
+use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessOwner;
-use App\Models\PsicCode;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\MalabonGeo;
 use App\Support\Numbering;
+use App\Support\Tin;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Business registry. Owners manage their own; an officer may read the record
@@ -90,15 +94,20 @@ class BusinessController extends Controller
              * would move that dead end earlier and make it silent.
              *
              * So the answer remains ordering: the businesses that can be renewed
-             * surface first, the rest stay reachable behind them. `withCount`
+             * surface first, the rest stay reachable behind them. An EXISTS
              * rather than a join because `permits` is many-per-business and a
              * join would multiply the page.
+             *
+             * It was `withCount('permits')` and ORDER BY CASE WHEN
+             * permits_count > 0. SQLite lets ORDER BY reach a select alias
+             * inside an expression; PostgreSQL does not, so the owner's
+             * business list answered 500 on the production database. The count
+             * was read by nothing but this sort.
              */
             // Named in the amendment chooser, so it must arrive with the
             // list rather than a request per row. One constant query.
             ->with('currentBusinessPermit')
-            ->withCount('permits')
-            ->orderByRaw('CASE WHEN permits_count > 0 THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN EXISTS (SELECT 1 FROM permits WHERE permits.business_id = businesses.id) THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
@@ -162,6 +171,175 @@ class BusinessController extends Controller
 
         return response()->json([
             'data' => new BusinessResource($business->load($this->eager)),
+        ]);
+    }
+
+    /**
+     * The address and owner columns an officer can now edit, flattened.
+     *
+     * Dotted keys (`address.street`, `owner.surname`) so the audit entry
+     * reads in the same vocabulary the request used, and so a reader of
+     * the log can tell a business column from one on a related row.
+     *
+     * Reloaded from the database rather than read off the in-memory
+     * relation: `syncAddressAndLines` replaces the address row and
+     * `syncOwner` upserts the owner, so a relation loaded before the
+     * write would hand back the values it was loaded with.
+     *
+     * @return array<string, scalar|null>
+     */
+    private static function relatedSnapshot(Business $business): array
+    {
+        $address = $business->address()->first();
+        $owner = $business->owners()->where('is_primary', true)->first();
+
+        $snapshot = [];
+        foreach ([
+            'house_bldg_no', 'street', 'line1', 'line2', 'block', 'lot',
+            'lot_area_sqm', 'barangay_id', 'telephone', 'mobile_number',
+            'email', 'website',
+        ] as $column) {
+            $snapshot["address.$column"] = $address?->$column;
+        }
+        foreach (['surname', 'given_name', 'middle_name', 'suffix', 'gender'] as $column) {
+            $snapshot["owner.$column"] = $owner?->$column;
+        }
+
+        return $snapshot;
+    }
+
+    /**
+     * An OFFICER corrects the filing's own answers.
+     *
+     * The same validation and the same writer as `update()` above, reached
+     * through a different door: the applicant's rules are the rules, which
+     * is the client's instruction of 30 September 2026 and the only reading
+     * of it that cannot drift — a second copy of the rules agrees on the
+     * day it is written and not after the next paper change.
+     *
+     * ── What is different, and why ──────────────────────────────────────
+     *
+     * It hangs off the APPLICATION rather than the business, because that
+     * is what an officer is authorised against: a sanitary officer may read
+     * the filings routed to CHO, not every business in the register.
+     *
+     * It is allowed at any status the officer can still see. A filing being
+     * reviewed is the case this exists for, and the wizard's Draft-or-
+     * Returned guard is about who may edit rather than about when.
+     *
+     * Every changed field is written to `application_corrections` with the
+     * officer named. A citizen's declared answer changed by somebody else
+     * has to say so on the record, or the declaration they signed stops
+     * meaning anything — that is what a return gives for free and what a
+     * direct edit has to buy back.
+     */
+    public function updateAsOfficer(Request $request, Application $application): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless(
+            $user !== null && $user->hasPermission('application.review'),
+            403,
+            'Only a reviewing officer may correct a filing.'
+        );
+        abort_unless(
+            ApplicationVisibility::canView($user, $application),
+            403,
+            'This filing is not routed to your office.'
+        );
+
+        $business = $application->business;
+        abort_unless($business !== null, 422, 'This filing has no business on the register.');
+
+        $data = $this->validateBusiness($request, $business);
+
+        /*
+         * Read BEFORE the write, so the audit can say what each field was.
+         * Only the columns this endpoint sets; the address and the lines are
+         * recorded as a fact of change rather than value-by-value, because a
+         * line table diffed into an audit line is unreadable.
+         */
+        $watched = [
+            'name', 'trade_name', 'registration_type', 'registration_number',
+            'tin', 'is_rented', 'lessor_name', 'lessor_address',
+            'lessor_contact', 'monthly_rental',
+            'emergency_contact_name', 'emergency_contact_number',
+            'economic_organization', 'economic_organization_others',
+            'president_officer_name', 'citizenship',
+            'capital_participation_filipino', 'capital_investment',
+            'has_tax_incentives',
+        ];
+        $before = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all();
+
+        /*
+         * The address and the named owner live on their own tables, and
+         * the sheet now edits both — the barangay, the street, the block
+         * and lot, the business's own telephone, mobile and e-mail, and
+         * all five of the owner's name fields.
+         *
+         * Read the same way and for the same reason as the columns above:
+         * an officer who can change WHO OWNS a business and leave nothing
+         * on the record is the failure this entry exists to prevent.
+         */
+        $before += self::relatedSnapshot($business);
+
+        DB::transaction(function () use ($business, $data) {
+            $business->update([
+                'name' => $data['name'],
+                'trade_name' => $data['trade_name'] ?? null,
+                'registration_type' => $data['registration_type'] ?? null,
+                'form_of_organization' => self::formOfOrganization($data),
+                'registration_number' => $data['registration_number'] ?? null,
+                'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'pays_rent' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
+                ...self::paperFormFields($data),
+            ]);
+            $this->syncAddressAndLines($business, $data);
+        });
+
+        $business->refresh();
+
+        /*
+         * One row per field that actually moved. A change nobody can trace
+         * to a person is the thing that makes this endpoint dangerous, and
+         * this is the whole of the answer to it.
+         */
+        $after = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all()
+            + self::relatedSnapshot($business);
+
+        $changed = [];
+        foreach ($after as $field => $value) {
+            /*
+             * Loose, not strict. A decimal column comes back from the
+             * database as the string '100.00' where it went in as the
+             * number 100, and a strict comparison would report a change
+             * every time an officer saved without touching the field.
+             */
+            if ($before[$field] == $value) {
+                continue;
+            }
+            $changed[$field] = ['from' => $before[$field], 'to' => $value];
+        }
+
+        if ($changed !== []) {
+            Audit::log('application.fields_corrected_by_officer', $application, [
+                'officer_id' => $user->id,
+                'department' => $user->department?->code,
+                'changed' => $changed,
+            ]);
+        }
+
+        return response()->json([
+            'data' => new BusinessResource($business->fresh([
+                'address.barangay', 'lines.psicCode', 'owners',
+            ])),
+            'meta' => ['changed' => array_keys($changed)],
         ]);
     }
 
@@ -418,37 +596,10 @@ class BusinessController extends Controller
          * ran. Left alone, the `string` rule below rejects it with a 422.
          */
         if (is_scalar($request->input('tin')) && filled($request->input('tin'))) {
-            $request->merge(['tin' => self::normalizeTin((string) $request->input('tin'))]);
+            $request->merge(['tin' => Tin::normalize((string) $request->input('tin'))]);
         }
 
-        /*
-         * The line-of-business rule, resolved per line before the rest run.
-         *
-         * Built by index rather than written as `lines.*.line_of_business`
-         * because the requirement depends on the SIBLING field: a line filed
-         * under the catch-all 00000 must be described, and a line carrying a
-         * real PSIC code need not be. A wildcard entry cannot ask that
-         * question, and the obvious closure beside `nullable` never runs —
-         * `nullable` tells the validator to skip every remaining rule the
-         * moment the value is null, which is precisely the case to catch.
-         *
-         * So each index gets its own entry and the wildcard is gone. Two
-         * entries for one attribute would merge, and a merged `nullable` would
-         * cancel the `required` beside it.
-         */
-        $lineRules = [];
-
-        foreach (is_array($request->input('lines')) ? $request->input('lines') : [] as $i => $line) {
-            $psicCodeId = is_array($line) ? ($line['psic_code_id'] ?? null) : null;
-
-            $lineRules["lines.{$i}.line_of_business"] = [
-                self::isUnclassifiedPsic($psicCodeId) ? 'required' : 'nullable',
-                'string',
-                'max:255',
-            ];
-        }
-
-        return $request->validate($lineRules + [
+        $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             // Trade name stays optional: most sole proprietors have none.
             'trade_name' => ['nullable', 'string', 'max:255'],
@@ -635,27 +786,9 @@ class BusinessController extends Controller
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.psic_code_id' => ['required', 'exists:psic_codes,id'],
             'lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
-            /*
-             * Free text for the "Other (not listed)" PSIC row, and optional
-             * detail for any line — REQUIRED on the catch-all.
-             *
-             * It was nullable everywhere, and the rule that a catch-all line
-             * must be described lived in one screen: ApplyWizard's `needsText`
-             * refuses to continue without it. ReferenceSeeder says the same
-             * thing about the 00000 row — *"the escape hatch: picking it makes
-             * the wizard require a free-text line"* — which is a rule about the
-             * data wearing the name of the one door that happened to enforce
-             * it.
-             *
-             * Any other caller filed a business whose only description was
-             * "Other (not listed)", and that is what the certificate then
-             * printed: *"pwede ba yon? make sure na meron kung ano nilagay nya
-             * o ininput"* [client, 1 October 2026]. 00000 carries no
-             * classification at all — PsicTaxonomy::group returns null for it —
-             * so the typed line is the only thing that says what the business
-             * does, to the certificate, the inspector and the reviewer alike.
-             */
-            // Rule built per line, above — see $lineRules.
+            // Free text for the "Other (not listed)" PSIC row, and optional
+            // detail for any line.
+            'lines.*.line_of_business' => ['nullable', 'string', 'max:255'],
             'lines.*.products_services' => ['nullable', 'string', 'max:1000'],
             /*
              * Unified form, lessor block. Only required once the applicant says
@@ -730,12 +863,6 @@ class BusinessController extends Controller
             'lessor_name.required_if' => "Enter the lessor's name, or set the premises to owner-occupied.",
             'lessor_address.required_if' => "Enter the lessor's address, or set the premises to owner-occupied.",
             'monthly_rental.required_if' => 'Enter the monthly rental, or set the premises to owner-occupied.',
-            /*
-             * Matched by the wildcard even though the rules are built per
-             * index: Laravel falls back to the `*` form when looking up a
-             * message for `lines.0.line_of_business.required`.
-             */
-            'lines.*.line_of_business.required' => 'Describe this line of business in your own words. "Other (not listed)" carries no classification of its own, so what you type here is the only thing that says what the business does.',
             'lines.required' => 'Add at least one line of business.',
             'lines.min' => 'Add at least one line of business.',
             'address.required' => 'A business address is required.',
@@ -747,6 +874,56 @@ class BusinessController extends Controller
             'tin.required' => 'Enter your Tax Identification Number.',
             'tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.',
         ]);
+
+        self::assertPinInBarangay($data, $business);
+
+        return $data;
+    }
+
+    /**
+     * Checklist Zoning 3 — a pin outside its own barangay is refused here, not
+     * only in the browser. See MalabonGeo for the geometry and the tolerance.
+     *
+     * Checked when the location is NEW: every create, and an update that moves
+     * the pin or changes the barangay. An update that sends back the location
+     * already on file is let through untouched, because most of the register
+     * predates this check — only 61 of 788 stored addresses sat inside their
+     * own barangay when it was measured — and a renewal re-saves that address
+     * as it found it. Refusing it would charge our history to an applicant who
+     * never placed the pin; the wizard says it out loud instead ("Check this
+     * location"), and CPDO sees it. The moment the applicant touches either the
+     * pin or the barangay, the new answer has to agree with itself.
+     *
+     * The error sits on both coordinates, because either the pin or the
+     * barangay can be the wrong half, and the pin is what the message asks to
+     * move first.
+     */
+    private static function assertPinInBarangay(array $data, ?Business $business): void
+    {
+        $lat = $data['address']['latitude'] ?? null;
+        $lng = $data['address']['longitude'] ?? null;
+        $barangayId = $data['address']['barangay_id'] ?? null;
+        if ($lat === null || $lng === null || $barangayId === null) {
+            return;
+        }
+
+        $stored = $business?->address;
+        if ($stored !== null
+            && (int) $stored->barangay_id === (int) $barangayId
+            && $stored->latitude !== null && $stored->longitude !== null
+            && abs((float) $stored->latitude - (float) $lat) < 1e-6
+            && abs((float) $stored->longitude - (float) $lng) < 1e-6) {
+            return;
+        }
+
+        $name = Barangay::whereKey($barangayId)->value('name');
+        $problem = $name === null ? null : MalabonGeo::pinProblem((float) $lat, (float) $lng, (string) $name);
+        if ($problem !== null) {
+            throw ValidationException::withMessages([
+                'address.latitude' => $problem,
+                'address.longitude' => $problem,
+            ]);
+        }
     }
 
     /**
@@ -821,21 +998,14 @@ class BusinessController extends Controller
      * that is not a recognisable TIN comes back untouched so the regex rule
      * reports it instead of us silently mangling it.
      */
-    private static function normalizeTin(string $raw): string
-    {
-        $trimmed = trim($raw);
-        if (! preg_match('/^[\d\s.\-]+$/', $trimmed)) {
-            return $trimmed;
-        }
-        $digits = preg_replace('/\D/', '', $trimmed);
-        $length = strlen($digits);
-        if ($length !== 9 && ($length < 12 || $length > 14)) {
-            return $trimmed;
-        }
-        $tin = substr($digits, 0, 3).'-'.substr($digits, 3, 3).'-'.substr($digits, 6, 3);
-
-        return $length > 9 ? $tin.'-'.substr($digits, 9) : $tin;
-    }
+    /*
+     * Moved to App\Support\Tin on 27 September 2026.
+     *
+     * A second route now accepts a typed TIN — the automatic requirement
+     * raised when item 3 is left blank, answered in a requirement reply
+     * and written back by OfficerRequestController. Two callers, so the
+     * shaping stopped being this controller's private business.
+     */
 
     /**
      * The named person on the paper — BPLO item 11 / item 12.
@@ -1028,28 +1198,6 @@ class BusinessController extends Controller
                 : null;
             $row->save();
         }
-    }
-
-    /**
-     * Is this PSIC selection the catch-all 00000 "Other (not listed)" row?
-     *
-     * By CODE rather than by id, because the id is whatever the reference
-     * seeder happened to insert and differs between a fresh database and a
-     * migrated one. The code is the thing the PSA publishes and the thing the
-     * rest of the system matches on — see `PsicTaxonomy::group`, which returns
-     * null for exactly this row.
-     *
-     * False for an id that does not resolve: the `exists` rule beside this one
-     * is what answers an unknown code, and two rules firing on one mistake
-     * tells the applicant their trade is both missing and unknown.
-     */
-    private static function isUnclassifiedPsic(mixed $psicCodeId): bool
-    {
-        if (! is_scalar($psicCodeId)) {
-            return false;
-        }
-
-        return PsicCode::whereKey($psicCodeId)->value('code') === PsicCode::UNCLASSIFIED;
     }
 
     private function authorizeOwner(Request $request, Business $business): void

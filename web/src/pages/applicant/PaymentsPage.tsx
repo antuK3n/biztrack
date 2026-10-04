@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDownIcon, DownloadIcon, PaymentsIcon, SearchIcon } from '../../components/icons'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, SortFilter } from '../../components/ui/Proto'
+import { SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatDate, formatMoney } from '../../lib/format'
 import { applications, payments } from '../../lib/resources'
@@ -10,6 +10,14 @@ import { useAsync } from '../../lib/useAsync'
 import type { FeeAssessment, Payment } from '../../lib/types'
 
 /*
+ * Payment History now lives on Profile, as its second tab [checklist
+ * 2026-09-27, View Payment History 1]. It was a page of its own with a rail
+ * entry; the client asked for it under the owner's profile, where the account
+ * record already is, and for the rail to lose the entry. /payments still works
+ * and redirects to /profile?tab=payments (App.tsx), so a bookmark or an old
+ * notification link lands in the right place. This file keeps the list itself;
+ * ProfilePage renders it.
+ *
  * Payment History (PDF p21–22): white shadow rows with bold "Ref No. :",
  * italic "Paid:" date, a serif peso amount + chevron; expanding a row reveals
  * that payment's serif Tax Order of Payment card (fetched lazily from the
@@ -122,7 +130,7 @@ function TaxOrderCard({ payment, detail }: { payment: Payment; detail: FeeDetail
   )
 }
 
-export function PaymentsPage() {
+export function PaymentHistory() {
   const { data, loading, error, reload } = useAsync(() => payments.history(), [])
   const list = data ?? []
 
@@ -216,24 +224,24 @@ export function PaymentsPage() {
 
   return (
     <div>
-      <PageTitle
-        right={
-          <SortFilter
-            sort={{ value: sortKey, options: SORT_OPTIONS, onChange: setSortKey }}
-            filter={{ value: statusFilter, options: STATUS_OPTIONS, onChange: setStatusFilter }}
-            dateRange={{
-              from: dateFrom,
-              to: dateTo,
-              onChange: (from, to) => {
-                setDateFrom(from)
-                setDateTo(to)
-              },
-            }}
-          />
-        }
-      >
-        Payment History
-      </PageTitle>
+      {/*
+        No heading of its own: the Profile tab that opens this already says
+        "Payment history", and a second title under it would say it twice.
+      */}
+      <div className="mb-5 flex justify-end">
+        <SortFilter
+          sort={{ value: sortKey, options: SORT_OPTIONS, onChange: setSortKey }}
+          filter={{ value: statusFilter, options: STATUS_OPTIONS, onChange: setStatusFilter }}
+          dateRange={{
+            from: dateFrom,
+            to: dateTo,
+            onChange: (from, to) => {
+              setDateFrom(from)
+              setDateTo(to)
+            },
+          }}
+        />
+      </div>
 
       {loading ? (
         <SkeletonList rows={3} />
@@ -282,7 +290,23 @@ export function PaymentsPage() {
                         Ref No. : <span className="tnum">{p.reference_number}</span>
                       </span>
                       <span className="mt-0.5 block text-sm italic text-ink-muted">
-                        Paid: {formatDate(p.paid_at)}
+                        {/*
+                          * Only a completed payment was paid. An online payment
+                          * still waiting for the payment service, or one that
+                          * did not go through, has no paid date — and "Paid: —"
+                          * beside it would read as paid with the date missing.
+                          */}
+                        {p.status === 'completed'
+                          ? p.refund_review
+                            ? `Paid: ${formatDate(p.paid_at)} · paid twice, BPLO will contact you about a refund`
+                            : `Paid: ${formatDate(p.paid_at)}`
+                          : p.status === 'pending'
+                            ? p.set_aside
+                              ? 'Set aside — still being checked with the payment service'
+                              : 'Waiting for the payment to be confirmed'
+                            : p.status === 'failed'
+                              ? 'Did not go through'
+                              : 'Refunded'}
                       </span>
                     </span>
                     <span className="display-serif tnum shrink-0 text-2xl text-ink">
@@ -308,29 +332,36 @@ export function PaymentsPage() {
                     * different things under the same verb is how a receipt gets
                     * mistaken for the expander.
                     */}
-                  <span className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => viewReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-                    >
-                      <SearchIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'view'
-                        ? 'Opening…'
-                        : 'View Receipt'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      aria-label={`Save receipt ${p.reference_number} as a PDF`}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
-                    >
-                      <DownloadIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
-                    </button>
-                  </span>
+                  {/*
+                    * Receipts only for money actually received — the server
+                    * refuses the rest (PaymentController::receipt), so a button
+                    * here would only ever produce an error.
+                    */}
+                  {p.status === 'completed' && (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => viewReceipt(p)}
+                        disabled={receiptBusy?.id === p.id}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                      >
+                        <SearchIcon size={14} />
+                        {receiptBusy?.id === p.id && receiptBusy.act === 'view'
+                          ? 'Opening…'
+                          : 'View Receipt'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadReceipt(p)}
+                        disabled={receiptBusy?.id === p.id}
+                        aria-label={`Save receipt ${p.reference_number} as a PDF`}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
+                      >
+                        <DownloadIcon size={14} />
+                        {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
+                      </button>
+                    </span>
+                  )}
                 </div>
                 {open && (
                   <div className="pl-4 sm:pl-8">

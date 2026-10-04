@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 import { OFFICES } from '../src/pages/admin/permitColumns'
 
-/** Six offices; the picker adds an "All offices" option on top. */
+/** Six offices; the picker adds "All offices" and "Other offices" around them. */
 const OFFICE_COUNT = OFFICES.length
 
 /*
@@ -25,11 +25,10 @@ const OFFICE_COUNT = OFFICES.length
  *     browser behaviour that `tsc` is blind to: a `viewPdf` that resolved and
  *     opened nothing would typecheck perfectly.
  *
- * There is no revoke test because there is no revoke. See the head of
- * web/src/pages/admin/PermitsPage.tsx for why that is a decision rather than an
- * omission — and if a Revoke control ever appears on this screen without the
- * status, the audit entry and the notification behind it, this file is where it
- * should have been caught.
+ * Revoke (checklist item 23) is here twice: the dialog's rules stubbed below,
+ * and the whole act — status, public verify page — unstubbed in
+ * permit-revoke-and-map.spec.ts. The audit entry and the owner's notice are
+ * the server's, and RevokePermitTest pins them.
  */
 
 /*
@@ -104,6 +103,7 @@ const PERMITS = [
     prior_permit_number: null,
     revoked_at: null,
     revoked_reason: null,
+    business_retired: false,
     office_form: null,
   },
   {
@@ -136,6 +136,7 @@ const PERMITS = [
     prior_permit_number: 'MCS-2024-000512',
     revoked_at: null,
     revoked_reason: null,
+    business_retired: false,
     office_form: {
       application_date: '2025-01-02',
       application_type: 'Renewal',
@@ -176,6 +177,7 @@ const PERMITS = [
     prior_permit_number: null,
     revoked_at: null,
     revoked_reason: null,
+    business_retired: false,
     office_form: {
       application_date: '2026-02-01',
       application_type: 'New Locational Clearance',
@@ -184,6 +186,25 @@ const PERMITS = [
     },
   },
 ]
+
+/*
+ * A certificate whose business is RETIRED — removed from the register
+ * (checklist item 21). It sits in the stub's pool but not in PERMITS, because
+ * the page asks for `retired=hide` by default and every count below is of the
+ * three rows a reader sees without asking for retired businesses. The Retired
+ * test is the one that asks.
+ */
+const RETIRED = {
+  ...PERMITS[0],
+  ban: 'BP-2025-0099',
+  id: 904,
+  permit_number: 'MCB-2025-000099',
+  status: 'expired',
+  status_label: 'Expired',
+  business: { id: 99, name: 'Lumang Panaderia' },
+  application: { id: 599, tracking_id: 'BIZ-2025-00099' },
+  business_retired: true,
+}
 
 /*
  * The Sort and Filter menus.
@@ -229,13 +250,17 @@ test.describe('the permit register table', () => {
       const q = (url.searchParams.get('q') ?? '').toLowerCase()
       const status = url.searchParams.get('status') ?? ''
       const office = url.searchParams.get('permit_type') ?? ''
-      let rows = PERMITS.filter((p) => {
+      const except = url.searchParams.get('exclude_permit_type') ?? ''
+      const retired = url.searchParams.get('retired') ?? ''
+      let rows = [...PERMITS, RETIRED].filter((p) => {
         const haystack =
           `${p.permit_number} ${p.ban ?? ''} ${p.business?.name ?? ''} ${p.face.owner_name ?? ''} ${p.application.tracking_id} ${p.permit_type.name}`.toLowerCase()
         return (
           (!q || haystack.includes(q)) &&
           (!status || p.status === status) &&
-          (!office || p.permit_type.code === office)
+          (!office || p.permit_type.code === office) &&
+          (!except || p.permit_type.code !== except) &&
+          (retired === 'hide' ? !p.business_retired : retired === 'only' ? p.business_retired : true)
         )
       })
 
@@ -249,7 +274,7 @@ test.describe('the permit register table', () => {
       const sort = url.searchParams.get('sort')
       if (sort) {
         const dir = url.searchParams.get('dir') === 'asc' ? 1 : -1
-        const key = (p: (typeof PERMITS)[number]) =>
+        const key = (p: typeof RETIRED) =>
           sort === 'ban' ? (p.ban ?? '') : sort === 'business' ? (p.business?.name ?? '') : p.permit_number
         rows = [...rows].sort((a, b) => dir * key(a).localeCompare(key(b)))
       }
@@ -296,10 +321,10 @@ test.describe('the permit register table', () => {
      */
     expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
 
-    // And the picker still offers every office, including "All".
+    // And the picker still offers every office, "All" and "Other offices".
     await openFilter(page)
     const office = filterField(page, 'Office')
-    await expect(office.locator('option')).toHaveCount(OFFICE_COUNT + 1)
+    await expect(office.locator('option')).toHaveCount(OFFICE_COUNT + 2)
     await expect(office).toHaveValue('')
     await page.keyboard.press('Escape')
   })
@@ -539,28 +564,20 @@ test.describe('the permit register table', () => {
     await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
   })
 
-  test('the issue-date range is not offered as a filter', async ({ page }) => {
+  test('the issue-date range narrows on the server', async ({ page }) => {
     /*
-     * Removed on the client's instruction [1 October 2026: "paki tanggal na to
-     * sa filter", of the From / To pair]. Same shape as the expiry window
-     * below, and for the same reason: `issued_from` / `issued_to` remain on
-     * the endpoint, documented and tested, so this asserts the SCREEN and the
-     * API test beside it asserts the endpoint.
-     *
-     * The question the pair answered is still answerable — the register is
-     * ordered by issuance and the Sort menu offers that column both ways.
+     * The filter an office asks for that Status cannot answer: what was issued
+     * in a given month. It is the server's — a browser filtering the rows in
+     * hand would find nothing past the first page of a register that holds
+     * thousands.
      */
     await openFilter(page)
 
-    await expect(page.locator('.shadow-overlay input[type=date]')).toHaveCount(0)
-    await expect.poll(() => asked.at(-1)).not.toContain('issued_from')
-    await expect.poll(() => asked.at(-1)).not.toContain('issued_to')
+    await page.locator('.shadow-overlay input[type=date]').first().fill('2026-01-01')
+    await expect.poll(() => asked.at(-1)).toContain('issued_from=2026-01-01')
 
-    // The orderings that answer the same question are not filters, and stay.
-    await page.keyboard.press('Escape')
-    await openSort(page)
-    await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
-    await expect(page.getByRole('option', { name: 'Oldest issued' })).toBeVisible()
+    await page.locator('.shadow-overlay input[type=date]').last().fill('2026-12-31')
+    await expect.poll(() => asked.at(-1)).toContain('issued_to=2026-12-31')
   })
 
   test('the expiry window is not offered as a filter', async ({ page }) => {
@@ -666,6 +683,148 @@ test.describe('the permit register table', () => {
       // And it does not claim to be sortable to a screen reader either.
       await expect(header).not.toHaveAttribute('aria-sort', /.*/)
     }
+  })
+
+  test('BPLO’s own table drops the columns that say nothing about a Mayor’s Permit', async ({
+    page,
+  }) => {
+    /*
+     * Checklist item 17: "only necessary columns, no expiry for BPLO since
+     * business permits all expire in January". Every Mayor's Permit runs to
+     * the end of the year, so Valid until and Days to expiry repeat one fact
+     * down the page, and with one certificate type chosen the certificate and
+     * office columns are constant.
+     */
+    await openSort(page)
+    await page.getByRole('option', { name: 'Expiring soonest' }).click()
+    await expect.poll(() => asked.at(-1)).toContain('sort=valid_until')
+
+    await openFilter(page)
+    await filterField(page, 'Office').selectOption('BUSINESS')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => asked.at(-1)).toContain('permit_type=BUSINESS')
+
+    for (const gone of [/^Valid until/i, /^Days to expiry/i, /^Permit \/ Certificate/i, /^Office$/i]) {
+      await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+    }
+    // What BPLO does read is still there.
+    for (const kept of [/^Tracking ID/i, /^Permit No/i, /^Business/i, /^Status/i, /^Issued on/i]) {
+      await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
+    }
+
+    /*
+     * And the expiry ORDERING went with the column: the sort it was in is
+     * dropped rather than kept ordering the rows by a date nobody can see.
+     */
+    await expect.poll(() => asked.at(-1)).not.toContain('sort=valid_until')
+    await openSort(page)
+    await expect(page.getByRole('option', { name: 'Expiring soonest' })).toHaveCount(0)
+    await expect(page.getByRole('option', { name: 'Newest issued' })).toHaveAttribute('aria-selected', 'true')
+    await page.keyboard.press('Escape')
+
+    // Another office keeps its expiry — a clearance lapses in any month.
+    await openFilter(page)
+    await filterField(page, 'Office').selectOption('SANITARY')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
+  })
+
+  test('the other offices’ permits are a view of their own', async ({ page }) => {
+    /*
+     * Checklist item 18: "other permits in a separate view". BPLO's table is
+     * the Mayor's Permit; the five clearances other offices issue are one
+     * choice away, asked of the server as "every type but BUSINESS".
+     */
+    await openFilter(page)
+    await filterField(page, 'Office').selectOption('OTHER')
+    await page.keyboard.press('Escape')
+
+    await expect.poll(() => asked.at(-1)).toContain('exclude_permit_type=BUSINESS')
+    expect(asked.at(-1)).not.toContain('permit_type=OTHER')
+
+    const rows = page.locator('tbody tr')
+    await expect(rows).toHaveCount(2)
+    await expect(page.locator('tbody')).not.toContainText('MCB-2026-000001')
+    await expect(page.getByText(/issued by every office but BPLO/)).toBeVisible()
+  })
+
+  test('retired businesses are hidden until the filter asks for them', async ({ page }) => {
+    /*
+     * Checklist item 21. The first request already says `retired=hide` — the
+     * default is the server's narrowing, not rows fetched and then dropped.
+     */
+    expect(asked[0]).toContain('retired=hide')
+    await expect(page.locator('tbody')).not.toContainText('MCB-2025-000099')
+    await expect(page.getByText(/Retired businesses are hidden\./)).toBeVisible()
+
+    await openFilter(page)
+    const retired = filterField(page, 'Retired businesses')
+    await expect(retired).toHaveValue('hide')
+    await retired.selectOption('only')
+    await page.keyboard.press('Escape')
+
+    await expect.poll(() => asked.at(-1)).toContain('retired=only')
+    const rows = page.locator('tbody tr')
+    await expect(rows).toHaveCount(1)
+    // Named, and said to be retired in words — not a tint, not "removed".
+    await expect(rows.first()).toContainText('Lumang Panaderia (retired)')
+
+    await openFilter(page)
+    await filterField(page, 'Retired businesses').selectOption('include')
+    await page.keyboard.press('Escape')
+    await expect(rows).toHaveCount(PERMITS.length + 1)
+  })
+
+  test('status filters on every state a permit can be in, Revoked and Suspended included', async ({
+    page,
+  }) => {
+    await openFilter(page)
+    for (const label of ['Active', 'Expired', 'Suspended', 'Revoked', 'Superseded']) {
+      await expect(page.getByRole('option', { name: label, exact: true })).toBeVisible()
+    }
+    await page.getByRole('option', { name: 'Revoked', exact: true }).click()
+    await expect.poll(() => asked.at(-1)).toContain('status=revoked')
+  })
+
+  test('Revoke is offered only on a permit in force, and asks before it acts', async ({ page }) => {
+    /*
+     * Checklist item 23. Active and suspended rows only — an expired or
+     * superseded certificate has already stopped being valid, and the server
+     * refuses to revoke one. The dialog names the permit AND the business, and
+     * will not send without a reason.
+     */
+    let sent: { url: string; body: unknown } | null = null
+    await page.route('**/api/v1/permits/*/revoke', async (route) => {
+      sent = { url: route.request().url(), body: route.request().postDataJSON() }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { ...PERMITS[0], status: 'revoked', status_label: 'Revoked' } }),
+      })
+    })
+
+    await expect(page.getByRole('button', { name: 'Revoke MCB-2026-000001' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Revoke MCS-2025-000770/ })).toHaveCount(0) // expired
+    await expect(page.getByRole('button', { name: /^Revoke MCZ-2026-000014/ })).toHaveCount(0) // superseded
+
+    await page.getByRole('button', { name: 'Revoke MCB-2026-000001' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Revoke MCB-2026-000001?' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('Aling Nena Sari-Sari Store')
+    await expect(dialog).toContainText('notified')
+
+    // No reason, no request.
+    const confirm = dialog.getByRole('button', { name: 'Revoke permit' })
+    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+
+    await dialog.getByRole('textbox', { name: 'Reason for revoking' }).fill('Closure order from the Mayor.')
+    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
+    await confirm.click()
+
+    await expect(dialog).toHaveCount(0)
+    expect(sent).not.toBeNull()
+    expect(sent!.url).toContain('/permits/901/revoke')
+    expect(sent!.body).toEqual({ reason: 'Closure order from the Mayor.' })
   })
 
   test('every View button names the permit it opens', async ({ page }) => {
@@ -889,7 +1048,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await openFilter(page)
       const picker = filterField(page, 'Office')
       await expect(picker).toBeVisible()
-      await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 1) // six offices + "All"
+      await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 2) // six offices, "All", "Other offices"
       // It opens on BPLO's own office; widen it, which is the whole point of
       // the control being here.
       await expect(picker).toHaveValue('BUSINESS')

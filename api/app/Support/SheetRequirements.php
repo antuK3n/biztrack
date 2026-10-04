@@ -38,6 +38,8 @@ final class SheetRequirements
         return match ($permitTypeCode) {
             'ZONING' => ZoningRequirements::forApplication($application),
             'CEC' => CecRequirements::forApplication($application),
+            'FSIC' => FsicRequirements::forApplication($application),
+            'OCCUPANCY' => OccupancyRequirements::forApplication($application),
             default => null,
         };
     }
@@ -48,8 +50,28 @@ final class SheetRequirements
         return match ($permitTypeCode) {
             'ZONING' => ZoningRequirements::accepts($code),
             'CEC' => CecRequirements::accepts($code),
+            'FSIC' => FsicRequirements::accepts($code),
+            'OCCUPANCY' => OccupancyRequirements::accepts($code),
             default => false,
         };
+    }
+
+    /**
+     * Every checklist slot in the system, keyed by permit type code.
+     *
+     * SANITARY is absent because it has no checklist of its own, which is
+     * the same reason `for()` returns null for it.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function allSlots(): array
+    {
+        return [
+            'ZONING' => ZoningRequirements::slotCodes(),
+            'CEC' => CecRequirements::slotCodes(),
+            'FSIC' => FsicRequirements::slotCodes(),
+            'OCCUPANCY' => OccupancyRequirements::slotCodes(),
+        ];
     }
 
     /** The document type behind one slot, created on demand. */
@@ -57,6 +79,8 @@ final class SheetRequirements
     {
         return match ($permitTypeCode) {
             'CEC' => CecRequirements::documentType($code),
+            'FSIC' => FsicRequirements::documentType($code),
+            'OCCUPANCY' => OccupancyRequirements::documentType($code),
             default => ZoningRequirements::documentType($code),
         };
     }

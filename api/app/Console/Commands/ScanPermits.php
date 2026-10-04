@@ -28,9 +28,9 @@ use Illuminate\Support\Facades\DB;
  * keyed on (permit_id, notice_kind), which carries a unique index. The insert is
  * the permission to send: if the row already exists the send is skipped. So a
  * second run on the same day is a no-op, and the 30-day reminder is not re-sent
- * for thirty consecutive nights. The ledger is also what "Reminders Sent" on the
- * Renewal Risk screen counts, so a row must never be written for a reminder that
- * was not actually delivered.
+ * for thirty consecutive nights. The ledger is read as a record of reminders
+ * sent, so a row must never be written for a reminder that was not actually
+ * delivered.
  *
  * **Bucketed, not exact-date.** The obvious implementation looks for permits
  * whose `valid_until` is exactly today + 30. That silently loses reminders: one
@@ -194,14 +194,12 @@ class ScanPermits extends Command
      *
      * Two exclusions, both learned the hard way — the first run of this scan
      * wrote 15 ledger rows for which no notification could be delivered, which
-     * would have over-stated "Reminders Sent" by 15:
+     * would have over-stated the reminders sent by 15:
      *
      * - **Closed businesses.** `Business` soft-deletes, so `$permit->business`
      *   resolves to null for a closed one and the notification silently goes
      *   nowhere. Nobody should be chased to renew a permit for a business they
-     *   have shut. RenewalRiskAnalytics excludes them from the watchlist for the
-     *   same reason, so including them here would also mean sending reminders
-     *   about permits the officer's screen does not show.
+     *   have shut.
      * - **Unclaimed businesses.** No owner account, no inbox.
      *
      * Filtering in the query rather than bailing out mid-loop is what keeps the

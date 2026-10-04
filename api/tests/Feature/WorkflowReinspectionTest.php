@@ -118,6 +118,12 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
         test()->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+        // The checklist is complete before the sheet goes in — the submit
+        // refuses one that is not. See satisfyChecklist() in Pest.php.
+        satisfyChecklist(
+            Application::findOrFail($appId),
+            PermitType::where('code', $code)->firstOrFail(),
+        );
         test()->withHeaders(authAs('owner@biztrack.local'))
             ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
                 'form_data' => [],

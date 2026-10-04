@@ -1,7 +1,8 @@
 <?php
 
 /*
- * Builds the dashboard and growth/lifecycle fixture DATASETS.
+ * Builds the dashboard fixture DATASET. (The growth/lifecycle one went with
+ * Business Growth Analysis, checklist 2026-09-27 item 6.)
  *
  * These are not dumps of the register. Every row is here because it sits on a
  * branch where a statistic could plausibly come out wrong — a null that must not
@@ -98,7 +99,7 @@ foreach ([1.0, 2.0, 3.0] as $days) {
 foreach ([4.0, 5.0] as $days) {
     $stageObservations[] = ['code' => 'CHO', 'name' => 'City Health Office', 'days' => $days];
 }
-foreach ([['OBO', 'Office of the Building Official'], ['CENRO', 'City Environment Office'], ['BFP', 'Bureau of Fire Protection']] as [$code, $name]) {
+foreach ([['OBO', 'Office of the Local Building Official'], ['CENRO', 'City Environment Office'], ['BFP', 'Bureau of Fire Protection']] as [$code, $name]) {
     $stageObservations[] = ['code' => $code, 'name' => $name, 'days' => 0.0];
 }
 
@@ -277,9 +278,9 @@ $dashboard = [
 
     'permit_type_columns' => [
         ['code' => 'BUSINESS', 'label' => "Mayor's / Business Permit"],
-        ['code' => 'SANITARY', 'label' => 'Sanitary Permit / Health Certificate'],
+        ['code' => 'SANITARY', 'label' => 'Sanitary Permit'],
         ['code' => 'FSIC', 'label' => 'Fire Safety Inspection Certificate'],
-        ['code' => 'ZONING', 'label' => 'Zoning / Locational Clearance'],
+        ['code' => 'ZONING', 'label' => 'Zoning Clearance'],
     ],
     'expiring_permits' => $expiringPermits,
     'barangays' => $barangays,
@@ -292,109 +293,19 @@ $dashboard = [
         'total_businesses' => 25,
         'points' => $mapPoints,
     ],
-];
-
-/* ── growth / lifecycle ──────────────────────────────────────────────── */
-
-/*
- * Survival observations, built so the Kaplan-Meier product is checkable by hand
- * and so the censoring actually matters.
- *
- * Cohort 2023 (10 businesses): 2 lapse at cycle 1, 2 at cycle 2, and the rest are
- * censored along the way. At cycle 1 all 10 are at risk and 2 fail, so
- * S(1) = 1 - 2/10 = 0.8. Six reach cycle 2 and 2 fail, so
- * S(2) = 0.8 * (1 - 2/6) = 0.5333… -> 53.3.
- *
- * Cohort 2024 (4 businesses): 1 lapses at cycle 1, 3 censored there.
- * S(1) = 1 - 1/4 = 0.75.
- *
- * Cohort 2026 (3 businesses): every one still inside its FIRST permit, so time 0
- * and event 0. max_cycle is 0, no cycle is estimable, and the survival must be
- * NULL. This is the divide-by-zero guard the spec calls for, and the case where a
- * naive "renewed / total" ratio would print 0% and libel a cohort that has simply
- * not had a renewal yet.
- */
-$cohorts = [];
-$add = function (string $cohort, int $businessId, int $time, int $event) use (&$cohorts) {
-    $cohorts[] = ['cohort' => $cohort, 'business_id' => $businessId, 'time' => $time, 'event' => $event];
-};
-
-$id = 1;
-foreach ([[1, 1], [1, 1], [1, 0], [1, 0], [2, 1], [2, 1], [2, 0], [3, 0], [3, 0], [2, 0]] as [$time, $event]) {
-    $add('2023', $id++, $time, $event);
-}
-foreach ([[1, 1], [1, 0], [1, 0], [1, 0]] as [$time, $event]) {
-    $add('2024', $id++, $time, $event);
-}
-foreach ([[0, 0], [0, 0], [0, 0]] as [$time, $event]) {
-    $add('2026', $id++, $time, $event);
-}
-
-$growth = [
-    'params' => ['months' => 12],
-    'now' => '2026-07-30T00:00:00.000000Z',
-    'period_start' => '2025-07-30',
-    'period_end' => '2026-07-30',
-    'prior_period_start' => '2024-07-30',
-    'top_n' => 6,
-    'survival_methodology' => 'Of the businesses that reached each renewal, this is the share that '
-        .'had renewed every earlier one with no gap in cover. Businesses still inside their current '
-        .'permit are set aside rather than counted as failures. It describes what this group of '
-        .'businesses did. It is not a forecast of what any business will do next.',
-    'grace_days' => 30,
-
-    // 40 against 32 gives +25.0% exactly.
-    'registrations' => 40,
-    'registrations_prior' => 32,
-    'closures' => 7,
-
-    // Totals 400, so a count of 5 is a 1.25% share -> 1.2 half-to-even.
-    'status_counts' => ['active' => 300, 'expired' => 65, 'inactive' => 30, 'closed' => 5],
-
     /*
-     * Barangays ranked by DELTA, not volume. Longos has the most registrations
-     * but only +2, so it must not lead.
-     *
-     * Bulacan and Acacia are identical on BOTH sort keys — delta +6 and 10
-     * registrations — which is what forces the name tie-break to decide, and
-     * Bulacan is listed first so input order cannot supply the right answer by
-     * accident. Ordering has to be total, or the table reshuffles between
-     * refreshes and the two engines disagree.
-     *
-     * Flores has an empty prior period, so its growth_rate must be null while its
-     * delta is still a number.
+     * New and closed businesses. Three months on purpose: an ordinary month, a
+     * month where closures outrun registrations (net must go negative, not be
+     * floored at zero), and an empty month that must stay a row of zeros.
      */
-    'barangays' => [
-        ['barangay' => 'Longos', 'registrations' => 20, 'prior' => 18],
-        ['barangay' => 'Bulacan', 'registrations' => 10, 'prior' => 4],
-        ['barangay' => 'Acacia', 'registrations' => 10, 'prior' => 4],
-        ['barangay' => 'Flores', 'registrations' => 4, 'prior' => 0],
-        ['barangay' => 'Tonsuya', 'registrations' => 2, 'prior' => 9],
+    'business_movement' => [
+        ['month' => '2026-05', 'registered' => 7, 'closed' => 2],
+        ['month' => '2026-06', 'registered' => 1, 'closed' => 3],
+        ['month' => '2026-07', 'registered' => 0, 'closed' => 0],
     ],
-
-    'closure_months' => [
-        ['month' => '2025-08', 'closures' => 0],
-        ['month' => '2025-09', 'closures' => 2],
-        ['month' => '2025-10', 'closures' => 1],
-        ['month' => '2025-11', 'closures' => 4],
-    ],
-
-    /*
-     * All three directions, and a count tie between the two 12s that has to break
-     * on PSIC code.
-     */
-    'industries' => [
-        ['industry' => 'Retail sale of hardware', 'psic_code' => '47521', 'count' => 30, 'registrations' => 10, 'prior' => 4],
-        ['industry' => 'Food and beverage service', 'psic_code' => '56101', 'count' => 20, 'registrations' => 3, 'prior' => 9],
-        ['industry' => 'Laundry services', 'psic_code' => '96200', 'count' => 12, 'registrations' => 5, 'prior' => 5],
-        ['industry' => 'Bakery products', 'psic_code' => '10711', 'count' => 12, 'registrations' => 6, 'prior' => 1],
-    ],
-
-    'cohorts' => $cohorts,
 ];
 
 $flags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
 file_put_contents("{$dir}/dashboard.dataset.json", json_encode($dashboard, $flags)."\n");
-file_put_contents("{$dir}/growth-lifecycle.dataset.json", json_encode($growth, $flags)."\n");
 
-echo "wrote dashboard.dataset.json and growth-lifecycle.dataset.json\n";
+echo "wrote dashboard.dataset.json\n";

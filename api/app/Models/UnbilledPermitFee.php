@@ -28,6 +28,12 @@ class UnbilledPermitFee extends Model
 {
     protected $fillable = [
         'business_id', 'application_id', 'permit_type_id', 'amount',
+        /*
+         * The penalty this fee was late by, frozen at issue (Secs. 8A.04 /
+         * 8A.05). NOT in $fillable was how `returned_state` and `file_hash`
+         * were both silently dropped on write; named here for that reason.
+         */
+        'surcharge', 'interest', 'months_late',
         // What the line says on the January bill when the permit type is not
         // the answer — an amendment carries the business permit type but is
         // not a business permit fee. Null on every clearance row.
@@ -37,6 +43,9 @@ class UnbilledPermitFee extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'surcharge' => 'decimal:2',
+        'interest' => 'decimal:2',
+        'months_late' => 'integer',
         'incurred_at' => 'datetime',
         'billed_at' => 'datetime',
     ];

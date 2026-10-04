@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from 'react'
+import { useState, type ComponentType, type SVGProps } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AmendIcon,
@@ -10,8 +10,10 @@ import {
   ShieldCheckIcon,
   UsersIcon,
 } from '../components/icons'
+import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { Logo } from '../components/Logo'
-import { requests } from '../lib/resources'
+import { AccountRestrictedModal } from '../components/ui/Proto'
+import { businesses, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { activePortal, portalPath } from '../lib/api'
 import { useAuth } from '../stores/auth'
@@ -110,18 +112,28 @@ function HomeCard({
 
 /* ── Owner home (PDF p5) ──────────────────────────────────────────────── */
 function OwnerHome() {
+  const [dismissed, setDismissed] = useState(false)
+  const homeAddressMissing = useAuth((s) => s.user?.home_address_missing ?? false)
+  // Confirm status exposure at runtime: BusinessResource does not currently
+  // include `status`, so `b.status` may be undefined — the modal only fires
+  // when a restricted status is actually present. Purely informational.
+  const { data } = useAsync(() => businesses.list(), [])
+
   /*
-   * ---- The restriction notice moved to the shell -----------------------
+   * -- Blacklisted wins over suspended --------------------------------------
    *
-   * This page raised it, which meant an owner who landed anywhere else - a
-   * notification link, a bookmark, a reload on the page they were last
-   * reading - was never told. "Pag open na pag open pa lang ng account" is
-   * about the ACCOUNT, not about the home page [client, 30 September 2026],
-   * so it is raised in AppShell now, from the session's own payload.
+   * This took whichever came first in the list. An owner with a suspended shop
+   * AND a blacklisted account got the suspension notice about half the time -
+   * the lesser of the two findings, and the one whose advice ("your other
+   * businesses are fine") is false when the account itself is barred.
    *
-   * Nothing is left here: a barred account is redirected out of this page
-   * before it renders, by the same guard.
+   * A blacklisting is about the person and reaches everything they hold, so it
+   * is the news that has to be delivered when both are true.
    */
+  const held = data ?? []
+  const restricted =
+    held.find((b) => b.status === 'blacklisted') ?? held.find((b) => b.status === 'suspended')
+  const showModal = !dismissed && Boolean(restricted)
 
   /*
    * ── The list moved onto the tile ─────────────────────────────────────────
@@ -150,10 +162,31 @@ function OwnerHome() {
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
+      {showModal && restricted && (
+        <AccountRestrictedModal
+          variant={restricted.status === 'suspended' ? 'suspended' : 'blacklisted'}
+          /*
+            The reference only makes sense for a SUSPENSION, which is about
+            one premises. Quoting one business's BAN against an account-wide
+            blacklisting would invite the reader to ring up about that shop
+            and be told the finding is not about it.
+          */
+          referenceId={restricted.status === 'suspended' ? restricted.ban : null}
+          businessName={restricted.name}
+          covers={held.length}
+          onClose={() => setDismissed(true)}
+        />
+      )}
       <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Track your businesses with</h1>
       <div className="mt-6">
         <Logo height={72} />
       </div>
+      {/*
+        Under the logo and above the four tiles, capped to their width: it is
+        something to finish, not a fifth place to go [checklist 2026-09-28,
+        Register 2]. Gone once the address is saved.
+      */}
+      {homeAddressMissing && <HomeAddressPrompt className="mt-10 w-full max-w-2xl" />}
       <div className="mt-14 flex flex-wrap items-start justify-center gap-8 lg:gap-12">
         <HomeCard to="/apply?type=new" icon={FilePlusIcon} label="New Business Permit" />
         <HomeCard to="/apply?type=renewal" icon={RenewIcon} label="Renew Business Permit" />
@@ -219,12 +252,13 @@ function StaffHome({ permissions }: { permissions: string[] }) {
    * /staff/login. Reported as "Records crashes". The rail beside these tiles
    * never had the bug, because it has always gone through portalPath.
    *
-   * The super admin's Analytics destination matches the rail's: Office
-   * Performance, not Processing Time (issue #102).
+   * The super admin's Analytics destination matches the rail's: the one
+   * dashboard every office reads (checklist 2026-09-27, item 1). Office
+   * Performance and Processing Time are a tab away.
    */
   const portal = activePortal()
   const cards: Card[] = [
-    { to: '/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
+    { to: '/queue', icon: InboxIcon, label: 'Manage Applications', permission: 'application.review' },
     {
       to: '/analytics',
       icon: ChartIcon,
@@ -271,7 +305,7 @@ function StaffHome({ permissions }: { permissions: string[] }) {
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
-      <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Application Verification</h1>
+      <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Manage Applications</h1>
       <div className="mt-4">
         <Logo height={56} />
       </div>

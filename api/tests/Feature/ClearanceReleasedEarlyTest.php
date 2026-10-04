@@ -70,6 +70,9 @@ function clearanceApproved(Application $app, string $code): ApplicationPermitTyp
 
     // Two acts: applying opens the office's form, saving it hands it in.
     $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    // The checklist is complete before the sheet goes in — the submit
+    // refuses one that is not. See satisfyChecklist() in Pest.php.
+    satisfyChecklist($app, $type);
     $workflow->submitClearanceForm($app, $type);
 
     $row = ApplicationPermitType::where('application_id', $app->id)

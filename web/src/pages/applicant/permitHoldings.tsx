@@ -9,7 +9,7 @@ import { type SortFilterOption } from '../../components/ui/Proto'
 import { businessName, formatBytes, formatDate } from '../../lib/format'
 import { documents as documentsApi, permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { HeldClearance, Permit } from '../../lib/types'
+import type { HeldClearance, PageMeta, Permit } from '../../lib/types'
 
 /*
  * What an applicant holds, and how a business's row is drawn.
@@ -43,20 +43,33 @@ export const NEARING_DAYS = 30
  */
 const MAX_PERMIT_PAGES = 10
 
-async function loadAllPermits(): Promise<Permit[]> {
+async function loadAllPermits(): Promise<{
+  permits: Permit[]
+  unbilled: PageMeta['unbilled_fees']
+}> {
   const all: Permit[] = []
+  let unbilled: PageMeta['unbilled_fees']
+
   for (let page = 1; page <= MAX_PERMIT_PAGES; page++) {
     const { data, meta } = await permitsApi.page({ page, per_page: 200 })
     all.push(...data)
+    // The same on every page; taken from the first and not re-read.
+    if (page === 1) unbilled = meta.unbilled_fees
     if (meta.current_page >= meta.last_page) break
   }
-  return all
+
+  return { permits: all, unbilled }
 }
 
 /** What one fetch has to bring back before this page can group anything. */
 export interface ProfileHoldings {
   permits: Permit[]
   held: HeldClearance[]
+  /*
+   * Ridden back on the FIRST page's meta, because it is a fact about the
+   * owner and not about the page — every page would repeat it.
+   */
+  unbilled: PageMeta['unbilled_fees']
 }
 
 /**
@@ -72,8 +85,8 @@ export interface ProfileHoldings {
  * has nothing to defend against here.
  */
 export async function loadHoldings(): Promise<ProfileHoldings> {
-  const [permits, held] = await Promise.all([loadAllPermits(), permitsApi.held()])
-  return { permits, held }
+  const [paged, held] = await Promise.all([loadAllPermits(), permitsApi.held()])
+  return { permits: paged.permits, held, unbilled: paged.unbilled }
 }
 
 /* ── Approved Businesses ──────────────────────────────────────────────── */
@@ -271,24 +284,8 @@ function HeldCopyRow({ copy, business }: { copy: HeldClearance; business: string
  * assistive tech can be told what the triangle opens. The triangle itself is
  * decorative — the button's own text is the business name.
  */
-export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGroup; defaultOpen?: boolean }) {
-  /*
-   * ---- Open, because the page exists to show these -------------------------
-   *
-   * Every section started collapsed, so a screen built "for more visibility and
-   * accessibility" of approved permits [client brief] opened showing none of
-   * them: four business names and a count, and a click needed before a single
-   * permit was on screen.
-   *
-   * Collapsed-by-default is right for a disclosure that hides detail nobody
-   * asked for. Here the detail IS what was asked for, and the heading rows are
-   * the navigation through it rather than the content.
-   *
-   * It stays a real disclosure, so a reader with a dozen businesses can shut
-   * the ones they are not working on — and `defaultOpen` is a prop rather than
-   * a constant so a caller with a long list can start them closed.
-   */
-  const [open, setOpen] = useState(defaultOpen)
+export function BusinessRow({ group }: { group: BusinessGroup }) {
+  const [open, setOpen] = useState(false)
   const panelId = useId()
   const headingId = useId()
 
@@ -470,7 +467,7 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
  */
 export function useHoldings(enabled: boolean) {
   const { data, loading, error, reload } = useAsync<ProfileHoldings>(
-    () => (enabled ? loadHoldings() : Promise.resolve({ permits: [], held: [] })),
+    () => (enabled ? loadHoldings() : Promise.resolve({ permits: [], held: [], unbilled: undefined })),
     [enabled],
   )
   const [sort, setSort] = useState('name')
@@ -602,5 +599,5 @@ export function useHoldings(enabled: boolean) {
     return sorted
   }, [groups, sort, filter])
 
-  return { groups, visible, sort, setSort, filter, setFilter, loading, error, reload }
+  return { groups, visible, sort, setSort, filter, setFilter, unbilled: data?.unbilled, loading, error, reload }
 }

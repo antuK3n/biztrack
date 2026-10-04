@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\ReturnTargets;
 use App\Enums\ApplicationType;
 use App\Enums\OfficerRequestStatus;
 use App\Support\AmendableFields;
@@ -19,6 +20,43 @@ class ApplicationResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        /*
+         * One query for every permit's history, keyed by permit type.
+         * Ascending, because a timeline is read from the beginning — the
+         * reader that wants the newest first can reverse a short list more
+         * cheaply than the API can guess which order a screen wants.
+         */
+        $historyByPermit = $this->relationLoaded('permitTypes')
+            ? \App\Models\ApplicationStatusHistory::query()
+                ->where('application_id', $this->id)
+                ->whereNotNull('permit_type_id')
+                ->with('changedBy:id,name')
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->get()
+                ->groupBy('permit_type_id')
+            : collect();
+
+        /*
+         * The FILING's own moves — the rows with no `permit_type_id`, which
+         * `transition()` writes and `transitionClearance()` does not.
+         *
+         * They are merged into the outcome permit's timeline below. Before
+         * 28 September 2026 they were read by the application-level
+         * `status_history` and by nothing else, so a filing that was
+         * returned and resubmitted showed a Mayor's Permit whose history
+         * still read "Application submitted" alone.
+         */
+        $filingHistory = $this->relationLoaded('permitTypes')
+            ? \App\Models\ApplicationStatusHistory::query()
+                ->where('application_id', $this->id)
+                ->whereNull('permit_type_id')
+                ->with('changedBy:id,name')
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->get()
+            : collect();
+
         return [
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
@@ -97,8 +135,25 @@ class ApplicationResource extends JsonResource
              * mandatory ones is how a stall owner would think they were finished
              * — or a shop owner think they were not.
              */
+            /*
+             * ── Each permit's own status history [26 September 2026] ──────
+             *
+             * Client: *"put a tracking history PER PERMIT, which contains date
+             * and time on when a permit changed status."*
+             *
+             * Grouped ONCE here rather than queried inside the map. Six permits
+             * on a filing would otherwise be six queries, on a payload the
+             * applicant's list page already fetches per row — the classic N+1,
+             * and it would arrive on the one screen that renders a card for
+             * every filing the owner has.
+             *
+             * `relationLoaded` guards it for the same reason the map below is
+             * guarded: the list resource does not load this, and a resource
+             * that lazily queries whatever it was not given is how a list
+             * endpoint starts issuing a hundred of them.
+             */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(function ($pt) use ($request) {
+                ? $this->permitTypes->map(function ($pt) use ($request, $historyByPermit, $filingHistory) {
                     /*
                      * SEP-5. Progress is shared across the filing; the words an
                      * office wrote are not.
@@ -158,6 +213,42 @@ class ApplicationResource extends JsonResource
                          * says nothing about the content of anyone's remarks.
                          */
                         'returned_at' => optional($pt->pivot?->returned_at)->toISOString(),
+                        /*
+                         * ── This permit's timeline ───────────────────────
+                         *
+                         * The STATUS of each move is shared, on the same
+                         * reasoning the note at the top of this map sets out
+                         * for `status`: every office needs to see that the
+                         * fire permit reached inspection and passed, because
+                         * BPLO's final approval is gated on all five.
+                         *
+                         * The NOTE is not. It is free prose one office wrote
+                         * about someone else's premises — the same thing
+                         * `remarks` above is gated for, and the same gate.
+                         * Without this a CHO officer would read BFP's reason
+                         * for returning a permit by opening a timeline.
+                         */
+                        /*
+                         * The outcome permit carries the FILING's moves as
+                         * well as its own — see the note where
+                         * `$filingHistory` is read. Sorted together so a
+                         * return and the office decision around it read in
+                         * the order they happened rather than in two blocks.
+                         */
+                        'history' => ($pt->code === \App\Models\PermitType::OUTCOME_CODE
+                            ? ($historyByPermit[$pt->id] ?? collect())
+                                ->concat($filingHistory)
+                                ->sortBy([['created_at', 'asc'], ['id', 'asc']])
+                                ->values()
+                            : ($historyByPermit[$pt->id] ?? collect()))
+                            ->map(fn ($h) => [
+                                'from_status' => $h->from_status,
+                                'to_status' => $h->to_status,
+                                'note' => $readsWords ? $h->note : null,
+                                'changed_by' => $h->changedBy?->name,
+                                'created_at' => optional($h->created_at)->toISOString(),
+                            ])
+                            ->values(),
                         'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
                     ];
                 })->values()
@@ -289,6 +380,38 @@ class ApplicationResource extends JsonResource
                              * cannot is half a feature. Both doors, one builder.
                              */
                             'requirements' => SheetRequirements::for($this->resource, $type->code),
+                            /*
+                             * What the applicant changed on the rows this
+                             * office last asked about — was and now.
+                             *
+                             * Without it a resubmitted sheet is
+                             * indistinguishable from the one the office sent
+                             * back, which is the complaint that produced the
+                             * whole Return feature and was answered for BPLO
+                             * on 29 September 2026 and for the offices on the
+                             * 30th.
+                             *
+                             * It includes rows that did NOT change, and that
+                             * is the point of it here: the resubmit gate
+                             * deliberately lets a file the office called wrong
+                             * come back identical — blocking that would trap
+                             * an applicant whose document was right — so this
+                             * is how the office finds out rather than reading
+                             * the document again to discover it.
+                             */
+                            'corrections' => \App\Models\ApplicationCorrection::where(
+                                'application_id',
+                                $this->resource->id,
+                            )
+                                ->where('permit_type_id', $type->id)
+                                ->orderByDesc('id')
+                                ->get()
+                                ->map(fn ($c) => [
+                                    'target' => $c->target,
+                                    'old_value' => $c->old_value,
+                                    'new_value' => $c->new_value,
+                                    'at' => optional($c->created_at)->toISOString(),
+                                ])->all(),
                         ];
                     })->values()
                 : [],
@@ -444,6 +567,76 @@ class ApplicationResource extends JsonResource
              */
             'status_history' => $this->relationLoaded('statusHistory')
                 ? StatusHistoryResource::collection($this->statusHistory)
+                : [],
+            /*
+             * ── What the applicant put right, and what it was ───────────
+             *
+             * Client, 27 September 2026: *"where can the admin see the newly
+             * complied fields?"* Nowhere, before this — a resubmitted filing
+             * arrived looking like any other and the officer re-read fifty
+             * questions to find the three they had asked about.
+             *
+             * Same rule as `status_history` directly above: an unloaded
+             * relation and a filing that was never returned are the same
+             * empty answer, and no reader has anything different to do
+             * about the two.
+             */
+            /*
+             * BPLO's remark for each returned field, keyed by the same code
+             * the pointer uses. A map rather than a list because every
+             * reader wants it BY FIELD — the applicant drawing a box, the
+             * officer reading back what they asked — and a list would make
+             * all of them build the same index.
+             */
+            /*
+             * The MAIN FORM's notes only, on the same reasoning as
+             * `corrections` below — and missed when that filter was added.
+             *
+             * The offices record theirs in the same table since 30 September
+             * 2026, marked with the permit they belong to; BPLO's carry a
+             * null. Unfiltered, a filing whose zoning sheet had been returned
+             * handed the main form notes keyed `ZONING_REQ_TAX_DECLARATION` —
+             * harmless only because no main-form target is spelled that way,
+             * which is luck rather than a rule.
+             */
+            'return_notes' => $this->relationLoaded('returnNotes')
+                ? $this->returnNotes
+                    ->whereNull('permit_type_id')
+                    ->pluck('note', 'target')
+                    ->all()
+                : (object) [],
+            /*
+             * The MAIN FORM's corrections only.
+             *
+             * Since 30 September 2026 the offices record theirs in the same
+             * table, marked with the permit they belong to; BPLO's carry a
+             * null. Unfiltered, this block would hand the officer's sheet
+             * rows like `ZONING_LEASE_TITLE` and get away with it only
+             * because `mainFormTargetLabel` skips codes it does not know.
+             * An office's are on its own clearance row.
+             */
+            'corrections' => $this->relationLoaded('corrections')
+                ? $this->corrections->whereNull('permit_type_id')->values()->map(fn ($c) => [
+                    'target' => $c->target,
+                    'old_value' => $c->old_value,
+                    'new_value' => $c->new_value,
+                    'at' => optional($c->created_at)->toISOString(),
+                ])->all()
+                : [],
+            /*
+             * ── What an officer may return this filing ABOUT ────────────
+             *
+             * The `form:` codes the applicant actually answered. A field
+             * they left blank was never their answer to correct, and a
+             * missing TIN already has its own route — see
+             * `ReturnTargets::answeredBy`.
+             *
+             * Sent rather than worked out in the browser because only this
+             * side knows which record holds each field. The picker keeps
+             * the labels and the grouping, which is what it knows.
+             */
+            'answered_targets' => $this->relationLoaded('business') && $this->business
+                ? ReturnTargets::answeredBy($this->business)
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];

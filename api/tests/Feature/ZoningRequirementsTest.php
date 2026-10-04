@@ -118,16 +118,40 @@ it('carries the sketch and the authorisation from BPLO rather than asking again'
         if ($found === null) {
             continue; // AUTHORIZATION only appears when a representative is named
         }
+        /*
+         * `source` is the claim: the business permit already holds this,
+         * so the row shows that copy instead of asking for it again.
+         *
+         * `code` is NOT null, and stopped being so on 30 September 2026.
+         * A carried row gained a slot of its own that day for two
+         * reasons: a lease attached as two pages showed as one with no
+         * way to add the other, and once every documentary row began
+         * blocking the submit an empty carried row was a dead end —
+         * business permit documents cannot be added after payment, and
+         * this stage starts after payment.
+         */
         expect($found['source'])->toBe('carried')
-            ->and($found['code'])->toBeNull();
+            ->and($found['code'])->not->toBeNull()
+            ->and($found['carried_from'])->toBeString();
     }
 
-    // And the slots that genuinely have nowhere else to come from still take a
-    // file, so the sheet is not left asking for nothing.
+    /*
+     * Every row but the sheet itself takes a file, the carried ones
+     * included since 30 September 2026.
+     *
+     * The sketch asserted FALSE here until that date, because BPLO collects
+     * it and asking twice is asking twice. What that missed is that BPLO
+     * stops collecting anything once the filing is paid, and this sheet is
+     * filled in after payment — so a sketch that never made it onto the
+     * business permit had nowhere to go, and the row blocks the submit now.
+     * The row still SHOWS the BPLO copy and still says where it came from;
+     * what it no longer does is refuse a second one.
+     */
     expect(ZoningRequirements::accepts('ZONING_REQ_TAX_DECLARATION'))->toBeTrue()
         ->and(ZoningRequirements::accepts('ZONING_REQ_DECLARATION'))->toBeTrue()
-        // No longer a slot here — BPLO collects it.
-        ->and(ZoningRequirements::accepts('ZONING_REQ_SKETCH'))->toBeFalse();
+        ->and(ZoningRequirements::accepts('ZONING_REQ_SKETCH'))->toBeTrue()
+        // The form itself is not a slot, and never was.
+        ->and(ZoningRequirements::accepts('ZONING_REQ_FORM'))->toBeFalse();
 });
 
 it('asks everyone for the sketch, the notarised declaration and the registration', function () {
@@ -141,35 +165,59 @@ it('asks everyone for the sketch, the notarised declaration and the registration
     }
 });
 
-it('makes the notarised declaration the one row that blocks a submission', function () {
+it('blocks a submission on every document, and on the form itself never', function () {
     /*
-     * The client, 17 September 2026: *"I wonder how I was able to submit the
+     * This read "the notarised declaration is the ONE row that blocks" until
+     * 30 September 2026, and the history is the point of the test.
+     *
+     * The client, 17 September: *"I wonder how I was able to submit the
      * Locational Clearance without submitting the Applicant Declaration."*
+     * They could because the checklist was a counter list with no gate in it,
+     * and the declaration was excepted because the paper marks that row in
+     * capitals — MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION.
      *
-     * They could because this checklist was a counter list with no gate in it,
-     * which is right for every row but one. The paper marks this row alone in
-     * capitals — MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION — and
-     * the flag is asserted HERE rather than in the browser because both the
-     * applicant's submit button and CPDD's review screen read it. A rule
-     * private to one of two consumers is the defect this class exists to avoid.
+     * The same client, 30 September, reading the same screen: *"Are the
+     * documentary fields here not required? Make sure they are required."*
+     * The reason for the exception was the reason for all of them — CPDD
+     * cannot act on a filing missing the documents its decision rests on, so
+     * accepting an incomplete sheet only buys the applicant a return trip.
      *
-     * Asserted as "exactly one", not "this one is true". A later row that
-     * quietly arrives blocking would shut the submit button on a document the
-     * applicant is still chasing from another office, and that failure looks
-     * from the outside like the form being broken.
+     * The flag is asserted HERE rather than in the browser because three
+     * things read it: the applicant's submit button, CPDD's review screen and
+     * `WorkflowService::submitClearanceForm`, which is the one that enforces
+     * it. A rule private to one consumer is the defect this class exists to
+     * avoid — and it was exactly the defect that shipped, because for a
+     * fortnight the declaration gate lived only in the browser.
+     *
+     * Both tenures, because the checklist branches on them and a gate that
+     * applied to only one branch would be invisible from the other.
      */
     foreach ([true, false] as $rented) {
-        $rows = ZoningRequirements::forApplication(zoningFiling($rented));
+        $rows = collect(ZoningRequirements::forApplication(zoningFiling($rented)));
 
-        $blocking = collect($rows)->filter(fn (array $row) => $row['blocking'] ?? false);
+        $documentary = $rows->whereIn('source', ['upload', 'carried']);
+        expect($documentary)->not->toBeEmpty()
+            ->and($documentary->pluck('blocking')->unique()->all())->toBe([true]);
 
-        expect($blocking->pluck('label')->all())->toBe(['Applicant Declaration, notarised']);
+        /*
+         * And the form itself never blocks. Its `satisfied` is whether the
+         * sheet has been submitted — false at the moment of submitting — so a
+         * gate on it would be one the applicant can never clear, because what
+         * it waits for is the act it is refusing.
+         */
+        $sheet = $rows->where('source', 'sheet');
+        expect($sheet)->not->toBeEmpty()
+            ->and($sheet->pluck('blocking')->unique()->all())->toBe([false]);
 
-        // And it is a row a file can actually be put into, or the gate would be
-        // one the applicant has no way to clear.
-        expect($blocking->first()['source'])->toBe('upload');
-        expect($blocking->first()['code'])->not->toBeNull();
-        expect($blocking->first()['satisfied'])->toBeFalse();
+        /*
+         * Every gate is one the applicant has a way to clear: an upload row
+         * has a slot of its own, and a carried row names the business-permit
+         * attachment that answers it. A blocking row with neither would be a
+         * dead end that looks, from the outside, like the form being broken.
+         */
+        foreach ($documentary as $row) {
+            expect($row['code'] ?? $row['carried_from'])->not->toBeNull();
+        }
     }
 });
 
@@ -201,11 +249,12 @@ it('counts a business-permit attachment as the row it already answers', function
     $row = fn (string $key) => collect(ZoningRequirements::forApplication($app->fresh()))
         ->firstWhere('key', $key);
 
-    // Nothing attached at step 4 yet, so the carried rows are outstanding —
-    // and they are carried rather than uploadable either way.
+    // Nothing attached at step 4 yet, so the carried row is outstanding.
+    // It names the BPLO attachment that would answer it, and since 30
+    // September 2026 it also has a slot of its own to fall back on.
     expect($row('DTI_SEC')['source'])->toBe('carried')
         ->and($row('DTI_SEC')['satisfied'])->toBeFalse()
-        ->and($row('DTI_SEC')['code'])->toBeNull();
+        ->and($row('DTI_SEC')['carried_from'])->toBe('DTI_SEC_CDA');
 
     ApplicationDocument::create([
         'application_id' => $app->id,

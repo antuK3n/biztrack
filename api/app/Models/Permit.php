@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PermitStatus;
+use App\Support\BusinessDate;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,6 +16,12 @@ class Permit extends Model
         'prior_permit_id',
         'status', 'valid_from', 'valid_until', 'pdf_path', 'issued_at',
         'issued_by_user_id',
+        // Written by WorkflowService::revokePermit and nothing else.
+        'revoked_at', 'revoked_reason',
+        // The old register's key for a certificate it issued on paper; null on
+        // every permit BizTrack mints (migration
+        // 2026_09_27_000100_let_the_register_hold_what_the_old_system_issued).
+        'legacy_id',
     ];
 
     protected $casts = [
@@ -22,6 +29,13 @@ class Permit extends Model
         'valid_from' => 'date',
         'valid_until' => 'date',
         'issued_at' => 'datetime',
+        /*
+         * Cast since the column gained a writer. It sat uncast while nothing
+         * wrote it, and PermitRegisterResource's `optional($this->revoked_at)
+         * ->toIso8601String()` would have thrown on the first revoked row —
+         * a raw string has no such method.
+         */
+        'revoked_at' => 'datetime',
         /*
          * The business details as they were when this certificate was signed.
          * See `App\Support\PermitFace` for the builder and the migration for
@@ -159,9 +173,13 @@ class Permit extends Model
         return $this->belongsTo(User::class, 'issued_by_user_id');
     }
 
-    /** Days until expiry (negative if already past). */
+    /**
+     * Days until expiry (negative if already past), counted from BusinessDate:
+     * the Debug page's pretend date when one is set, so the countdown on every
+     * permit screen agrees with the late surcharge the same filing would get.
+     */
     public function daysUntilExpiry(): int
     {
-        return now()->startOfDay()->diffInDays($this->valid_until, false);
+        return (int) BusinessDate::today()->startOfDay()->diffInDays($this->valid_until, false);
     }
 }

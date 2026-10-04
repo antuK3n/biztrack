@@ -10,8 +10,20 @@ class ApplicationStatusHistory extends Model
     protected $table = 'application_status_history';
 
     protected $fillable = [
-        'application_id', 'from_status', 'to_status', 'changed_by_user_id', 'note',
+        'application_id', 'permit_type_id', 'from_status', 'to_status',
+        'changed_by_user_id', 'department_id', 'note',
     ];
+
+    /**
+     * Which permit this row is about, or null for the FILING's own move.
+     *
+     * One table, two timelines, told apart by this column — see the
+     * migration that added it for why it is not a second table.
+     */
+    public function permitType(): BelongsTo
+    {
+        return $this->belongsTo(PermitType::class);
+    }
 
     public function application(): BelongsTo
     {
