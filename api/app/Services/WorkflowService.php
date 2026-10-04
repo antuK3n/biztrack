@@ -36,6 +36,7 @@ use App\Support\Numbering;
 use App\Support\PermitFace;
 use App\Support\PermitFees;
 use App\Support\Ra11032;
+use App\Support\RenewablePermit;
 use App\Support\RenewalSeason;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
@@ -3335,6 +3336,34 @@ class WorkflowService
             ], $snapshot);
 
             $this->notify->permitRevoked($permit, $reason);
+
+            /*
+             * ── And its open renewal ends with it ────────────────────────────
+             *
+             * Nothing read the prior permit once a renewal was under way, so
+             * BPLO could revoke a permit and then approve its renewal, and
+             * payment minted a fresh Active one — re-licensing the business
+             * the revocation was meant to stop (scenario run, owner-renew 47,
+             * permit-suspend-revoke 14). Ken, 5 October 2026: revoking
+             * rejects it, with the revocation's reason, through the ordinary
+             * rejection — so the owner gets the usual notice and any deferred
+             * fees it claimed go back (`transition`).
+             *
+             * Unpaid ones only. A paid business-permit renewal has already
+             * superseded the permit, which then cannot be revoked; what is
+             * left is a paid renewal still carrying ANOTHER permit being
+             * revoked, and rejecting that filing would suspend the business
+             * permit it already issued. That case is not decided, so it is
+             * not guessed at here. A draft is left alone too — it was never
+             * filed, and submit refuses it now (`RenewablePermit`).
+             */
+            $unpaid = array_values(array_filter(
+                RenewablePermit::IN_PROGRESS,
+                fn (ApplicationStatus $s) => ! $s->isPaid(),
+            ));
+            foreach (RenewablePermit::renewalsNaming([$permit->id], $unpaid)->get() as $renewal) {
+                $this->rejectApplication($renewal, $reason);
+            }
         });
 
         return $permit;

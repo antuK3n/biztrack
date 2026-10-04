@@ -1,13 +1,18 @@
 <?php
 
+use App\Enums\ApplicationStatus;
 use App\Enums\PermitStatus;
+use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Models\UnbilledPermitFee;
 use App\Models\User;
+use Carbon\Carbon;
 
 /*
  * POST /permits/{permit}/revoke — taking a permit away (checklist item 23).
@@ -255,4 +260,103 @@ it('shows a revoked permit on the register with both revocation columns filled',
         ->and($row['status_label'])->toBe('Revoked')
         ->and($row['revoked_at'])->not->toBeNull()
         ->and($row['revoked_reason'])->toBe('Closure order.');
+});
+
+/*
+ * ── Revoking a permit rejects its open renewal (Ken, 5 October 2026) ────────
+ *
+ * Nothing read the prior permit's status once a renewal was under way. BPLO
+ * could revoke the permit and then approve its renewal, and payment minted a
+ * fresh Active business permit — re-licensing the business the revocation
+ * was meant to stop (scenario run, owner-renew 47, permit-suspend-revoke 14).
+ */
+
+/** A business permit for 2026 and a submitted renewal of it, in January 2027. */
+function revokedMidRenewal(): array
+{
+    test()->travelTo(Carbon::parse('2027-01-05 02:00:00'));
+    $permit = revocablePermit();
+    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2027-01-20']);
+
+    $owner = authAs('owner@biztrack.local');
+    $renewalId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $permit->business_id,
+        'data_privacy_consent' => true,
+        'application_type' => 'renewal',
+        'prior_permit_ids' => [$permit->id],
+    ])->assertCreated()->json('data.id');
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$renewalId}/submit")->assertOk();
+
+    return [$permit, $renewalId];
+}
+
+it('rejects the open renewal of a permit it revokes, giving the revocation as the reason', function () {
+    [$permit, $renewalId] = revokedMidRenewal();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Fraudulent documents.'])
+        ->assertOk();
+
+    $renewal = Application::find($renewalId);
+    expect($renewal->status)->toBe(ApplicationStatus::Rejected)
+        ->and($renewal->rejection_reason)->toBe('Fraudulent documents.');
+
+    // The owner hears it the usual way.
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    expect(AppNotification::where('user_id', $owner->id)->where('title', 'Application rejected')->exists())->toBeTrue();
+
+    // And BPLO can no longer approve it, so there is nothing to pay.
+    $assignment = ApplicationAssignment::where('application_id', $renewalId)->firstOrFail();
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/approve")
+        ->assertStatus(422);
+    expect(Permit::where('application_id', $renewalId)->exists())->toBeFalse();
+});
+
+it('stops a renewal billed before the revocation from being paid after it', function () {
+    [$permit, $renewalId] = revokedMidRenewal();
+    bploApprovesForm($renewalId);
+    $fee = UnbilledPermitFee::create([
+        'business_id' => $permit->business_id,
+        'application_id' => $permit->application_id,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'amount' => 500,
+        'incurred_at' => now()->subMonths(3),
+        'billed_on_application_id' => $renewalId,
+    ]);
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Fraudulent registration.'])
+        ->assertOk();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$renewalId}/pay", ['method' => 'gcash'])
+        ->assertStatus(422);
+
+    expect(Permit::where('application_id', $renewalId)->exists())->toBeFalse()
+        // The deferred fee it had claimed is free for the next bill.
+        ->and($fee->fresh()->billed_on_application_id)->toBeNull();
+});
+
+it('leaves a renewal draft alone, which then cannot be submitted', function () {
+    test()->travelTo(Carbon::parse('2027-01-05 02:00:00'));
+    $permit = revocablePermit();
+    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2027-01-20']);
+    $owner = authAs('owner@biztrack.local');
+    $draftId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $permit->business_id,
+        'data_privacy_consent' => true,
+        'application_type' => 'renewal',
+        'prior_permit_ids' => [$permit->id],
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Closure order.'])
+        ->assertOk();
+
+    expect(Application::find($draftId)->status)->toBe(ApplicationStatus::Draft);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$draftId}/submit")
+        ->assertStatus(422)
+        ->assertJsonPath('errors.prior_permit_id.0', 'This permit was revoked, so it can’t be renewed.');
 });
