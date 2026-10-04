@@ -229,6 +229,28 @@ const openFilter = async (page: Page) => {
 const filterField = (page: Page, label: string) =>
   page.locator('.shadow-overlay label').filter({ hasText: label }).locator('select')
 
+/*
+ * The Office picker is a tab strip above the table now, not a select inside
+ * Filter [client, 4 October 2026: "paki labas na lang sa filter"]. Each tab's
+ * accessible name is the full office and certificate, so the tests address it
+ * the way a screen reader announces it.
+ */
+const officeGroup = (page: Page) => page.getByRole('group', { name: 'Office' })
+
+const officeTab = (page: Page, code: string) => {
+  if (code === '') return officeGroup(page).getByRole('button', { name: 'All offices, every permit' })
+  if (code === 'OTHER') {
+    return officeGroup(page).getByRole('button', { name: 'Other offices, every permit but the Mayor’s' })
+  }
+  const o = OFFICES.find((x) => x.code === code)!
+  return officeGroup(page).getByRole('button', { name: `${o.office} — ${o.name}` })
+}
+
+const chooseOffice = async (page: Page, code: string) => {
+  await officeTab(page, code).click()
+  await expect(officeTab(page, code)).toHaveAttribute('aria-pressed', 'true')
+}
+
 /** Every query string the screen sent, so a narrowing can be pinned to the server. */
 let asked: string[]
 
@@ -301,9 +323,7 @@ test.describe('the permit register table', () => {
      * below; here it is a starting condition to undo, exactly as a reader
      * would.
      */
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, '')
     await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
   })
 
@@ -322,11 +342,8 @@ test.describe('the permit register table', () => {
     expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
 
     // And the picker still offers every office, "All" and "Other offices".
-    await openFilter(page)
-    const office = filterField(page, 'Office')
-    await expect(office.locator('option')).toHaveCount(OFFICE_COUNT + 2)
-    await expect(office).toHaveValue('')
-    await page.keyboard.press('Escape')
+    await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 2)
+    await expect(officeTab(page, '')).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('the table leads with the tracking ID, then the office’s own permit no.', async ({ page }) => {
@@ -486,8 +503,7 @@ test.describe('the permit register table', () => {
      */
     const wide = await page.locator('thead th').count()
 
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('SANITARY')
+    await chooseOffice(page, 'SANITARY')
 
     await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
     await expect(page.locator('tbody tr')).toHaveCount(1)
@@ -707,9 +723,7 @@ test.describe('the permit register table', () => {
     await page.getByRole('option', { name: 'Expiring soonest' }).click()
     await expect.poll(() => asked.at(-1)).toContain('sort=valid_until')
 
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('BUSINESS')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, 'BUSINESS')
     await expect.poll(() => asked.at(-1)).toContain('permit_type=BUSINESS')
 
     for (const gone of [/^Valid until/i, /^Days to expiry/i, /^Permit \/ Certificate/i, /^Office$/i]) {
@@ -731,9 +745,7 @@ test.describe('the permit register table', () => {
     await page.keyboard.press('Escape')
 
     // Another office keeps its expiry — a clearance lapses in any month.
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('SANITARY')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, 'SANITARY')
     await expect(page.getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
   })
 
@@ -743,9 +755,7 @@ test.describe('the permit register table', () => {
      * the Mayor's Permit; the five clearances other offices issue are one
      * choice away, asked of the server as "every type but BUSINESS".
      */
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('OTHER')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, 'OTHER')
 
     await expect.poll(() => asked.at(-1)).toContain('exclude_permit_type=BUSINESS')
     expect(asked.at(-1)).not.toContain('permit_type=OTHER')
@@ -959,10 +969,15 @@ test.describe('the office picker, and whose columns each reader gets', () => {
          * column heading on this table, so a text query would pass while the
          * control was still on screen.
          */
+        // The Office tab strip is not drawn for a single-office reader. Its
+        // group is the thing to look for, not the word "Office", which is
+        // also a column heading on this table.
+        await expect(officeGroup(page)).toHaveCount(0)
+        // The narrowing this office DOES get — status, in the Filter menu —
+        // is still there. (The issue-date range was removed on the client's
+        // instruction; see "the issue-date range is not offered as a filter".)
         await openFilter(page)
-        await expect(filterField(page, 'Office')).toHaveCount(0)
-        // The narrowing this office DOES get is still there.
-        await expect(page.locator('.shadow-overlay input[type=date]')).toHaveCount(2)
+        await expect(page.getByRole('option', { name: 'Active', exact: true })).toBeVisible()
         await page.keyboard.press('Escape')
 
         // Its own sheet is there…
@@ -1053,15 +1068,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await page.goto('/staff/admin/permits')
       await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
 
-      await openFilter(page)
-      const picker = filterField(page, 'Office')
-      await expect(picker).toBeVisible()
-      await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 2) // six offices, "All", "Other offices"
+      await expect(officeGroup(page)).toBeVisible()
+      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 2) // six offices, "All", "Other offices"
       // It opens on BPLO's own office; widen it, which is the whole point of
       // the control being here.
-      await expect(picker).toHaveValue('BUSINESS')
-      await picker.selectOption('')
-      await page.keyboard.press('Escape')
+      await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
+      await chooseOffice(page, '')
 
       /*
        * The BAN is off every reader's table now, BPLO's included — it names

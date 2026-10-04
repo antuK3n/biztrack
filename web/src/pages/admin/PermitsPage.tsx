@@ -241,6 +241,106 @@ function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
   return value === null || value.trim() === '' ? '—' : value
 }
 
+/** A permit's uploads: a count that expands into View/Download per file. */
+function UploadsCell({ permit }: { permit: PermitRegisterRow }) {
+  const [open, setOpen] = useState(false)
+  const docs = permit.documents
+
+  if (!docs) return <span className="text-xs text-ink-muted">—</span>
+  if (docs.length === 0) return <span className="text-xs text-ink-muted">None uploaded</span>
+
+  return (
+    <div className="min-w-[13rem]">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`${open ? 'Hide' : 'Show'} ${docs.length} uploaded requirement${docs.length === 1 ? '' : 's'} for ${permit.permit_number}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink hover:border-royal hover:text-royal"
+      >
+        <span aria-hidden="true" className="text-[10px] text-ink-muted">{open ? '▾' : '▸'}</span>
+        {docs.length} file{docs.length === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-2.5">
+          {docs.map((d) => (
+            <li key={d.id}>
+              <p className="text-xs font-semibold text-ink">{d.name}</p>
+              <p className="max-w-[16rem] truncate text-[11px] text-ink-muted" title={d.filename}>
+                {d.filename}
+              </p>
+              <div className="mt-1">
+                <DocumentActions id={d.id} filename={d.filename} label={d.name} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Which office's permits — a visible tab strip, not a menu entry.
+ *
+ * One tab per office, named the way staff say it (the department code) with
+ * the certificate under it, so "BPLO" and "Mayor's / Business Permit" are read
+ * together without a 70-character option. The full office name is the tab's
+ * accessible name and its tooltip.
+ *
+ * It scrolls sideways on a narrow screen rather than wrapping into a block of
+ * pills, so the strip stays one line and the table stays where the eye left it.
+ */
+const OFFICE_TAB_CODES: Record<OfficeCode, string> = {
+  BUSINESS: 'BPLO',
+  ZONING: 'Zoning',
+  SANITARY: 'CHO',
+  FSIC: 'BFP',
+  OCCUPANCY: 'OBO',
+  CEC: 'CENRO',
+}
+
+function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: OfficeChoice) => void }) {
+  const tabs: { value: OfficeChoice; short: string; sub: string; full: string }[] = [
+    { value: '', short: 'All offices', sub: 'Every permit', full: 'All offices, every permit' },
+    ...OFFICES.map((o) => ({ value: o.code as OfficeChoice, short: OFFICE_TAB_CODES[o.code], sub: o.name, full: `${o.office} — ${o.name}` })),
+    { value: OTHER_OFFICES, short: 'Other offices', sub: 'All but the Mayor’s', full: 'Other offices, every permit but the Mayor’s' },
+  ]
+
+  return (
+    // Wraps rather than scrolls: at 1440px a one-line strip cut CENRO in half
+    // and hid "Other offices" off the edge, and a tab nobody can see is a
+    // filter nobody uses.
+    <div role="group" aria-label="Office" className="mb-4">
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((t) => {
+          const active = t.value === value
+          return (
+            <button
+              key={t.value || 'all'}
+              type="button"
+              aria-pressed={active}
+              aria-label={t.full}
+              title={t.full}
+              onClick={() => onChange(t.value)}
+              className={`flex flex-col items-start rounded-lg border px-3.5 py-1.5 text-left transition-colors ${
+                active
+                  ? 'border-royal bg-royal text-white shadow-card'
+                  : 'border-line bg-white text-ink hover:border-royal'
+              }`}
+            >
+              <span className="text-sm font-bold leading-tight">{t.short}</span>
+              <span className={`text-[11px] leading-tight ${active ? 'text-white/85' : 'text-ink-muted'}`}>
+                {t.sub}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function PermitsPage() {
   /*
    * ── Who is reading, and how many offices they can see ────────────────────
@@ -625,24 +725,9 @@ export function PermitsPage() {
                 onChange: (v: string) => selectStatus(v as StatusFilter),
               }}
               filterFields={[
-                ...(locked === null
-                  ? [
-                      {
-                        label: 'Office',
-                        value: chosen,
-                        options: [
-                          { value: '', label: 'All offices — every column' },
-                          ...OFFICES.map((o) => ({ value: o.code, label: `${o.office} — ${o.name}` })),
-                          /*
-                           * Last, after the six, because it is a grouping of
-                           * five of them — read after the list it summarises.
-                           */
-                          { value: OTHER_OFFICES, label: 'Other offices — every permit but the Mayor’s' },
-                        ],
-                        onChange: (v: string) => selectOffice(v as OfficeChoice),
-                      },
-                    ]
-                  : []),
+                // Office moved OUT of this menu to the OfficeTabs strip above the
+                // table [client, 4 October 2026: "paki labas na lang sa filter"]:
+                // it decides which columns exist, so it is the first choice made.
                 {
                   label: 'Retired businesses',
                   value: retired,
@@ -708,6 +793,7 @@ export function PermitsPage() {
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
       ) : (
       <>
+      {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} />}
 
 
       {/*
@@ -863,7 +949,7 @@ export function PermitsPage() {
               </thead>
               <tbody>
                 {rows.map((permit) => (
-                  <tr key={permit.id} className="border-t border-line">
+                  <tr key={permit.id} className="border-t border-line align-top">
                     {columns.map((column) => {
                       const text = cellFor(permit, column)
                       return (
@@ -903,28 +989,18 @@ export function PermitsPage() {
                       IS, not its filename, so a screen reader hears "Barangay
                       Business Clearance" rather than "scan_003.pdf".
                     */}
-                    <td className="px-4 py-3.5 align-top">
-                      {permit.documents && permit.documents.length > 0 ? (
-                        <ul className="space-y-2">
-                          {permit.documents.map((d) => (
-                            <li key={d.id} className="min-w-[16rem]">
-                              <p className="text-xs font-semibold text-ink">{d.name}</p>
-                              <p className="truncate text-[11px] text-ink-muted" title={d.filename}>
-                                {d.filename}
-                              </p>
-                              <div className="mt-1">
-                                <DocumentActions id={d.id} filename={d.filename} label={d.name} />
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="text-xs text-ink-muted">
-                          {permit.documents ? 'None uploaded' : '—'}
-                        </span>
-                      )}
+                    {/*
+                      Collapsed to a count until asked. Listed in full, three
+                      uploads with their View/Download buttons made one row
+                      ~250px tall and pushed the rest of the register down a
+                      screen — the table stopped being something you run your
+                      eye down. The count says there IS something; the toggle
+                      shows it.
+                    */}
+                    <td className="px-4 py-3.5">
+                      <UploadsCell permit={permit} />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top">
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right">
                       <button
                         type="button"
                         onClick={() => view(permit)}
