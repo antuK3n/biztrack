@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { notifications } from '../lib/resources'
 import type { Notification } from '../lib/types'
 import { useNotifications } from '../stores/notifications'
-import { XCircleIcon } from './icons'
+import { AlertTriangleIcon, CheckCircleIcon, XCircleIcon } from './icons'
 import { Modal } from './ui/Modal'
 
 /**
@@ -21,10 +21,51 @@ import { Modal } from './ui/Modal'
  * it once, and the notification stays in the list for the record. Several
  * revoked at once are shown one after another, oldest first.
  *
+ * Since 5 October 2026 it raises every status change an office makes from
+ * Change status, not only a revocation: suspended, retired, rejected, and
+ * active again — each typed by NotificationService, each said once.
+ *
  * It looks again whenever the unread count changes, so a revocation that lands
  * while the owner is signed in appears on the next poll rather than at the
  * next sign-in.
  */
+/** The notices this modal raises, and how each one looks and reads. */
+const KINDS: Record<
+  string,
+  { description: string; tone: string; Icon: typeof XCircleIcon; scan: string | null }
+> = {
+  permit_revoked: {
+    description: 'This permit is no longer valid.',
+    tone: 'bg-s-red-tint text-s-red',
+    Icon: XCircleIcon,
+    scan: 'revoked',
+  },
+  permit_rejected: {
+    description: 'This permit is no longer valid.',
+    tone: 'bg-s-red-tint text-s-red',
+    Icon: XCircleIcon,
+    scan: 'rejected',
+  },
+  permit_suspended: {
+    description: 'This permit is not valid while the suspension stands.',
+    tone: 'bg-s-purple-tint text-s-purple',
+    Icon: AlertTriangleIcon,
+    scan: 'suspended',
+  },
+  permit_retired: {
+    description: 'This permit is closed.',
+    tone: 'bg-canvas text-ink-secondary',
+    Icon: XCircleIcon,
+    scan: 'retired',
+  },
+  permit_reactivated: {
+    description: 'This permit is valid again.',
+    tone: 'bg-s-green-tint text-s-green',
+    Icon: CheckCircleIcon,
+    scan: null,
+  },
+}
+
 export function PermitRevokedModal() {
   const unread = useNotifications((s) => s.unread)
   const setUnread = useNotifications((s) => s.setUnread)
@@ -39,7 +80,7 @@ export function PermitRevokedModal() {
       .then((res) => {
         if (cancelled) return
         const revoked = res.data
-          .filter((n) => n.type === 'permit_revoked' && n.read_at === null)
+          .filter((n) => n.type in KINDS && n.read_at === null)
           .reverse()
         setQueue(revoked)
       })
@@ -69,13 +110,14 @@ export function PermitRevokedModal() {
   )
 
   if (!current) return null
+  const kind = KINDS[current.type] ?? KINDS.permit_revoked
 
   return (
     <Modal
       open
       onClose={() => acknowledge()}
       title={current.title}
-      description="This permit is no longer valid."
+      description={kind.description}
       footer={
         <>
           <button
@@ -97,14 +139,16 @@ export function PermitRevokedModal() {
       }
     >
       <div className="flex gap-3">
-        <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-s-red-tint text-s-red">
-          <XCircleIcon size={22} />
+        <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${kind.tone}`}>
+          <kind.Icon size={22} />
         </span>
         <div className="min-w-0 space-y-2 text-sm leading-relaxed text-ink-secondary">
           <p>{current.body}</p>
           <p className="text-xs text-ink-muted">
-            Anyone who scans this permit&rsquo;s QR code is now told it has been revoked. This notice stays in your
-            notifications.
+            {kind.scan
+              ? `Anyone who scans this permit’s QR code is now told it is ${kind.scan}. `
+              : 'Anyone who scans this permit’s QR code is told it is valid. '}
+            This notice stays in your notifications.
           </p>
         </div>
       </div>

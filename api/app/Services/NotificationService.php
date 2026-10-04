@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\PermitStatus;
 use App\Jobs\SendOwnerUpdateEmail;
 use App\Models\Application;
 use App\Models\AppNotification;
@@ -296,9 +297,10 @@ class NotificationService
         if (! $app->applicant) {
             return;
         }
+        // `permit_suspended`: the owner's screen raises this as a modal.
         $this->push(
             $app->applicant,
-            'decision',
+            'permit_suspended',
             'Business Permit suspended',
             "Your Business Permit {$permit->permit_number} has been suspended because your "
                 ."{$refused->name} was rejected. Reason: {$reason} Apply for that permit again, "
@@ -325,9 +327,10 @@ class NotificationService
         if (! $app->applicant) {
             return;
         }
+        // `permit_reactivated`: the owner's screen raises this as a modal.
         $this->push(
             $app->applicant,
-            'issuance',
+            'permit_reactivated',
             'Business Permit restored',
             "Your Business Permit {$permit->permit_number} is active again."
                 .($reason !== null
@@ -387,6 +390,48 @@ class NotificationService
             disapproval: true,
         );
         $this->fanOut($owner, "BizTrack: {$name} {$permit->permit_number} has been revoked.");
+    }
+
+    /**
+     * An office changed one of its certificates' status from Change status.
+     *
+     * [Client, 5 October 2026: "magrereflect pa rin ito sa lahat, even sa mga
+     * permits, notif, at mga modal pag log in ng business owners".] One notice
+     * per change, typed by what happened so the owner's screen can raise it as
+     * a modal and colour it in the list: `permit_suspended`, `permit_retired`,
+     * `permit_rejected` or `permit_reactivated`. It names the office, since
+     * each office now changes its own certificates. (Revoked has its own,
+     * permitRevoked.)
+     */
+    public function permitStatusChanged(Permit $permit, PermitStatus $to, string $reason): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+
+        $permit->loadMissing('permitType.department');
+        $name = $permit->permitType?->name ?? 'Permit';
+        $office = $permit->permitType?->department?->name ?? 'issuing office';
+
+        [$type, $title, $what] = match ($to) {
+            PermitStatus::Suspended => ['permit_suspended', "{$name} suspended", 'has been suspended and may not be used while the suspension stands.'],
+            PermitStatus::Retired => ['permit_retired', "{$name} retired", 'has been retired. The business is recorded as no longer operating under it.'],
+            PermitStatus::Rejected => ['permit_rejected', "{$name} rejected", 'has been rejected by the office that issued it and is no longer valid.'],
+            default => ['permit_reactivated', "{$name} active again", 'is active again.'],
+        };
+
+        $this->push(
+            $owner,
+            $type,
+            $title,
+            "Your {$name} {$permit->permit_number} {$what} Reason: {$reason} "
+                ."Contact the {$office} if you have questions.",
+            '/permits',
+            $permit,
+            disapproval: $to !== PermitStatus::Active,
+        );
+        $this->fanOut($owner, "BizTrack: {$title} — {$permit->permit_number}.");
     }
 
     // --- Messaging -----------------------------------------------------------

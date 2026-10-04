@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
-import { businessName } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
-import type { Permit, PermitRegisterRow } from '../../lib/types'
+import type { PermitRegisterRow } from '../../lib/types'
 import { BusinessMapPage } from './BusinessMapPage'
+import { ChangeStatusDialog, StatusHistoryDialog } from './PermitStatusDialogs'
+import { STATUS_TONES } from './permitStatusTones'
 import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
-import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
 import { DocumentActions } from '../../components/DocumentActions'
 import { useAuth } from '../../stores/auth'
@@ -115,7 +115,7 @@ const SEARCH_DEBOUNCE_MS = 300
  * written since the business permit began being suspended when another office
  * refuses — comes with it.
  */
-type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'revoked' | 'superseded'
+type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'revoked' | 'retired' | 'rejected' | 'superseded'
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'All' },
@@ -123,6 +123,9 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'expired', label: 'Expired' },
   { value: 'suspended', label: 'Suspended' },
   { value: 'revoked', label: 'Revoked' },
+  // Added with Change status [client, 5 October 2026].
+  { value: 'retired', label: 'Retired' },
+  { value: 'rejected', label: 'Rejected' },
   { value: 'superseded', label: 'Superseded' },
 ]
 
@@ -152,37 +155,15 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
   { value: 'only', label: 'Only retired businesses' },
 ]
 
-/** A permit that is in force — the only kind Revoke is offered on. */
 /**
- * Revocable by THIS reader: in force, and issued by the reader's own office —
- * BPLO the Mayor's Permit, CHO its Sanitary Permits, and so on [client, 4
- * October 2026]. The server applies the same rule (PermitController::revoke).
+ * May THIS reader change this permit's status? The issuing office only — BPLO
+ * the Mayor's Permit, CHO its Sanitary Permits, and so on; the super admin
+ * reads the history. The server applies the same rule (PermitController::status).
  */
-function revocable(permit: PermitRegisterRow, ownOffice: OfficeCode | null): boolean {
-  return (
-    ownOffice !== null &&
-    permit.permit_type?.code === ownOffice &&
-    (permit.status === 'active' || permit.status === 'suspended')
-  )
+function mayChangeStatus(permit: PermitRegisterRow, canChange: boolean, ownOffice: OfficeCode | null): boolean {
+  return canChange && ownOffice !== null && permit.permit_type?.code === ownOffice
 }
 
-/**
- * Status tones, in the tints the other admin tables already use.
- *
- * Superseded is grey rather than red: it is an ordinary, correct outcome — the
- * business renewed early and this certificate was replaced — and colouring it
- * as a problem would break "Red Means Stop" (DESIGN.md). Red is held for
- * `revoked`, which is the one enforcement state in this map, and is listed
- * even though no row carries it so that the day a writer exists the table does
- * not silently render it in the neutral grey of the fallback.
- */
-const STATUS_TONES: Record<string, ChipTone> = {
-  active: 'tint-green',
-  expired: 'tint-yellow',
-  superseded: 'tint-gray',
-  suspended: 'tint-purple',
-  revoked: 'tint-red',
-}
 
 /*
  * ── The Expiring window is not on this screen ─────────────────────────────
@@ -447,7 +428,8 @@ export function PermitsPage() {
    */
   const isSuperAdmin = permissions?.includes('user.manage') ?? false
   const bploView = readsEveryOffice && !isSuperAdmin
-  const canRevoke = permissions?.includes('permit.revoke') ?? false
+  // Every office holds `permit.revoke`; it gates Change status on its own certificates.
+  const canChange = permissions?.includes('permit.revoke') ?? false
   const ownOffice = permitCodeForDepartment(department)
 
   /*
@@ -532,24 +514,11 @@ export function PermitsPage() {
   const [viewing, setViewing] = useState<number | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   /*
-   * The permit whose suspension is being lifted, or null. The whole permit
-   * rather than its id, because the dialog names the certificate and the
-   * business — an admin confirming a lift should not have to trust that they
-   * clicked the row they meant.
+   * The row whose Change status or Status history dialog is open. Whole rows,
+   * so each dialog names the certificate and the business it acts on.
    */
-  const [lifting, setLifting] = useState<Permit | null>(null)
-  const [liftReason, setLiftReason] = useState('')
-  const [liftBusy, setLiftBusy] = useState(false)
-  const [liftError, setLiftError] = useState<string | null>(null)
-  /*
-   * The permit being revoked, or null. Whole row for the same reason as
-   * `lifting`: the dialog names the certificate and the business, so the
-   * officer confirms the row they meant rather than an id.
-   */
-  const [revoking, setRevoking] = useState<PermitRegisterRow | null>(null)
-  const [revokeReason, setRevokeReason] = useState('')
-  const [revokeBusy, setRevokeBusy] = useState(false)
-  const [revokeError, setRevokeError] = useState<string | null>(null)
+  const [changing, setChanging] = useState<PermitRegisterRow | null>(null)
+  const [historyOf, setHistoryOf] = useState<PermitRegisterRow | null>(null)
 
   const { data, loading, error, reload } = useAsync(
     () =>
@@ -733,26 +702,6 @@ export function PermitsPage() {
     setPage(1)
   }
 
-  async function confirmRevoke() {
-    if (revoking === null || revokeBusy || revokeReason.trim() === '') return
-    setRevokeBusy(true)
-    setRevokeError(null)
-    try {
-      await permits.revoke(revoking.id, revokeReason.trim())
-      closeRevoke()
-      reload()
-    } catch (err) {
-      setRevokeError(toApiError(err).message)
-    } finally {
-      setRevokeBusy(false)
-    }
-  }
-
-  function closeRevoke() {
-    setRevoking(null)
-    setRevokeReason('')
-    setRevokeError(null)
-  }
   const sortedColumn = sort ? columns.find((c) => c.sort === sort.key)?.label : null
 
   return (
@@ -1038,6 +987,10 @@ export function PermitsPage() {
                   <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
                     Permit
                   </th>
+                  {/* Last, after the certificate itself [client, 5 October 2026]. */}
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1113,53 +1066,35 @@ export function PermitsPage() {
                       >
                         {viewing === permit.id ? 'Opening…' : 'View'}
                       </button>
-                      {/*
-                        ── Lift, on suspended rows only ──────────────────────
+                    </td>
+                    {/*
+                      ── Actions: Change status and Status history ──────────
 
-                        A suspension is automatic: a clearance office refusing
-                        one of the other permits suspends the business permit
-                        in the same transaction, so nothing waits on a queue
-                        being opened. This is the other half the LGU asked for
-                        — *"CAN be suspended"* — a person able to overrule it.
-
-                        Drawn only where it applies rather than disabled
-                        everywhere: on an active permit it is not a control in
-                        a wrong state, it is a control about nothing.
-
-                        The permit number is in the accessible name for the
-                        reason the View button beside it gives.
-                      */}
-                      {/*
-                        ── Revoke, on rows that are in force ─────────────────
-
-                        Checklist item 23, for BPLO and the super admin. Drawn
-                        only on Active and Suspended rows — an expired or
-                        superseded certificate has already stopped being valid,
-                        and the server refuses to revoke it — and only for a
-                        reader holding `permit.revoke`. Red, because it is the
-                        destructive act on this row (DESIGN.md, Red Means
-                        Stop); the dialog behind it is the confirmation.
-                      */}
-                      {canRevoke && revocable(permit, ownOffice) && (
+                      Change status for the office that issued this permit, and
+                      nobody else; Status history for every reader of the row.
+                      The permit number rides in each accessible name, as on View.
+                    */}
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right">
+                      <div className="inline-flex gap-2">
+                        {mayChangeStatus(permit, canChange, ownOffice) && (
+                          <button
+                            type="button"
+                            onClick={() => setChanging(permit)}
+                            aria-label={`Change status of ${permit.permit_number}`}
+                            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal/90"
+                          >
+                            Change status
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => setRevoking(permit)}
-                          aria-label={`Revoke ${permit.permit_number}`}
-                          className="ml-2 rounded-full border border-s-red px-4 py-1.5 text-xs font-semibold text-s-red hover:bg-s-red hover:text-white"
+                          onClick={() => setHistoryOf(permit)}
+                          aria-label={`Status history of ${permit.permit_number}`}
+                          className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:border-ink hover:text-ink"
                         >
-                          Revoke
+                          Status history
                         </button>
-                      )}
-                      {permit.status === 'suspended' && (
-                        <button
-                          type="button"
-                          onClick={() => setLifting(permit)}
-                          aria-label={`Lift the suspension on ${permit.permit_number}`}
-                          className="ml-2 rounded-full border border-s-red px-4 py-1.5 text-xs font-semibold text-s-red hover:bg-s-red hover:text-white"
-                        >
-                          Lift
-                        </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1167,157 +1102,10 @@ export function PermitsPage() {
             </table>
           </div>
 
-          {lifting !== null && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="lift-heading"
-                className="w-full max-w-md rounded-xl bg-white p-6 shadow-raised"
-              >
-                <h2 id="lift-heading" className="text-base font-bold text-ink">
-                  Lift the suspension on {lifting.permit_number}?
-                </h2>
-                {/*
-                  What the act does and what it deliberately does NOT do. An
-                  admin who believes this also grants the refused clearance
-                  would be lifting it for a reason that is not true.
-                */}
-                <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
-                  {businessName(lifting.business)} may trade on this permit again. The permit
-                  that was rejected stays rejected — that is the issuing office’s decision,
-                  not yours — so this says the business may operate while it is unsettled.
-                </p>
-                <label className="mt-4 block">
-                  <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">
-                    Why are you lifting it?
-                  </span>
-                  <textarea
-                    value={liftReason}
-                    onChange={(e) => setLiftReason(e.target.value)}
-                    rows={3}
-                    className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-                    placeholder="e.g. CHO confirmed the refusal was filed against the wrong business."
-                  />
-                </label>
-                {/* This is audited and read back later; say so where it is typed. */}
-                <p className="mt-1 text-xs text-ink-muted">
-                  Recorded in the audit log against your account.
-                </p>
-                {liftError !== null && (
-                  <p role="alert" className="mt-2 text-xs font-medium text-s-red">
-                    {liftError}
-                  </p>
-                )}
-                <div className="mt-5 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLifting(null)
-                      setLiftReason('')
-                      setLiftError(null)
-                    }}
-                    className="rounded-full border border-line px-5 py-2 text-sm font-semibold text-ink hover:bg-shell-deep"
-                  >
-                    Cancel
-                  </button>
-                  {/*
-                    `aria-disabled`, never `disabled` (AGENTS.md §6.2): a screen
-                    reader skips a disabled control and takes the sentence
-                    explaining it along too.
-                  */}
-                  <button
-                    type="button"
-                    aria-disabled={liftBusy || liftReason.trim() === '' || undefined}
-                    onClick={async () => {
-                      if (liftBusy || liftReason.trim() === '') return
-                      setLiftBusy(true)
-                      setLiftError(null)
-                      try {
-                        await permits.liftSuspension(lifting.id, liftReason.trim())
-                        setLifting(null)
-                        setLiftReason('')
-                        reload()
-                      } catch (err) {
-                        setLiftError(toApiError(err).message)
-                      } finally {
-                        setLiftBusy(false)
-                      }
-                    }}
-                    className="rounded-full bg-s-red px-5 py-2 text-sm font-semibold text-white hover:brightness-110 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                  >
-                    {liftBusy ? 'Lifting…' : 'Lift suspension'}
-                  </button>
-                </div>
-              </div>
-            </div>
+          {changing !== null && (
+            <ChangeStatusDialog permit={changing} onClose={() => setChanging(null)} onChanged={reload} />
           )}
-
-          {revoking !== null && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="revoke-heading"
-                aria-describedby="revoke-consequence"
-                className="w-full max-w-md rounded-xl bg-white p-6 shadow-raised"
-              >
-                <h2 id="revoke-heading" className="text-base font-bold text-ink">
-                  Revoke {revoking.permit_number}?
-                </h2>
-                {/*
-                  The certificate and the business by name, then what happens
-                  — each consequence once. An officer confirming an enforcement
-                  act should not have to trust that they clicked the row they
-                  meant, or guess who is told.
-                */}
-                <p id="revoke-consequence" className="mt-2 text-sm leading-relaxed text-ink-secondary">
-                  {revoking.permit_type?.name ?? 'This permit'} for{' '}
-                  <span className="font-semibold text-ink">{businessName(revoking.business)}</span> stops
-                  being valid today. The owner is notified with your reason, and anyone who scans the
-                  permit’s QR code sees it as revoked. This cannot be undone.
-                </p>
-                <label className="mt-4 block">
-                  <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">
-                    Reason for revoking
-                  </span>
-                  <textarea
-                    value={revokeReason}
-                    onChange={(e) => setRevokeReason(e.target.value)}
-                    rows={3}
-                    aria-required="true"
-                    className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-                  />
-                </label>
-                <p className="mt-1 text-xs text-ink-muted">
-                  Recorded in the audit log against your account.
-                </p>
-                {revokeError !== null && (
-                  <p role="alert" className="mt-2 text-xs font-medium text-s-red">
-                    {revokeError}
-                  </p>
-                )}
-                <div className="mt-5 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={closeRevoke}
-                    className="rounded-full border border-line px-5 py-2 text-sm font-semibold text-ink hover:bg-shell-deep"
-                  >
-                    Cancel
-                  </button>
-                  {/* aria-disabled, never disabled (AGENTS.md §6.2). */}
-                  <button
-                    type="button"
-                    aria-disabled={revokeBusy || revokeReason.trim() === '' || undefined}
-                    onClick={confirmRevoke}
-                    className="rounded-full bg-s-red px-5 py-2 text-sm font-semibold text-white hover:brightness-110 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                  >
-                    {revokeBusy ? 'Revoking…' : 'Revoke permit'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {historyOf !== null && <StatusHistoryDialog permit={historyOf} onClose={() => setHistoryOf(null)} />}
 
           <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
             <div>

@@ -465,6 +465,17 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::middleware('permission:permit.revoke')
         ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);
 
+    /*
+     * Change status and its history [client, 5 October 2026]. The options and
+     * the history are reads any permit reader may make of a permit it can see
+     * (the controller checks that); changing is the issuing office's, behind
+     * the same permission as revoking.
+     */
+    Route::get('permits/{permit}/status-options', [PermitController::class, 'statusOptions']);
+    Route::get('permits/{permit}/history', [PermitController::class, 'history']);
+    Route::middleware('permission:permit.revoke')
+        ->post('permits/{permit}/status', [PermitController::class, 'status']);
+
     // Chatbot (rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
     Route::post('chatbot/messages', [ChatbotController::class, 'store']);

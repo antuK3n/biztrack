@@ -559,9 +559,10 @@ export function PermitDetailPage() {
                 )}
               </div>
             )}
-            {revoked && (
+            {/* Revoked, and the two statuses added on 5 October 2026: each is a decision, said on the face. */}
+            {(revoked || permit.status === 'retired' || permit.status === 'rejected') && (
               <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
-                Revoked
+                {cert?.status_label ?? permit.status}
               </p>
             )}
 

@@ -71,6 +71,12 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
     return { tone: 'warning', Glyph: AlertTriangleIcon }
   }
 
+  // Change status [client, 5 October 2026]: each kind in its own colour.
+  if (n.type === 'permit_rejected') return { tone: 'warning', Glyph: XCircleIcon }
+  if (n.type === 'permit_suspended') return { tone: 'warning', Glyph: AlertTriangleIcon }
+  if (n.type === 'permit_retired') return { tone: 'info', Glyph: XCircleIcon }
+  if (n.type === 'permit_reactivated') return { tone: 'success', Glyph: CheckCircleIcon }
+
   // A revoked permit is enforcement, never a success. Older notices carried
   // the generic `decision` type and showed a green tick; the title catches them.
   if (n.type === 'permit_revoked' || (n.type === 'decision' && /revoked/i.test(n.title))) {

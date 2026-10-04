@@ -1,0 +1,202 @@
+<?php
+
+use App\Enums\PermitStatus;
+use App\Models\ApplicationAssignment;
+use App\Models\AppNotification;
+use App\Models\Barangay;
+use App\Models\Permit;
+use App\Models\PermitType;
+use App\Models\PsicCode;
+use App\Models\User;
+
+/*
+ * Change status and View status history [client, 5 October 2026].
+ *
+ *   BPLO, on a Mayor's Permit   Active · Suspended · Retired · Revoked
+ *   A clearance office          Active · Rejected
+ *
+ * A clearance set to Rejected suspends the Mayor's Permit at once, and while
+ * it stands BPLO cannot change that permit at all; setting it back to Active
+ * restores the Mayor's Permit. Only the issuing office changes a permit; the
+ * super admin reads the history. Every change tells the owner.
+ */
+
+/**
+ * A filing holding an active Mayor's Permit and an active Sanitary Permit.
+ *
+ * @return array{business: Permit, sanitary: Permit}
+ */
+function statusPair(): array
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => 'Status Store '.random_int(10000, 99999),
+        'trade_name' => 'Status Trade',
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(100000, 999999),
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '5 Status Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
+    ])->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY'])->pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    // Routed to the health office, as a filing carrying its permit is.
+    ApplicationAssignment::firstOrCreate([
+        'application_id' => $appId,
+        'department_id' => PermitType::where('code', 'SANITARY')->value('issuing_department_id'),
+    ]);
+
+    $make = fn (string $code, string $prefix) => Permit::create([
+        'permit_number' => $prefix.'-'.random_int(100000, 999999),
+        'application_id' => $appId,
+        'business_id' => $businessId,
+        'permit_type_id' => PermitType::where('code', $code)->value('id'),
+        'status' => PermitStatus::Active,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+
+    return ['business' => $make('BUSINESS', 'MPS'), 'sanitary' => $make('SANITARY', 'HCS')];
+}
+
+function setStatus(string $as, Permit $permit, string $status, string $reason = 'For the record.')
+{
+    return test()->withHeaders(authAs($as))
+        ->postJson("/api/v1/permits/{$permit->id}/status", ['status' => $status, 'reason' => $reason]);
+}
+
+it('offers BPLO the four Mayor’s Permit statuses, and an office only Active and Rejected', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    $bplo = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
+    expect($bplo['can_change'])->toBeTrue()
+        ->and(array_column($bplo['options'], 'label'))->toBe(['Suspended', 'Retired', 'Revoked']);
+
+    $cho = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson("/api/v1/permits/{$hc->id}/status-options")->assertOk()->json('data');
+    expect($cho['can_change'])->toBeTrue()
+        ->and(array_column($cho['options'], 'label'))->toBe(['Rejected']);
+});
+
+it('lets BPLO suspend the Mayor’s Permit, tells the owner, and records it in the history', function () {
+    ['business' => $mp] = statusPair();
+
+    setStatus('bplo@biztrack.local', $mp, 'suspended', 'Inspection found violations.')->assertOk()
+        ->assertJsonPath('data.status', 'suspended');
+
+    expect($mp->fresh()->suspended_cause)->toBe('manual');
+
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $notice = AppNotification::where('user_id', $owner->id)->latest('id')->firstOrFail();
+    expect($notice->type)->toBe('permit_suspended')
+        ->and($notice->body)->toContain('Inspection found violations.');
+
+    $history = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/history")->assertOk()->json('data');
+    expect($history[0]['to'])->toBe('suspended')
+        ->and($history[0]['reason'])->toBe('Inspection found violations.')
+        ->and(end($history)['label'])->toBe('Issued');
+});
+
+it('makes Retired final', function () {
+    ['business' => $mp] = statusPair();
+
+    setStatus('bplo@biztrack.local', $mp, 'retired', 'Business closed.')->assertOk();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Retired);
+
+    setStatus('bplo@biztrack.local', $mp, 'active', 'Reopened.')->assertUnprocessable();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Retired);
+});
+
+it('suspends the Mayor’s Permit when an office rejects its permit, and locks it for BPLO', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'Failed re-inspection.')->assertOk();
+
+    expect($hc->fresh()->status)->toBe(PermitStatus::Rejected)
+        ->and($mp->fresh()->status)->toBe(PermitStatus::Suspended)
+        ->and($mp->fresh()->suspended_cause)->toBe('refusal');
+
+    // BPLO is told why, and cannot change it.
+    $options = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
+    expect($options['locked'])->not->toBeEmpty()
+        ->and($options['locked'][0])->toContain($hc->permit_number);
+
+    setStatus('bplo@biztrack.local', $mp, 'active', 'Trying anyway.')->assertUnprocessable();
+    setStatus('bplo@biztrack.local', $mp, 'revoked', 'Trying anyway.')->assertUnprocessable();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
+
+    // The owner hears about both.
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $types = AppNotification::where('user_id', $owner->id)->latest('id')->take(2)->pluck('type')->all();
+    expect($types)->toContain('permit_rejected')->toContain('permit_suspended');
+});
+
+it('restores the Mayor’s Permit when the office sets its permit back to Active', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'Failed re-inspection.')->assertOk();
+    setStatus('sanitary@biztrack.local', $hc, 'active', 'Passed the follow-up inspection.')->assertOk();
+
+    expect($hc->fresh()->status)->toBe(PermitStatus::Active)
+        ->and($mp->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('never lifts BPLO’s own suspension when an office re-approves', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    setStatus('bplo@biztrack.local', $mp, 'suspended', 'Closure order pending.')->assertOk();
+    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'Failed re-inspection.')->assertOk();
+    setStatus('sanitary@biztrack.local', $hc, 'active', 'Passed.')->assertOk();
+
+    expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
+});
+
+it('keeps each office to its own vocabulary and its own certificates', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    // An office cannot suspend or retire, even its own permit.
+    setStatus('sanitary@biztrack.local', $hc, 'suspended')->assertUnprocessable();
+    setStatus('sanitary@biztrack.local', $hc, 'retired')->assertUnprocessable();
+    // BPLO cannot reject a Mayor's Permit.
+    setStatus('bplo@biztrack.local', $mp, 'rejected')->assertUnprocessable();
+
+    // Nobody changes another office's permit, and the super admin changes none.
+    setStatus('bplo@biztrack.local', $hc, 'rejected')->assertForbidden();
+    setStatus('fire@biztrack.local', $hc, 'rejected')->assertForbidden();
+    setStatus('admin@biztrack.local', $mp, 'suspended')->assertForbidden();
+
+    $admin = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
+    expect($admin['can_change'])->toBeFalse()->and($admin['options'])->toBe([]);
+
+    expect($mp->fresh()->status)->toBe(PermitStatus::Active)
+        ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
+});
+
+it('asks for a reason', function () {
+    ['business' => $mp] = statusPair();
+
+    setStatus('bplo@biztrack.local', $mp, 'suspended', '')->assertUnprocessable()->assertJsonValidationErrors('reason');
+});
+
+it('tells the public verify page a Rejected or Retired permit is not valid', function () {
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'Failed re-inspection.')->assertOk();
+
+    test()->getJson("/api/v1/verify/{$hc->permit_number}")
+        ->assertOk()
+        ->assertJsonPath('data.status', 'rejected')
+        ->assertJsonPath('data.is_valid', false);
+});

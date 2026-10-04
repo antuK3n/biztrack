@@ -60,7 +60,9 @@ import type {
   PaymentMethod,
   PaymentOptions,
   Permit,
+  PermitHistoryEntry,
   PermitRegisterRow,
+  PermitStatusOptions,
   PermitType,
   PrefillResult,
   ProcessingTimeReport,
@@ -1484,6 +1486,13 @@ export const permits = {
    */
   revoke: (id: number, reason: string) =>
     unwrap<PermitRegisterRow>(api.post(`/permits/${id}/revoke`, { reason })),
+  /** What the Change status dialog may offer, and what (if anything) locks it. */
+  statusOptions: (id: number) => unwrap<PermitStatusOptions>(api.get(`/permits/${id}/status-options`)),
+  /** Change status — the issuing office only; the server says no to anyone else. */
+  changeStatus: (id: number, status: string, reason: string) =>
+    unwrap<PermitRegisterRow>(api.post(`/permits/${id}/status`, { status, reason })),
+  /** Every status the permit has held, newest first. */
+  history: (id: number) => unwrap<PermitHistoryEntry[]>(api.get(`/permits/${id}/history`)),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */

@@ -405,7 +405,8 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
                * (DESIGN.md, Never Color Alone) — the fill is what makes it
                * findable while scrolling a long profile.
                */
-              const sanctioned = permit.status === 'suspended' || permit.status === 'revoked'
+              const sanctioned =
+                permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected'
 
               return (
                 <li
@@ -557,7 +558,8 @@ export function useHoldings(enabled: boolean) {
        * already carries it, and a lapsed permit is a date passing rather
        * than a decision anybody took.
        */
-      if (permit.status === 'suspended' || permit.status === 'revoked') group.flagged = true
+      if (permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected')
+        group.flagged = true
     }
 
     /*
