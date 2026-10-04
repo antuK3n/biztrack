@@ -32,9 +32,52 @@ If a **[J]** rule gets in your way, say so — those are the negotiable ones. If
 
 ---
 
+## 0. Defense week — five people on `main` [J — Ken, 4 October 2026]
+
+**Until the thesis defense, everyone commits to `main`.** Five people are in one
+room, each with their own Claude, on the same branch. For this week this section
+overrides §1's "work on `dev`, only the client touches `main`"; everything else
+in this file still applies.
+
+**The loop, for every finished change — never batched:**
+
+1. `git fetch origin && git pull --rebase origin main` before starting.
+2. Before editing a file, `git log origin/main --since="3 hours ago" --format="%h %an %ar  %s" -- <file>`.
+   If someone else touched it, tell your developer and wait for a yes.
+3. One small change per commit. Run the §3 checks for what it touched.
+4. Right before pushing: `git fetch origin`, then compare
+   `git diff --name-only HEAD...origin/main` (their files) with
+   `git diff --name-only origin/main...HEAD` (yours). Say so if they overlap.
+5. `git pull --rebase origin main` (history must stay linear — no merge
+   commits), re-check, `git push origin HEAD:main`.
+6. Tell your developer the hash and subject you pushed, so the room hears it.
+
+**Conflicts:** never resolve one in someone else's change on your own. Show
+both sides, who wrote the other side, and your recommendation, then wait. No
+whole-file `--ours`/`--theirs`. Never `push --force`, never rewrite pushed
+history, never `reset --hard`, never `stash` (§1).
+
+**If GitHub refuses the push** with "Changes must be made through a pull
+request" (`main` is protected; only Ken's account bypasses it): push a branch,
+then `gh pr create --base main --fill` and `gh pr merge --rebase --delete-branch`
+(no approvals needed). Pull `main` again afterwards.
+
+**Shared things:** announce a migration when you push one (pick a timestamp
+later than `ls api/database/migrations | tail -1`). `.env` files stay off limits
+(§2.5). Don't touch biztrack.page or its server unless your developer asks —
+Ken deploys, and payments there are real money (a ₱50 test charge).
+
+**If the session runs as Fable:** Fable is the orchestrator only — it plans,
+hands every implementation, investigation and test task to an **Opus**
+subagent (Agent tool, `model: "opus"`) with a self-contained brief that
+carries these rules, and reviews what comes back. It does not write code
+itself, unless the developer says otherwise.
+
+---
+
 ## 1. Git
 
-**`main` is the client's. Only they push or merge to it. [J]**
+**`main` is the client's. Only they push or merge to it. [J]** *(Suspended for defense week — see §0.)*
 
 ```
 you:      commit → dev → push        (repeat)
