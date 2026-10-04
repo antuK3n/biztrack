@@ -714,6 +714,8 @@ it('files an approved reply to a requirement under the office that asked for it,
     // The approved one is on the health office's row, named by what it asked for…
     expect($docsOn('TEST-SANITARY-0001')->firstWhere('id', $approved->id)['name'] ?? null)
         ->toBe('Health certificates of the food handlers');
+    // …marked as sent under Other Requirements, which a filing upload is not.
+    expect($docsOn('TEST-SANITARY-0001')->firstWhere('id', $approved->id)['from_request'] ?? null)->toBeTrue();
     // …and not on the Mayor's Permit, which did not ask.
     expect($docsOn('TEST-BUSINESS-0001')->pluck('id'))->not->toContain($approved->id);
 

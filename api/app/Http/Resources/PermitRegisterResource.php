@@ -240,6 +240,8 @@ class PermitRegisterResource extends PermitResource
                 // A requested file is named by what the office asked for, not
                 // by the catch-all "Other Requirements" type it is filed under.
                 'name' => $this->requestTitle($d) ?? $d->documentType?->name ?? 'Document',
+                // Sent through Other Requirements, so the table can say so.
+                'from_request' => $d->relationLoaded('requestResponses') && $d->requestResponses->isNotEmpty(),
                 'filename' => $d->original_filename,
                 'status' => $d->verification_status,
                 'download_url' => '/documents/'.$d->id.'/download',
