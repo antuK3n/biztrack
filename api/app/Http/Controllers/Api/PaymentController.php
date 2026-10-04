@@ -20,8 +20,10 @@ use App\Support\PaymentMode;
 use App\Support\PdfFile;
 use App\Support\PermitFees;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -44,6 +46,12 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PaymentController extends Controller
 {
+    /** How long one payment holds its bill's lock at most — see `onePaymentAtATime`. */
+    private const PAY_LOCK_SECONDS = 60;
+
+    /** How long a second press waits for the first before giving up. */
+    private const PAY_LOCK_WAIT_SECONDS = 30;
+
     public function __construct(
         private PaymentGateway $gateway,
         private WorkflowService $workflow,
@@ -133,6 +141,12 @@ class PaymentController extends Controller
     }
 
     public function pay(Request $request, Application $application): JsonResponse
+    {
+        return $this->onePaymentAtATime($application, fn (Application $fresh) => $this->payNow($request, $fresh));
+    }
+
+    /** `pay()`, once it holds the bill's lock — see `onePaymentAtATime`. */
+    private function payNow(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
 
@@ -319,6 +333,12 @@ class PaymentController extends Controller
      * set aside here rather than refused — see the note above that branch.
      */
     public function counterPayment(Request $request, Application $application): JsonResponse
+    {
+        return $this->onePaymentAtATime($application, fn (Application $fresh) => $this->counterPaymentNow($request, $fresh));
+    }
+
+    /** `counterPayment()`, once it holds the bill's lock. */
+    private function counterPaymentNow(Request $request, Application $application): JsonResponse
     {
         $this->authorizeBploStaff($request);
 
@@ -577,6 +597,35 @@ class PaymentController extends Controller
         $stripped = preg_replace('/\s+\([^()]*\)/u', '', $label) ?? $label;
 
         return trim(preg_replace('/\s{2,}/u', ' ', $stripped) ?? $stripped);
+    }
+
+    /**
+     * One payment at a time per bill (Ken, 5 October 2026).
+     *
+     * Both doors read the balance and then charged, with nothing held between
+     * the two, so a second press inside that window passed the same check: the
+     * owner's double tap, two clerks on two screens, or the owner paying
+     * online while BPLO marked the bill paid each recorded a second payment of
+     * the whole bill or opened a second live KwikPay order (scenario run,
+     * owner-pay 2; bplo-counter-payment 7, 8, 12).
+     *
+     * So the owner's Pay and BPLO's Mark as paid take the same lock on the
+     * filing, and everything they decide is decided again INSIDE it, from a
+     * fresh read: a press that waited finds the bill settled and is refused,
+     * or finds the online order the first one opened and is handed that.
+     *
+     * A cache lock rather than `lockForUpdate`. Opening a KwikPay order is an
+     * HTTP call of up to `payments.kwikpay.timeout` seconds, and holding a
+     * database transaction across it would also roll back the record of an
+     * order KwikPay may already hold if anything failed after. The lock
+     * expires on its own after `PAY_LOCK_SECONDS` — longer than a KwikPay
+     * transfer can take (15 s to answer, 10 s to connect) — so a request that
+     * dies holding it cannot block the bill for longer than that.
+     */
+    private function onePaymentAtATime(Application $application, Closure $then): JsonResponse
+    {
+        return Cache::lock('payment:application:'.$application->id, self::PAY_LOCK_SECONDS)
+            ->block(self::PAY_LOCK_WAIT_SECONDS, fn () => $then(Application::findOrFail($application->id)));
     }
 
     /** A KwikPay payment for this application still waiting, with somewhere to pay it. */
