@@ -677,6 +677,14 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             Route::post('owners/{owner}/lift-blacklist', [BusinessStatusController::class, 'liftOwnerBlacklist']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
             /*
+             * Business Owner Status, one row per owner [client, 5 October 2026]:
+             * the roster of people, their status (Active or Blacklisted), and
+             * its history.
+             */
+            Route::get('owners', [BusinessStatusController::class, 'owners']);
+            Route::post('owners/{owner}/status', [BusinessStatusController::class, 'ownerStatus']);
+            Route::get('owners/{owner}/history', [BusinessStatusController::class, 'ownerHistory']);
+            /*
              * The other half of FO-003's section II. Same permission as the
              * status change: both are the register's own facts about a
              * business, set by an admin rather than by its owner, and an

@@ -76,8 +76,10 @@ it('records the status change as from, to and reason', function () {
     // is what made a blacklisting render as "Active".
     expect($log->changes)->toHaveKeys(['from', 'to', 'reason'])
         ->and($log->changes['from'])->toBe($before)
-        ->and($log->changes['to'])->toBe('blacklisted')
-        ->and($log->changes['reason'])->toBe('Falsified / misrepresented documents')
+        // Blacklisting is of the owner and SUSPENDS the business [client,
+        // 5 October 2026]; the row names the owner's finding as its reason.
+        ->and($log->changes['to'])->toBe('suspended')
+        ->and($log->changes['reason'])->toBe('Owner blacklisted: Falsified / misrepresented documents')
         ->and($log->changes)->not->toHaveKey('status');
 });
 

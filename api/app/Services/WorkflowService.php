@@ -3191,24 +3191,38 @@ class WorkflowService
      */
     public function statusLockFor(Permit $permit): array
     {
-        $permit->loadMissing('permitType', 'application');
+        $permit->loadMissing('permitType', 'application', 'business.owner');
+
+        /*
+         * Any certificate, not only the Mayor's Permit: a business the super
+         * admin has suspended — or whose owner is blacklisted — holds every
+         * one of its permits suspended [client, 5 October 2026]. Only
+         * reinstating the business or the owner releases them.
+         */
+        $held = [];
+        $business = $permit->business;
+        if ($business?->owner?->isBlacklisted()) {
+            $held[] = "The owner, {$business->owner->name}, is blacklisted — the super admin has to reinstate the owner first";
+        } elseif (in_array($business?->status, ['suspended', Business::STATUS_BLACKLISTED], true)) {
+            $held[] = "{$business->name} is suspended by the super admin — the business has to be reinstated first";
+        }
 
         if ($permit->permitType?->code !== PermitType::OUTCOME_CODE) {
-            return [];
+            return $held;
         }
 
         if ($permit->application !== null) {
-            return $this->refusalsHolding($permit->application);
+            return [...$held, ...$this->refusalsHolding($permit->application)];
         }
 
         // A permit whose filing was deleted: only its business's Rejected certificates can hold it.
-        return Permit::query()
+        return [...$held, ...Permit::query()
             ->where('business_id', $permit->business_id)
             ->where('status', PermitStatus::Rejected->value)
             ->with('permitType')
             ->get()
             ->map(fn (Permit $p) => "{$p->permitType?->name} {$p->permit_number} — set to Rejected by its office")
-            ->all();
+            ->all()];
     }
 
     private function assertNotHeldByRefusal(Permit $permit): void
@@ -3218,8 +3232,8 @@ class WorkflowService
         if ($lock !== []) {
             throw ValidationException::withMessages([
                 'status' => [
-                    'This Mayor\'s / Business Permit is held suspended because another permit is rejected, '
-                    .'and it cannot be changed until that office sets it back to Active: '.implode('; ', $lock).'.',
+                    'This permit is held suspended and cannot be changed until this is settled: '
+                    .implode('; ', $lock).'.',
                 ],
             ]);
         }
@@ -3256,9 +3270,7 @@ class WorkflowService
             ]);
         }
 
-        if ($isOutcome) {
-            $this->assertNotHeldByRefusal($permit);
-        }
+        $this->assertNotHeldByRefusal($permit);
 
         // Revoking keeps its own path: its columns, its audit action, its notice.
         if ($to === PermitStatus::Revoked) {

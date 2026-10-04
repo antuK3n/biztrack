@@ -73,9 +73,10 @@ it('bars the owner and every business they hold, not just the one clicked', func
     expect($owner->refresh()->isBlacklisted())->toBeTrue()
         ->and($owner->blacklist_reason)->toBe('Falsified sanitary clearance.');
 
-    // And all three shopfronts, so every screen that reads a business's own
-    // status — the roster, the certificate, the QR check — keeps working.
-    expect($owner->businesses()->pluck('status')->unique()->all())->toBe(['blacklisted']);
+    // And all three shopfronts are SUSPENDED by it [client, 5 October 2026] —
+    // the owner is what is blacklisted, so every screen reading a business's own
+    // status still finds it barred.
+    expect($owner->businesses()->pluck('status')->unique()->all())->toBe(['suspended']);
 
     // The reply says what else moved, so the screen need not reload and count.
     expect($data['owner_blacklisted'])->toBeTrue()
@@ -142,8 +143,10 @@ it('lifts the bar from the person and the businesses it swept up', function () {
     $clicked = $owner->businesses()->first();
     blacklist($clicked)->assertOk();
 
+    // Reinstated from the owner's own row now [client, 5 October 2026]: a
+    // business of a blacklisted owner is locked.
     $data = test()->withHeaders(authAs('admin@biztrack.local'))
-        ->postJson("/api/v1/admin/businesses/{$clicked->id}/status", [
+        ->postJson("/api/v1/admin/owners/{$owner->id}/status", [
             'status' => 'active',
             'reason' => 'Documents verified on appeal.',
         ])->assertOk()->json('data');
@@ -151,14 +154,14 @@ it('lifts the bar from the person and the businesses it swept up', function () {
     expect($owner->refresh()->isBlacklisted())->toBeFalse()
         ->and($owner->blacklist_reason)->toBeNull()
         ->and($owner->businesses()->pluck('status')->unique()->all())->toBe(['active'])
-        ->and($data['others_restored'])->toBe(2);
+        ->and($data['businesses_moved'])->toBe(3);
 
     foreach ($owner->businesses()->get() as $business) {
         expect($business->isBlockedFromApplying())->toBeFalse();
     }
 });
 
-it('does not lift the bar by moving one business to Flagged', function () {
+it('does not let one business of a blacklisted owner be changed at all', function () {
     /*
      * Half-measures. Setting a blacklisted business to Flagged is not an admin
      * saying the finding no longer stands, and leaving the owner barred while
@@ -169,11 +172,12 @@ it('does not lift the bar by moving one business to Flagged', function () {
     $clicked = $owner->businesses()->first();
     blacklist($clicked)->assertOk();
 
+    // Locked while the owner is blacklisted [client, 5 October 2026].
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/admin/businesses/{$clicked->id}/status", [
             'status' => 'flagged',
             'reason' => 'Under review.',
-        ])->assertOk();
+        ])->assertUnprocessable();
 
     expect($owner->refresh()->isBlacklisted())->toBeTrue()
         ->and($clicked->refresh()->isBlockedFromApplying())->toBeTrue();
@@ -189,11 +193,11 @@ it('does not re-date a blacklisting that is already in force', function () {
 
     $when = $owner->refresh()->blacklisted_at;
 
-    $again = blacklist($clicked, 'Same finding, saved twice.')->assertOk()->json('data');
+    // A second save is refused outright now: the business is locked.
+    blacklist($clicked, 'Same finding, saved twice.')->assertUnprocessable();
 
     expect($owner->refresh()->blacklisted_at->equalTo($when))->toBeTrue()
-        ->and($owner->blacklist_reason)->toBe('Falsified sanitary clearance.')
-        ->and($again['others_blacklisted'])->toBe(0);
+        ->and($owner->blacklist_reason)->toBe('Falsified sanitary clearance.');
 });
 
 it('tells the owner it is their account, and how many businesses it covers', function () {
@@ -252,7 +256,7 @@ it('lists the barred people, with everything they own', function () {
 
     $swept = collect($row['businesses'])->firstWhere('name', 'Reyes Hardware');
     expect($swept['registered_after'])->toBeFalse()
-        ->and($swept['status'])->toBe('blacklisted');
+        ->and($swept['status'])->toBe('suspended');
 });
 
 it('drops the owner off the barred register once reinstated', function () {
@@ -261,7 +265,7 @@ it('drops the owner off the barred register once reinstated', function () {
     blacklist($clicked)->assertOk();
 
     test()->withHeaders(authAs('admin@biztrack.local'))
-        ->postJson("/api/v1/admin/businesses/{$clicked->id}/status", [
+        ->postJson("/api/v1/admin/owners/{$owner->id}/status", [
             'status' => 'active',
             'reason' => 'Documents verified on appeal.',
         ])->assertOk();
@@ -290,7 +294,7 @@ it('marks the roster row so three shops of one owner read as one sanction', func
     expect($rows)->toHaveCount(3);
     foreach ($rows as $row) {
         expect($row['owner']['blacklisted'])->toBeTrue()
-            ->and($row['status'])->toBe('blacklisted');
+            ->and($row['status'])->toBe('suspended');
     }
 });
 
