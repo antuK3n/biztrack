@@ -467,6 +467,8 @@ class OfficeFormController extends Controller
             'submit' => ['sometimes', 'boolean'],
             // Birthdays can never be in the future (CEC "Birthday of Owner").
             'form_data.owner_birthday' => ['sometimes', 'nullable', 'date', 'before:today'],
+            // The owner's Community Tax Certificate (Occupancy sheet) was issued already.
+            'form_data.owner_ctc_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             // An office cannot have issued a document on a future date.
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
@@ -495,13 +497,41 @@ class OfficeFormController extends Controller
             ->first();
         $current = $existing?->form_data ?? [];
 
+        /*
+         * ── Who may write what ──────────────────────────────────────────────
+         *
+         * The applicant owns the answers; the office dates stay as recorded.
+         *
+         * An OFFICE may correct the answers on the one sheet it issues the
+         * permit for — client, 4 October 2026, on finding Edit mode would not
+         * let them: *"I can't edit fields. PLEASE FIX FOR ALL ADMINS/OFFICES."*
+         * The gate is the department that ISSUES this permit type, strictly,
+         * and not `readableCode()`: an admin who may read every office's sheet
+         * is not thereby every office. A reader from another office, or the
+         * super admin, keeps the old rule — the issuance dates and nothing else.
+         *
+         * Every corrected answer is written to the audit log by key, before and
+         * after, so a sheet an office changed reads as one an office changed.
+         */
+        $ownsSheet = $user->department_id !== null
+            && $user->department_id === $this->issuingDepartmentId($permitTypeCode);
+
         if ($isOwner) {
-            // The applicant owns the answers; the office dates stay as recorded.
             $formData = array_diff_key($submitted, array_flip(self::OFFICER_KEYS))
                 + array_intersect_key($current, array_flip(self::OFFICER_KEYS));
+        } elseif ($ownsSheet) {
+            $formData = $submitted + $current;
         } else {
-            // The officer may only touch the issuance dates.
             $formData = array_intersect_key($submitted, array_flip(self::OFFICER_KEYS)) + $current;
+        }
+
+        $corrected = [];
+        if (! $isOwner && $ownsSheet) {
+            foreach ($formData as $key => $value) {
+                if (($current[$key] ?? null) !== $value) {
+                    $corrected[$key] = ['from' => $current[$key] ?? null, 'to' => $value];
+                }
+            }
         }
 
         $formData = OfficeFormAnswers::derive($application, $permitType->code, $formData);
@@ -511,6 +541,12 @@ class OfficeFormController extends Controller
             ['form_data' => $formData]
         );
         Audit::log('office_form.saved', $form);
+        if ($corrected !== []) {
+            Audit::log('office_form.corrected_by_office', $form, [
+                'department_id' => $user->department_id,
+                'fields' => $corrected,
+            ]);
+        }
 
         /*
          * ── Saving is not submitting. Completing is. ──────────────────────────

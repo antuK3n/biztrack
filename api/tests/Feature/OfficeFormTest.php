@@ -4,7 +4,10 @@ use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Enums\ClearanceStatus;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
+use App\Models\Department;
 use App\Models\ApplicationOfficeForm;
+use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\PermitType;
 use App\Models\User;
@@ -231,7 +234,13 @@ it('lets a reviewing officer record the issuance dates', function () {
         ->toMatchArray(['application_type' => 'Full', 'building_permit_no' => 'BP-001']);
 });
 
-it('does not let an officer overwrite the applicant answers', function () {
+it('does not let ANOTHER office overwrite the applicant answers', function () {
+    /*
+     * BPLO does not issue the Occupancy Permit — the Office of the Building
+     * Official does — so this is a reviewer from outside the sheet's office,
+     * and it keeps the old rule: the issuance dates and nothing else. The
+     * test two below is the office that DOES issue it.
+     */
     $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
@@ -246,6 +255,80 @@ it('does not let an officer overwrite the applicant answers', function () {
         ->assertOk();
 
     expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001');
+});
+
+it('lets the office that issues the permit correct the applicant’s answers, and records each change', function () {
+    /*
+     * Client, 4 October 2026: *"edit mode for the admin side still does not
+     * work. I can't edit fields. PLEASE FIX FOR ALL ADMINS/OFFICES."* Edit
+     * mode had only ever opened the For Office Use fields; the decision taken
+     * was that an office may correct the one sheet it issues the permit for.
+     *
+     * Two things are pinned. The write lands — and the audit row names the
+     * key, what it said and what it says now, so a sheet an office changed
+     * reads as one an office changed. `department_id` is on the row because
+     * the reader of an audit log asks "which office", not "which user id".
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001', 'building_units' => '3'],
+    ]);
+    /*
+     * Routed, as `startClearance` routes it: visibility asks whether the
+     * office holds a review on the filing before the write rule is ever
+     * reached, and an office with no assignment is a stranger to it.
+     */
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'OBO')->value('id'),
+        'status' => 'pending',
+        'assigned_at' => now(),
+    ]);
+
+    $this->withHeaders(authAs('obo@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001-A', 'building_units' => '3'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.building_permit_no', 'BP-001-A');
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001-A');
+
+    $entry = AuditLog::where('action', 'office_form.corrected_by_office')->latest('id')->first();
+    expect($entry)->not->toBeNull()
+        ->and($entry->changes['department_id'])->toBe(User::where('email', 'obo@biztrack.local')->value('department_id'))
+        ->and($entry->changes['fields'])->toBe([
+            'building_permit_no' => ['from' => 'BP-001', 'to' => 'BP-001-A'],
+        ]);
+});
+
+it('refuses the super admin the write outright', function () {
+    /*
+     * The gate is the department that ISSUES the permit, strictly. The super
+     * admin reads every office's sheet and belongs to none, and reading
+     * everything must not become editing everything. In practice the admin
+     * never reaches the write rule: `application.review` is not among its
+     * permissions, so the request is refused at the door. Asserted as the
+     * 403 it is rather than as a silent strip, because a test that passed
+     * either way would not notice the door moving.
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001'],
+    ]);
+
+    $this->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'TAMPERED'],
+        ])
+        ->assertForbidden();
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+        ->and(AuditLog::where('action', 'office_form.corrected_by_office')->count())->toBe(0);
 });
 
 it('rejects an issuance date in the future', function () {

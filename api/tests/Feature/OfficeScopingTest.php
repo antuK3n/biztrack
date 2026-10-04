@@ -355,9 +355,15 @@ it('gives an officer with no department nothing rather than everything', functio
 it('does not widen what an officer may write on an office form', function () {
     // Item 56 scopes who may reach the form; it must not relax item 54's split
     // between the applicant's answers and the office's issuance dates.
+    //
+    // Written from BPLO since 4 October 2026, not OBO: the office that ISSUES
+    // the permit may now correct its own sheet's answers (OfficeFormTest pins
+    // that, and the audit row it leaves). The split this test guards is the
+    // one for every OTHER reviewer on the filing, and BPLO reads the Occupancy
+    // sheet without issuing the permit.
     $app = fileRoutedApplication('Scoping Office Form Cafe', ['BUSINESS', 'OCCUPANCY']);
 
-    test()->withHeaders(authAs('obo@biztrack.local'))
+    test()->withHeaders(authAs('bplo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app['id']}/office-forms/OCCUPANCY", [
             'form_data' => ['building_permit_date' => '2026-01-05', 'owner_name' => 'Hacked'],
         ])->assertOk();
