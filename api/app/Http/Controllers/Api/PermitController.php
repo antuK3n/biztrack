@@ -621,8 +621,9 @@ class PermitController extends Controller
         // CENRO's certificate is landscape too, as its issued sheet is.
         if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false)) {
             $pdf->setPaper('letter', 'landscape');
-        } elseif ($cert['is_fsic'] ?? false) {
-            // The BFP's FSIC is a portrait Letter sheet, as issued.
+        } elseif (($cert['is_fsic'] ?? false) || ($cert['is_zoning'] ?? false)) {
+            // The BFP's FSIC and the CPDO's Zoning Clearance are portrait
+            // Letter sheets, as issued.
             $pdf->setPaper('letter', 'portrait');
         }
 
@@ -798,6 +799,25 @@ class PermitController extends Controller
         $isBusinessPermit = $code === PermitType::OUTCOME_CODE;
         $isCenroCertificate = $code === 'CEC';
         $isFsic = $code === 'FSIC';
+        $isZoning = $code === 'ZONING';
+
+        /*
+         * ── The Zoning Clearance signs once, as the CPDO's form does ────────
+         *
+         * One line: the City Planning & Development Coordinator / Zoning
+         * Administrator [client, 5 October 2026, with the issued sheet]. The
+         * name is the CPDO's office_signatories row whose role names either
+         * post, and a blank ruled line until the office sets one.
+         */
+        if ($isZoning) {
+            $administrator = collect($office)->first(fn (array $s) => str_contains(strtolower($s['role']), 'zoning administrator')
+                || str_contains(strtolower($s['role']), 'coordinator'));
+
+            $signatories = [[
+                'role' => "City Planning & Dev't Coordinator / Zoning Administrator",
+                'name' => $administrator['name'] ?? null,
+            ]];
+        }
 
         /*
          * ── The FSIC signs as the BFP's own form does ───────────────────────
@@ -947,12 +967,29 @@ class PermitController extends Controller
             ];
         }
 
+        /*
+         * ── The CPDO's Zoning Clearance (For Business Permit) ───────────────
+         *
+         * Laid out from the issued sheet [client, 5 October 2026]: a boxed
+         * block naming the business, its type of establishment, address, the
+         * ZONING PERMIT NO. and date issued, and the DECISION, then the four
+         * standing conditions. The number is this system's permit number and
+         * the type of establishment is the line of business on the face.
+         * Only the office's letterhead is added here; the rest is the face.
+         */
+        if ($isZoning) {
+            $sheetFields = [
+                'letterhead' => config('biztrack.letterheads.ZONING'),
+            ];
+        }
+
         return [
             // Which sheet to draw. The views branch on these rather than on the
             // permit type's name, which is a label and may be reworded.
             'is_business_permit' => $isBusinessPermit,
             'is_cenro_certificate' => $isCenroCertificate,
             'is_fsic' => $isFsic,
+            'is_zoning' => $isZoning,
             ...$sheetFields,
             'permit_number' => $permit->permit_number,
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',

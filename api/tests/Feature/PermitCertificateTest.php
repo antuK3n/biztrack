@@ -384,3 +384,53 @@ it('draws the FSIC as the BFP issues it, signed by the fire office and not the M
     $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
     expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
 });
+
+/*
+ * ── The CPDO's Zoning Clearance ─────────────────────────────────────────────
+ *
+ * Laid out from the issued sheet [client, 5 October 2026]: For Business
+ * Permit, the ZONING PERMIT NO. being this system's permit number, the
+ * decision and the four conditions, and one signature — the City Planning &
+ * Development Coordinator / Zoning Administrator — with no Mayor on it.
+ */
+it('draws the Zoning Clearance as the CPDO issues it, signed by its administrator', function () {
+    $seed = ownersPermit();
+    $permit = Permit::create([
+        'permit_number' => 'LC-TEST-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => PermitType::where('code', 'ZONING')->value('id'),
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+    OfficeSignatory::updateOrCreate(
+        ['department_id' => PermitType::where('code', 'ZONING')->value('issuing_department_id'), 'role' => 'Zoning Administrator'],
+        ['name' => 'Roberto F. Santos', 'sort_order' => 1, 'is_active' => true],
+    );
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['is_zoning'])->toBeTrue()
+        ->and($cert['signatories'])->toBe([[
+            'role' => "City Planning & Dev't Coordinator / Zoning Administrator",
+            'name' => 'Roberto F. Santos',
+        ]]);
+
+    authAs('owner@biztrack.local');
+    $pdf = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent());
+    $text = $pdf->getText();
+
+    expect($pdf->getPages())->toHaveCount(1)
+        ->and($text)->toContain('ZONING CLEARANCE')
+        ->and($text)->toContain('(For Business Permit)')
+        ->and($text)->toContain($permit->permit_number)
+        ->and($text)->toContain('ZONING CLEARANCE GRANTED')
+        ->and($text)->toContain('ROBERTO F. SANTOS')
+        ->and($text)->not->toContain('City Mayor');
+
+    $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
+    expect([(int) round($box[2]), (int) round($box[3])])->toBe([612, 792]);
+});

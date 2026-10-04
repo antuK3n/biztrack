@@ -166,6 +166,14 @@ return [
          * guessed: a wrong phone number on a certificate is worse than none.
          * A null line simply does not print.
          */
+        // The CPDO's head on the Zoning Clearance.
+        'ZONING' => [
+            // Malabon has no province (NCR), so the Republic heads it where
+            // a provincial city's sheet names its province.
+            'republic' => 'Republic of the Philippines',
+            'city' => 'City of Malabon',
+            'office' => 'City Planning & Development Office',
+        ],
         'BFP' => [
             'agency' => 'Bureau of Fire Protection',
             'region' => 'National Capital Region',

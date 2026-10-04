@@ -7849,7 +7849,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/database/seeders/RbacSeeder.php:254",
+        "check": "api/database/seeders/RbacSeeder.php:260",
         "test": "api/tests/Feature/ZoningOfficerTest.php::lets the zoning officer clear its own assignment but not end the application",
         "marker": "'zoning_officer' => ["
       }
