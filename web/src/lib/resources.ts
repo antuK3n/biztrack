@@ -1,3 +1,4 @@
+import type { ZoningFactValues } from './zoningCheck'
 import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
@@ -429,6 +430,8 @@ export const applications = {
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
       data_privacy_consent?: boolean
+      /** The applicant's answers to the zoning ordinance's questions. */
+      zoning_facts?: ZoningFactValues
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
@@ -2104,6 +2107,8 @@ export type PasswordCodeSent =
 
 export interface OfficeHoursStatus {
   open: boolean
+  /** 'open' or 'closed' while the Debug page forces the notice; null when the clock decides. */
+  forced?: 'open' | 'closed' | null
   /** The server's clock, in Manila time. Never the browser's. */
   now: string
   timezone: string
@@ -2114,4 +2119,34 @@ export interface OfficeHoursStatus {
 
 export const officeHours = {
   get: () => unwrap<OfficeHoursStatus>(api.get('/office-hours')),
+}
+
+/* ── System notices ───────────────────────────────────────────────────── */
+
+/**
+ * What every signed-in screen must say about the Debug page's switches: today
+ * only the pretend date for renewals, which puts a banner over the app while
+ * it is set (components/PretendDateBanner).
+ */
+export interface SystemNotices {
+  /** "2027-01-25" while renewal dates are simulated, otherwise null. */
+  pretend_date: string | null
+}
+
+export const systemNotices = {
+  get: () => unwrap<SystemNotices>(api.get('/system-notices')),
+}
+
+/**
+ * Fired after the Debug page changes something every screen shows, so the
+ * banner asks again now instead of at its next poll.
+ */
+export const SYSTEM_NOTICES_CHANGED = 'biztrack:system-notices-changed'
+
+/**
+ * Whether the sign-in form must carry a captcha. The Debug page can switch a
+ * configured captcha off; the form then neither draws nor demands it.
+ */
+export const signInOptions = {
+  get: () => unwrap<{ captcha: boolean }>(api.get('/auth/sign-in-options')),
 }

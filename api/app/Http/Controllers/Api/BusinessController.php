@@ -10,6 +10,7 @@ use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessOwner;
+use App\Models\PsicCode;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\MalabonGeo;
@@ -599,7 +600,34 @@ class BusinessController extends Controller
             $request->merge(['tin' => Tin::normalize((string) $request->input('tin'))]);
         }
 
-        $data = $request->validate([
+        /*
+         * The line-of-business rule, resolved per line before the rest run.
+         *
+         * Built by index rather than written as `lines.*.line_of_business`
+         * because the requirement depends on the SIBLING field: a line filed
+         * under the catch-all 00000 must be described, and a line carrying a
+         * real PSIC code need not be. A wildcard entry cannot ask that
+         * question, and the obvious closure beside `nullable` never runs —
+         * `nullable` tells the validator to skip every remaining rule the
+         * moment the value is null, which is precisely the case to catch.
+         *
+         * So each index gets its own entry and the wildcard is gone. Two
+         * entries for one attribute would merge, and a merged `nullable` would
+         * cancel the `required` beside it.
+         */
+        $lineRules = [];
+
+        foreach (is_array($request->input('lines')) ? $request->input('lines') : [] as $i => $line) {
+            $psicCodeId = is_array($line) ? ($line['psic_code_id'] ?? null) : null;
+
+            $lineRules["lines.{$i}.line_of_business"] = [
+                self::isUnclassifiedPsic($psicCodeId) ? 'required' : 'nullable',
+                'string',
+                'max:255',
+            ];
+        }
+
+        $data = $request->validate($lineRules + [
             'name' => ['required', 'string', 'max:255'],
             // Trade name stays optional: most sole proprietors have none.
             'trade_name' => ['nullable', 'string', 'max:255'],
@@ -786,9 +814,27 @@ class BusinessController extends Controller
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.psic_code_id' => ['required', 'exists:psic_codes,id'],
             'lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
-            // Free text for the "Other (not listed)" PSIC row, and optional
-            // detail for any line.
-            'lines.*.line_of_business' => ['nullable', 'string', 'max:255'],
+            /*
+             * Free text for the "Other (not listed)" PSIC row, and optional
+             * detail for any line — REQUIRED on the catch-all.
+             *
+             * It was nullable everywhere, and the rule that a catch-all line
+             * must be described lived in one screen: ApplyWizard's `needsText`
+             * refuses to continue without it. ReferenceSeeder says the same
+             * thing about the 00000 row — *"the escape hatch: picking it makes
+             * the wizard require a free-text line"* — which is a rule about the
+             * data wearing the name of the one door that happened to enforce
+             * it.
+             *
+             * Any other caller filed a business whose only description was
+             * "Other (not listed)", and that is what the certificate then
+             * printed: *"pwede ba yon? make sure na meron kung ano nilagay nya
+             * o ininput"* [client, 1 October 2026]. 00000 carries no
+             * classification at all — PsicTaxonomy::group returns null for it —
+             * so the typed line is the only thing that says what the business
+             * does, to the certificate, the inspector and the reviewer alike.
+             */
+            // Rule built per line, above — see $lineRules.
             'lines.*.products_services' => ['nullable', 'string', 'max:1000'],
             /*
              * Unified form, lessor block. Only required once the applicant says
@@ -863,6 +909,12 @@ class BusinessController extends Controller
             'lessor_name.required_if' => "Enter the lessor's name, or set the premises to owner-occupied.",
             'lessor_address.required_if' => "Enter the lessor's address, or set the premises to owner-occupied.",
             'monthly_rental.required_if' => 'Enter the monthly rental, or set the premises to owner-occupied.',
+            /*
+             * Matched by the wildcard even though the rules are built per
+             * index: Laravel falls back to the `*` form when looking up a
+             * message for `lines.0.line_of_business.required`.
+             */
+            'lines.*.line_of_business.required' => 'Describe this line of business in your own words. "Other (not listed)" carries no classification of its own, so what you type here is the only thing that says what the business does.',
             'lines.required' => 'Add at least one line of business.',
             'lines.min' => 'Add at least one line of business.',
             'address.required' => 'A business address is required.',
@@ -1198,6 +1250,28 @@ class BusinessController extends Controller
                 : null;
             $row->save();
         }
+    }
+
+    /**
+     * Is this PSIC selection the catch-all 00000 "Other (not listed)" row?
+     *
+     * By CODE rather than by id, because the id is whatever the reference
+     * seeder happened to insert and differs between a fresh database and a
+     * migrated one. The code is the thing the PSA publishes and the thing the
+     * rest of the system matches on — see `PsicTaxonomy::group`, which returns
+     * null for exactly this row.
+     *
+     * False for an id that does not resolve: the `exists` rule beside this one
+     * is what answers an unknown code, and two rules firing on one mistake
+     * tells the applicant their trade is both missing and unknown.
+     */
+    private static function isUnclassifiedPsic(mixed $psicCodeId): bool
+    {
+        if (! is_scalar($psicCodeId)) {
+            return false;
+        }
+
+        return PsicCode::whereKey($psicCodeId)->value('code') === PsicCode::UNCLASSIFIED;
     }
 
     private function authorizeOwner(Request $request, Business $business): void

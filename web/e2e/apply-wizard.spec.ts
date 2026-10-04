@@ -1304,8 +1304,10 @@ test('the zoning note under the map is loud, green when listed and amber with an
 }) => {
   /*
    * Zoning 8: the note was being overlooked — 14px in a pale box, read as a
-   * caption. Zoning 13: when the trade is not on the list, say the owner may
-   * appeal in person at the City's zoning office.
+   * caption. Zoning 13: when the trade is not on the list, say where the owner
+   * may appeal — the Local Zoning Board of Appeals, which is where City
+   * Ordinance No. 24-2018 Art. IX §16 sends appeals (it said "in person at that
+   * office" until the ordinance was read in full).
    *
    * The verdict comes from the ordinance lookup, which depends on the seeded
    * uses; so the real response is fetched and only its verdict is set, once
@@ -1337,8 +1339,8 @@ test('the zoning note under the map is loud, green when listed and amber with an
   // Said in words, not only in amber.
   await expect(note).toContainText(/not on the zoning list/i)
   await expect(note).toContainText(/not on the zoning rules’ list for longos/i)
-  // Zoning 13, in plain words.
-  await expect(note).toContainText(/you may appeal in person at that office/i)
+  // Zoning 13, in plain words, and to the body the ordinance names.
+  await expect(note).toContainText(/you may appeal to the local zoning board of appeals/i)
   await expect(note).toContainText(/the city’s zoning office \(cpdo\)/i)
 
   const loud = async () =>
@@ -1751,7 +1753,7 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
   const modal = page.getByRole('dialog', { name })
   await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
-  await modal.getByLabel(new RegExp(`which business are you ${type === 'renewal' ? 'renewing' : 'amending'}`, 'i')).selectOption({ value: '1' })
+  await modal.getByRole('combobox', { name: /^business\b/i }).selectOption({ value: '1' })
 
   /*
    * Checkboxes in a labelled list, not radios in a radiogroup. A renewal covers
@@ -2375,7 +2377,7 @@ test('the business is reached on a +63 mobile and a grouped landline, never an 0
    * painting the boxes red across the nine invalid lengths on the way to a
    * valid one teaches an applicant to ignore the colour.
    */
-  const mobileError = page.getByRole('alert').filter({ hasText: /10 digits after \+63/i })
+  const mobileError = page.getByRole('alert').filter({ hasText: /enter a valid mobile number/i })
   for (const box of mobileBoxes) await box.fill('')
   await first.fill('812')
   await second.fill('345')

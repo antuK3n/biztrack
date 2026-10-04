@@ -28,6 +28,7 @@ use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
 use App\Support\Audit;
+use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
 use App\Support\Numbering;
@@ -385,9 +386,27 @@ class WorkflowService
              * CPDO on the filing that states it: `application_amendments` holds
              * the proposed value, and the review sheet shows old → new.
              *
-             * Only for an address change. Amending a floor area or a trade name
-             * tells CPDO nothing it assessed, and attaching zoning to those
-             * would be the five-clearance mistake again in miniature.
+             * ── A change of activity or a larger area carries it too ─────────
+             *
+             * This said "only for an address change: amending a floor area or
+             * a trade name tells CPDO nothing it assessed". The ordinance says
+             * otherwise for two of the three. Art. IX §8: "Should there be any
+             * change in the activity or expansion of the area subject of the
+             * Locational Clearance, the owner/developer shall apply for a new
+             * Locational Clearance" — repeated word for word in §9. CPDO did
+             * assess the activity (it is item V on MCG-CPDD-FO-003) and the
+             * floor area (item VIII.A, and the processing fee is charged per
+             * square metre of it, §10.1(c)). So a new line of business, or a
+             * floor area larger than the register's, now carries ZONING as a
+             * move does. A smaller floor area does not (that is no expansion),
+             * and neither does a trade name or an owner: Annex A 63 says a
+             * change of tenant or proprietor is not a change of occupancy.
+             *
+             * A floor area with NO earlier figure on the register is not
+             * treated as an expansion — there is nothing to compare, and
+             * charging a fresh clearance on a guess is the five-clearance
+             * mistake again in miniature. The zoning checklist tells CPDO and
+             * BPLO it could not compare, so the call is a person's.
              *
              * ── And only when the PREMISES actually move ─────────────────────
              *
@@ -402,7 +421,7 @@ class WorkflowService
              */
             $codes = [PermitType::OUTCOME_CODE];
 
-            if (self::amendmentMovesPremises($app)) {
+            if (self::amendmentNeedsLocationalClearance($app) !== []) {
                 $codes[] = 'ZONING';
             }
 
@@ -453,6 +472,37 @@ class WorkflowService
             ->where('field', 'address_pin')
             ->whereNotNull('new_value')
             ->exists();
+    }
+
+    /**
+     * Why this amendment needs a new locational clearance, if it does.
+     *
+     * A move (the pin), a change of activity (the line of business) or an
+     * expansion of the area (a floor area larger than the register's) — City
+     * Ordinance No. 24-2018, Art. IX §§8-9. Empty when none applies. See the
+     * note in `permitTypeIdsAtSubmission` for what is deliberately left out.
+     *
+     * @return list<'moves'|'activity'|'area'>
+     */
+    public static function amendmentNeedsLocationalClearance(Application $app): array
+    {
+        $requested = $app->requestedChanges()->whereNotNull('new_value')->pluck('new_value', 'field');
+        $why = [];
+        if ($requested->has('address_pin')) {
+            $why[] = 'moves';
+        }
+        if ($requested->has('line_of_business')) {
+            $why[] = 'activity';
+        }
+        if ($requested->has('business_area_sqm')) {
+            $before = $app->business()->withTrashed()->value('business_area_sqm');
+            $after = $requested->get('business_area_sqm');
+            if (is_numeric($before) && is_numeric($after) && (float) $after > (float) $before) {
+                $why[] = 'area';
+            }
+        }
+
+        return $why;
     }
 
     /**
@@ -3845,18 +3895,34 @@ class WorkflowService
          * `permitTypeIdsAtSubmission`), so the question "is anything still
          * outstanding" already has one answer.
          *
-         * Only an address amendment ever carries a clearance, so for every
-         * other kind this is empty and costs nothing.
+         * Only an amendment that moves, changes the activity or enlarges the
+         * area carries a clearance (Art. IX §8), so for every other kind this
+         * is empty and costs nothing.
          */
         $app->load('permitTypes');
         $outstanding = $this->outstandingClearances($app);
 
         if ($outstanding->isNotEmpty()) {
+            /*
+             * Named by what the amendment does, because BPLO cannot clear it
+             * themselves and needs to know what CPDO is assessing. A move
+             * keeps its original words ("for the new address") — the
+             * register-wide refusal message tests read them.
+             */
+            $why = self::amendmentNeedsLocationalClearance($app);
+            $what = match (true) {
+                in_array('moves', $why, true) => 'moves the premises',
+                in_array('activity', $why, true) => 'changes the line of business',
+                in_array('area', $why, true) => 'enlarges the floor area',
+                default => 'needs other permits',
+            };
             throw ValidationException::withMessages([
                 'permits' => [
-                    'This amendment moves the premises, so it cannot be approved until '
+                    "This amendment {$what}, so it cannot be approved until "
                     .$outstanding->pluck('name')->join(', ')
-                    .' has been issued for the new address.',
+                    .(in_array('moves', $why, true)
+                        ? ' has been issued for the new address.'
+                        : ' has been issued for it (City Ordinance No. 24-2018, Art. IX §8).'),
                 ],
             ]);
         }
@@ -4686,7 +4752,9 @@ class WorkflowService
         }
 
         $expired = CarbonImmutable::parse($prior->valid_until)->endOfDay();
-        $filed = CarbonImmutable::parse($app->submitted_at ?? $app->created_at ?? now());
+        // The pretend date while the Debug page sets one; the real filing time
+        // otherwise (BusinessDate). submitted_at itself is never rewritten.
+        $filed = BusinessDate::filedAt($app->submitted_at ?? $app->created_at);
 
         if ($filed->lessThanOrEqualTo($expired)) {
             return $none;
@@ -4769,8 +4837,6 @@ class WorkflowService
      */
     private function issuePermitFor(Application $app, PermitType $type): Permit
     {
-        $validityDays = (int) ($type->validity_days ?: 365);
-
         /*
          * ── A renewal continues the term; it does not restart it ─────────────
          *
@@ -4819,9 +4885,47 @@ class WorkflowService
          * future permit type will read; zeroing it to signal "anchored instead"
          * would make the column mean two things.
          */
+        /*
+         * ---- Two anchors, and `validity_days` is now read by neither -------
+         *
+         * The business permit ends on 20 January, per Sec. 2N above. Every
+         * other certificate ends on 31 December of the year it was issued:
+         * *"ang expiration ay always end of a year, so laging December 31,
+         * 202X"* [client, 1 October 2026].
+         *
+         * That replaces continue-the-term for the five clearances — the
+         * `addDays($validityDays)` this used to be — which came from the
+         * 9 September reasoning that anchoring punishes renewing early. The
+         * client has overruled it for the look of the certificate, and the cost
+         * is real and small: a clearance issued in November runs about seven
+         * weeks rather than a year.
+         *
+         * `validity_days` stays on the row, now read by nothing. It is left
+         * rather than zeroed for the reason the note below already gives about
+         * the business permit: a column that means "the term" on some rows and
+         * "ignore me" on others means nothing on any of them, and a future
+         * permit type that does run a rolling term will want it back.
+         */
         $validUntil = $type->code === PermitType::OUTCOME_CODE
             ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
-            : CarbonImmutable::parse($validFrom)->addDays($validityDays);
+            : RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom));
+
+        /*
+         * Who signs it, with one addition only this moment can make.
+         *
+         * `officerInChargeFor` answers from the record — the assignment, then
+         * the classifier — and is the only thing print time may use. At issue
+         * there is one more candidate it cannot see: the person performing the
+         * act. An officer approving their office's clearance IS that office's
+         * signatory even on a filing nobody formally claimed.
+         *
+         * Guarded on the department, which is what keeps the Business Permit
+         * right: released at payment, its acting user is the applicant, who
+         * belongs to no office and so is never written here.
+         */
+        $acting = Auth::user();
+        $officer = PermitFace::officerInChargeFor($app, $type)
+            ?? ($acting?->department_id === $type->issuing_department_id ? $acting : null);
 
         $permit = Permit::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
@@ -4850,9 +4954,23 @@ class WorkflowService
                  * because the relation was not on the model would be worse than
                  * no snapshot at all, since it prints as blank on the paper.
                  */
+                /*
+                 * The signatories are frozen with the rest of the face, and
+                 * for the same reason [client, 1 October 2026: put the Mayor
+                 * and the officer in charge on every permit].
+                 *
+                 * A certificate names the people who signed it. Reading them
+                 * live would have a new mayor retroactively re-signing every
+                 * permit the city has ever issued, and an officer moving office
+                 * rewriting the clearances they granted in the old one.
+                 *
+                 * The officer is resolved above, from the record rather than
+                 * from the session — on the Business Permit the acting user is
+                 * the applicant who just paid.
+                 */
                 'issued_details' => PermitFace::capture(
                     $app->business?->loadMissing(['address.barangay', 'owner', 'lines.psicCode'])
-                ),
+                ) + PermitFace::captureSignatories($officer),
             ],
         );
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\MessageResource;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\Business;
 use App\Models\Department;
 use App\Models\Message;
 use App\Models\MessageAttachment;
@@ -16,6 +17,7 @@ use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -252,6 +254,28 @@ class MessageController extends Controller
             'That office is not handling this application, so it cannot be messaged about it.'
         );
 
+        /*
+         * ---- And the officer has to still be holding the case ------------
+         *
+         * "Once na in-unassign na, magsstay pa rin ang convo pero di nya na
+         * ma-cha-chat" [client, 30 September 2026]. The screen closes its
+         * composer from the same predicate, and this is the half that is a
+         * rule rather than an appearance: a browser is the reader's own, and a
+         * disabled box stops nothing that types the request by hand or keeps a
+         * tab open through a reassignment.
+         *
+         * Said in the officer's own terms. "That office is not handling this"
+         * above is about the wrong office; this is about the right office and
+         * the wrong person, and telling them the first would send them looking
+         * for a routing problem that is not there.
+         */
+        abort_unless(
+            $this->writesTo($user, $application, $office->id),
+            403,
+            'This filing is no longer assigned to you, so its conversation is read-only. '
+            .'Whoever holds it now can answer.'
+        );
+
         return $office;
     }
 
@@ -296,6 +320,33 @@ class MessageController extends Controller
             ->from('message_threads as vt')
             ->whereColumn('vt.id', 'messages.thread_id')
             ->where('vt.department_id', $deptId));
+
+        /*
+         * ---- And only this officer's own stretch of it ------------------
+         *
+         * "Sa end naman ng bagong officer in charge, wala yung dating convo -
+         * bagong convo na dapat nila" [client, 30 September 2026].
+         *
+         * One office has ONE conversation with the applicant, which runs the
+         * whole length of the filing and which the applicant reads whole. An
+         * officer reads the part that was theirs: the messages written while
+         * they held the case. Somebody taking a case over opens on an empty
+         * screen and starts again, and the officer who handed it on keeps the
+         * conversation they had - still legible, no longer writable.
+         *
+         * Messages with NO holder are read by whoever is in the office. They
+         * were written to the office before anybody claimed the case, so
+         * nobody's stretch owns them and hiding them would lose the applicant's
+         * first question.
+         *
+         * A general enquiry and the administrator's line are unaffected. They
+         * have no filing and so no officer in charge; `handled_by_user_id` is
+         * null on both, and the clause above has already confined this to
+         * threads addressed to the reader's own office.
+         */
+        $query->where(fn ($who) => $who
+            ->whereNull('messages.handled_by_user_id')
+            ->orWhere('messages.handled_by_user_id', $user->id));
     }
 
     /**
@@ -374,8 +425,10 @@ class MessageController extends Controller
             ->addSelect(['last_message_at' => $lastMessageAt])
             ->addSelect(['messages_count' => $messagesCount])
             ->with([
-                'business:id,name',
-                'applicant:id,name',
+                // `status` and `blacklisted_at` ride along for the standing
+                // note on an officer's row - see counterpartyStanding().
+                'business:id,name,status',
+                'applicant:id,name,blacklisted_at',
                 'assignments.department',
                 'assignments.officer:id,name',
                 'messageThreads.department',
@@ -442,16 +495,39 @@ class MessageController extends Controller
              * routed to the office they are addressed to - which is the state
              * in which somebody there can actually act on them.
              */
-            $query->whereHas('assignments', function ($a) use ($user) {
+            $query->where(function ($mine) use ($user) {
+                $mine->whereHas('assignments', function ($a) use ($user) {
+                    /*
+                     * -1 rather than null: a seat with no office matches
+                     * nothing, where `where(col, null)` becomes `IS NULL` and
+                     * would match every unrouted assignment instead.
+                     */
+                    $a->where('application_assignments.department_id', $user->department_id ?? -1);
+                    $a->where(fn ($who) => $who
+                        ->whereNull('application_assignments.officer_user_id')
+                        ->orWhere('application_assignments.officer_user_id', $user->id));
+                });
+
                 /*
-                 * -1 rather than null: a seat with no office matches nothing,
-                 * where `where(col, null)` becomes `IS NULL` and would match
-                 * every unrouted assignment instead.
+                 * ---- And a case they used to hold, for reading -------------
+                 *
+                 * "Once na in-unassign na, magsstay pa rin ang convo pero di
+                 * nya na ma-cha-chat, like for viewing na lang" [client, 30
+                 * September 2026].
+                 *
+                 * Keyed on their own stretch of the conversation rather than
+                 * on a record of the handover, because there is none: an
+                 * assignment's `officer_user_id` is overwritten in place, so
+                 * by the time somebody is unassigned nothing says they ever
+                 * were. `messages.handled_by_user_id` does say, on every
+                 * message they were answerable for, and it does not move.
+                 *
+                 * An officer who held a case and never wrote on it has no
+                 * stretch and no row. That is right: there is no conversation
+                 * to keep for viewing, which is what this clause preserves.
                  */
-                $a->where('application_assignments.department_id', $user->department_id ?? -1);
-                $a->where(fn ($who) => $who
-                    ->whereNull('application_assignments.officer_user_id')
-                    ->orWhere('application_assignments.officer_user_id', $user->id));
+                $mine->orWhereHas('messageThreads.messages', fn ($m) => $m
+                    ->where('messages.handled_by_user_id', $user->id));
             });
         } else {
             /*
@@ -716,122 +792,292 @@ class MessageController extends Controller
             return $this->ownerEnquiryRows($user);
         }
 
-        // An office sees the enquiries addressed to it, and only once somebody
-        // has actually written — the same rule the filing list uses, for the
-        // same reason: a row with nothing in it is a silhouette of a message.
         /*
-         * This read BPLO's post, hard-coded, because BPLO was the only office
-         * an enquiry could be addressed to. Now that every office has a front
-         * door [client, 28 September 2026] the hard-coding would have shown
-         * the sanitary office BPLO's mail and hidden its own: a leak and a
-         * blackout in the same line.
+         * ---- One row per owner, whether or not anybody has written -------
          *
-         * A seat with no office reads nothing rather than reading the
-         * unaddressed - the same fail-closed posture as scopeMessagesToReader.
+         * "Lahat dapat ng officer matatanggap ang general inquiry, so that
+         * ma-me-message pa rin nila yung business owner sa messages page.
+         * Matic na pag gumagawa ng account may magrereflect na sa general
+         * inquiry ng BPLO. Ganon naman din sa other offices once na nag-apply
+         * na sila ng other permit sa office na yon" [client, 1 October 2026].
+         *
+         * This listed threads, and only threads with something in them - the
+         * same rule the filing list uses, on the reasoning that a row with
+         * nothing in it is a silhouette of a message. That reasoning holds for
+         * a FILING, where the applicant has already been given a way in, and
+         * fails here: the row IS the way in. An office that can only answer
+         * what it has been asked cannot start the conversation, and starting
+         * it is the whole point of this screen.
+         *
+         * Which owners an office may hear from:
+         *
+         *  - BPLO, everybody. It coordinates every filing and is the office
+         *    you write to when you do not know which office to ask, so an
+         *    account exists in its list from the day it is registered.
+         *
+         *  - Every other office, the owners it has been routed work for. An
+         *    office with no filing of yours has no business opening a
+         *    conversation with you, and an inbox listing every citizen in the
+         *    city would bury the ones it does.
+         *
+         * Anybody holding the seat reads them. A general enquiry has no filing
+         * and so no officer in charge - `handled_by_user_id` is null on every
+         * message in one - which is what "lahat ng officer" comes to in the
+         * code: there is no tenure to scope by, and none is applied.
          */
         if ($user->department_id === null) {
             return collect();
         }
 
-        $threads = MessageThread::with(['department', 'user:id,name'])
-            ->whereNull('application_id')
-            ->whereNotNull('user_id')
-            ->where('department_id', $user->department_id)
-            ->whereHas('messages')
-            ->get();
+        return $this->officeEnquiryRows($user, $bplo, $limit);
+    }
+
+    /**
+     * The owners this office may hear from, and what has been said to each.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function officeEnquiryRows(User $officer, Department $bplo, int $limit): Collection
+    {
+        $isBplo = $officer->department_id === $bplo->id;
 
         /*
-         * `toBase()` and not just `map()`. An Eloquent collection that maps to
-         * arrays downgrades itself to a base collection only if it has
-         * something in it to inspect — an EMPTY one stays Eloquent, and the
-         * merge below then tries to read a model key off an array and 500s.
-         * The empty case is the common one: most offices have no enquiries.
+         * The row's office is the READER'S, not BPLO's.
+         *
+         * Passing `$bplo` here labelled every office's list with BPLO's name
+         * and BPLO's department id, so the fire office's own enquiries came
+         * back addressed to somebody else - and a test that checks one office
+         * cannot see another's caught it by finding a BPLO row in the fire
+         * office's inbox.
          */
-        return $threads->toBase()
-            ->map(fn (MessageThread $t) => $this->generalRow($t, $user, $t->department ?? $bplo, true))
-            ->sortByDesc(fn (array $row) => $row['updated_at'] ?? '')
+        $office = $officer->department ?? $bplo;
+
+        $owners = User::query()
+            ->select(['id', 'name', 'blacklisted_at'])
+            ->whereHas('roles.permissions', fn ($q) => $q->where('name', 'business.manage_own'))
+            ->where('is_active', true);
+
+        if (! $isBplo) {
+            $owners->where(function ($eligible) use ($officer) {
+                /*
+                 * Routed work, not merely a filing that names this office's
+                 * permit. An assignment is the moment the office is actually
+                 * given something to do - before that there is nothing for
+                 * them to open a conversation about.
+                 */
+                $eligible->whereHas('businesses.applications.assignments', fn ($a) => $a
+                    ->where('application_assignments.department_id', $officer->department_id));
+
+                /*
+                 * ---- Or somebody who has simply written to them -----------
+                 *
+                 * An owner may address ANY office through its general enquiry,
+                 * routed work or not - that is what the front door per office
+                 * is for [client, 28 September 2026]. Without this clause an
+                 * office would be handed a question it could not see: the
+                 * thread accepted, stored, and absent from the one screen that
+                 * lists enquiries.
+                 *
+                 * Found by a test that wrote to the fire office from an owner
+                 * it had never been routed anything for, and then could not
+                 * find the message in the fire office's inbox.
+                 */
+                $eligible->orWhereHas('messageThreads', fn ($t) => $t
+                    ->whereNull('message_threads.application_id')
+                    ->where('message_threads.department_id', $officer->department_id));
+            });
+        }
+
+        $owners = $owners->orderBy('name')->get();
+
+        if ($owners->isEmpty()) {
+            return collect();
+        }
+
+        /*
+         * The threads in one query rather than one per owner. Most of these
+         * rows have no thread at all - that is the point of them - so this is
+         * a single read that usually returns very little.
+         */
+        $threads = MessageThread::with(['department', 'user:id,name,blacklisted_at'])
+            ->whereNull('application_id')
+            ->where('department_id', $officer->department_id)
+            ->whereIn('user_id', $owners->pluck('id'))
+            ->get()
+            ->keyBy('user_id');
+
+        return $owners
+            ->toBase()
+            ->map(fn (User $owner) => $this->generalRow(
+                $threads->get($owner->id),
+                $officer,
+                $office,
+                true,
+                $owner,
+            ))
+            /*
+             * Whoever spoke most recently first, then the silent ones by name.
+             * An office scanning for what is waiting should not have to read
+             * past a hundred accounts that have never written; an office
+             * looking for a particular person finds them in alphabetical
+             * order below.
+             */
+            ->sortBy(fn (array $row) => [
+                // Silent accounts last, whatever they are called.
+                $row['updated_at'] === null ? 1 : 0,
+                // Among the rest, newest first - a negated epoch, because one
+                // `sortBy` over a tuple is the only way to mix a descending
+                // key with an ascending one. A second `sortByDesc` pass would
+                // simply undo this one.
+                $row['updated_at'] === null ? 0 : -strtotime($row['updated_at']),
+                // And alphabetically, which is how an office looks somebody up.
+                $row['counterparty']['name'],
+            ])
             ->take($limit)
             ->values();
     }
 
     /**
-     * The general enquiries an OWNER sees: a front door per office.
+     * The owner's general enquiry: ONE row, with every office on it.
      *
-     * ---- Which offices are offered, and why not simply all of them --------
+     * ---- Six rows, then one, and why it came back --------------------
      *
-     * The client's rule, in their words: "sa business owner side kung wala
-     * pang mismong officer in charge sa application nila, magkakaroon na rin
-     * ng general inquiry ang ibat ibang offices, tulad ng pinagawa ko sa
-     * bplo" [28 September 2026]. So an office earns a front door when there
-     * is nobody yet answerable for the owner's filings on its behalf.
+     * The enquiry began as a single conversation with BPLO. When every office
+     * got a front door it became a row each, and on the inbox that read as six
+     * conversations - six titles, six dates, six previews - for what an owner
+     * thinks of as one thing: asking the City a question.
      *
-     * That is three clauses, and each is doing work:
+     * "Nasa iisang convo na lang uli ang mga general inquiry sa ibat ibang
+     * offices, tas may choices na lang ulit don kung anong office" [client, 30
+     * September 2026]. So the row is one again and the office is a choice
+     * INSIDE it - the same shape a permit's conversation has, where the pane
+     * carries a picker and the inbox carries one line.
      *
-     *  - BPLO always. It coordinates every filing and is the office you write
-     *    to when you do not know which office to ask; an owner with nothing
-     *    registered at all has no other way in, which is the case the BPLO
-     *    enquiry was built for in the first place.
-     *
-     *  - Any office the owner has ALREADY written to, offered or not.
-     *    Withdrawing the row once an officer is assigned would take a
-     *    conversation off the screen while leaving it in the database -
-     *    history vanishing because the routing changed, which is the bug
-     *    visibleOffices() exists to avoid one screen over.
-     *
-     *  - Otherwise: an office with no officer-in-charge on any of this
-     *    owner's filings. Once somebody there is named on a filing, the owner
-     *    has a person to write to ON the filing, and a second empty channel
-     *    to the same office would only split the conversation in two.
+     * Nothing changes underneath. `(user_id, department_id)` is still unique,
+     * so these are still separate threads and an office still reads only its
+     * own; what is joined is the summary, not the correspondence.
      *
      * @return Collection<int, array<string, mixed>>
      */
     private function ownerEnquiryRows(User $owner): Collection
     {
+        $offices = $this->enquiryOffices($owner);
+
         /*
-         * Every enquiry this owner holds, in ONE query and keyed by office.
-         * Eight offices asked one at a time is eight round trips for a screen
-         * that is already the slowest thing an owner opens.
+         * The row is summarised from the office that spoke LAST, because that
+         * is the conversation the reader would open it to see. Its date is what
+         * sorts the row among the filings, and its office is what the card
+         * names underneath the title.
          */
-        $threads = MessageThread::with('department')
+        $latest = $offices
+            ->filter(fn (array $o) => $o['last_message_at'] !== null)
+            ->sortByDesc('last_message_at')
+            ->first();
+
+        $thread = $latest && $latest['thread_id']
+            ? MessageThread::with('department')->find($latest['thread_id'])
+            : null;
+
+        $last = $thread
+            ? Message::with('sender:id,name')->where('thread_id', $thread->id)->latest('id')->first()
+            : null;
+
+        $office = $thread?->department;
+
+        return collect([[
+            'kind' => 'general',
+            'application_id' => null,
+            /*
+             * The office the row OPENS on, not the only one it holds. Null
+             * before anybody has written, and the pane then picks its own
+             * default - see generalIndex().
+             */
+            'department_id' => $office?->id,
+            'thread_id' => $thread?->id,
+            'user_id' => $owner->id,
+            'tracking_id' => null,
+            'business_name' => null,
+            'status' => null,
+            'counterparty' => [
+                // Named for what it IS. Every other row on an applicant's inbox
+                // is titled after a business, so the one that has none needs a
+                // title of its own rather than whichever office answered last.
+                'name' => 'General enquiry',
+                'subtitle' => 'Ask any office',
+                'is_officer' => true,
+            ],
+            // Who spoke last, printed under the title. Null until somebody has.
+            'responsible_office' => $office ? [
+                'code' => $office->code,
+                'name' => $office->name,
+                'officer' => null,
+            ] : null,
+            'offices' => $offices->values()->all(),
+            'messages_count' => $offices->sum('messages_count'),
+            'unread_count' => $offices->sum('unread_count'),
+            'last_message' => $last ? [
+                'body' => $last->body,
+                'sender_name' => $last->sender?->name,
+                'mine' => $last->sender_user_id === $owner->id,
+                'created_at' => optional($last->created_at)->toISOString(),
+            ] : null,
+            'updated_at' => $latest['last_message_at'] ?? null,
+        ]]);
+    }
+
+    /**
+     * Every office an owner may ask, with what has been said to each.
+     *
+     * The shape the office PICKER reads, and the same shape a filing's offices
+     * have, so the pane needs no second branch: one row per department whether
+     * or not a thread exists for it, because the row IS how a conversation
+     * gets started.
+     *
+     * Counted in two queries rather than per office. Six offices asked one at a
+     * time is twelve round trips on a screen an owner already waits for.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function enquiryOffices(User $owner): Collection
+    {
+        $threads = MessageThread::query()
             ->whereNull('application_id')
             ->where('user_id', $owner->id)
             ->get()
             ->keyBy('department_id');
 
-        /*
-         * ---- Every office, always ------------------------------------------
-         *
-         * "Sa business owner side lahat na ng offices may general inquiry"
-         * [client, 28 September 2026]. Not a filtered list: the table IS the
-         * list, and an office the LGU adds later becomes reachable without a
-         * deploy.
-         *
-         * Two narrower rules came before this one and both were wrong, in the
-         * same direction. The first closed an office's door as soon as it was
-         * in charge of anything of the owner's; the second, as soon as it was
-         * in charge of everything. Both were reading "kung wala pang mismong
-         * officer in charge" as a CONDITION on the door, and it is not - it is
-         * the situation being described, the one where an owner has nobody to
-         * write to. The answer to it is that the offices are always there.
-         *
-         * It also reads better on the screen. A directory that grows and
-         * shrinks with the routing is one an owner cannot learn: the fire
-         * office was there last week and is gone today, and nothing on the
-         * page explains why. Six fixed rows are six fixed rows.
-         *
-         * Who may READ what is untouched by this and is the half that has to
-         * stay shut - see authorizeGeneralParticipant(), where an office is
-         * refused an enquiry addressed to another.
-         */
-        return Department::orderBy('name')->get()
-            ->toBase()
-            ->map(fn (Department $office) => $this->generalRow(
-                $threads->get($office->id),
-                $owner,
-                $office,
-                false,
-            ))
-            ->values();
+        $ids = $threads->pluck('id');
+
+        $stats = Message::query()
+            ->selectRaw('thread_id')
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw('MAX(created_at) AS last_at')
+            // Somebody else's turn that the reader has not opened. Your own is
+            // never unread to you, which is why the sender is excluded here
+            // rather than the count being taken off the thread.
+            ->selectRaw('SUM(CASE WHEN read_at IS NULL AND sender_user_id != ? THEN 1 ELSE 0 END) AS unread', [$owner->id])
+            ->whereIn('thread_id', $ids)
+            ->groupBy('thread_id')
+            ->get()
+            ->keyBy('thread_id');
+
+        return Department::orderBy('name')->get()->toBase()->map(function (Department $office) use ($threads, $stats) {
+            $thread = $threads->get($office->id);
+            $stat = $thread ? $stats->get($thread->id) : null;
+
+            return [
+                'department_id' => $office->id,
+                'code' => $office->code,
+                'name' => $office->name,
+                'thread_id' => $thread?->id,
+                'messages_count' => (int) ($stat->total ?? 0),
+                'unread_count' => (int) ($stat->unread ?? 0),
+                'last_message_at' => $stat?->last_at
+                    ? Carbon::parse($stat->last_at)->toISOString()
+                    : null,
+                'can_message' => true,
+            ];
+        })->values();
     }
 
     /**
@@ -844,8 +1090,13 @@ class MessageController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function generalRow(?MessageThread $thread, User $user, Department $for, bool $isOfficer): array
-    {
+    private function generalRow(
+        ?MessageThread $thread,
+        User $user,
+        Department $for,
+        bool $isOfficer,
+        ?User $owner = null,
+    ): array {
         $count = $thread ? Message::where('thread_id', $thread->id)->count() : 0;
         // Counted here rather than reused from the filing query's aggregate:
         // an enquiry has no application, so it is not in that query at all.
@@ -882,15 +1133,35 @@ class MessageController extends Controller
             'thread_id' => $thread?->id,
             // The person, when an officer is reading; nobody, when it is your
             // own enquiry and the counterparty is the office.
-            'user_id' => $thread?->user_id,
+            /*
+             * Whose enquiry it is. `$owner` carries it where no thread exists
+             * yet - an office's list holds a row for every owner it may hear
+             * from, and that row is how the office OPENS the conversation, so
+             * it has to name somebody before anybody has written.
+             */
+            'user_id' => $thread?->user_id ?? $owner?->id,
             'tracking_id' => null,
             'business_name' => null,
             'status' => null,
             'counterparty' => $isOfficer
                 ? [
-                    'name' => $thread?->user?->name ?? 'Applicant',
+                    'name' => $thread?->user?->name ?? $owner?->name ?? 'Applicant',
                     'subtitle' => 'General enquiry',
                     'is_officer' => false,
+                    /*
+                     * An enquiry has no filing, so there is no business whose
+                     * standing to report - only the person's own. Somebody
+                     * whose shop is suspended but who is not blacklisted shows
+                     * nothing here, and that is right: the finding is against
+                     * the shop, and this row is not about a shop.
+                     */
+                    /*
+                     * The person's own standing, not one business's: an
+                     * enquiry is about no business at all, so the note reports
+                     * the worst they hold and says how far it reaches
+                     * [client, 1 October 2026].
+                     */
+                    'standing' => $this->ownerStanding($thread?->user ?? $owner),
                 ]
                 : [
                     'name' => $office->name,
@@ -922,6 +1193,168 @@ class MessageController extends Controller
             ] : null,
             'updated_at' => optional($last?->created_at ?? $thread?->updated_at)->toISOString(),
         ];
+    }
+
+    /**
+     * Where the person writing to this office currently stands.
+     *
+     * ---- Why an officer is told at all --------------------------------
+     *
+     * "Paki lagyan din ng note sa other admin offices sa messages page kung
+     * ang kumokontak sa kanya ay currently suspended, flagged, blacklisted"
+     * [client, 30 September 2026].
+     *
+     * An office reading its mail cannot otherwise tell. A blacklisted owner
+     * and a good-standing one write identical rows, and the reply an officer
+     * would give differs: somebody barred from filing should not be told to
+     * file, and somebody whose shop is flagged is a conversation worth
+     * reading with the finding in mind. The note is the finding, not a
+     * judgement about the person - so it says what is recorded and nothing
+     * else.
+     *
+     * ---- Which finding wins ------------------------------------------
+     *
+     * BLACKLISTED against the PERSON first. It reaches every business they
+     * hold and every business they register afterwards, so reporting one
+     * shop's lesser standing over it would understate what the officer is
+     * looking at.
+     *
+     * Then the BUSINESS this filing is for - blacklisted, suspended, flagged
+     * - because the row is about that filing. Another of the owner's shops
+     * being suspended is not this conversation's business, and saying so here
+     * would have an officer raising a matter the applicant did not come about.
+     *
+     * `flagged` is included and is the gentlest of the three: it is a watch,
+     * not a bar, and the client named it alongside the other two.
+     *
+     * @return array{kind: string, label: string}|null
+     */
+    private function counterpartyStanding(?User $person, ?Business $business): ?array
+    {
+        if ($person?->isBlacklisted() === true) {
+            return [
+                'kind' => 'blacklisted',
+                'label' => 'Account blacklisted',
+                // Moot on a blacklisting: the cascade sets every business the
+                // person holds to `blacklisted`, so none of them is suspended
+                // and a count here would read as zero and mean nothing.
+                'suspended_count' => 0,
+            ];
+        }
+
+        $found = match ($business?->status) {
+            Business::STATUS_BLACKLISTED => ['kind' => 'blacklisted', 'label' => 'Business blacklisted'],
+            'suspended' => ['kind' => 'suspended', 'label' => 'Business suspended'],
+            'flagged' => ['kind' => 'flagged', 'label' => 'Business flagged'],
+            default => null,
+        };
+
+        if ($found === null) {
+            return null;
+        }
+
+        /*
+         * How many of this person's businesses are suspended in all.
+         *
+         * "Pwede rin i-note doon na may isa, dalawa, ... syang business na
+         * suspended" [client, 1 October 2026]. The note stays SPECIFIC to the
+         * business this conversation is about - which is the same instruction,
+         * first half - and this is the scale of it: an officer answering about
+         * one suspended shopfront is better for knowing whether it is the only
+         * one or the third.
+         *
+         * It does not change which note is shown. A row whose own business is
+         * in good standing says nothing, however many of the owner's others
+         * are suspended: that is not this conversation's business, and raising
+         * it would have an officer answering a matter the applicant did not
+         * come about.
+         */
+        return $found + ['suspended_count' => $this->businessStandings($person)['suspended'] ?? 0];
+    }
+
+    /**
+     * Where this person stands with no one business in question.
+     *
+     * ---- Why a general enquiry needs its own answer ---------------------
+     *
+     * "Pag yung business is flagged, suspended, ipa-reflect din sa business
+     * owner general enquiry, para alam ng other admin officer" [client, 1
+     * October 2026].
+     *
+     * A filing's row names the business the conversation is about, so its note
+     * is that business's standing. An enquiry is about no business at all, and
+     * reported nothing but a blacklisting - so an office answering a question
+     * from somebody with two suspended shopfronts had no sign of it, which is
+     * exactly the reader this note was added for.
+     *
+     * With no business in question the answer is the WORST one they hold, and
+     * the counts say how far it reaches. Blacklisting first, for the same
+     * reason as anywhere else: it is against the person and covers everything.
+     *
+     * @return array{kind: string, label: string, suspended_count: int}|null
+     */
+    private function ownerStanding(?User $person): ?array
+    {
+        if ($person?->isBlacklisted() === true) {
+            return ['kind' => 'blacklisted', 'label' => 'Account blacklisted', 'suspended_count' => 0];
+        }
+
+        $held = $this->businessStandings($person);
+
+        $suspended = $held['suspended'] ?? 0;
+
+        if (($held[Business::STATUS_BLACKLISTED] ?? 0) > 0) {
+            return ['kind' => 'blacklisted', 'label' => 'Business blacklisted', 'suspended_count' => $suspended];
+        }
+
+        if ($suspended > 0) {
+            return ['kind' => 'suspended', 'label' => 'Business suspended', 'suspended_count' => $suspended];
+        }
+
+        if (($held['flagged'] ?? 0) > 0) {
+            return ['kind' => 'flagged', 'label' => 'Business flagged', 'suspended_count' => 0];
+        }
+
+        return null;
+    }
+
+    /**
+     * How many businesses this person holds in each standing.
+     *
+     * ---- This was a per-status count, memoised, and both were wrong ------
+     *
+     * It counted suspensions alone, with a cache keyed by user id held in a
+     * property on the controller - on the reasoning that an inbox is many rows
+     * and few applicants, so the question is asked nine times and answered
+     * once. The reasoning was right and the assumption under it was not: the
+     * controller is NOT built fresh for every request the way that supposed.
+     *
+     * A test caught it by suspending a second business between two reads of
+     * the same inbox and still being told there was one. The same staleness
+     * reaches a long-lived worker - Octane, Swoole - where one instance serves
+     * many requests and a count cached on it outlives the facts it counted. On
+     * PHP-FPM it would have hidden until the day somebody changed the runtime.
+     *
+     * So it asks every time, and asks once for every standing rather than once
+     * per standing: one grouped COUNT against a table of a few hundred is not
+     * worth a cache that can lie. If this page ever does need the saving, the
+     * honest place is a single query in threads() building the map for the
+     * whole page - not a bag on the controller.
+     *
+     * @return array<string, int> keyed by status
+     */
+    private function businessStandings(?User $person): array
+    {
+        if ($person === null) {
+            return [];
+        }
+
+        return $person->businesses()
+            ->selectRaw('status, COUNT(*) AS n')
+            ->groupBy('status')
+            ->pluck('n', 'status')
+            ->map(fn ($n) => (int) $n)
+            ->all();
     }
 
     /** One inbox row, named from the reader's side of the conversation. */
@@ -966,6 +1399,12 @@ class MessageController extends Controller
                     'name' => $app->applicant?->name ?? 'Applicant',
                     'subtitle' => $app->business?->name ?? $app->tracking_id,
                     'is_officer' => false,
+                    /*
+                     * Where the person writing to this office currently stands
+                     * [client, 30 September 2026]. Null for anybody in good
+                     * standing, which is almost everybody.
+                     */
+                    'standing' => $this->counterpartyStanding($app->applicant, $app->business),
                 ]
                 // The office of the newest readable turn — taken from the row's
                 // own office list rather than resolved again, so the title and
@@ -1027,7 +1466,7 @@ class MessageController extends Controller
         $threads = $this->readableThreads($app, $user)->keyBy('department_id');
 
         $rows = $this->visibleOffices($app, $user)
-            ->map(function (Department $d) use ($addressable, $threads, $stats, $latest) {
+            ->map(function (Department $d) use ($app, $user, $addressable, $threads, $stats, $latest) {
                 $thread = $threads->get($d->id);
                 $stat = $thread ? $stats->get($thread->id) : null;
 
@@ -1041,7 +1480,22 @@ class MessageController extends Controller
                     'last_message_at' => $stat
                         ? optional($latest->get($thread->id)?->created_at)->toISOString()
                         : null,
-                    'can_message' => $addressable->has($d->id),
+                    /*
+                     * Addressable, AND still this officer's case to answer.
+                     *
+                     * "Once na in-unassign na, magsstay pa rin ang convo pero
+                     * di nya na ma-cha-chat, like for viewing na lang"
+                     * [client, 30 September 2026]. The conversation is left
+                     * where it was and the composer closes - writesTo() is the
+                     * whole of that rule, and the same predicate refuses the
+                     * POST, because a closed box in a browser is a suggestion.
+                     *
+                     * An applicant is never closed out of their own filing:
+                     * writesTo() answers true for anybody without
+                     * `application.view_all`.
+                     */
+                    'can_message' => $addressable->has($d->id)
+                        && $this->writesTo($user, $app, $d->id),
                 ];
             })
             ->values()
@@ -1223,9 +1677,22 @@ class MessageController extends Controller
         $threadIds = $threads->pluck('id')->all();
         // Opening a conversation is reading it — there is no separate gesture.
         $this->markThreadsRead($threadIds, $user);
-        $total = Message::whereIn('thread_id', $threadIds)->count();
+        /*
+         * Scoped to the READER as well as to the thread.
+         *
+         * The thread was enough while an office had one conversation its whole
+         * staff shared. An officer now reads the stretch that was theirs - the
+         * messages written while they held the case [client, 30 September
+         * 2026] - so the same filter the inbox counts through has to run here,
+         * or the transcript would hand a successor the predecessor's
+         * conversation that the row beside it says is empty.
+         */
+        $total = Message::whereIn('thread_id', $threadIds)
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
+            ->count();
         $messages = Message::query()
             ->whereIn('thread_id', $threadIds)
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
             ->with(['sender:id,name,department_id', 'attachments', 'thread:id,department_id', 'thread.department:id,code,name'])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
@@ -1306,6 +1773,19 @@ class MessageController extends Controller
             $message = Message::create([
                 'thread_id' => $thread->id,
                 'sender_user_id' => $request->user()->id,
+                /*
+                 * WHO HELD the filing for this office when the message was
+                 * written - not who wrote it. An applicant's question carries
+                 * the officer it was addressed to, which is what lets that
+                 * officer keep reading it after the case moves on, and what
+                 * keeps it out of their successor's screen.
+                 *
+                 * Null when the office holds the filing but nobody in it has
+                 * picked the case up. Those messages belong to the office
+                 * rather than to a person, and whoever claims it reads them -
+                 * see scopeMessagesToReader().
+                 */
+                'handled_by_user_id' => $this->holderOf($application, $office->id),
                 'body' => $data['body'],
             ]);
 
@@ -1371,6 +1851,16 @@ class MessageController extends Controller
                 ->from('message_threads as ut')
                 ->whereColumn('ut.id', 'messages.thread_id')
                 ->where('ut.department_id', $deptId));
+
+            /*
+             * And only their own stretch of it. A badge counting messages the
+             * reader cannot open is a badge that never clears: the successor
+             * would be told the predecessor's conversation is waiting on them,
+             * and find nothing on the screen it points at.
+             */
+            $query->where(fn ($who) => $who
+                ->whereNull('messages.handled_by_user_id')
+                ->orWhere('messages.handled_by_user_id', $user->id));
 
             return;
         }
@@ -1923,10 +2413,39 @@ class MessageController extends Controller
         ]);
 
         $reader = $request->user();
-        $thread = $this->generalThreadFor(
-            $this->generalOwner($request, $user),
-            $this->requestedOffice($request),
-        );
+        $owner = $this->generalOwner($request, $user);
+
+        /*
+         * Which office to open on, when the caller names none: BPLO.
+         *
+         * "Make it on messages page naka default lagi sa BPLO" [client, 1
+         * October 2026]. It coordinates every filing and is the office you
+         * write to when you do not know which office to ask.
+         *
+         * It used to answer with whichever office had spoken last, on the
+         * reasoning that an applicant is coming back to the conversation they
+         * were having. The screen now opens on BPLO regardless, and a server
+         * that disagreed would be fetched twice for every visit — once for the
+         * office that spoke last, once more when the picker settled — showing
+         * one conversation and replacing it with another as the reader looked
+         * at it.
+         *
+         * Nothing is hidden by it. Every office keeps its pill, and the pills
+         * carry how much has been said to each.
+         *
+         * Only for the OWNER's own enquiry. An office opening somebody's
+         * enquiry is opening its own conversation with them and may not read
+         * another's, so the default there is the office itself.
+         */
+        $chosen = $this->requestedOffice($request);
+
+        if ($chosen === null) {
+            $chosen = $reader->id === $owner->id
+                ? $this->bplo()?->id
+                : $reader->department_id;
+        }
+
+        $thread = $this->generalThreadFor($owner, $chosen);
         $this->authorizeGeneralParticipant($reader, $thread);
 
         $this->markThreadsRead([$thread->id], $reader);
@@ -1948,9 +2467,16 @@ class MessageController extends Controller
                 'returned' => $messages->count(),
                 'window' => self::MESSAGE_WINDOW,
                 'department_id' => $thread->department_id,
-                // One office, always, so the transcript screen's picker has the
-                // same shape it has on a filing and needs no second branch.
-                'offices' => [$this->generalOfficeRow($thread, $total)],
+                /*
+                 * Every office the reader may ask, so the pane draws the same
+                 * picker a filing has [client, 30 September 2026]. An OFFICE
+                 * reading somebody's enquiry gets its own and nothing else -
+                 * the picker is a choice for the person who has one, and an
+                 * office seat may only ever read its own conversation.
+                 */
+                'offices' => $reader->id === $owner->id
+                    ? $this->enquiryOffices($owner)->all()
+                    : [$this->generalOfficeRow($thread, $total)],
             ],
         ]);
     }
@@ -2222,6 +2748,50 @@ class MessageController extends Controller
      * owed a reply more than the routing is owed purity. BPLO, which is always
      * addressable, frequently has no named officer on an unrouted filing.
      */
+    /**
+     * Who is holding this filing for this office right now, if anybody.
+     *
+     * The id alone, and one query. `assignedOfficer()` below answers the same
+     * question with the whole User loaded, for the places that print a name;
+     * this is on the write path of every message and wants neither the model
+     * nor its relations.
+     */
+    private function holderOf(Application $application, int $departmentId): ?int
+    {
+        return ApplicationAssignment::query()
+            ->where('application_id', $application->id)
+            ->where('department_id', $departmentId)
+            ->value('officer_user_id');
+    }
+
+    /**
+     * May this reader still WRITE in this office's conversation?
+     *
+     * "Kung ano lang ang naka assign sa kanya, yun lang ang pwede nyang
+     * ma-chat. Once na in-unassign na, magsstay pa rin ang convo pero di nya
+     * na ma-cha-chat, like for viewing na lang" [client, 30 September 2026].
+     *
+     * So holding the case is what grants the composer, and losing it leaves
+     * the conversation legible and closed. An applicant is not an officer and
+     * is never closed out of their own filing; an office with NOBODY holding
+     * the case is open to whoever is in it, because somebody has to be able to
+     * answer before anyone has claimed it.
+     */
+    private function writesTo(User $user, Application $application, int $departmentId): bool
+    {
+        if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
+            return true;
+        }
+
+        if ($user->department_id !== $departmentId) {
+            return false;
+        }
+
+        $holder = $this->holderOf($application, $departmentId);
+
+        return $holder === null || $holder === $user->id;
+    }
+
     private function assignedOfficer(Application $application, ?int $departmentId = null): ?User
     {
         $forOffice = $departmentId === null ? null : $application->assignments()

@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type SVGProps } from 'react'
+import type { ComponentType, SVGProps } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AmendIcon,
@@ -12,8 +12,7 @@ import {
 } from '../components/icons'
 import { HomeAddressPrompt } from '../components/HomeAddressPrompt'
 import { Logo } from '../components/Logo'
-import { AccountRestrictedModal } from '../components/ui/Proto'
-import { businesses, permits, requests } from '../lib/resources'
+import { permits, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { activePortal, portalPath } from '../lib/api'
 import { useAuth } from '../stores/auth'
@@ -112,28 +111,20 @@ function HomeCard({
 
 /* ── Owner home (PDF p5) ──────────────────────────────────────────────── */
 function OwnerHome() {
-  const [dismissed, setDismissed] = useState(false)
   const homeAddressMissing = useAuth((s) => s.user?.home_address_missing ?? false)
-  // Confirm status exposure at runtime: BusinessResource does not currently
-  // include `status`, so `b.status` may be undefined — the modal only fires
-  // when a restricted status is actually present. Purely informational.
-  const { data } = useAsync(() => businesses.list(), [])
 
   /*
-   * -- Blacklisted wins over suspended --------------------------------------
+   * ---- The restriction notice moved to the shell -----------------------
    *
-   * This took whichever came first in the list. An owner with a suspended shop
-   * AND a blacklisted account got the suspension notice about half the time -
-   * the lesser of the two findings, and the one whose advice ("your other
-   * businesses are fine") is false when the account itself is barred.
+   * This page raised it, which meant an owner who landed anywhere else - a
+   * notification link, a bookmark, a reload on the page they were last
+   * reading - was never told. "Pag open na pag open pa lang ng account" is
+   * about the ACCOUNT, not about the home page [client, 30 September 2026],
+   * so it is raised in AppShell now, from the session's own payload.
    *
-   * A blacklisting is about the person and reaches everything they hold, so it
-   * is the news that has to be delivered when both are true.
+   * Nothing is left here: a barred account is redirected out of this page
+   * before it renders, by the same guard.
    */
-  const held = data ?? []
-  const restricted =
-    held.find((b) => b.status === 'blacklisted') ?? held.find((b) => b.status === 'suspended')
-  const showModal = !dismissed && Boolean(restricted)
 
   /*
    * ── The list moved onto the tile ─────────────────────────────────────────
@@ -193,21 +184,6 @@ function OwnerHome() {
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
-      {showModal && restricted && (
-        <AccountRestrictedModal
-          variant={restricted.status === 'suspended' ? 'suspended' : 'blacklisted'}
-          /*
-            The reference only makes sense for a SUSPENSION, which is about
-            one premises. Quoting one business's BAN against an account-wide
-            blacklisting would invite the reader to ring up about that shop
-            and be told the finding is not about it.
-          */
-          referenceId={restricted.status === 'suspended' ? restricted.ban : null}
-          businessName={restricted.name}
-          covers={held.length}
-          onClose={() => setDismissed(true)}
-        />
-      )}
       <h1 className="text-center text-[34px] font-bold leading-tight text-ink">Track your businesses with</h1>
       <div className="mt-6">
         <Logo height={72} />

@@ -4,6 +4,7 @@ import { DownloadIcon } from './icons'
 import { toApiError } from '../lib/api'
 import { formatBytes, formatDateTime } from '../lib/format'
 import { messages as messagesApi } from '../lib/resources'
+import { officeHoursNote } from '../lib/officeHours'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type { Message, MessageOffice, MessageTranscriptMeta } from '../lib/types'
@@ -142,6 +143,50 @@ function senderRole(message: Message): string {
   return office ? `${office} Officer` : 'Officer'
 }
 
+/**
+ * The office-hours line that sits above every composer.
+ *
+ * ── It re-reads the clock, and it has to ────────────────────────────────────
+ *
+ * A messages screen is left open. Computed once at mount, this would still be
+ * saying "closed now — expect an answer tomorrow morning" at ten past seven on
+ * a Monday, to a reader who could be answered within the minute. So it ticks,
+ * once a minute, which is as coarse as it can be and still change on the stroke
+ * of the hour it is describing.
+ *
+ * `role="status"` rather than `aria-live="assertive"`: a screen reader should
+ * be told when the counter opens under them, but politely, and never over the
+ * top of a message they are in the middle of reading.
+ *
+ * The dot is not the information — the sentence is. Colour here only sorts
+ * "open" from "closed" at a glance for the readers who can use it, which is
+ * why the green and the amber carry text that says the same thing (DESIGN.md,
+ * never colour alone).
+ */
+function OfficeHoursNote() {
+  const [note, setNote] = useState(() => officeHoursNote())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNote(officeHoursNote()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  return (
+    <p
+      role="status"
+      className={`mb-2.5 flex items-start gap-2 rounded-lg px-3 py-2 text-xs leading-relaxed text-ink-secondary ${
+        note.open ? 'bg-s-green-tint' : 'bg-s-orange-tint'
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${note.open ? 'bg-s-green' : 'bg-s-orange'}`}
+      />
+      {note.text}
+    </p>
+  )
+}
+
 function Bubble({
   message,
   mine,
@@ -208,12 +253,21 @@ function OfficePicker({
   offices,
   activeId,
   readerOffice,
+  label,
   onPick,
 }: {
   offices: MessageOffice[]
   activeId: number | null
   /** The reader's own office, when they have one. Null for an applicant. */
   readerOffice: string | null
+  /**
+   * What the strip is asking.
+   *
+   * "Which office is this about?" is right on a permit and slightly wrong on a
+   * general enquiry, which is not about anything yet - there, the question is
+   * who you are writing to.
+   */
+  label?: string
   onPick: (departmentId: number) => void
 }) {
   if (offices.length === 0) return null
@@ -250,7 +304,7 @@ function OfficePicker({
   return (
     <div className="mb-2.5">
       <p id="message-office-label" className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-        Which office is this about?
+        {label ?? 'Which office is this about?'}
       </p>
       <div role="group" aria-labelledby="message-office-label" className="flex flex-wrap gap-1.5">
         {offices.map((office) => {
@@ -326,12 +380,14 @@ export type MessageTarget =
   /**
    * `userId` omitted means "mine"; an officer names the person.
    *
-   * `officeId` omitted means BPLO, which is what an enquiry always was. Every
-   * office has a front door now [client, 28 September 2026], so the office is
-   * part of WHICH conversation this is - two enquiries by the same person to
-   * two offices are two transcripts, not one.
+   * No office on the target, deliberately. Every office has a front door, and
+   * for a while each was its own inbox row and therefore its own target -
+   * which put six conversations on an applicant's inbox for what they think of
+   * as one thing. The office is a choice INSIDE the conversation now [client,
+   * 30 September 2026], held in the same `officeId` state a filing uses and
+   * drawn with the same picker.
    */
-  | { kind: 'general'; userId?: number | null; officeId?: number | null }
+  | { kind: 'general'; userId?: number | null }
   /**
    * An office account and the System Administrator.
    *
@@ -384,6 +440,20 @@ export function MessageThreadView({
    */
   const [officeId, setOfficeId] = useState<number | null>(null)
 
+  /*
+   * Picking a different office re-asks the server, and the answer is a
+   * different transcript. Anything half-typed belonged to the office it was
+   * addressed to, so it does not travel: a question for the fire office sent
+   * to the health office because the pill moved under the caret is the bug
+   * this avoids.
+   */
+  function pickOffice(departmentId: number) {
+    if (departmentId === officeId) return
+    setOfficeId(departmentId)
+    setBody('')
+    setAttachment(null)
+  }
+
   const { data, loading, error, reload, setData } = useAsync<{
     data: Message[]
     meta: MessageTranscriptMeta
@@ -392,17 +462,13 @@ export function MessageThreadView({
       target.kind === 'admin'
         ? messagesApi.adminWithMeta(target.userId)
         : target.kind === 'general'
-          ? messagesApi.generalWithMeta(target.userId, target.officeId)
+          ? messagesApi.generalWithMeta(target.userId, officeId)
           : messagesApi.listWithMeta(target.applicationId, officeId),
     // The key parts of the target, not the object: a fresh literal on every
     // render would re-fetch the transcript forever.
     [
       target.kind,
       target.kind === 'application' ? target.applicationId : target.userId,
-      // The enquiry's office belongs in the key as much as the person does:
-      // without it, switching from the fire office's enquiry to the health
-      // office's would re-render the transcript and never re-fetch it.
-      target.kind === 'general' ? target.officeId : null,
       officeId,
     ],
   )
@@ -423,9 +489,32 @@ export function MessageThreadView({
 
   const list = data?.data ?? []
   const offices = data?.meta.offices ?? []
-  // Depended on by id and not by the array: `offices` is a fresh array on every
-  // render, and an effect that watches it would re-run for ever.
-  const firstOfficeId = offices.length > 0 ? offices[0].department_id : null
+  /*
+   * ---- The picker opens on BPLO -------------------------------------------
+   *
+   * "Make it on messages page naka default lagi sa BPLO" [client, 1 October
+   * 2026].
+   *
+   * It opened on `offices[0]`, and that list is sorted busiest-first with the
+   * silent offices after it BY NAME — so on a filing nobody has written about,
+   * which is most of them, the default was whichever office came first
+   * alphabetically: the Bureau of Fire Protection, on a permit that had
+   * nothing to do with fire.
+   *
+   * BPLO is the right default for the same reason it is the general enquiry's:
+   * it coordinates every filing, and is the office an applicant writes to when
+   * they do not know which office to ask.
+   *
+   * Nothing is hidden by this. Every office keeps its pill, and the pills
+   * carry how much has been said to each — so a conversation already running
+   * with another office is one press away, and says so with a number.
+   *
+   * Depended on by id and not by the array: `offices` is a fresh array on
+   * every render, and an effect that watches it would re-run for ever.
+   */
+  const defaultOfficeId =
+    offices.find((o) => o.code === 'BPLO')?.department_id ??
+    (offices.length > 0 ? offices[0].department_id : null)
   const active = offices.find((o) => o.department_id === officeId) ?? null
   /**
    * Who the reader is writing to, in their own words.
@@ -469,8 +558,8 @@ export function MessageThreadView({
         : (active?.name ?? null)
 
   useEffect(() => {
-    if (officeId === null && firstOfficeId !== null) setOfficeId(firstOfficeId)
-  }, [officeId, firstOfficeId])
+    if (officeId === null && defaultOfficeId !== null) setOfficeId(defaultOfficeId)
+  }, [officeId, defaultOfficeId])
 
   /*
    * An office that has come off the filing keeps its correspondence readable
@@ -479,6 +568,24 @@ export function MessageThreadView({
    * refuse.
    */
   const closed = active !== null && !active.can_message
+  /*
+   * ---- Two ways a conversation closes, and they need different words ------
+   *
+   * The OFFICE came off the filing: nobody here can answer, and the reader is
+   * usually the applicant, watching a correspondent disappear.
+   *
+   * The CASE came off the reader: the office is still on the filing and
+   * somebody else is holding it now [client, 30 September 2026]. Telling that
+   * officer "the health office is no longer handling this application" sends
+   * them to look for a routing problem that is not there, while they are
+   * sitting in the health office.
+   *
+   * Told apart by whether the reader belongs to the office whose conversation
+   * this is. Nothing else on the payload distinguishes them, and nothing
+   * needs to: those are the only two ways `can_message` goes false.
+   */
+  const closedByHandover =
+    closed && viewerIsOfficer && user?.department?.name === active?.name
 
   // Keep the newest message in view when the thread grows.
   useEffect(() => {
@@ -502,7 +609,7 @@ export function MessageThreadView({
         target.kind === 'admin'
           ? await messagesApi.sendAdmin(text, attachment, target.userId)
           : target.kind === 'general'
-            ? await messagesApi.sendGeneral(text, attachment, target.userId, target.officeId)
+            ? await messagesApi.sendGeneral(text, attachment, target.userId, officeId)
             : await messagesApi.send(target.applicationId, text, attachment, officeId)
       /*
        * Append rather than refetch, so the message appears instantly — but only
@@ -528,11 +635,28 @@ export function MessageThreadView({
       <OfficePicker
         offices={offices}
         activeId={officeId}
+        label={target.kind === 'general' ? 'Which office are you asking?' : undefined}
         readerOffice={user?.department?.name ?? null}
-        onPick={setOfficeId}
+        onPick={pickOffice}
       />
 
-      <div className={`flex-1 space-y-4 overflow-y-auto pr-1 ${scrollClassName}`}>
+      {/*
+        ---- A short conversation sits at the BOTTOM -------------------------
+
+        `mt-auto` on the list inside a flex-column scroller. The transcript is
+        a fixed-height pane now, so three messages were pinned to the ceiling
+        with 400px of white between them and the box you reply in — the eye
+        has to travel the whole pane to get from the last thing said to the
+        place you answer it, and every messaging app people already use puts
+        those two together.
+
+        It has to be `mt-auto` on the child rather than `justify-end` on the
+        scroller: `justify-end` on an overflowing flex container pushes the
+        first items out of reach above the scroll origin, and a long thread
+        would lose its oldest messages entirely.
+      */}
+      <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto pr-1 ${scrollClassName}`}>
+        <div className="mt-auto space-y-4">
         {loading ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading messages…</p>
         ) : error ? (
@@ -553,14 +677,37 @@ export function MessageThreadView({
             <Bubble key={m.id} message={m} mine={isMine(m)} onAttachmentError={setSendError} />
           ))
         )}
-        <div ref={endRef} />
+          <div ref={endRef} />
+        </div>
       </div>
 
       <div className="mt-4 border-t border-line pt-4">
+        {/*
+          ── When the City answers ─────────────────────────────────────────
+
+          *"Put a message somewhere that offices can only reply within work
+          hours"* [client, 1 October 2026]. Here, directly above the box, is
+          the somewhere: it is read at the moment the reader is deciding
+          whether to write, and it is the same spot they come back to when
+          they are wondering why nobody has replied.
+
+          Not shown on a CLOSED conversation, where the office has come off
+          the filing: that thread will not be answered at seven on Monday
+          either, and a second notice under the first would only argue with
+          it.
+
+          Out of hours the line changes rather than appearing — a notice that
+          shows up only when the counter is shut is one nobody reads until
+          they are already waiting. The wording stays reassuring in both
+          states because nothing is being refused: the message sends either
+          way, and saying so is the point.
+        */}
+        {!closed && <OfficeHoursNote />}
         {closed && (
           <p className="mb-2 text-xs font-medium text-ink-secondary">
-            {active?.name} is no longer handling this application. You can still read what was
-            said, but not reply.
+            {closedByHandover
+              ? 'This filing is no longer assigned to you. You can still read what was said while it was yours, but not reply.'
+              : `${active?.name} is no longer handling this application. You can still read what was said, but not reply.`}
           </p>
         )}
         {sendError && <p className="mb-2 text-xs font-medium text-s-red">{sendError}</p>}
@@ -602,7 +749,24 @@ export function MessageThreadView({
             */
             readOnly={closed}
             aria-disabled={closed || undefined}
-            placeholder={counterparty ? `Write to ${counterparty}…` : 'Write a message…'}
+            /*
+              The addressee, but only when naming them fits.
+
+              "Write to Business Permits and Licensing Office…" wraps to three
+              lines in a two-row box, so on a phone the placeholder was cut
+              through the middle of a word — "Write to Business / Permits and /
+              Licensing Offic". A placeholder that cannot be read whole is
+              worse than a shorter one, and it is the most redundant text on
+              the screen: the office it names is the pill highlighted directly
+              above the box.
+
+              So a long name gives way. The staff side keeps its addressee,
+              because "the applicant" is short and is the one case where the
+              box could otherwise be mistaken for a note to oneself.
+            */
+            placeholder={
+              counterparty && counterparty.length <= 24 ? `Write to ${counterparty}…` : 'Write a message…'
+            }
             aria-label={active ? `Message to ${active.name}` : 'Message'}
             aria-describedby="message-send-hint"
             onFocus={() => setComposerFocused(true)}

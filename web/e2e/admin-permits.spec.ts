@@ -564,20 +564,28 @@ test.describe('the permit register table', () => {
     await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
   })
 
-  test('the issue-date range narrows on the server', async ({ page }) => {
+  test('the issue-date range is not offered as a filter', async ({ page }) => {
     /*
-     * The filter an office asks for that Status cannot answer: what was issued
-     * in a given month. It is the server's — a browser filtering the rows in
-     * hand would find nothing past the first page of a register that holds
-     * thousands.
+     * Removed on the client's instruction [1 October 2026: "paki tanggal na to
+     * sa filter", of the From / To pair]. Same shape as the expiry window
+     * below, and for the same reason: `issued_from` / `issued_to` remain on
+     * the endpoint, documented and tested, so this asserts the SCREEN and the
+     * API test beside it asserts the endpoint.
+     *
+     * The question the pair answered is still answerable — the register is
+     * ordered by issuance and the Sort menu offers that column both ways.
      */
     await openFilter(page)
 
-    await page.locator('.shadow-overlay input[type=date]').first().fill('2026-01-01')
-    await expect.poll(() => asked.at(-1)).toContain('issued_from=2026-01-01')
+    await expect(page.locator('.shadow-overlay input[type=date]')).toHaveCount(0)
+    await expect.poll(() => asked.at(-1)).not.toContain('issued_from')
+    await expect.poll(() => asked.at(-1)).not.toContain('issued_to')
 
-    await page.locator('.shadow-overlay input[type=date]').last().fill('2026-12-31')
-    await expect.poll(() => asked.at(-1)).toContain('issued_to=2026-12-31')
+    // The orderings that answer the same question are not filters, and stay.
+    await page.keyboard.press('Escape')
+    await openSort(page)
+    await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Oldest issued' })).toBeVisible()
   })
 
   test('the expiry window is not offered as a filter', async ({ page }) => {

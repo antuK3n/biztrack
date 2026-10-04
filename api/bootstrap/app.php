@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\EnforceAccountRestriction;
+use App\Http\Middleware\EnsureDebugPanelOpen;
 use App\Http\Middleware\EnsureEmailConfirmedToFile;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\SecurityHeaders;
@@ -8,6 +10,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -22,6 +25,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => EnsurePermission::class,
             'email.confirmed' => EnsureEmailConfirmedToFile::class,
+            // The Debug page's API: super admin AND the panel open, else 404.
+            'debug.panel' => EnsureDebugPanelOpen::class,
+            // A suspended or blacklisted owner reaches their messages and
+            // their notices, and nothing else. See the middleware for what it
+            // is attached to and why it is attached per group.
+            'unrestricted' => EnforceAccountRestriction::class,
         ]);
         $middleware->append(SecurityHeaders::class);
         /*
@@ -95,6 +104,16 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+        /*
+         * A wrong method on a Debug route is a 404 like everything else there.
+         * Route matching answers 405 before any middleware runs, so without
+         * this a POST to a GET-only debug route would tell anybody — panel
+         * closed, not signed in — that the route exists, which is what the
+         * 404s in EnsureDebugPanelOpen are for.
+         */
+        $exceptions->render(fn (MethodNotAllowedHttpException $e, Request $request) => $request->is('api/v1/debug', 'api/v1/debug/*')
+            ? response()->json(['message' => 'Not Found.'], 404)
+            : null);
 
         /*
          * ── A 404 names no class and no id ───────────────────────

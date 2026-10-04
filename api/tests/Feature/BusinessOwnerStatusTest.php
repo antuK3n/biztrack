@@ -161,11 +161,17 @@ it('stops a draft started before the suspension from being submitted after it', 
      * The draft predates the suspension, so the create-time gate never saw it.
      * Without a gate at submit this filing reached an office queue and was
      * worked as though the business were in good standing.
+     *
+     * 403 rather than the 422 this asserted until 30 September 2026. A
+     * suspension now bars the whole account until it is settled, so
+     * `EnforceAccountRestriction` answers in front of the route and never
+     * reaches the controller's own check on `business_id`. Both refuse; this
+     * one refuses earlier, and says the account is restricted rather than
+     * naming a field the sender could correct.
      */
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('business_id');
+        ->assertForbidden();
 
     expect(Application::find($appId)->status->value)->toBe('draft');
 });
@@ -185,8 +191,10 @@ it('lets the filing through again once the business is restored', function () {
             'status' => 'blacklisted', 'reason' => 'Falsified / misrepresented documents',
         ])->assertOk();
 
+    // 403: the account is barred outright while the finding stands. See the
+    // note on the test above for why this stopped being a 422.
     test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/submit")->assertStatus(422);
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertForbidden();
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/admin/businesses/{$businessId}/status", [

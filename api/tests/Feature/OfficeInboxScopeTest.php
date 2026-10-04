@@ -189,33 +189,43 @@ it('does not show an office a filing it was never assigned', function () {
 // The owner's front doors.
 // ─────────────────────────────────────────────────────────────────────────
 
-it('offers the owner a general enquiry with every office, not only BPLO', function () {
+it('gives the owner one enquiry row carrying every office', function () {
+    /*
+     * ---- One row, then six, then one again -------------------------------
+     *
+     * The enquiry began as a single conversation with BPLO. When every office
+     * got a front door it became a row each, and the inbox then showed six
+     * conversations - six titles, six dates, six previews - for what an owner
+     * thinks of as one thing: asking the City a question.
+     *
+     * "Nasa iisang convo na lang uli ang mga general inquiry sa ibat ibang
+     * offices, tas may choices na lang ulit don kung anong office" [client, 30
+     * September 2026]. So the row is one and the offices ride ON it, which is
+     * the same shape a permit's row has.
+     *
+     * Underneath nothing joined up: `(user_id, department_id)` is still unique
+     * and an office still reads only its own thread. What was merged is the
+     * summary, not the correspondence - which the test below this one holds.
+     */
     $rows = inbox('owner@biztrack.local')->where('kind', 'general');
 
-    $codes = $rows->pluck('responsible_office.code')->sort()->values();
+    expect($rows)->toHaveCount(1);
 
-    expect($codes->all())->toBe(
-        Department::orderBy('code')->pluck('code')->all()
-    );
+    $row = $rows->first();
+
+    expect(collect($row['offices'])->pluck('code')->sort()->values()->all())
+        ->toBe(Department::orderBy('code')->pluck('code')->all())
+        ->and($row['counterparty']['name'])->toBe('General enquiry');
 });
 
-it('leaves every door open however the filings are routed', function () {
+it('leaves every office on the row however the filings are routed', function () {
     /*
-     * ---- Two narrower rules came before this one, both wrong -------------
-     *
-     * The first closed an office's door as soon as that office was in charge
-     * of anything of the owner's. Against the register that shut every door
-     * but BPLO on the strength of one permit routed everywhere - including
-     * for a permit filed days later with nothing routed to it at all.
-     *
-     * The second closed it only once the office was in charge of EVERY filing
-     * they held. Better, and wrong in the same direction.
-     *
-     * "Sa business owner side lahat na ng offices may general inquiry"
-     * [client, 28 September 2026]. "Kung wala pang mismong officer in charge"
-     * was the situation being described - an owner with nobody to write to -
-     * not a condition on the door. The answer to it is that the offices are
-     * always there.
+     * Two narrower rules came before this one and both were wrong in the same
+     * direction: the first withdrew an office once it was in charge of
+     * anything of the owner's, the second once it was in charge of everything.
+     * "Kung wala pang mismong officer in charge" was the situation being
+     * described - an owner with nobody to write to - not a condition on the
+     * offer.
      */
     $fire = office('BFP');
     $fireOfficer = User::where('email', 'fire@biztrack.local')->value('id');
@@ -226,11 +236,11 @@ it('leaves every door open however the filings are routed', function () {
 
     expect($filings->count())->toBeGreaterThan(1);
 
-    $doors = fn () => inbox('owner@biztrack.local')
-        ->where('kind', 'general')
-        ->pluck('responsible_office.code');
+    $offices = fn () => collect(
+        inbox('owner@biztrack.local')->where('kind', 'general')->first()['offices']
+    )->pluck('code');
 
-    expect($doors())->toContain('BFP');
+    expect($offices())->toContain('BFP');
 
     // Every filing they hold, handed to a named person in the fire office.
     foreach ($filings as $id) {
@@ -243,64 +253,34 @@ it('leaves every door open however the filings are routed', function () {
         ]);
     }
 
-    /*
-     * Still there. A directory that grows and shrinks with the routing is one
-     * an owner cannot learn: the fire office was on the page last week and is
-     * gone today, and nothing on the screen explains why.
-     */
-    expect($doors())->toContain('BFP');
-
-    // And the whole set, not only the one under test.
-    expect($doors()->sort()->values()->all())
+    expect($offices())->toContain('BFP')
+        ->and($offices()->sort()->values()->all())
         ->toBe(Department::orderBy('code')->pluck('code')->all());
 });
 
-it('keeps a door open once it has been used', function () {
-    $fire = office('BFP');
-
+it('counts what has been said to each office separately on the one row', function () {
     $token = loginToken('owner@biztrack.local');
     app('auth')->forgetGuards();
 
-    test()->withToken($token)
-        ->postJson('/api/v1/general-messages', [
-            'department_id' => $fire->id,
-            'body' => 'Do I need a second extinguisher on the mezzanine?',
-        ])
-        ->assertCreated();
+    test()->withToken($token)->postJson('/api/v1/general-messages', [
+        'department_id' => office('BFP')->id,
+        'body' => 'A question for the fire office.',
+    ])->assertCreated();
+
+    $row = inbox('owner@biztrack.local')->where('kind', 'general')->first();
+    $offices = collect($row['offices'])->keyBy('code');
 
     /*
-     * Writing in a door does not remove it; it fills it. The row is the same
-     * conversation either way, and the SCREEN decides where to draw it from
-     * the message count - see MessagesPage, where an enquiry with something
-     * in it joins the conversations and an empty one stays under "Ask an
-     * office".
+     * The counts are what make one row honest about six conversations. Without
+     * them the picker is six identical pills and the owner has no way to see
+     * which office they have already written to.
      */
-    $row = inbox('owner@biztrack.local')
-        ->where('kind', 'general')
-        ->firstWhere('responsible_office.code', 'BFP');
-
-    expect($row)->not->toBeNull()
-        ->and($row['messages_count'])->toBe(1);
-});
-
-it('keeps BPLO\'s door open whatever the routing says', function () {
-    $filing = unroutedFiling();
-
-    ApplicationAssignment::create([
-        'application_id' => $filing->id,
-        'department_id' => office('BPLO')->id,
-        'officer_user_id' => User::where('email', 'bplo@biztrack.local')->value('id'),
-        'status' => 'pending',
-        'assigned_at' => now(),
-    ]);
-
-    /*
-     * BPLO coordinates every filing and is who you write to when you do not
-     * know which office to ask. An owner with nothing registered at all has no
-     * other way in, which is the case the enquiry was built for.
-     */
-    expect(inbox('owner@biztrack.local')->where('kind', 'general')->pluck('responsible_office.code'))
-        ->toContain('BPLO');
+    expect($offices['BFP']['messages_count'])->toBe(1)
+        ->and($offices['CHO']['messages_count'])->toBe(0)
+        ->and($row['messages_count'])->toBe(1)
+        // And the row is summarised from whoever spoke last.
+        ->and($row['responsible_office']['code'])->toBe('BFP')
+        ->and($row['last_message']['body'])->toBe('A question for the fire office.');
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -363,17 +343,33 @@ it('shows an office only the enquiries addressed to it', function () {
         'body' => 'Fire office only.',
     ])->assertCreated();
 
+    /*
+     * The fire office holds the words. Found by the message rather than by
+     * position: an office's list now carries a row for every owner it may
+     * hear from, whether or not anybody has written [client, 1 October 2026],
+     * so `first()` is whichever account sorts highest and not necessarily the
+     * one that spoke.
+     */
     $fire = inbox('fire@biztrack.local')->where('kind', 'general');
-    expect($fire)->toHaveCount(1)
-        ->and($fire->first()['last_message']['body'])->toBe('Fire office only.');
+    $spoken = $fire->firstWhere('messages_count', 1);
+
+    expect($spoken)->not->toBeNull()
+        ->and($spoken['last_message']['body'])->toBe('Fire office only.');
 
     /*
      * The half that has to stay shut. This read BPLO's post hard-coded, so
      * before the change the fire office would have been shown BPLO's mail and
-     * not its own — a leak and a blackout in the same line.
+     * not its own - a leak and a blackout in the same line.
+     *
+     * The health office may hold rows of its own now; what it must not hold is
+     * a word of this. Asserted on the CONTENT, because the row is no longer
+     * evidence of anything - it is the door, and every office has one per
+     * owner it may hear from.
      */
     $health = inbox('sanitary@biztrack.local')->where('kind', 'general');
-    expect($health)->toHaveCount(0);
+
+    expect($health->sum('messages_count'))->toBe(0)
+        ->and($health->pluck('last_message')->filter())->toBeEmpty();
 });
 
 it('refuses an enquiry addressed to an office that does not exist', function () {
@@ -491,4 +487,167 @@ it('tells the owner when the office answers', function () {
     expect($owner->notifications()->count())->toBeGreaterThan($before);
     expect($owner->notifications()->latest('id')->first()->title)
         ->toContain('Bureau of Fire Protection');
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// An office can start the conversation, not only answer one.
+// ─────────────────────────────────────────────────────────────────────────
+
+/*
+ * "Lahat dapat ng officer matatanggap ang general inquiry, so that ma-me-message
+ * pa rin nila yung business owner sa messages page. Matic na pag gumagawa ng
+ * account may magrereflect na sa general inquiry ng BPLO. Ganon naman din sa
+ * other offices once na nag-apply na sila ng other permit sa office na yon"
+ * [client, 1 October 2026].
+ *
+ * The office's enquiry list used to be built from THREADS, and only threads with
+ * something in them. That is right for a filing, where the applicant has already
+ * been given a way in, and wrong here: the row IS the way in.
+ */
+
+function enquiryRowsFor(string $email): Collection
+{
+    return inbox($email)->where('kind', 'general');
+}
+
+it('puts a newly registered owner in BPLO’s list before anybody has written', function () {
+    $owner = User::create([
+        'name' => 'Brand New Owner',
+        'first_name' => 'Brand',
+        'last_name' => 'Owner',
+        'gender' => 'F',
+        'email' => 'brand.new.'.random_int(10000, 99999).'@biztrack.local',
+        'mobile_number' => '09170000009',
+        'password' => 'biztrack1',
+        'is_active' => true,
+        'email_verified_at' => now(),
+    ]);
+    $owner->roles()->sync(Role::where('name', 'business_owner')->pluck('id'));
+
+    /*
+     * No business, no filing, nothing said. BPLO coordinates every filing and
+     * is the office you write to when you do not know which office to ask, so
+     * an account is in its list from the day it is registered.
+     */
+    $row = enquiryRowsFor('bplo@biztrack.local')
+        ->firstWhere('counterparty.name', 'Brand New Owner');
+
+    expect($row)->not->toBeNull()
+        ->and($row['messages_count'])->toBe(0)
+        ->and($row['thread_id'])->toBeNull()
+        // And it names them, so the office can open the conversation.
+        ->and($row['user_id'])->toBe($owner->id);
+});
+
+it('keeps that owner out of another office’s list until they are routed work', function () {
+    $owner = User::create([
+        'name' => 'Unrouted Owner',
+        'first_name' => 'Unrouted',
+        'last_name' => 'Owner',
+        'gender' => 'F',
+        'email' => 'unrouted.'.random_int(10000, 99999).'@biztrack.local',
+        'mobile_number' => '09170000010',
+        'password' => 'biztrack1',
+        'is_active' => true,
+        'email_verified_at' => now(),
+    ]);
+    $owner->roles()->sync(Role::where('name', 'business_owner')->pluck('id'));
+
+    /*
+     * An office with no filing of yours has no business opening a conversation
+     * with you, and an inbox listing every citizen in the city would bury the
+     * ones it does have work for.
+     */
+    expect(enquiryRowsFor('fire@biztrack.local')->firstWhere('counterparty.name', 'Unrouted Owner'))
+        ->toBeNull();
+});
+
+it('adds an owner to an office’s list once that office is routed their filing', function () {
+    $filing = unroutedFiling();
+    $fire = office('BFP');
+
+    expect(enquiryRowsFor('fire@biztrack.local')->firstWhere('counterparty.name', owner()->name))
+        ->toBeNull();
+
+    ApplicationAssignment::create([
+        'application_id' => $filing->id,
+        'department_id' => $fire->id,
+        'officer_user_id' => User::where('email', 'fire@biztrack.local')->value('id'),
+        'status' => 'pending',
+        'assigned_at' => now(),
+    ]);
+
+    // "Ganon naman din sa other offices once na nag-apply na sila ng other
+    // permit sa office na yon."
+    expect(enquiryRowsFor('fire@biztrack.local')->firstWhere('counterparty.name', owner()->name))
+        ->not->toBeNull();
+});
+
+it('lists an owner who simply wrote to an office it was never routed for', function () {
+    $token = loginToken('owner@biztrack.local');
+    app('auth')->forgetGuards();
+
+    test()->withToken($token)->postJson('/api/v1/general-messages', [
+        'department_id' => office('CENRO')->id,
+        'body' => 'A question for the environment office.',
+    ])->assertCreated();
+
+    /*
+     * An owner may address ANY office through its general enquiry, routed work
+     * or not - that is what the front door per office is for. Without this the
+     * office would be handed a question it could not see: the thread accepted,
+     * stored, and absent from the one screen that lists enquiries.
+     */
+    $row = enquiryRowsFor('cenro@biztrack.local')->firstWhere('counterparty.name', owner()->name);
+
+    expect($row)->not->toBeNull()
+        ->and($row['last_message']['body'])->toBe('A question for the environment office.');
+});
+
+it('lets the office write first, to somebody who has said nothing', function () {
+    $ownerId = owner()->id;
+
+    $token = loginToken('bplo@biztrack.local');
+    app('auth')->forgetGuards();
+
+    /*
+     * The point of the row. An office that can only answer what it has been
+     * asked cannot start the conversation, and starting it is what this screen
+     * is for.
+     */
+    test()->withToken($token)
+        ->postJson("/api/v1/general-messages/{$ownerId}", [
+            'department_id' => office('BPLO')->id,
+            'body' => 'Your renewal window opens next month.',
+        ])
+        ->assertCreated();
+
+    $row = enquiryRowsFor('bplo@biztrack.local')->firstWhere('counterparty.name', owner()->name);
+
+    expect($row['last_message']['body'])->toBe('Your renewal window opens next month.');
+});
+
+it('shows the same enquiry to every officer in the office', function () {
+    $token = loginToken('owner@biztrack.local');
+    app('auth')->forgetGuards();
+
+    test()->withToken($token)->postJson('/api/v1/general-messages', [
+        'department_id' => office('BPLO')->id,
+        'body' => 'Anybody at BPLO, please.',
+    ])->assertCreated();
+
+    /*
+     * "Lahat dapat ng officer matatanggap ang general inquiry." An enquiry has
+     * no filing and so no officer in charge - `handled_by_user_id` is null on
+     * every message in one - so there is no tenure to scope by and none is
+     * applied. Whoever holds the seat reads it.
+     */
+    $colleague = secondSeat('BPLO', 'bplo_staff');
+
+    foreach (['bplo@biztrack.local', $colleague->email] as $email) {
+        $row = enquiryRowsFor($email)->firstWhere('counterparty.name', owner()->name);
+
+        expect($row)->not->toBeNull()
+            ->and($row['last_message']['body'])->toBe('Anybody at BPLO, please.');
+    }
 });

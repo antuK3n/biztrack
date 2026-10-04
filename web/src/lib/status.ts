@@ -623,6 +623,34 @@ export const REQUIREMENT_CHIP_TONE: Record<RequestStatus, ChipTone> = {
 }
 
 /**
+ * The same five statuses, as a TABLE reads them.
+ *
+ * ── Why a second map and not a change to the first ─────────────────────────
+ *
+ * A solid chip is right where it is the only one on the screen: the heading of
+ * an open requirement, where the status is the first thing to land and has a
+ * whole card to itself. It is wrong in a column of them. Four rows of
+ * white-on-orange and one of white-on-red turned Other Requirements into a row
+ * of traffic lights with the business names reading as the quiet part — the
+ * opposite of what the reader is scanning for, which is WHICH requirement,
+ * for WHICH business.
+ *
+ * Proto's own note has said this since the super-admin tables were built —
+ * "soft tints for table chips" — and this screen was the one that had no tint
+ * to use for its warm statuses. Now it does.
+ *
+ * Same statuses, same words, same order of severity: only the weight changes,
+ * and `rejected` stays red because it still means stop.
+ */
+export const REQUIREMENT_ROW_TONE: Record<RequestStatus, ChipTone> = {
+  pending: 'tint-orange',
+  needs_resubmission: 'tint-orange',
+  submitted: 'tint-purple',
+  fulfilled: 'tint-green',
+  rejected: 'tint-red',
+}
+
+/**
  * The applicant's status guide: the journey, in order, and what each step means.
  *
  * ── Why this is separate from NEXT_ACTION ─────────────────────────────────

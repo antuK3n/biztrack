@@ -21,14 +21,23 @@ use Illuminate\Support\Facades\Log;
 class Turnstile
 {
     /**
-     * Configured at all? Blank secret means the captcha is not in play.
-     *
-     * Deliberately keyed on the SECRET rather than on a separate on/off flag.
-     * A flag can be true while the credential is missing, and that state fails
-     * every sign-in with "captcha check failed" for a reason nobody typing a
-     * password can see or fix.
+     * Is the captcha checked on sign-in? Configured, and not switched off from
+     * the Debug page (SystemSwitches::captchaOn, which asks configured()).
      */
     public static function enabled(): bool
+    {
+        return SystemSwitches::captchaOn();
+    }
+
+    /**
+     * Configured at all? Blank secret means the captcha cannot be in play.
+     *
+     * Deliberately keyed on the SECRET. The Debug page's switch can turn a
+     * configured captcha OFF, but never on without this: a switch that is on
+     * while the credential is missing fails every sign-in with "captcha check
+     * failed" for a reason nobody typing a password can see or fix.
+     */
+    public static function configured(): bool
     {
         return filled(config('services.turnstile.secret'));
     }

@@ -51,9 +51,17 @@ class OfficeHours
     public static function status(): array
     {
         $now = self::now();
+        /*
+         * The Debug page can force the NOTICE open or closed — a defense held
+         * at 7 pm should not open under "City offices are closed now"
+         * [Ken, 2026-10-04]. Only the notice: isOpen() stays the clock's, so
+         * the out-of-hours sign-in rows in the audit log stay true.
+         */
+        $forced = SystemSwitches::officeHoursOverride();
 
         return [
-            'open' => self::isOpen($now),
+            'open' => $forced !== null ? $forced === 'open' : self::isOpen($now),
+            'forced' => $forced,
             'now' => $now->toIso8601String(),
             'timezone' => self::timezone(),
             'opens' => (string) config('office_hours.opens'),

@@ -20,6 +20,7 @@ use App\Support\Audit;
 use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
+use App\Support\Zoning\ZoningFacts;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -241,6 +242,13 @@ class ApplicationController extends Controller
             'prior_permit_ids.*' => ['exists:permits,id'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
+            /*
+             * The answers the zoning ordinance asks that nothing else on the
+             * filing carries (App\Support\Zoning\ZoningFacts). The
+             * applicant's keys only: the zoning officer's go through their
+             * own endpoint, so a draft save can never overwrite them.
+             */
+            ...ZoningFacts::rules('zoning_facts', ZoningFacts::applicantKeys()),
         ]);
 
         $business = Business::findOrFail($data['business_id']);
@@ -309,6 +317,7 @@ class ApplicationController extends Controller
             // assessed on rather than having it re-derived later against a
             // reference table that may since have been corrected.
             'fee_profile' => $this->classifyFeeProfile($data['fee_profile'] ?? null),
+            'zoning_facts' => ZoningFacts::clean($data['zoning_facts'] ?? null, ZoningFacts::applicantKeys()) ?: null,
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
         /*
@@ -410,6 +419,7 @@ class ApplicationController extends Controller
             'data_privacy_consent' => ['sometimes', 'boolean'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
+            ...ZoningFacts::rules('zoning_facts', ZoningFacts::applicantKeys()),
         ]);
 
         /*
@@ -441,6 +451,15 @@ class ApplicationController extends Controller
         }
         if (isset($data['payment_mode'])) {
             $application->update(['payment_mode' => $data['payment_mode']]);
+        }
+        /*
+         * The whole set, replaced: the wizard sends every answer it holds on
+         * each save, and an answer cleared on screen has to clear here too.
+         */
+        if (array_key_exists('zoning_facts', $data)) {
+            $application->update([
+                'zoning_facts' => ZoningFacts::clean($data['zoning_facts'], ZoningFacts::applicantKeys()) ?: null,
+            ]);
         }
         /*
          * `array_key_exists`, not `isset`: the value is a boolean and `false` is
