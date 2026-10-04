@@ -6,6 +6,7 @@ use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Support\Zoning\Ordinance;
 use App\Support\Zoning\PinZone;
 
 /*
@@ -63,10 +64,10 @@ function pzDraft(string $barangay, ?array $pin, string $code): int
     ])->assertCreated()->json('data.id');
 }
 
-/** An amendment of a permitted sari-sari store on Longos' R-2, asking `$changes`. */
+/** An amendment of a permitted pharmacy on Longos' R-2, asking `$changes`. */
 function pzAmendment(array $changes): int
 {
-    $draft = Application::findOrFail(pzDraft('Longos', [14.659117, 120.957631], '47111'));
+    $draft = Application::findOrFail(pzDraft('Longos', [14.659117, 120.957631], '47721'));
     $draft->update(['status' => 'approved']);
     $prior = Permit::create([
         'application_id' => $draft->id,
@@ -106,13 +107,25 @@ it('reads the zone from the traced polygon under the pin, and nothing else', fun
         ->and(PinZone::at(14.667975, 120.969217, pzBarangay('Longos')))->toBeNull();
 });
 
-it('lets the ordinary neighbourhood trades through a residential zone, and stops a warehouse', function () {
+it('lets the small neighbourhood shops through every zone', function () {
+    // Ken, 5 October 2026: a sari-sari store, a grocery, a carinderia or food
+    // cart, a barber or beauty salon, a laundry, a tailor, a bakeshop and an
+    // internet café pass ANYWHERE — Institutional, Industry, Parks included.
+    $everyZone = [...array_map(fn ($c) => [$c], array_keys(Ordinance::SECTION_FOR_CODE)), ['R-2-BASIC', 'R-2-MAX']];
+    foreach (PinZone::NEIGHBOURHOOD as $code) {
+        foreach ($everyZone as $zone) {
+            expect(PinZone::refuses($zone, pzPsic($code)))->toBeFalse("{$code} refused in ".implode('+', $zone));
+        }
+    }
+    expect(PinZone::NEIGHBOURHOOD)->toEqualCanonicalizing(['47111', '47112', '56101', '56103', '96110', '96120', '96200', '14100', '10711', '93290']);
+});
+
+it('lets the home businesses through a residential zone, and stops a warehouse', function () {
     $r1 = ['R-1'];
     $r2 = ['R-2-BASIC', 'R-2-MAX'];
-    // Ken's check: a sari-sari store, a carinderia, a barber shop, a laundry
-    // and a computer shop (an internet café, 93290; computer retail and
-    // repair too) pass in a residential zone.
-    foreach (['47111', '56101', '96110', '96200', '93290', '47411', '95110'] as $code) {
+    // Art. V §2.1 by trade, kept broad on Ken's word: computer retail and
+    // repair, a factory, a filling station, a bar and a funeral parlour pass.
+    foreach (['47411', '95110', '22200', '47300', '56302', '96301'] as $code) {
         expect(PinZone::refuses($r1, pzPsic($code)))->toBeFalse("{$code} refused in R-1")
             ->and(PinZone::refuses($r2, pzPsic($code)))->toBeFalse("{$code} refused in R-2");
     }
@@ -147,9 +160,10 @@ it('says which line, in which zone, in the words the map uses', function () {
     $sentence = PinZone::refusal(14.659117, 120.957631, pzBarangay('Longos'), [pzPsic('47111'), pzPsic('52101')]);
     expect($sentence)->toBe('Warehousing and storage isn\'t allowed in the Homes and apartments, some small shops'.PZ_SENTENCE);
 
-    expect(PinZone::refusal(14.667975, 120.969217, pzBarangay('Acacia'), [pzPsic('47111')]))
-        ->toBe(pzPsic('47111')->title.' isn\'t allowed in the Industry'.PZ_SENTENCE);
-    expect(PinZone::refusal(14.659117, 120.957631, pzBarangay('Longos'), [pzPsic('47111')]))->toBeNull();
+    expect(PinZone::refusal(14.667975, 120.969217, pzBarangay('Acacia'), [pzPsic('47721')]))
+        ->toBe('Retail sale of pharmaceutical goods (pharmacy) isn\'t allowed in the Industry'.PZ_SENTENCE);
+    expect(PinZone::refusal(14.659117, 120.957631, pzBarangay('Longos'), [pzPsic('47721')]))->toBeNull()
+        ->and(PinZone::refusal(14.667975, 120.969217, pzBarangay('Acacia'), [pzPsic('47111')]))->toBeNull();
 });
 
 it('answers the wizard for the pin and line on screen', function () {
@@ -192,7 +206,7 @@ it('refuses an amendment that moves the business, or changes its line, to where 
 
     $move = pzAmendment(['address_barangay_id' => $acacia, 'address_pin' => '14.667975,120.969217']);
     $this->postJson("/api/v1/applications/{$move}/submit")->assertUnprocessable()
-        ->assertJsonPath('errors.zoning.0', pzPsic('47111')->title.' isn\'t allowed in the Industry'.PZ_SENTENCE);
+        ->assertJsonPath('errors.zoning.0', 'Retail sale of pharmaceutical goods (pharmacy) isn\'t allowed in the Industry'.PZ_SENTENCE);
 
     $trade = pzAmendment(['line_of_business' => (string) pzPsic('52101')->id]);
     $this->postJson("/api/v1/applications/{$trade}/submit")->assertUnprocessable()

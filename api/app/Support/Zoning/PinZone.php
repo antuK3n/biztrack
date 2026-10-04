@@ -30,6 +30,8 @@ use App\Support\ZoningConformance;
  *
  * Only when all of these hold:
  *
+ *  - it is not one of the small neighbourhood shops Ken named, which pass in
+ *    every zone (NEIGHBOURHOOD);
  *  - the zone at the pin is known, and its list (with every list it takes in,
  *    Ordinance::closure) names at least one use;
  *  - the trade has a row in TradeUses naming at least one line, `is` or
@@ -40,16 +42,18 @@ use App\Support\ZoningConformance;
  *    home industry, by trade (Ordinance::homeBusiness), whatever the business
  *    turns out to be. A sari-sari store, a carinderia or a barber shop in a
  *    residential zone is never refused here; CPDO applies §2.1's conditions.
- *    Nor is a computer shop (NEIGHBOURHOOD).
+ *    Factories, filling stations, bars and funeral parlours pass on it too,
+ *    and Ken kept it that way (5 October 2026).
  *
  * A "maybe" line is enough to pass: "and the like" is CPDO's to judge.
  *
  * ── Who asks ───────────────────────────────────────────────────────────────
  *
- * The wizard, as the pin and the line of business change (`GET zone-at-pin`),
- * and ApplicationController::submit, so the API cannot be used around it: a
- * new filing always, an amendment that moves the business or changes its
- * line. Both say the same sentence (`refusal`).
+ * The wizard, as the pin and the line of business change (`GET zone-at-pin`,
+ * which holds Next), the note under the map (ZoningConformance::forPin, which
+ * says it), and ApplicationController::submit, so the API cannot be used
+ * around it: a new filing always, an amendment that moves the business or
+ * changes its line. All three say the same sentence (`refusal`).
  */
 final class PinZone
 {
@@ -88,13 +92,20 @@ final class PinZone
     public const R2_EITHER = 'Homes and apartments, some small shops';
 
     /**
-     * Trades never refused where a zone takes in Residential-1's list though
-     * neither the lists nor §2.1 reach them. Ken's check of the rule (5
-     * October 2026) named a computer shop among the neighbourhood trades a
-     * residential zone must not stop, and the register files an internet café
-     * under 93290 — with billiard halls and videoke, which therefore pass too.
+     * The small neighbourhood shops Ken said pass ANYWHERE, in every zone
+     * (5 October 2026), as the register files them. Each code is wider than
+     * the shop he named, and the rest of it passes too:
+     *
+     *  - 47111 sari-sari store; 47112 grocery or mini-mart
+     *  - 56101 restaurants and carinderia; 56103 refreshment stands, kiosks
+     *    and food carts (the small eateries)
+     *  - 96110 barbershop and hairdressing; 96120 beauty parlour, salon, spa
+     *  - 96200 laundry and dry-cleaning
+     *  - 14100 wearing apparel, garments and tailoring (a garment factory too)
+     *  - 10711 bakery products (bakeshop)
+     *  - 93290 the internet café, filed with billiard halls and videoke
      */
-    public const NEIGHBOURHOOD = ['93290'];
+    public const NEIGHBOURHOOD = ['47111', '47112', '56101', '56103', '96110', '96120', '96200', '14100', '10711', '93290'];
 
     /** @var array<string, list<array{codes: list<string>, name: string, polygons: list<list<list<array{0: float, 1: float}>>>}>> */
     private static array $files = [];
@@ -142,6 +153,9 @@ final class PinZone
     /** Is `$psic` clearly not allowed in the zone made of `$codes`? See the class note. */
     public static function refuses(array $codes, PsicCode $psic): bool
     {
+        if (in_array((string) $psic->code, self::NEIGHBOURHOOD, true)) {
+            return false;
+        }
         $row = TradeUses::USES[(string) $psic->code] ?? null;
         if ($row === null || (($row['is'] ?? []) === [] && ($row['maybe'] ?? []) === [])) {
             return false;
@@ -158,7 +172,7 @@ final class PinZone
         if ($uses === []) {
             return false;
         }
-        if ($takesInR1 && (Ordinance::homeBusiness((string) $psic->code) || in_array((string) $psic->code, self::NEIGHBOURHOOD, true))) {
+        if ($takesInR1 && Ordinance::homeBusiness((string) $psic->code)) {
             return false;
         }
 
