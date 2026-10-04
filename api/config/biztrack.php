@@ -139,4 +139,27 @@ return [
      */
     'report_role' => env('DB_REPORT_ROLE', 'biztrack_report'),
 
+    /*
+     * ── Letterheads the certificates print ──────────────────────────────────
+     *
+     * CENRO's Certificate of Environment Clearance heads with the office's
+     * own address, trunkline, e-mail and website, read off the issued sheet
+     * [client, 4 October 2026]. `departments` carries a code, a name and a
+     * description and nothing postal, so the letterhead lives here rather
+     * than as a literal split across the React view and the PDF blade —
+     * one place to correct when the office moves floor or changes its
+     * extension, and both renderings read it.
+     *
+     * Keyed by department code. An office with no entry prints the generic
+     * three-line city block instead.
+     */
+    'letterheads' => [
+        'CENRO' => [
+            'address' => '4/F, Malabon City Hall, F. Sevilla Blvd., Brgy. Tañong, Malabon City, 1470 Philippines',
+            'trunkline' => '8281-4999 loc 1019 / 1013',
+            'email' => 'CENRO@malabon.gov.ph',
+            'website' => 'Malabon.gov.ph',
+        ],
+    ],
+
 ];

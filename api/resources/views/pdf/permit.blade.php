@@ -156,13 +156,46 @@
         body.mayors .enforcement { font-size: 9.5px; margin-top: 14px; }
         body.mayors .expires { font-size: 9.5px; }
 
+        /*
+         * ── CENRO's Certificate of Environment Clearance ────────────────────
+         *
+         * Green, because the client asked for the sheet in the office's own
+         * colour [4 October 2026] — a soft tint rather than a saturated fill,
+         * so the small italic clause and the receipt block still clear AA on
+         * it. dompdf paints `body` background to the page edge, so the tint
+         * is set on the frame instead and the margin stays paper-white, as a
+         * printed sheet's would.
+         *
+         * The business is named in the middle of the page in the size the
+         * office prints it (about 22pt on an 11-inch sheet), with the trade
+         * and address underlined beneath it exactly as the issued copy sets
+         * them; the compliance clause is italic for the same reason.
+         */
+        body.cenro .sheet { background: #e8f3ea; border-color: #2e7d4f; }
+        body.cenro .letterhead { font-size: 8.5px; color: #333; margin-top: 2px; }
+        body.cenro .city { font-size: 14px; line-height: 1.15; max-width: 330px; }
+        /* Spacing spread to the sample's rhythm: the first pass left the
+         * bottom third of the sheet empty under the receipt block. */
+        body.cenro .cenro-title { font-family: DejaVu Sans, sans-serif; font-weight: bold; font-size: 22px; letter-spacing: 1px; margin-top: 20px; }
+        body.cenro .cenro-number { text-align: center; font-size: 13px; margin-top: 6px; }
+        body.cenro .cenro-issued-to { text-align: center; font-size: 12px; margin-top: 3px; }
+        body.cenro .cenro-business { text-align: center; font-size: 24px; font-weight: bold; text-decoration: underline; margin-top: 18px; }
+        body.cenro .cenro-trade { text-align: center; font-size: 10.5px; font-weight: bold; text-decoration: underline; margin-top: 8px; }
+        body.cenro .cenro-clause { text-align: center; font-style: italic; font-size: 10.5px; line-height: 1.5; margin: 16px 40px 0; }
+        body.cenro .cenro-dated { text-align: center; font-style: italic; font-size: 11px; margin-top: 16px; }
+        body.cenro table.signatures { margin-top: 24px; }
+        body.cenro .sig-name { font-size: 13.5px; }
+        body.cenro .sig-role { font-size: 11px; color: #1a1a1a; text-transform: none; letter-spacing: 0; }
+        body.cenro .cenro-receipt { font-size: 9.5px; line-height: 1.5; margin-top: 16px; }
+        body.cenro .cenro-receipt-label { font-weight: bold; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : '' }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : '') }}">
 <div class="sheet">
     {{-- Header: city block left, verification QR right. --}}
     <table class="row">
@@ -175,9 +208,20 @@
                 @if(file_exists(public_path('malabon-seal.png')))
                     <img class="seal" src="{{ public_path('malabon-seal.png') }}" alt="">
                 @endif
-                <div class="republic">REPUBLIC OF THE PHILIPPINES</div>
-                <div class="city">CITY OF MALABON</div>
-                <div class="office">{{ strtoupper($department_name ?? 'Business Permits and Licensing Office') }}</div>
+                @if(($is_cenro_certificate ?? false) && ! empty($letterhead))
+                    {{-- CENRO's own letterhead, as the issued sheet carries it:
+                         the office name as the heading, then its address and
+                         lines. From config/biztrack.php, not typed here. --}}
+                    <div class="republic">REPUBLIC OF THE PHILIPPINES</div>
+                    <div class="city">{{ strtoupper($department_name) }}</div>
+                    <div class="letterhead">{{ $letterhead['address'] }}</div>
+                    <div class="letterhead">Trunkline No: {{ $letterhead['trunkline'] }} &nbsp;|&nbsp; Email: {{ $letterhead['email'] }}</div>
+                    <div class="letterhead">Website: {{ $letterhead['website'] }}</div>
+                @else
+                    <div class="republic">REPUBLIC OF THE PHILIPPINES</div>
+                    <div class="city">CITY OF MALABON</div>
+                    <div class="office">{{ strtoupper($department_name ?? 'Business Permits and Licensing Office') }}</div>
+                @endif
             </td>
             {{-- The City's two numbered boxes, on the Mayor's Permit only.
                  A clearance has no Business Account Number on its face and
@@ -199,7 +243,27 @@
         </tr>
     </table>
 
-    <div class="title">{{ strtoupper($permit_type_name) }}</div>
+    @if($is_cenro_certificate ?? false)
+        {{-- CENRO's sheet names the business in the middle of the page rather
+             than in a field grid: title, number, "is hereby issued to", the
+             business, its trade and address, then the compliance clause. --}}
+        <div class="title cenro-title">CERTIFICATE OF ENVIRONMENT CLEARANCE</div>
+        <div class="cenro-number">{{ $permit_number }}</div>
+        <div class="cenro-issued-to">is hereby issued to</div>
+        <div class="cenro-business">{{ $business_name ?: 'Business removed from register' }}</div>
+        <div class="cenro-trade">
+            {{ $line_of_business ?: '—' }} &ndash; with address at {{ collect([$address, $barangay])->filter()->implode(', ') ?: '—' }}, {{ str_contains(strtoupper($city ?: ''), 'CITY') ? strtoupper($city) : strtoupper(trim(($city ?: 'Malabon').' City')) }}
+        </div>
+        <div class="cenro-clause">
+            This issuance of certificate shall not exempt the grantee from compliance with applicable permits
+            required by DENR and the City Government of Malabon as stated in the application form and in
+            accordance with Article W &ndash; Environmental Protection and Preservation Fees of the City Ordinance
+            A10-2016, The New Revenue Code of the City of Malabon.
+        </div>
+        <div class="cenro-dated">Issued this {{ $valid_from }} at the Malabon City Hall.</div>
+    @else
+        <div class="title">{{ strtoupper($permit_type_name) }}</div>
+    @endif
     @if($status_label && $status_label !== 'Active')
         <div class="status">{{ strtoupper($status_label) }}</div>
     @endif
@@ -218,6 +282,7 @@
         };
         $fullAddress = collect([$address, $barangay, $city])->filter()->implode(', ') ?: null;
         $mayors = $is_business_permit ?? false;
+        $cenro = $is_cenro_certificate ?? false;
 
         /*
          * The Mayor's Permit carries the City's own three rows and nothing
@@ -253,6 +318,9 @@
         }
     @endphp
 
+    {{-- No field grid on CENRO's sheet: the business is named in the block
+         above, and the rest of its face is the receipt at the foot. --}}
+    @if(! $cenro)
     <table class="fields">
         @foreach($rows as [$label, $box])
             <tr>
@@ -261,6 +329,7 @@
             </tr>
         @endforeach
     </table>
+    @endif
 
     {{-- Date of issue, area and headcount share one line, as the paper sets
          them. Only on the Mayor's Permit; a clearance has neither figure. --}}
@@ -274,7 +343,9 @@
         </table>
     @endif
 
-    <div class="rule"></div>
+    @if(! $cenro)
+        <div class="rule"></div>
+    @endif
 
     {{-- The fee line, under the rule, exactly where the City prints it. --}}
     @if($mayors)
@@ -296,7 +367,7 @@
                 <td><div class="remarks-box ruled"></div></td>
             </tr>
         </table>
-    @else
+    @elseif(! $cenro)
         <div class="remarks-label">Remarks</div>
         <div class="remarks-box"></div>
     @endif
@@ -331,7 +402,9 @@
         <table class="signatures">
             <tr>
                 @foreach($pair as $block)
-                    <td style="width: 50%">
+                    {{-- A sheet with ONE signature (CENRO's Chief) centres it
+                         across the page instead of leaving it in the left half. --}}
+                    <td style="width: {{ count($blocks) === 1 ? '100' : '50' }}%">
                         <div class="sig-name {{ $block['name'] ? '' : 'blank' }}">{{ $block['name'] ?: '.' }}</div>
                         <div class="sig-line"></div>
                         <div class="sig-role">{{ $block['role'] }}</div>
@@ -339,7 +412,7 @@
                 @endforeach
                 {{-- An odd count leaves the second half empty rather than
                      stretching one signature across the sheet. --}}
-                @if(count($pair) === 1)
+                @if(count($pair) === 1 && count($blocks) > 1)
                     <td style="width: 50%"></td>
                 @endif
             </tr>
@@ -357,13 +430,26 @@
         <div class="expires">(THIS PERMIT WILL EXPIRE ON {{ strtoupper($valid_until ?: '') }})</div>
     @endif
 
+    {{-- CENRO's receipt block, bottom-left as the office prints it. Amount
+         Paid is CENRO's share of the filing's bill, not the total - see the
+         controller. Every line prints, blank or not, so the sheet reads
+         against the paper one line for line. --}}
+    @if($cenro)
+        <div class="cenro-receipt">
+            <div><span class="cenro-receipt-label">Official Receipt:</span> {{ $or_number ?: '' }}</div>
+            <div><span class="cenro-receipt-label">Amount Paid:</span> {{ $office_amount_paid ?: '' }}</div>
+            <div><span class="cenro-receipt-label">Date Paid:</span> {{ $date_paid ?: '' }}</div>
+            <div><span class="cenro-receipt-label">Application Control No.:</span> {{ $tracking_id ?: '' }}</div>
+        </div>
+    @endif
+
     {{-- Off the Mayor's Permit on the client's instruction [4 October 2026].
          That sheet already carries the City's own enforcement terms above, and
          the QR beside the seal is how a permit is checked; a printed verify URL
          across the foot was a second warning in our words and an address nobody
          types. The clearances keep it - they have no enforcement block, so
          without this they would say nothing about verifying at all. --}}
-    @if(! $mayors)
+    @if(! $mayors && ! $cenro)
         <div class="note">
             Subject to revocation for non-compliance with existing laws, ordinances, rules and regulations.<br>
             Verify authenticity with code <span class="verify-code">{{ $permit_number }}</span> at {{ $verify_url }}

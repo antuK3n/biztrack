@@ -66,6 +66,17 @@ interface PermitCertificate {
   amount_paid?: string | null
   or_number?: string | null
   date_paid?: string | null
+  /*
+   * ── CENRO's Certificate of Environment Clearance ─────────────────────────
+   *
+   * Its own sheet too [client, 4 October 2026]: the office's letterhead at the
+   * head, the business named in the middle of the page, a compliance clause,
+   * one signature, and a receipt block bottom-left. `office_amount_paid` is
+   * CENRO's share of the filing's bill, not the total — see the controller.
+   */
+  is_cenro_certificate?: boolean
+  office_amount_paid?: string | null
+  letterhead?: { address: string; trunkline: string; email: string; website: string } | null
 }
 
 /**
@@ -260,7 +271,7 @@ export function PermitDetailPage() {
       a single column of fields, and widening them would only stretch ten rows
       of label-and-value across a screen.
     */
-    <div className={`mx-auto ${cert?.is_business_permit ? 'max-w-5xl' : 'max-w-3xl'}`}>
+    <div className={`mx-auto ${cert?.is_business_permit || cert?.is_cenro_certificate ? 'max-w-5xl' : 'max-w-3xl'}`}>
       {/*
         Print the same paper the download is on: US Letter, landscape.
 
@@ -269,7 +280,7 @@ export function PermitDetailPage() {
         differently shaped certificates of the same permit. `@page` cannot be
         set from a class, which is why it is a tag rather than a utility.
       */}
-      {cert?.is_business_permit && (
+      {(cert?.is_business_permit || cert?.is_cenro_certificate) && (
         <style>{'@media print { @page { size: letter landscape; margin: 0.4in; } }'}</style>
       )}
       {/* Modal-like sheet: royal bar with white X (p59) */}
@@ -311,7 +322,19 @@ export function PermitDetailPage() {
 
         {/* The permit "document" */}
         <article className="border-[6px] border-white bg-white px-3 py-5 sm:px-10 sm:py-7 print:border-0 print:p-0">
-          <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-8 sm:py-6">
+          {/*
+            CENRO's sheet is green [client, 4 October 2026] — a soft tint on
+            the ruled frame only, so the margin stays paper-white and the
+            small italic clause still reads at AA. `print-color-adjust` keeps
+            the tint when printed; browsers drop backgrounds by default.
+          */}
+          <div
+            className={`border-2 px-3.5 py-5 sm:px-8 sm:py-6 ${
+              cert?.is_cenro_certificate
+                ? 'border-[#2e7d4f] bg-[#e8f3ea] [print-color-adjust:exact]'
+                : 'border-ink/80'
+            }`}
+          >
             {/*
               The seal block and the QR sat side by side at every width, so on
               a phone "REPUBLIC OF THE PHILIPPINES" wrapped over four lines in
@@ -348,10 +371,26 @@ export function PermitDetailPage() {
                 <p className="mt-2 text-base font-bold uppercase tracking-wide text-ink">
                   Republic of the Philippines
                 </p>
-                <p className="text-base font-bold uppercase tracking-wide text-ink">City of Malabon</p>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">
-                  {cert?.department_name ?? 'Business Permits and Licensing Office'}
-                </p>
+                {cert?.is_cenro_certificate && cert.letterhead ? (
+                  /* CENRO's own letterhead, from config/biztrack.php. */
+                  <>
+                    <p className="max-w-sm text-base font-bold uppercase leading-snug tracking-wide text-ink">
+                      {cert.department_name}
+                    </p>
+                    <p className="mt-1 text-[11px] text-ink-secondary">{cert.letterhead.address}</p>
+                    <p className="text-[11px] text-ink-secondary">
+                      Trunkline No: {cert.letterhead.trunkline} &nbsp;|&nbsp; Email: {cert.letterhead.email}
+                    </p>
+                    <p className="text-[11px] text-ink-secondary">Website: {cert.letterhead.website}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-base font-bold uppercase tracking-wide text-ink">City of Malabon</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">
+                      {cert?.department_name ?? 'Business Permits and Licensing Office'}
+                    </p>
+                  </>
+                )}
               </div>
               <div className="flex shrink-0 items-start gap-4 self-center sm:self-start">
                 {/*
@@ -397,9 +436,16 @@ export function PermitDetailPage() {
             {/* Tighter tracking and a smaller size below `sm`: at 0.18em a
                 three-word permit name took three lines of a phone screen
                 before the document had said anything. */}
-            <h1 className="display-serif mt-6 text-balance text-center text-2xl uppercase tracking-[0.08em] text-ink sm:text-3xl sm:tracking-[0.18em]">
-              {cert?.permit_type_name ?? permit.permit_type.name}
-            </h1>
+            {cert?.is_cenro_certificate ? (
+              /* The office's own title, in the bold sans it prints in. */
+              <h1 className="mt-6 text-balance text-center text-xl font-bold uppercase tracking-wide text-ink sm:text-2xl">
+                Certificate of Environment Clearance
+              </h1>
+            ) : (
+              <h1 className="display-serif mt-6 text-balance text-center text-2xl uppercase tracking-[0.08em] text-ink sm:text-3xl sm:tracking-[0.18em]">
+                {cert?.permit_type_name ?? permit.permit_type.name}
+              </h1>
+            )}
             {expired && (
               <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
                 Expired
@@ -463,7 +509,43 @@ export function PermitDetailPage() {
               A certificate reading down one aligned column is both correct and
               quicker to read than two ragged ones.
             */}
-            {cert?.is_business_permit ? (
+            {cert?.is_cenro_certificate ? (
+              /*
+                ── CENRO's Certificate of Environment Clearance ──────────────
+
+                Laid out from the sheet the office issues [client, 4 October
+                2026]. Unlike the two other faces it has no field grid: the
+                business is named in the middle of the page, with its trade
+                and address underlined beneath, then the compliance clause,
+                the issue line, one signature, and a receipt block at the
+                foot. The office letterhead replaces the city block in the
+                header, where it is rendered above.
+              */
+              <>
+                <div className="mt-6 text-center">
+                  <p className="text-base text-ink">{permit.permit_number}</p>
+                  <p className="mt-0.5 text-sm text-ink-secondary">is hereby issued to</p>
+                  <p className="mt-5 text-2xl font-bold text-ink underline underline-offset-4 sm:text-3xl">
+                    {cert.business_name ?? 'Business removed from register'}
+                  </p>
+                  <p className="mt-2 text-xs font-bold text-ink underline underline-offset-2 sm:text-sm">
+                    {cert.line_of_business || '—'} &ndash; with address at{' '}
+                    {[cert.address, cert.barangay].filter(Boolean).join(', ') || '—'},{' '}
+                    {(/city/i.test(cert.city ?? '') ? cert.city! : `${cert.city || 'Malabon'} City`).toUpperCase()}
+                  </p>
+                  <p className="mx-auto mt-5 max-w-3xl text-xs italic leading-relaxed text-ink sm:text-sm">
+                    This issuance of certificate shall not exempt the grantee from compliance with
+                    applicable permits required by DENR and the City Government of Malabon as stated in
+                    the application form and in accordance with Article W &ndash; Environmental
+                    Protection and Preservation Fees of the City Ordinance A10-2016, The New Revenue
+                    Code of the City of Malabon.
+                  </p>
+                  <p className="mt-5 text-sm italic text-ink">
+                    Issued this {formatDate(permit.valid_from)} at the Malabon City Hall.
+                  </p>
+                </div>
+              </>
+            ) : cert?.is_business_permit ? (
               /*
                 ── The City's own Business Permit form ──────────────────────
 
@@ -580,12 +662,21 @@ export function PermitDetailPage() {
               It stays for print, where it is what it has always been: the
               space an officer writes a condition into on the issued copy.
             */}
-            <div className="mt-4 hidden print:block">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">Remarks:</p>
-              <div className="mt-1 h-16 border border-line" />
-            </div>
+            {/* Generic sheet only: the Mayor's Permit draws its own Remarks box
+                on screen (a second one appeared when it was printed), and
+                CENRO's certificate has none. */}
+            {!cert?.is_business_permit && !cert?.is_cenro_certificate && (
+              <div className="mt-4 hidden print:block">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">Remarks:</p>
+                <div className="mt-1 h-16 border border-line" />
+              </div>
+            )}
 
-            <div className="mt-10 grid gap-10 text-center sm:grid-cols-2">
+            {/* One signature centres rather than sitting in the left column of
+                a two-up grid — CENRO signs once, with the Chief. */}
+            <div
+              className={`mt-10 grid gap-10 text-center ${signatories.length > 1 ? 'sm:grid-cols-2' : ''}`}
+            >
               {signatories.map((s) => (
                 <div key={s.role}>
                   {/* Invisible placeholder when unnamed, so every signature line
@@ -645,7 +736,24 @@ export function PermitDetailPage() {
               their own, so removing them would leave those certificates saying
               nothing about how to check one.
             */}
-            {!cert?.is_business_permit && (
+            {/* CENRO's receipt block, bottom-left as the office prints it. */}
+            {cert?.is_cenro_certificate && (
+              <dl className="mt-8 space-y-0.5 text-xs text-ink">
+                {[
+                  ['Official Receipt', cert.or_number],
+                  ['Amount Paid', cert.office_amount_paid],
+                  ['Date Paid', cert.date_paid],
+                  ['Application Control No.', permit.application?.tracking_id],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex gap-1.5">
+                    <dt className="font-bold">{label}:</dt>
+                    <dd className="tnum">{value || ' '}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+
+            {!cert?.is_business_permit && !cert?.is_cenro_certificate && (
               <>
                 <p className="mt-8 text-center text-[10px] leading-relaxed text-ink-muted">
                   Subject to revocation for non-compliance with existing laws, ordinances, rules and
