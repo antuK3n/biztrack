@@ -2,8 +2,10 @@
 
 namespace App\Services\KwikPay;
 
+use App\Enums\ApplicationStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
+use App\Models\Application;
 use App\Models\FeeAssessment;
 use App\Models\Payment;
 use App\Models\User;
@@ -260,11 +262,71 @@ class KwikPayGateway
                 'source' => $source,
             ] + $context);
 
+            if ($this->catchPaymentOnClosedFiling($payment)) {
+                return true;
+            }
+
             $this->workflow->onPaymentCompleted($payment);
             $this->catchDoublePayment($payment);
 
             return true;
         });
+    }
+
+    /**
+     * The money arrived after its filing was cancelled, rejected or removed.
+     *
+     * An order stays payable at KwikPay whatever happens to the filing it was
+     * opened for, so the owner can cancel while it waits, BPLO can reject, and
+     * the purge can remove the filing — and the payment still settles. It
+     * used to be booked in silence: Completed on a dead filing, no flag, no
+     * notice, and on a removed filing a crash besides (scenario run,
+     * owner-pay 27, payments-kwikpay 30, expiry-and-lapse 32).
+     *
+     * Ken's decision: record it, mark it for refund the way a double payment
+     * is marked, leave the filing alone, and tell BPLO and the super admin.
+     * The amount is what KwikPay collected, which is what would go back.
+     *
+     * True when it caught one, and the caller stops there.
+     */
+    private function catchPaymentOnClosedFiling(Payment $payment): bool
+    {
+        // The purge soft-deletes, so the removed filing is still there to name.
+        $filing = Application::withTrashed()->find($payment->application_id);
+
+        $became = match (true) {
+            $filing === null || $filing->trashed() => 'removed',
+            $filing->status === ApplicationStatus::Cancelled => 'cancelled',
+            $filing->status === ApplicationStatus::Rejected => 'rejected',
+            default => null,
+        };
+
+        if ($became === null) {
+            return false;
+        }
+
+        $tracking = $filing?->tracking_id ?? '—';
+        $sentence = 'A ₱'.number_format(self::requestedAmount($payment), 2)." payment for {$tracking} "
+            ."came in after the filing was {$became}. It needs a refund.";
+
+        $payment->update(['refund_review_at' => now(), 'gateway_note' => $sentence]);
+        Audit::log('payment.after_filing_closed', $payment, [
+            'application_id' => $payment->application_id,
+            'filing' => $became,
+            'amount' => (string) self::requestedAmount($payment),
+        ]);
+
+        User::query()
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['admin', 'bplo_staff']))
+            ->get()
+            ->each(fn (User $staff) => $this->notify->push(
+                $staff,
+                'payment_refund_due',
+                'An online payment needs checking',
+                $sentence,
+            ));
+
+        return true;
     }
 
     /**

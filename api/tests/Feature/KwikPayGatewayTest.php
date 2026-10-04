@@ -7,6 +7,7 @@ use App\Models\AppNotification;
 use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\Payment;
+use App\Models\Permit;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\KwikPay\KwikPayGateway;
@@ -720,6 +721,46 @@ it('carries on past a payment it cannot settle, and puts that one in front of st
     expect($stuck->fresh()->status)->toBe(PaymentStatus::Pending)
         ->and($stuck->fresh()->flagged_at)->not->toBeNull();
 });
+
+/*
+ * An order stays payable at KwikPay whatever happens to its filing. Money
+ * that arrives after the filing was cancelled, rejected or removed used to
+ * be booked in silence (scenario run, owner-pay 27, payments-kwikpay 30,
+ * expiry-and-lapse 32); it is now marked for refund and staff are told.
+ */
+it('marks for refund a payment that lands after its filing closed, moves nothing, and tells BPLO and the super admin', function (string $became, Closure $close) {
+    $app = kpFiling();
+    $payment = kpOpen($app);
+    $close($app);
+    $status = Application::withTrashed()->find($app->id)->status;
+
+    app('auth')->forgetGuards();
+    kpPostCallback(kpCallback($payment))->assertOk();
+
+    $sentence = 'A ₱'.number_format((float) $payment->gateway_amount, 2)." payment for {$app->tracking_id} "
+        ."came in after the filing was {$became}. It needs a refund.";
+    $payment->refresh();
+    expect($payment->status)->toBe(PaymentStatus::Completed)
+        ->and($payment->refund_review_at)->not->toBeNull()
+        ->and(Application::withTrashed()->find($app->id)->status)->toBe($status)
+        ->and(Permit::where('application_id', $app->id)->exists())->toBeFalse();
+
+    foreach (['admin@biztrack.local', 'bplo@biztrack.local'] as $email) {
+        $notice = AppNotification::where('user_id', User::where('email', $email)->value('id'))
+            ->where('type', 'payment_refund_due')
+            ->sole();
+        expect($notice->body)->toBe($sentence);
+    }
+})->with([
+    'cancelled' => ['cancelled', function (Application $app) {
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson("/api/v1/applications/{$app->id}/cancel")->assertOk();
+    }],
+    'rejected' => ['rejected', function (Application $app) {
+        app(WorkflowService::class)->rejectApplication($app->fresh(), 'Wrong zone.');
+    }],
+    'removed' => ['removed', fn (Application $app) => $app->fresh()->delete()],
+]);
 
 it('lets the owner ask once for their payment status', function () {
     // Written for the setting where KwikPay's answer to /api/query settles a payment.
