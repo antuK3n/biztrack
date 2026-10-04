@@ -6,6 +6,7 @@ use App\Services\Sms\LogSmsChannel;
 use App\Services\Sms\SmsChannel;
 use App\Support\ReportViews;
 use App\Support\SystemSwitches;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
@@ -45,6 +46,24 @@ class AppServiceProvider extends ServiceProvider
                 ? Limit::none()
                 : Limit::perMinute(10)->by($request->ip());
         });
+
+        /*
+         * The Forgot Password link opens the WEB app's reset page.
+         *
+         * Laravel builds it from a route named `password.reset`, and this API
+         * has none — the page is web/src/pages/auth/ResetPasswordPage.tsx at
+         * /reset-password, which reads `token` and `email` off the query
+         * string and posts them to /auth/reset-password. Without this every
+         * registered address answered 500 while an unknown one answered 200:
+         * nobody could reset a password, and the status told a stranger which
+         * addresses had accounts. FRONTEND_URL is the base the permit QR and
+         * the owner-update mail already use.
+         */
+        ResetPassword::createUrlUsing(fn ($user, string $token) => rtrim((string) config('app.frontend_url'), '/')
+            .'/reset-password?'.http_build_query([
+                'token' => $token,
+                'email' => $user->getEmailForPasswordReset(),
+            ]));
 
         // The reporting views step aside while migrations run, so a later
         // `->change()` can alter the tables they read. See ReportViews.
