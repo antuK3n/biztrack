@@ -579,6 +579,22 @@ class PermitController extends Controller
             'qr' => QrCode::svgDataUri($verifyUrl),
         ]);
 
+        /*
+         * The Mayor's Permit prints on US LETTER, landscape — 11 inches wide
+         * by 8.5 tall, which is the pad the City cuts [client, 4 October
+         * 2026]. Its fields are set for that width: three boxes across for the
+         * date, area and headcount, and the fee line in one row. Portrait
+         * wraps them into a column that reads nothing like the paper beside
+         * it, and A4 landscape is 20mm longer and 13mm shorter, so a sheet
+         * printed on it sits wrong in the same folder.
+         *
+         * The clearances stay on portrait A4. They are a single column of
+         * fields, and landscape would strand them in the left third.
+         */
+        if ($cert['is_business_permit'] ?? false) {
+            $pdf->setPaper('letter', 'landscape');
+        }
+
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
         $file = PdfFile::render($pdf);
 
