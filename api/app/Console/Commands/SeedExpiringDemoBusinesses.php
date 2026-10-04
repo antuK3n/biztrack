@@ -173,6 +173,42 @@ class SeedExpiringDemoBusinesses extends Command
                 'note' => 'Mayor’s Permit locked until 1 January; Sanitary Permit due in 20 days. Both rules on one screen.',
                 'due' => ['SANITARY' => $now->addDays(20)],
             ],
+            /*
+             * ── Everything due at once, January lock set aside ──────────────
+             *
+             * Client, 5 October 2026: *"Provide me 2 businesses (dummy data)
+             * with ALL OF THEIR PERMITS NEARING EXPIRATION. Don't mind the
+             * January lock for this 2."* So the Mayor's Permit here ends in a
+             * couple of weeks rather than on a 20 January — a term the system
+             * cannot issue, on purpose. `RenewalWindow` opens a Mayor's Permit
+             * on 1 January of its expiry year, which has already passed, so it
+             * is renewable today alongside the five clearances, all inside the
+             * 30-day window. Nothing in the lock itself is changed.
+             */
+            [
+                'name' => 'Hulong Duhat Eatery',
+                'note' => 'ALL six permits expire in 9–16 days — every one renewable today, Mayor’s Permit included.',
+                'due' => [
+                    PermitType::OUTCOME_CODE => $now->addDays(16),
+                    'SANITARY' => $now->addDays(9),
+                    'FSIC' => $now->addDays(10),
+                    'OCCUPANCY' => $now->addDays(12),
+                    'CEC' => $now->addDays(14),
+                    'ZONING' => $now->addDays(15),
+                ],
+            ],
+            [
+                'name' => 'Panghulo Auto Supply',
+                'note' => 'ALL six permits expire in 18–27 days — every one renewable today, Mayor’s Permit included.',
+                'due' => [
+                    PermitType::OUTCOME_CODE => $now->addDays(27),
+                    'SANITARY' => $now->addDays(18),
+                    'FSIC' => $now->addDays(20),
+                    'OCCUPANCY' => $now->addDays(22),
+                    'CEC' => $now->addDays(24),
+                    'ZONING' => $now->addDays(25),
+                ],
+            ],
         ];
 
         $made = 0;
