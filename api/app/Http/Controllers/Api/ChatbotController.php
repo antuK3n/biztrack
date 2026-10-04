@@ -59,8 +59,15 @@ class ChatbotController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        /*
+         * The chat panel shows a 4xx's own sentence in place of its "couldn't
+         * reach the assistant" line, so the length refusal says what to do
+         * rather than naming a "message field" nobody can see.
+         */
         $data = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
+        ], [
+            'message.max' => 'Please keep your message to 2,000 characters or fewer.',
         ]);
 
         $user = $request->user();

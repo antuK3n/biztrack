@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api } from '../lib/api'
+import { api, toApiError } from '../lib/api'
 import { PlusIcon, XIcon } from './icons'
 
 /* Chatbot bubble + slide-in panel (owner screens, p7-p8). Rule-based assistant
@@ -133,13 +133,25 @@ export function ChatBubble() {
         ...prev.map((m) => (m.id === pendingId && asked ? asked : m)),
         res.data.data,
       ])
-    } catch {
+    } catch (error) {
+      /*
+       * A 4xx is the API answering, not the assistant being out of reach, and
+       * its sentence is the one the owner needs: "keep your message to 2,000
+       * characters" for an over-long one, the restriction for a suspended
+       * account. Both used to read "couldn't reach the assistant", which sent
+       * them to retry something that would only be refused again. A 401 never
+       * gets here to be shown: the client sends that to sign-in.
+       */
+      const { status, message } = toApiError(error)
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           sender: 'bot',
-          body: "Sorry, I couldn't reach the assistant just now. Please try again, or message your assigned office from any application.",
+          body:
+            status >= 400 && status < 500
+              ? message
+              : "Sorry, I couldn't reach the assistant just now. Please try again, or message your assigned office from any application.",
         },
       ])
     } finally {

@@ -392,6 +392,22 @@ it('asks for a question instead of guessing on empty or junk input', function ()
         ->not->toContain('Barangay Business Clearance');
 });
 
+it('refuses an over-long message with one plain sentence about the length', function () {
+    /*
+     * The bubble shows a refusal's own sentence, so it has to be one an owner
+     * can act on. Laravel's "The message field must not be greater than 2000
+     * characters." names a field nobody sees.
+     */
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => str_repeat('a', 2001)])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Please keep your message to 2,000 characters or fewer.');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => str_repeat('a', 2000)])
+        ->assertCreated();
+});
+
 it('does not dump a canned answer on input it cannot classify', function () {
     $body = ask('asdfgh lorem ipsum');
 
