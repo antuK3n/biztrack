@@ -14,6 +14,7 @@ use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
 use App\Support\QrCode;
+use App\Support\RenewablePermit;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -353,6 +354,17 @@ class PermitController extends Controller
         $reader = $request->user();
 
         if ($reader !== null && ! $reader->hasPermission('permit.view_all')) {
+            /*
+             * Which of these a renewal in progress is already carrying. The
+             * renewal chooser counts "(N due)" from this list, and a permit
+             * it shows greyed out as `Renewal in progress` is not one more
+             * thing due (Ken, 5 October 2026). One query for the page.
+             */
+            $inProgress = RenewablePermit::inProgress(collect($permits->items())->pluck('id')->all());
+            foreach ($permits->items() as $permit) {
+                $permit->setAttribute('renewal_in_progress', in_array($permit->id, $inProgress, true));
+            }
+
             $owed = UnbilledPermitFee::query()
                 ->whereHas('business', fn ($b) => $b->where('owner_user_id', $reader->id))
                 ->outstanding()

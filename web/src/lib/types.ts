@@ -1187,6 +1187,11 @@ export interface Permit {
    * not drawing a picker.
    */
   renewal_blocked_reason?: string | null
+  /**
+   * A submitted renewal is already carrying this permit. Only on the owner's
+   * own list (`GET /permits`), where the renewal chooser counts what is due.
+   */
+  renewal_in_progress?: boolean
 }
 
 /**

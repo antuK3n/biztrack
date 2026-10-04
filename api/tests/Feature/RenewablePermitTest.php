@@ -298,3 +298,18 @@ it('does not offer an expired permit a renewal already replaced, and still offer
     expect($offered)->not->toContain($lapsed->id)
         ->and($offered)->toContain($neverRenewed->id);
 });
+
+it('marks the owner’s own permits that a renewal in progress is carrying', function () {
+    $businessId = rnpBusiness();
+    $busy = rnpPermit($businessId);
+    $free = rnpPermit($businessId);
+    $first = rnpRenew($businessId, $busy)->assertCreated()->json('data.id');
+    rnpSubmit($first)->assertOk();
+
+    // What the renewal chooser counts "(N due)" from.
+    authAs('owner@biztrack.local');
+    $rows = collect($this->getJson('/api/v1/permits?per_page=100')->assertOk()->json('data'))->keyBy('id');
+
+    expect($rows[$busy->id]['renewal_in_progress'])->toBeTrue()
+        ->and($rows[$free->id]['renewal_in_progress'])->toBeFalse();
+});

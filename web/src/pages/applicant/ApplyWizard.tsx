@@ -2192,6 +2192,11 @@ function IdentifyFilingModal({
    * weeks from expiry is NOT due (it waits for January) and one that lapsed
    * in March IS (late, with a surcharge). `status === 'active'` drops the
    * superseded certificates the list also carries.
+   *
+   * Nor is a permit another filing is already renewing: the picker greys it
+   * out as `Renewal in progress`, so counting it would promise one more thing
+   * due than there is to tick (Ken, 5 October 2026). The Home tile reads the
+   * same list without this flag, so the two can differ by exactly those.
    */
   const { data: ownPermits } = useAsync(
     () =>
@@ -2204,6 +2209,7 @@ function IdentifyFilingModal({
     const counts = new Map<number, number>()
     for (const p of ownPermits ?? []) {
       if (p.status !== 'active' || (p.renewal_blocked_reason ?? null) !== null) continue
+      if (p.renewal_in_progress) continue
       const id = p.business?.id
       if (id === undefined) continue
       counts.set(id, (counts.get(id) ?? 0) + 1)

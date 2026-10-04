@@ -70,9 +70,33 @@ test('a permit whose renewal is in progress is greyed out and cannot be ticked',
     await page.goto('/apply?type=renewal')
     const modal = page.getByRole('dialog', { name: DIALOG })
     await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
-    await modal.getByRole('combobox', { name: /which business/i }).selectOption({
-      value: String(BUSINESS_ID),
-    })
+    const chooser = modal.getByRole('combobox', { name: /which business/i })
+
+    /*
+     * The chooser's "(N due)" does not count it either: it is not one more
+     * thing to tick. Read from the server's own list, so this holds whatever
+     * else the copied register makes due on this business.
+     */
+    const own = await api<
+      {
+        status: string
+        renewal_blocked_reason: string | null
+        renewal_in_progress?: boolean
+        business: { id: number } | null
+      }[]
+    >(page, 'GET', '/permits?per_page=100')
+    const due = own.filter(
+      (p) =>
+        p.business?.id === BUSINESS_ID &&
+        p.status === 'active' &&
+        p.renewal_blocked_reason === null &&
+        !p.renewal_in_progress,
+    ).length
+    const option = chooser.locator(`option[value="${BUSINESS_ID}"]`)
+    if (due > 0) await expect(option).toContainText(`(${due} due)`)
+    else await expect(option).not.toContainText('due)')
+
+    await chooser.selectOption({ value: String(BUSINESS_ID) })
 
     const busyRow = modal.locator('li').filter({ hasText: busy.permit_number })
     const otherRow = modal.locator('li').filter({ hasText: other.permit_number })

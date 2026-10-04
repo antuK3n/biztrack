@@ -56,6 +56,8 @@ class PermitResource extends JsonResource
             'renewal_blocked_reason' => $this->relationLoaded('permitType')
                 ? RenewalWindow::refusalFor($this->resource)
                 : null,
+            // Set on the owner's own list only (PermitController::index).
+            'renewal_in_progress' => $this->whenHas('renewal_in_progress'),
         ];
     }
 }
