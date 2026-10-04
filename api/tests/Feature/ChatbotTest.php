@@ -500,12 +500,23 @@ it('explains the main wizard fields', function () {
      * answer still directing people to the old one would send an applicant
      * looking for a tab that is not in the map — the chatbot is read by people
      * who are already lost.
+     *
+     * The same for the "Business & Tax Profile step", which the wizard no
+     * longer has: business area, the employee counts, gross sales and the one
+     * Capital Investment figure are all asked on Business Operation now
+     * (ApplyWizard's `operation` section). Capital was asserted against
+     * "Location & Zoning step", where a per-line capital used to be.
      */
-    expect(ask('what is capital?'))->toContain('Capital')->toContain('Location & Zoning step');
-    expect(ask('what is gross sales?'))->toContain('Gross Sales')->toContain('before you take any expenses off');
+    expect(ask('what is capital?'))->toContain('Capital Investment is item 6 in the Business Operation step');
+    expect(ask('what is gross sales?'))->toContain('Gross Sales')->toContain('Business Operation step')->toContain('before you take any expenses off');
     expect(ask('what is line of business?'))->toContain('Line of Business')->toContain('PSIC');
     expect(ask('what should I enter for TIN?'))->toContain('Tax Identification Number')->toContain('123-456-789-000');
-    expect(ask('what is floor area for?'))->toContain('Floor Area')->toContain('square metres');
+    expect(ask('what is floor area for?'))->toContain('Business Area (sq. m.)')->toContain('Business Operation step')->toContain('square metres');
+    expect(ask('what is total number of employees?'))->toContain('item 2 in the Business Operation step');
+
+    foreach (['capital', 'gross sales', 'floor area', 'total number of employees'] as $field) {
+        expect(ask("what is {$field}?"))->not->toContain('Business & Tax Profile');
+    }
 });
 
 it('answers a bare field name without a question word', function () {
@@ -525,7 +536,7 @@ it('keeps permit questions out of the field layer', function () {
     expect(ask('how much is the sanitary permit'))
         ->toContain('Sanitary Permit')
         ->toContain('Tax Order of Payment')
-        ->not->toContain('Business & Tax Profile step');
+        ->not->toContain('Business Operation step');
 
     expect(ask('what documents do I need for a sanitary permit'))
         ->toContain('Sanitary Requirements')

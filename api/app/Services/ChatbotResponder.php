@@ -250,15 +250,15 @@ class ChatbotResponder
             'label' => 'Capital',
             'codes' => [],
             'aliases' => ['capital', 'capitalization', 'capitalisation', 'puhunan'],
-            'answer' => 'Capital sits under each line of business in the Location & Zoning step, and it is required. '
-                ."Enter, in pesos, what you have put into that line.\n"
+            'answer' => 'Capital Investment is item 6 in the Business Operation step, and it is required on a new application. '
+                ."Enter, in pesos, what you have put into the business, as one figure.\n"
                 .'For a new business it is what your business tax is assessed on, because there is no full year of gross sales to go on yet.',
         ],
         [
             'label' => 'Gross Sales, Preceding Year',
             'codes' => [],
             'aliases' => ['gross sales', 'gross receipt', 'gross receipts', 'gross income', 'benta', 'sales'],
-            'answer' => 'Gross Sales, Preceding Year is in the Business & Tax Profile step, one figure per line of business. '
+            'answer' => 'Gross Sales, Preceding Year is in the Business Operation step, one figure per line of business. '
                 ."Enter your total sales for last year, before you take any expenses off.\n"
                 .'A renewal is assessed on this figure. If the line is brand new, leave it and your capitalization is used instead.',
         ],
@@ -282,7 +282,7 @@ class ChatbotResponder
             'label' => 'Floor Area',
             'codes' => [],
             'aliases' => ['floor area', 'square meter', 'square meters', 'square metre', 'sqm', 'laki ng lugar'],
-            'answer' => 'Floor Area is in the Business & Tax Profile step. '
+            'answer' => 'Floor Area is item 1, Business Area (sq. m.), in the Business Operation step. '
                 ."Enter the floor space your business occupies at the premises, in square metres.\n"
                 .'Some fees are charged per square metre, so this figure feeds straight into your assessment. Give the space you occupy, not the whole building.',
         ],
@@ -295,6 +295,11 @@ class ChatbotResponder
              * Employees" would name a box the applicant cannot find. The old
              * wording stays in the aliases, which is where a name the applicant
              * might still use belongs.
+             *
+             * The step has gone since: business area, the employee counts,
+             * gross sales and the single Capital Investment figure are asked on
+             * Business Operation, numbered as the paper numbers them (ApplyWizard's
+             * `operation` section), so these answers name that step and item.
              */
             'label' => 'Total Number of Employees',
             'codes' => [],
@@ -304,7 +309,7 @@ class ChatbotResponder
                 'employee', 'employees', 'headcount', 'staff', 'manggagawa',
                 'male employees', 'female employees', 'employees residing in malabon',
             ],
-            'answer' => 'Total Number of Employees is in the Business & Tax Profile step, in the Employees block: your total headcount at this location. '
+            'answer' => 'Total Number of Employees is item 2 in the Business Operation step: your total headcount at this location. '
                 ."Three counts sit under it. Number of Male Employees and Number of Female Employees must ADD UP to the total, because the city's forms treat those two boxes as the total. Number of Employees Residing in Malabon is a different cut of the same people, so it only has to be no higher than the total.\n"
                 .'All four are required, and some fees are computed from staff counts, which is why the breakdown is asked for as well as the total.',
         ],
