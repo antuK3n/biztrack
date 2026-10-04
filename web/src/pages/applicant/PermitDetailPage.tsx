@@ -10,6 +10,7 @@ import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit } from '../../lib/types'
 import { FsicSheet } from './FsicSheet'
+import { SanitarySheet } from './SanitarySheet'
 import { ZoningSheet } from './ZoningSheet'
 
 /*
@@ -92,6 +93,9 @@ interface PermitCertificate {
   fsic_description?: string | null
   /** The CPDO's Zoning Clearance, drawn by ZoningSheet [client, 5 October 2026]. */
   is_zoning?: boolean
+  /** The CHO's Sanitary Permit to Operate, drawn by SanitarySheet [client, 5 October 2026]. */
+  is_sanitary?: boolean
+  sanitary_classification?: string | null
 }
 
 /**
@@ -299,7 +303,7 @@ export function PermitDetailPage() {
         <style>{'@media print { @page { size: letter landscape; margin: 0.4in; } }'}</style>
       )}
       {/* The FSIC is a portrait Letter sheet, as the download is. */}
-      {(cert?.is_fsic || cert?.is_zoning) && <style>{'@media print { @page { size: letter portrait; margin: 0.4in; } }'}</style>}
+      {(cert?.is_fsic || cert?.is_zoning || cert?.is_sanitary) && <style>{'@media print { @page { size: letter portrait; margin: 0.4in; } }'}</style>}
       {/* Modal-like sheet: royal bar with white X (p59) */}
       <div className="overflow-hidden rounded-md bg-white shadow-overlay print:rounded-none print:shadow-none">
         {/*
@@ -342,6 +346,15 @@ export function PermitDetailPage() {
           {cert?.is_fsic ? (
             <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-8 sm:py-6">
               <FsicSheet
+                cert={cert}
+                verifyUrl={permit.verify_url}
+                validFrom={permit.valid_from}
+                validUntil={permit.valid_until}
+              />
+            </div>
+          ) : cert?.is_sanitary ? (
+            <div className="border-2 border-ink/80 px-3.5 py-5 sm:px-10 sm:py-7">
+              <SanitarySheet
                 cert={cert}
                 verifyUrl={permit.verify_url}
                 validFrom={permit.valid_from}

@@ -292,18 +292,60 @@
         .zoning-sig-role { font-weight: bold; font-size: 10.5px; font-family: "DejaVu Serif", serif; margin-top: 3px; }
         .zoning-public { text-align: center; font-family: "DejaVu Serif", serif; font-size: 12px; margin-top: 96px; }
 
+        /*
+         * ── The CHO's Sanitary Permit to Operate ────────────────────────────
+         *
+         * Portrait Letter, set to the issued sheet [client, 5 October 2026]:
+         * a bold city head with the office in serif, the wide title, ruled
+         * fill-in lines with bold caps values and small captions, the
+         * clause in caps, and two signatures stepped right as the paper sets
+         * them — Recommending Approval, then Approved further over.
+         */
+        body.sanitary .sheet { padding: 26px 40px 24px; }
+        .san-seal-cell { width: 108px; vertical-align: middle; }
+        .san-seal { height: 84px; }
+        .san-head { text-align: center; padding-top: 8px; }
+        .san-head-line { font-weight: bold; font-size: 12.5px; line-height: 1.35; }
+        .san-office { font-family: "DejaVu Serif", serif; font-size: 15px; margin-top: 6px; }
+        .san-title { text-align: center; font-weight: bold; font-size: 28px; letter-spacing: 0.5px; margin-top: 34px; }
+        table.san-line { margin-top: 22px; }
+        table.san-line td { vertical-align: bottom; }
+        table.san-first { margin-top: 42px; }
+        .san-label { width: 1%; white-space: nowrap; font-size: 12px; padding-right: 10px !important; padding-bottom: 2px !important; }
+        .san-label-right { padding-left: 14px !important; }
+        .san-half { width: 30%; }
+        .san-fill { border-bottom: 1px solid #2b2b2b; text-align: center; font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 12px; padding: 0 4px 1px; min-height: 15px; }
+        .san-fill.san-wide { margin-top: 26px; font-size: 13.5px; }
+        .san-nowrap { white-space: nowrap; }
+        .san-caption { text-align: center; font-size: 10px; margin-top: 1px; }
+        .san-clause { font-size: 12px; line-height: 1.55; margin-top: 44px; }
+        table.san-sign { width: auto; margin-top: 40px; }
+        table.san-sign-first { margin-top: 56px; }
+        table.san-sign td { vertical-align: bottom; }
+        .san-sign-pad { padding: 0 !important; }
+        .san-pad-recommend { width: 90px; }
+        .san-pad-approve { width: 180px; }
+        .san-action { width: 150px; text-align: right; white-space: nowrap; font-size: 12px; padding: 0 10px 18px 0 !important; }
+        .san-sign-cell { width: 250px; text-align: center; }
+        .san-sig-name { font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 12.5px; }
+        .san-sig-name.blank { color: transparent; }
+        .san-sig-line { border-bottom: 1px solid #2b2b2b; }
+        .san-sig-role { font-size: 11.5px; margin-top: 2px; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : ''))) }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : (($is_sanitary ?? false) ? 'sanitary' : '')))) }}">
 <div class="sheet">
 @if($is_fsic ?? false)
     @include('pdf.fsic')
 @elseif($is_zoning ?? false)
     @include('pdf.zoning')
+@elseif($is_sanitary ?? false)
+    @include('pdf.sanitary')
 @else
     {{-- Header: city block left, verification QR right. --}}
     <table class="row">

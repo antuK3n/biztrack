@@ -621,7 +621,7 @@ class PermitController extends Controller
         // CENRO's certificate is landscape too, as its issued sheet is.
         if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false)) {
             $pdf->setPaper('letter', 'landscape');
-        } elseif (($cert['is_fsic'] ?? false) || ($cert['is_zoning'] ?? false)) {
+        } elseif (($cert['is_fsic'] ?? false) || ($cert['is_zoning'] ?? false) || ($cert['is_sanitary'] ?? false)) {
             // The BFP's FSIC and the CPDO's Zoning Clearance are portrait
             // Letter sheets, as issued.
             $pdf->setPaper('letter', 'portrait');
@@ -800,6 +800,25 @@ class PermitController extends Controller
         $isCenroCertificate = $code === 'CEC';
         $isFsic = $code === 'FSIC';
         $isZoning = $code === 'ZONING';
+        $isSanitary = $code === 'SANITARY';
+
+        /*
+         * ── The Sanitary Permit signs as the CHO's form does ────────────────
+         *
+         * Two lines and no Mayor: Recommending Approval by the Sanitary
+         * Inspector, Approved by the City Health Officer [client, 5 October
+         * 2026, with the issued sheet]. Names from the CHO's office_signatories
+         * rows naming either post; a blank ruled line until it has them.
+         */
+        if ($isSanitary) {
+            $named = fn (string $needle) => collect($office)
+                ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
+
+            $signatories = [
+                ['role' => 'Sanitary Inspector', 'name' => $named('inspector'), 'action' => 'Recommending Approval'],
+                ['role' => 'City Health Officer', 'name' => $named('health officer'), 'action' => 'Approved'],
+            ];
+        }
 
         /*
          * ── The Zoning Clearance signs once, as the CPDO's form does ────────
@@ -983,9 +1002,36 @@ class PermitController extends Controller
             ];
         }
 
+        /*
+         * ── The CHO's Sanitary Permit to Operate ────────────────────────────
+         *
+         * Laid out from the issued sheet [client, 5 October 2026]: issued to
+         * the registered name, the establishment and its type, the address,
+         * the SANITARY PERMIT NO. (this system's number), date issued and
+         * date of expiration, the non-transferable clause, and two
+         * signatures. The type of establishment is the CHO sheet's own
+         * Sanitary Classification (Food / Non-Food Establishment), which is
+         * what the health office classifies a premises by; the line of
+         * business stands in only when the sheet was never answered.
+         */
+        if ($isSanitary) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'SANITARY', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+            $classification = trim((string) ($sheet['sanitary_classification'] ?? ''));
+
+            $sheetFields = [
+                'sanitary_classification' => $classification !== '' ? $classification : null,
+                'letterhead' => config('biztrack.letterheads.SANITARY'),
+            ];
+        }
+
         return [
             // Which sheet to draw. The views branch on these rather than on the
             // permit type's name, which is a label and may be reworded.
+            'is_sanitary' => $isSanitary,
             'is_business_permit' => $isBusinessPermit,
             'is_cenro_certificate' => $isCenroCertificate,
             'is_fsic' => $isFsic,
