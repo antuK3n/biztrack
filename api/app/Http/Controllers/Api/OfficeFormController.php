@@ -16,6 +16,7 @@ use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\RenewalPrefill;
+use App\Support\SanitaryPrefill;
 use App\Support\SheetRequirements;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -53,13 +54,15 @@ class OfficeFormController extends Controller
     /**
      * What a sheet is OFFERED, and where each offer came from.
      *
-     * Two sources, one channel. Last year's answers (`RenewalPrefill`) and the
+     * Three sources, one channel. Last year's answers (`RenewalPrefill`), the
      * account's (`AccountPrefill`, 5 October 2026 — the owner's home address,
-     * which the business permit never asked). The previous filing wins where
-     * both speak: it was given on a form the applicant signed. `prefill_from`
-     * names the source per key so the browser's flag can say "from your
-     * previous application" or "from your account" rather than one phrase
-     * that is wrong half the time.
+     * which the business permit never asked), and a reading of the filing
+     * (`SanitaryPrefill` — the sanitary classification from the line of
+     * business). The previous filing wins where two speak: it was given on a
+     * form the applicant signed. `prefill_from` names the source per key so
+     * the browser's flag can say "from your previous application", "from
+     * your account" or "suggested" rather than one phrase that is wrong two
+     * times in three.
      *
      * @return array{prefill: array<string, mixed>, prefill_from: array<string, string>}
      */
@@ -67,11 +70,15 @@ class OfficeFormController extends Controller
     {
         $previous = RenewalPrefill::forSheet($application, $code);
         $account = array_diff_key(AccountPrefill::forSheet($application, $code, $stored), $previous);
+        // A reading of the filing itself — the Sanitary classification from the
+        // line of business. Last year's answer and the account both outrank it.
+        $suggested = array_diff_key(SanitaryPrefill::forSheet($application, $code, $stored), $previous, $account);
 
         return [
-            'prefill' => $previous + $account,
+            'prefill' => $previous + $account + $suggested,
             'prefill_from' => array_fill_keys(array_keys($previous), 'previous')
-                + array_fill_keys(array_keys($account), 'account'),
+                + array_fill_keys(array_keys($account), 'account')
+                + array_fill_keys(array_keys($suggested), 'application'),
         ];
     }
 
@@ -499,11 +506,16 @@ class OfficeFormController extends Controller
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.date_issued' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
+            // The Sanitary sheet's counts and its one date (5 October 2026).
+            'form_data.toilets_count' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000'],
+            'form_data.seating_capacity' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000'],
+            'form_data.pest_control_last_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
         ], [
             'form_data.owner_birthday.before' => "The owner's birthday must be a date in the past.",
             'form_data.building_permit_date.before_or_equal' => 'The building permit date issued cannot be in the future.',
             'form_data.fsec_date.before_or_equal' => 'The FSEC date issued cannot be in the future.',
             'form_data.date_issued.before_or_equal' => 'The date issued cannot be in the future.',
+            'form_data.pest_control_last_date.before_or_equal' => 'The last pest control date cannot be in the future.',
         ]);
 
         // Opaque JSON: keep the full payload, not validated()'s narrowed keys.

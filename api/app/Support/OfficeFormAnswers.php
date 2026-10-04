@@ -200,6 +200,30 @@ final class OfficeFormAnswers
                 // nothing rather than print a zero the office would act on.
                 default => '',
             };
+
+            /*
+             * ── The rest of the sheet's numbers, 5 October 2026 ─────────────
+             *
+             * The City has no paper for this permit, so the sheet was drawn
+             * from the standard PD 856 application. Its headcount and floor
+             * area are the Business & Tax Profile's — the same figures the
+             * sanitary inspection fee (Sec. 4D.01) is bracketed on — and are
+             * carried rather than asked a second time, for the reason the
+             * health-certificate count above is. Blank where the profile is
+             * blank: a zero the office would act on is worse than an empty box.
+             */
+            $count = fn ($n) => is_numeric($n) ? (string) (int) $n : '';
+            $male = $application->fee_profile['male_employees'] ?? null;
+            $female = $application->fee_profile['female_employees'] ?? null;
+            $derived['employees_male'] = $count($male);
+            $derived['employees_female'] = $count($female);
+            $derived['employees_total'] = match (true) {
+                is_numeric($employees) => (string) (int) $employees,
+                is_numeric($male) || is_numeric($female) => (string) ((int) $male + (int) $female),
+                default => '',
+            };
+            $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
+            $derived['total_floor_area_sqm'] = is_numeric($floorArea) ? (string) (0 + $floorArea) : '';
         }
         if ($permitTypeCode === 'CEC') {
             $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';
