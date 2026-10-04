@@ -334,16 +334,14 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'waste_segregation',
     'pest_control',
     'pest_control_last_date',
-    'certified',
   ],
-  CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday', 'certified'],
+  CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday'],
   FSIC: [
     'application_date',
     'authorized_representative',
     'occupancy_type',
     'building_storeys',
     'certificate_applied_for',
-    'certified',
   ],
   OCCUPANCY: [
     'application_date',
@@ -794,7 +792,6 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('toilets_count')) missing.push('No. of Toilets')
     if (!has('sewage_disposal')) missing.push('Sewage Disposal')
     if (!has('solid_waste_disposal')) missing.push('Solid Waste Disposal')
-    if (data.certified !== 'yes') missing.push('Certification')
   }
   if (code === 'CEC') {
     if (has('owner_birthday') && (data.owner_birthday as string) >= todayISO()) {
@@ -817,7 +814,6 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      * ZONING.
      */
     if (!has('owner_address')) missing.push('Owner’s Address')
-    if (data.certified !== 'yes') missing.push('The certification that the details are correct')
   }
   if (code === 'FSIC') {
     /*
@@ -829,9 +825,6 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      */
     if (!has('occupancy_type')) missing.push('Type of Occupancy / Business Nature')
     if (!has('building_storeys')) missing.push('No. of Storeys')
-    if (data.certified !== 'yes') {
-      missing.push('The certification that the details and attachments are correct')
-    }
   }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
@@ -1654,8 +1647,8 @@ function ZoningFields({
  * auto-filling, do so."* So this is the standard LGU "Application for Sanitary
  * Permit to Operate" under PD 856: the establishment's class and size, then
  * the five things the sanitary inspector checks everywhere — water, toilets,
- * sewage, refuse, vermin — then the food-establishment extras, then the
- * applicant's word. If the CHO's own form ever turns up, these sections are
+ * sewage, refuse, vermin — then the food-establishment extras. If the CHO's
+ * own form ever turns up, these sections are
  * reordered to it and nothing else moves.
  *
  * ── What is carried and what is asked ────────────────────────────────────────
@@ -1669,11 +1662,9 @@ function ZoningFields({
 function SanitaryFields({
   data,
   set,
-  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
-  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
   const isFood = get(data, 'sanitary_classification') === 'Food Establishment'
@@ -1874,32 +1865,6 @@ function SanitaryFields({
         </section>
       )}
 
-      <section className="space-y-3">
-        <SectionMarker letter={isFood ? 'E' : 'D'} label="Certification" />
-        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={get(data, 'certified') === 'yes'}
-              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
-              disabled={ro}
-              aria-disabled={ro}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
-            />
-            <span className="text-sm leading-relaxed text-ink">
-              I certify that the information above is true and correct, and that the
-              establishment will be kept in accordance with the Code on Sanitation of the
-              Philippines (PD 856) and open to inspection by the City Health Office.
-            </span>
-          </label>
-          <div className="mt-3 sm:w-2/3">
-            <DerivedField
-              label={<>Printed Name of Owner<FromApplicationTag /></>}
-              value={business.ownerName}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   )
 }
@@ -2641,9 +2606,9 @@ function DenrRequirementsPanel({ data }: { data: OfficeFormData }) {
  *    BPLO form yet. It is asked here, plainly, rather than left blank on a
  *    sheet that prints a box for it. If the BPLO form ever grows item A16, this
  *    becomes a carried-over field like the rest and the question comes off.
- *  - THE CERTIFICATION. "I hereby certify that all information contained herein
- *    is true and correct", over the owner's printed name. The printed name is
- *    BPLO's answer; the certifying is an act, so it is a real tick.
+ *  - THE CERTIFICATION was asked here as a tick over the owner's printed name,
+ *    and removed on 5 October 2026 from every office sheet. Client: *"For ALL
+ *    application forms containing this, please remove this."*
  *
  * Everything below the paper's REMARKS FINDINGS AND RECOMMENDATIONS rule is the
  * office's half — the evaluator, the chief, the DENR permit checklist — and is
@@ -2824,34 +2789,6 @@ function CecFields({
             label={<>Contact Numbers — Mobile No.<FromApplicationTag /></>}
             value={business.mobile}
           />
-        </div>
-
-        {/*
-          The paper's certification and signature block, as the one part of it
-          that can be done in a browser. The printed name is the owner BPLO
-          already knows; what the applicant supplies is the act of certifying, so
-          that is the control.
-        */}
-        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={get(data, 'certified') === 'yes'}
-              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
-              disabled={ro}
-              aria-disabled={ro}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
-            />
-            <span className="text-sm leading-relaxed text-ink">
-              I hereby certify that all information contained herein is true and correct.
-            </span>
-          </label>
-          <div className="mt-3 sm:w-2/3">
-            <DerivedField
-              label={<>Printed Name of Owner<FromApplicationTag /></>}
-              value={business.ownerName}
-            />
-          </div>
         </div>
       </section>
 
@@ -3034,37 +2971,6 @@ function FsicFields({
         />
       </section>
 
-      <section className="space-y-3">
-        <SectionMarker letter="D" label="Certification" />
-        {/*
-          The sentence above the signature on BFP's form. It gates the submit —
-          see `officeFormMissing` — because a sheet handed in without it is one
-          the office gives back, and being stopped here costs a tick where
-          being stopped there costs a trip.
-        */}
-        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={get(data, 'certified') === 'yes'}
-              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
-              disabled={ro}
-              aria-disabled={ro}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
-            />
-            <span className="text-sm leading-relaxed text-ink">
-              I hereby certify the correctness of the information provided above and the
-              completeness of the attached documents.
-            </span>
-          </label>
-          <div className="mt-3 sm:w-2/3">
-            <DerivedField
-              label={<>Printed Name of Owner<FromApplicationTag /></>}
-              value={business.ownerName}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   )
 }
@@ -3579,7 +3485,7 @@ export function OfficeFormSheet({
         */}
         {code !== 'CEC' && code !== 'ZONING' && <CarriedOverSection business={business} />}
         {code === 'ZONING' && <ZoningFields data={data} set={set} business={business} />}
-        {code === 'SANITARY' && <SanitaryFields data={data} set={set} business={business} />}
+        {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
         {code === 'CEC' && <CecFields data={data} set={set} business={business} />}
         {code === 'FSIC' && <FsicFields data={data} set={set} business={business} />}
         {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} business={business} />}
