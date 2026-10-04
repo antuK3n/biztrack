@@ -57,10 +57,13 @@ both sides, who wrote the other side, and your recommendation, then wait. No
 whole-file `--ours`/`--theirs`. Never `push --force`, never rewrite pushed
 history, never `reset --hard`, never `stash` (§1).
 
-**If GitHub refuses the push** with "Changes must be made through a pull
-request" (`main` is protected; only Ken's account bypasses it): push a branch,
-then `gh pr create --base main --fill` and `gh pr merge --rebase --delete-branch`
-(no approvals needed). Pull `main` again afterwards.
+**If GitHub refuses the push:** the pull-request requirement on `main` is off
+for defense week, but `main` still requires linear history and blocks
+force-pushes. A "fetch first" / non-fast-forward refusal means someone pushed
+while you worked: repeat steps 4–5. A "merge commits are not allowed" refusal
+means you merged instead of rebasing: `git pull --rebase origin main`, push
+again. If "Changes must be made through a pull request" ever comes back, push a
+branch, `gh pr create --base main --fill`, `gh pr merge --rebase --delete-branch`.
 
 **Shared things:** announce a migration when you push one (pick a timestamp
 later than `ls api/database/migrations | tail -1`). `.env` files stay off limits
