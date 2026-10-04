@@ -254,7 +254,19 @@ const chooseOffice = async (page: Page, code: string) => {
 /** Every query string the screen sent, so a narrowing can be pinned to the server. */
 let asked: string[]
 
+/*
+ * The register, as the super admin reads it.
+ *
+ * Moved off the BPLO session [client, 4 October 2026: "sa bplo side, bat
+ * nakikita nya lahat? dapat yung permit nya lang … at mga mismong permit sa
+ * other offices, no need sa ibang fields"]. BPLO no longer gets an ALL tab or
+ * another office's sheet columns, so the tests below — three offices' rows and
+ * every sheet side by side — are the super admin's now. What BPLO does get is
+ * pinned in the nested block at the end.
+ */
 test.describe('the permit register table', () => {
+  test.use({ storageState: sessionFor('admin') })
+
   test.beforeEach(async ({ page }) => {
     asked = []
 
@@ -315,33 +327,18 @@ test.describe('the permit register table', () => {
     await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
 
     /*
-     * Widen to every office before each test in this block.
-     *
-     * These tests are about the REGISTER — three rows from three offices, all
-     * five sheets side by side — and this session is BPLO's, which now opens
-     * on its own office. That default is deliberate and has its own test
-     * below; here it is a starting condition to undo, exactly as a reader
-     * would.
+     * The super admin belongs to no office and opens on ALL. Pressed again
+     * here only where the tab exists — the BPLO block below shares this
+     * stub and has no ALL tab to press.
      */
-    await chooseOffice(page, '')
-    await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+    if ((await officeTab(page, '').count()) > 0) {
+      await chooseOffice(page, '')
+      await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+    }
   })
 
-  test('BPLO opens on its own office, and can widen to the register', async ({ page }) => {
-    /*
-     * Client, 24 September 2026: "bplo admin office, make the office permit
-     * default sa bplo, but still sa filter ganon pa rin meron all offices, at
-     * yung 6 other offices and their permits."
-     *
-     * Asserted on the FIRST request rather than on what is on screen after
-     * the beforeEach has widened it: the point is that BPLO never sees the
-     * whole register unless it asks, and a page that fetched everything and
-     * then narrowed in the browser would look identical here while costing
-     * the request this avoids.
-     */
-    expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
-
-    // And the picker still offers every office, "All" and "Other offices".
+  test('the super admin opens on ALL, with every office beside it', async ({ page }) => {
+    expect(asked[0], 'the super admin opened narrowed to one office').not.toContain('permit_type=')
     await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1)
     await expect(officeTab(page, '')).toHaveAttribute('aria-pressed', 'true')
   })
@@ -849,6 +846,46 @@ test.describe('the permit register table', () => {
         page.getByRole('button', { name: `View certificate ${permit.permit_number}` }),
       ).toBeVisible()
     }
+  })
+
+  /*
+   * ── BPLO: its own permit in full, the other offices' permits alone ─────
+   *
+   * [Client, 4 October 2026: "dapat yung permit nya lang 'BPLO Mayor's /
+   * Business Permit' at mga mismong permit sa other offices no need sa ibang
+   * fields".]
+   */
+  test.describe('as BPLO', () => {
+    test.use({ storageState: sessionFor('bplo') })
+
+    test('opens on its own office, with the six offices and no ALL', async ({ page }) => {
+      expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
+      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT)
+      await expect(officeTab(page, '')).toHaveCount(0)
+      await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    test('another office’s tab is the permit, not the office’s sheet or uploads', async ({ page }) => {
+      await chooseOffice(page, 'SANITARY')
+      await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
+      await expect(page.locator('tbody tr')).toHaveCount(1)
+
+      // The permit: who holds it, its number, whether it is in force, and the certificate.
+      for (const kept of [/^Tracking ID/i, /^Permit No/i, /^Business/i, /^Owner/i, /^Status/i, /^Valid until/i]) {
+        await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
+      }
+      await expect(page.getByRole('button', { name: 'View certificate MCS-2025-000770' })).toBeVisible()
+
+      // Not the health office's sheet, its uploads, or the rest of the record.
+      for (const gone of [/Sanitary Classification/i, /Water Source/i, /^Requirements Submitted/i, /^Address/i, /^Issued by/i]) {
+        await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+      }
+    })
+
+    test('its own tab keeps every field and the uploads', async ({ page }) => {
+      await expect(page.getByRole('columnheader', { name: /^Requirements Submitted/i })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: /^Line of Business/i })).toBeVisible()
+    })
   })
 })
 
