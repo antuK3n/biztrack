@@ -388,6 +388,16 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          * decision, the same as approve and return above.
          */
         Route::post('assignments/{assignment}/classification', [AssignmentController::class, 'classify']);
+        /*
+         * BPLO marks a bill paid over the counter at City Hall [Ken, 4 Oct
+         * 2026]. In this group because `application.review` is what every one
+         * of the seven offices holds, the same reason `classification` above
+         * is here — but unlike classification, which office may act is not a
+         * per-filing question (AssignmentController::authorizeDepartment): it
+         * is always BPLO, who raises and chases the Tax Order of Payment.
+         * `PaymentController::authorizeBploStaff` enforces that.
+         */
+        Route::post('applications/{application}/counter-payment', [PaymentController::class, 'counterPayment']);
     });
     /*
      * Rejecting the whole application is not a per-office power. Each office

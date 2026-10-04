@@ -818,8 +818,12 @@ export interface FeeProfile {
  * `card` exists only while payments are simulated; `qrph` and `gotyme` only
  * through the online gateway. Which ones are offered comes from
  * `payments.options()`, never from a list in the page.
+ *
+ * `counter` is never offered — it is BPLO marking a bill paid over the
+ * counter at City Hall (`payments.markPaidAtCounter`), not something an
+ * owner picks.
  */
-export type PaymentMethod = 'gcash' | 'maya' | 'card' | 'qrph' | 'gotyme'
+export type PaymentMethod = 'gcash' | 'maya' | 'card' | 'qrph' | 'gotyme' | 'counter'
 
 export interface Payment {
   id: number

@@ -9,6 +9,10 @@ namespace App\Enums;
  * simulated offers GCash, Maya and Card, as it always has; KwikPay offers GCash,
  * Maya, QR Ph and GoTyme — its deposit channels (merchant docs §8) less USDT.
  * Card exists only in simulated mode because KwikPay has no card channel.
+ *
+ * `Counter` is not a channel at all — it is BPLO marking a bill paid over the
+ * counter at City Hall [Ken, 4 Oct 2026]. Never offered to an owner: it is not
+ * in `forMode()`, and has no KwikPay bank code because no gateway is involved.
  */
 enum PaymentMethod: string
 {
@@ -17,6 +21,7 @@ enum PaymentMethod: string
     case Card = 'card';
     case Qrph = 'qrph';
     case Gotyme = 'gotyme';
+    case Counter = 'counter';
 
     public function label(): string
     {
@@ -26,6 +31,7 @@ enum PaymentMethod: string
             self::Card => 'Credit / Debit Card',
             self::Qrph => 'QR Ph',
             self::Gotyme => 'GoTyme',
+            self::Counter => 'Paid at the counter',
         };
     }
 
@@ -40,7 +46,7 @@ enum PaymentMethod: string
             self::Maya => 'PMP',
             self::Qrph => 'qrph',
             self::Gotyme => 'GOT',
-            self::Card => null,
+            self::Card, self::Counter => null,
         };
     }
 

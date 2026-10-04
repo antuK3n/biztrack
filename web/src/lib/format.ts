@@ -265,6 +265,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   card: 'Card',
   qrph: 'QR Ph',
   gotyme: 'GoTyme',
+  counter: 'Paid at the counter',
 }
 
 export function paymentMethodLabel(method: string): string {
