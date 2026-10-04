@@ -108,10 +108,21 @@ return new class extends Migration
                 ]);
         }
 
+        /*
+         * `awaiting_other_permits` is written out rather than read off the
+         * enum, because the enum no longer has it: the client had the status
+         * removed on 4 October 2026 and `ApplicationStatus::AwaitingOtherPermits`
+         * stopped existing, which would have made this migration fatal on any
+         * database replayed from scratch.
+         *
+         * A migration describes the schema AS IT WAS on the day it ran, and a
+         * literal is the honest way to say so. The later migration that clears
+         * the status out is the one that speaks for today.
+         */
         $statusMap = [
             'submitted' => ApplicationStatus::ForApproval->value,
-            'under_review' => ApplicationStatus::AwaitingOtherPermits->value,
-            'for_inspection' => ApplicationStatus::AwaitingOtherPermits->value,
+            'under_review' => 'awaiting_other_permits',
+            'for_inspection' => 'awaiting_other_permits',
         ];
         $moved = [];
         foreach ($statusMap as $from => $to) {
@@ -167,7 +178,8 @@ return new class extends Migration
             ->update(['status' => 'submitted']);
         DB::table('applications')
             ->whereIn('status', [
-                ApplicationStatus::AwaitingOtherPermits->value,
+                // Literal for the reason given in `up()`: the enum case is gone.
+                'awaiting_other_permits',
                 ApplicationStatus::ForFinalApproval->value,
             ])
             ->update(['status' => 'under_review']);

@@ -8,10 +8,12 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Barangay;
+use App\Models\Business;
 use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Models\User;
 use App\Services\WorkflowService;
 use Illuminate\Validation\ValidationException;
 
@@ -233,7 +235,7 @@ it('returns one permit without returning the application or disturbing the other
 
     // CHO's permit went back to the applicant; the filing did not.
     expect($workflow->pivotFor($app->fresh(), 'SANITARY')->status)->toBe(ClearanceStatus::Returned);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     /*
      * BFP approves its own permit while CHO's sits returned. This is ALLOWED —
@@ -246,7 +248,7 @@ it('returns one permit without returning the application or disturbing the other
 
     expect($workflow->pivotFor($app->fresh(), 'FSIC')->status)->toBe(ClearanceStatus::ForInspection);
     expect($workflow->pivotFor($app->fresh(), 'SANITARY')->status)->toBe(ClearanceStatus::Returned);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     // And no inspector is sent to premises whose paperwork is mid-revision:
     // BFP has not picked a date, and CHO cannot until its permit is read again.
@@ -373,10 +375,59 @@ it('will not issue a second set of permits for a filing already approved', funct
 });
 
 it('lets no status follow a terminal one', function (string $status) {
-    // The table itself, stated once so the three terminal cases cannot drift
-    // apart. `cancelled` has no HTTP case above because cancel() is only offered
+    // The table itself, stated once so the terminal cases cannot drift apart.
+    // `cancelled` has no HTTP case above because cancel() is only offered
     // before payment, so a cancelled filing never has an open clearance
     // assignment to approve — the hole is the same shape and is closed here.
     expect(ApplicationStatus::from($status)->allowedNext())->toBe([])
         ->and(ApplicationStatus::from($status)->isTerminal())->toBeTrue();
-})->with(['approved', 'rejected', 'cancelled']);
+})->with(['rejected', 'cancelled']);
+
+it('stops an APPROVED filing by the row instead, because the status no longer can', function () {
+    /*
+     * ── Why `approved` left the list above ──────────────────────────────────
+     *
+     * It was the third terminal case until 4 October 2026, when the client had
+     * `awaiting_other_permits` removed — *"we no longer need that status"*. A
+     * paid filing reaches `approved` at payment now and gathers its other
+     * permits there, so the status marks TWO different situations and the
+     * table, which sees only the status, cannot refuse one without refusing
+     * the other.
+     *
+     * Both moves it allows are ones the removed status allowed, and both are
+     * needed while a filing gathers: an office can still refuse a clearance,
+     * and `refreshReadiness` still sends a filing with no confirmed RA 11032
+     * category to BPLO.
+     */
+    expect(ApplicationStatus::Approved->allowedNext())
+        ->toBe([ApplicationStatus::ForFinalApproval, ApplicationStatus::Rejected]);
+
+    /*
+     * So the guard moved to the row, and this is the claim that replaces
+     * "terminal is terminal": two filings at the same status, one finished and
+     * one not, told apart by `decided_at`. Every caller that used to ask
+     * `isTerminal()` asks this.
+     */
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $businessId = Business::where('owner_user_id', $owner->id)->value('id');
+
+    $at = fn ($decidedAt) => Application::create([
+        'business_id' => $businessId,
+        'applicant_user_id' => $owner->id,
+        'application_type' => 'new',
+        'status' => ApplicationStatus::Approved,
+        'decided_at' => $decidedAt,
+    ]);
+
+    $gathering = $at(null);
+    $closed = $at(now());
+
+    expect($gathering->isDecided())->toBeFalse()
+        ->and($closed->isDecided())->toBeTrue()
+        // And the SQL half agrees with the PHP half, or an officer's caseload
+        // says one thing on one screen and another on the next.
+        ->and(Application::query()->decided()->whereKey($gathering->id)->exists())->toBeFalse()
+        ->and(Application::query()->decided()->whereKey($closed->id)->exists())->toBeTrue()
+        ->and(Application::query()->notDecided()->whereKey($gathering->id)->exists())->toBeTrue()
+        ->and(Application::query()->notDecided()->whereKey($closed->id)->exists())->toBeFalse();
+});

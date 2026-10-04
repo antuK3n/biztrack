@@ -355,9 +355,15 @@ it('gives an officer with no department nothing rather than everything', functio
 it('does not widen what an officer may write on an office form', function () {
     // Item 56 scopes who may reach the form; it must not relax item 54's split
     // between the applicant's answers and the office's issuance dates.
+    //
+    // Written from BPLO since 4 October 2026, not OBO: the office that ISSUES
+    // the permit may now correct its own sheet's answers (OfficeFormTest pins
+    // that, and the audit row it leaves). The split this test guards is the
+    // one for every OTHER reviewer on the filing, and BPLO reads the Occupancy
+    // sheet without issuing the permit.
     $app = fileRoutedApplication('Scoping Office Form Cafe', ['BUSINESS', 'OCCUPANCY']);
 
-    test()->withHeaders(authAs('obo@biztrack.local'))
+    test()->withHeaders(authAs('bplo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app['id']}/office-forms/OCCUPANCY", [
             'form_data' => ['building_permit_date' => '2026-01-05', 'owner_name' => 'Hacked'],
         ])->assertOk();
@@ -874,10 +880,10 @@ it('drops a filing out of an office’s approval queue once that office has appr
      * `for_inspection` are not application statuses any more — they described
      * one permit's work, and it lives on `application_permit_types.status` now
      * (docs/application-flow-2026-09.md). A paid filing sits at
-     * `awaiting_other_permits` from the moment the bill clears until every
+     * `approved` from the moment the bill clears until every
      * required permit is approved, whatever its offices are doing inside it.
      *
-     * `awaiting_other_permits` therefore has to be in this list, for exactly the
+     * `approved` therefore has to be in this list, for exactly the
      * reason `for_inspection` had to be before it: leave it out and BFP's row
      * vanishes because of the FILING's status rather than because of BFP's
      * assignment, and the last assertion becomes a tautology measuring the bug
@@ -886,7 +892,7 @@ it('drops a filing out of an office’s approval queue once that office has appr
     $openIds = fn (string $email) => collect(
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/assignments?status=pending,in_progress,returned'
-                .'&application_status=for_approval,pending_payment,awaiting_other_permits,returned,for_final_approval&per_page=200')
+                .'&application_status=for_approval,pending_payment,approved,returned,for_final_approval&per_page=200')
             ->assertOk()->json('data')
     )->pluck('application.id');
 
@@ -911,7 +917,7 @@ it('drops a filing out of an office’s approval queue once that office has appr
      * offices' rows are still inside the same application status, so what
      * separates them can only be their own assignments.
      */
-    expect(Application::find($app['id'])->status->value)->toBe('awaiting_other_permits');
+    expect(Application::find($app['id'])->status->value)->toBe('approved');
     expect(
         Application::find($app['id'])->permitTypes()
             ->where('code', 'SANITARY')->first()->pivot->status->value

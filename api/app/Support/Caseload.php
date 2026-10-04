@@ -58,6 +58,11 @@ class Caseload
      * `awaiting_other_permits` for weeks with BPLO's assignment already marked
      * done. On the tester register EVERY BPLO assignment is in that state.
      *
+     * (That stage was `awaiting_other_permits` until 4 October 2026, when the
+     * client had the status removed. The filing now sits at `approved` for
+     * those same weeks, with `decided_at` still null — see
+     * `Application::isDecided()`, which is what `scopeNotDecided` below asks.)
+     *
      * Both consequences were visible on screen. An officer's "My assigned"
      * section was empty while they held three live filings, and the super
      * admin's Reassign dialog refused to move any of them — with the OIC
@@ -75,22 +80,6 @@ class Caseload
             ->tap(fn ($q) => self::scopeOpen($q));
     }
 
-    /**
-     * The application states that end a case.
-     *
-     * Read off the enum rather than listed here, so a state added later is
-     * classified by `isTerminal()` — the one place that already answers this
-     * question — instead of silently counting as live.
-     *
-     * @return array<int, string>
-     */
-    public static function decidedStatuses(): array
-    {
-        return array_values(array_map(
-            fn (ApplicationStatus $s) => $s->value,
-            array_filter(ApplicationStatus::cases(), fn (ApplicationStatus $s) => $s->isTerminal()),
-        ));
-    }
 
     /**
      * Narrow a query of ASSIGNMENTS to the ones still open.
@@ -109,7 +98,7 @@ class Caseload
      */
     public static function scopeOpen($query): void
     {
-        $query->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses()));
+        $query->whereHas('application', fn ($a) => $a->notDecided());
     }
 
     /** Site visits this officer still holds. */
@@ -135,7 +124,7 @@ class Caseload
     {
         return ApplicationAssignment::query()
             ->where('officer_user_id', $officer->id)
-            ->whereHas('application', fn ($a) => $a->whereIn('status', self::decidedStatuses()));
+            ->whereHas('application', fn ($a) => $a->decided());
     }
 
     /**
@@ -170,7 +159,10 @@ class Caseload
         return $query
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id,status',
+                // `decided_at` for `Application::statusLabel()` below: without the
+                // column the model reads it as null and every finished filing
+                // comes back as one still gathering.
+                'application:id,tracking_id,business_id,status,decided_at',
                 'application.business:id,name',
                 'application.permitTypes:id,code,name,issuing_department_id',
             ])
@@ -209,7 +201,16 @@ class Caseload
                  * completed na?"* Both were true — the step was finished and
                  * the filing was not — and only one of them was on screen.
                  */
-                'application_status_label' => $a->application?->status?->label(),
+                /*
+                 * `statusLabel()` and not `status?->label()`, for the very
+                 * reason given above. Since 4 October 2026 `approved` is
+                 * worn by a filing still gathering its other permits as
+                 * well as by a finished one, and the enum's word for it is
+                 * "Completed" — so the bare label would have put the client's
+                 * complaint straight back on this screen, on a row that is
+                 * live rather than one whose step is done.
+                 */
+                'application_status_label' => $a->application?->statusLabel(),
                 'at' => optional($a->assigned_at)->toISOString(),
             ])
             ->values()
@@ -241,7 +242,7 @@ class Caseload
             ApplicationAssignment::query()
                 ->where('department_id', $officer->department_id)
                 ->whereNull('officer_user_id')
-                ->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses())),
+                ->whereHas('application', fn ($a) => $a->notDecided()),
             $limit,
         );
     }
@@ -272,7 +273,10 @@ class Caseload
         $inspections = self::inspections($officer)
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id,status',
+                // `decided_at` for `Application::statusLabel()` below: without the
+                // column the model reads it as null and every finished filing
+                // comes back as one still gathering.
+                'application:id,tracking_id,business_id,status,decided_at',
                 'application.business:id,name',
             ])
             ->get()

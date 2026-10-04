@@ -36,7 +36,7 @@ use App\Models\OfficerRequest;
 function openApplicationForRequest(): Application
 {
     return Application::whereIn('status', [
-        'for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'returned',
+        'for_approval', 'pending_payment', 'approved', 'for_final_approval', 'returned',
     ])->firstOrFail();
 }
 

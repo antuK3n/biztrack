@@ -696,7 +696,7 @@ it('leaves the payment pending when moving its filing fails, and settles both on
     $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Completed)
-        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('carries on past a payment it cannot settle, and puts that one in front of staff after a day', function () {

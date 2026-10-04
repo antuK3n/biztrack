@@ -292,6 +292,75 @@ class InspectionController extends Controller
      * only ever names a user from the booking department, so this is safe at
      * booking time and is a separate, un-fixed finding.
      */
+    /**
+     * Take the site visit: become its inspector.
+     *
+     * The twin of `AssignmentController::claim`, and deliberately shaped like
+     * it — same conditional update, same 409 when somebody got there first,
+     * same silence when the caller already holds it. The client's point on
+     * 4 October 2026 was that the inspection can belong to a different officer
+     * from the review; it could already, but only an admin could say so. This
+     * is the office doing it for itself, which is what Claim has always meant
+     * on the other stage.
+     *
+     * `whereNull` in the UPDATE rather than a read-then-write: two inspectors
+     * pressing Claim on the same visit is the ordinary case this guards, and a
+     * check followed by a write would let both through.
+     */
+    public function claim(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+
+        $user = $request->user();
+
+        if ($inspection->inspector_user_id === $user->id) {
+            return response()->json(['data' => new InspectionResource($inspection->load('inspector'))]);
+        }
+
+        $taken = Inspection::whereKey($inspection->id)
+            ->whereNull('inspector_user_id')
+            ->update(['inspector_user_id' => $user->id]);
+
+        if ($taken === 0) {
+            $holder = $inspection->fresh()->load('inspector')->inspector;
+            abort(409, $holder
+                ? "This visit is already with {$holder->name}. Only the system administrator can move it."
+                : 'This visit is already with another officer.');
+        }
+
+        Audit::log('inspection.claimed', $inspection->fresh(), ['inspector_user_id' => $user->id]);
+
+        return response()->json(['data' => new InspectionResource($inspection->fresh()->load('inspector'))]);
+    }
+
+    /**
+     * Put the visit back: stop being its inspector.
+     *
+     * Same reasoning as `AssignmentController::release` — a claim that takes
+     * one click and an administrator to undo is a claim people stop making.
+     * Refused on somebody else's visit, because releasing another officer's
+     * work is a reassignment, and reassignment is the admin's.
+     */
+    public function release(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+
+        $user = $request->user();
+
+        abort_unless(
+            $inspection->inspector_user_id === null || $inspection->inspector_user_id === $user->id,
+            403,
+            'This visit is with another officer. Only the system administrator can move it.'
+        );
+
+        if ($inspection->inspector_user_id !== null) {
+            $inspection->forceFill(['inspector_user_id' => null])->save();
+            Audit::log('inspection.released', $inspection, ['released_by_user_id' => $user->id]);
+        }
+
+        return response()->json(['data' => new InspectionResource($inspection->fresh()->load('inspector'))]);
+    }
+
     private function authorizeDepartment(Request $request, Inspection $inspection): void
     {
         $user = $request->user();

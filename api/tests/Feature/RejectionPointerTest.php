@@ -61,14 +61,14 @@ it('records which rows a refusal is about, and what was said about each', functi
         $row,
         'The fire safety plan is not signed.',
         'Have it signed by a licensed fire safety practitioner, then apply again.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
-        ['FSIC_REQ_OBO_ENDORSEMENT' => 'No signature on the endorsement.'],
+        'FSIC_REQ_VALID_COO',
+        ['FSIC_REQ_VALID_COO' => 'Not a certified true copy.'],
     );
 
     $fresh = app(WorkflowService::class)->pivotFor($app->fresh(), 'FSIC');
 
     expect($fresh->status)->toBe(ClearanceStatus::Rejected)
-        ->and($fresh->remarks_target)->toBe('FSIC_REQ_OBO_ENDORSEMENT')
+        ->and($fresh->remarks_target)->toBe('FSIC_REQ_VALID_COO')
         /* The two sentences survive as they always did. */
         ->and($fresh->rejection_note)->toBe('The fire safety plan is not signed.')
         ->and($fresh->rejection_remedy)->not->toBeNull();
@@ -78,7 +78,7 @@ it('records which rows a refusal is about, and what was said about each', functi
         ->pluck('note', 'target')
         ->all();
 
-    expect($notes['FSIC_REQ_OBO_ENDORSEMENT'])->toBe('No signature on the endorsement.');
+    expect($notes['FSIC_REQ_VALID_COO'])->toBe('Not a certified true copy.');
 });
 
 it('refuses a re-submission that changed nothing since the refusal', function () {
@@ -90,7 +90,7 @@ it('refuses a re-submission that changed nothing since the refusal', function ()
         $row,
         'The fire safety plan is not signed.',
         'Have it signed, then apply again.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
+        'FSIC_REQ_VALID_COO',
         [],
     );
 
@@ -115,7 +115,7 @@ it('takes the re-submission once the named row has changed', function () {
         $row,
         'The fire safety plan is not signed.',
         'Have it signed, then apply again.',
-        'FSIC_REQ_OBO_ENDORSEMENT',
+        'FSIC_REQ_VALID_COO',
         [],
     );
 
@@ -125,7 +125,7 @@ it('takes the re-submission once the named row has changed', function () {
      */
     App\Models\ApplicationDocument::create([
         'application_id' => $app->id,
-        'document_type_id' => App\Support\SheetRequirements::documentType('FSIC', 'FSIC_REQ_OBO_ENDORSEMENT')->id,
+        'document_type_id' => App\Support\SheetRequirements::documentType('FSIC', 'FSIC_REQ_VALID_COO')->id,
         'original_filename' => 'endorsement-signed.pdf',
         'stored_path' => 'private/documents/test/endorsement-signed.pdf',
         'mime_type' => 'application/pdf',

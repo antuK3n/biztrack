@@ -166,7 +166,7 @@ class Inspection extends Model
      */
     private function filingIsDecided(): bool
     {
-        return $this->application?->status?->isTerminal() ?? false;
+        return $this->application?->isDecided() ?? false;
     }
 
     /**

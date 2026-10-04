@@ -185,6 +185,80 @@ class NotificationService
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is now {$to->label()}.");
     }
 
+    /**
+     * The site visit did not pass, and the owner has to act on it.
+     *
+     * ── Why this is not `applicationStatus()` ───────────────────────────────
+     *
+     * It was, until 4 October 2026, and that quietly stopped working the day
+     * `awaiting_other_permits` was removed. `applicationStatus` says nothing
+     * for Approved or Rejected, because each has a dedicated notice of its own
+     * — and a filing gathering its other permits now wears `approved`. So the
+     * one inspection result an owner must act on went back to being recorded
+     * in silence, which is the exact bug the note in
+     * `WorkflowService::recordInspection` says was fixed on 24 September.
+     *
+     * A notice of its own also reads better than the one it borrowed. The old
+     * body opened with the filing's status — "BIZ-… is now “Approved”. The
+     * City Health Office inspection did not pass" — which announces good news
+     * and then contradicts it.
+     */
+    public function inspectionFailed(Application $app, string $body): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'inspection',
+            'Inspection did not pass',
+            $body,
+            "/applications/{$app->id}",
+            $app,
+        );
+        $this->fanOut($app->applicant, "BizTrack: an inspection for {$app->tracking_id} did not pass.");
+    }
+
+    /**
+     * Tell the applicant something about a filing whose status is NOT changing.
+     *
+     * ── Why this exists beside `applicationStatus()` ────────────────────────
+     *
+     * Seven places in WorkflowService had been calling `applicationStatus($app,
+     * $app->status, $note)` — passing the CURRENT status — purely to carry a
+     * sentence to the owner: an office changed what it asked for, a visit was
+     * booked, a clearance was approved, the Business Permit was released. That
+     * worked while no live filing ever wore `approved`.
+     *
+     * Since 4 October 2026 a paid filing wears it while its other permits
+     * come in, and `applicationStatus` is deliberately silent on Approved
+     * because the END of a filing has its own notice. So every one of those
+     * seven sentences went quiet on exactly the filings they were about —
+     * including the one that says the permit has been released, fired in the
+     * same breath as the release. The owner paid and heard nothing.
+     *
+     * This carries the sentence and asks no question about the status, which
+     * is the whole of what those callers wanted. `applicationStatus` keeps its
+     * silence for the one caller that means a transition: `transition()`.
+     */
+    public function applicationNote(Application $app, string $note): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'status_change',
+            'Application update',
+            "{$app->tracking_id}: {$note}",
+            "/applications/{$app->id}",
+            $app,
+        );
+        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} — {$note}");
+    }
+
     /** End state: the application cleared every office (tester item 51). */
     public function applicationApproved(Application $app): void
     {

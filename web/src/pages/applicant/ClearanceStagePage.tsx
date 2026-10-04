@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
+import { InfoCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal } from '../../components/ui/Proto'
-import { businessName, formatBytes, formatRelative, pesoToNumber } from '../../lib/format'
+import { businessName, formatRelative, pesoToNumber } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, clearances, officeForms } from '../../lib/resources'
 import { clearanceStarted, clearanceWithOffice } from '../../lib/status'
@@ -18,14 +18,14 @@ import {
   type OfficeFormCode,
   type OfficeFormData,
 } from './OfficeFormStep'
-import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
+import { fileRejection, uploadErrorMessage } from './uploads'
 import { carriedOverBusiness } from './carriedOver'
 import type {
   Application,
-  ApplicationType,
   Clearance,
   ClearanceMeta,
   OfficeFormRequirement,
+  CarriedSource,
 } from '../../lib/types'
 
 /*
@@ -269,11 +269,6 @@ interface ClearanceStageProps {
   onOpenChange: (code: OfficeFormCode | null) => void
   /** The business as every office sheet carries it, for the sheets opened here. */
   business: CarriedOverBusiness
-  /**
-   * Which kind of filing this is, because a NEW one may not hand in a
-   * permit it already holds — see `mayUploadHeldCopy` below.
-   */
-  applicationType: ApplicationType
 }
 
 /*
@@ -312,7 +307,6 @@ interface ClearanceStageProps {
 export function ClearanceStage({
   applicationId,
   business,
-  applicationType,
   openCode,
   onOpenChange,
   correctCode,
@@ -341,7 +335,6 @@ export function ClearanceStage({
    * actually lives; this keeps a control off the screen that the server
    * would reject.
    */
-  const mayUploadHeldCopy = applicationType === 'amendment'
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
   const [rows, setRows] = useState<Clearance[] | null>(null)
@@ -363,9 +356,6 @@ export function ClearanceStage({
   const [note, setNote] = useState('')
 
   /* The card whose SUBMISSION dialog is open. Submit always opens this. */
-  const [heldPrompt, setHeldPrompt] = useState<Clearance | null>(null)
-  const [heldPromptFile, setHeldPromptFile] = useState<File | null>(null)
-  const [heldPromptError, setHeldPromptError] = useState<string | null>(null)
 
   /*
    * The card whose Apply is about to DELETE the certificate already uploaded
@@ -384,7 +374,6 @@ export function ClearanceStage({
    * deletion: the applicant, in a dialog that names the file and whose confirm
    * button says "Delete", before anything leaves the disk.
    */
-  const [applyPrompt, setApplyPrompt] = useState<Clearance | null>(null)
 
   /*
    * The applicant said, by hand, that they trade from a market stall.
@@ -462,6 +451,8 @@ export function ClearanceStage({
    * flag clear itself, with nothing having to clear it.
    */
   const [offered, setOffered] = useState<Record<string, Record<string, unknown>>>({})
+  /** Where each offered key came from, by sheet; see `prefill_from`. */
+  const [offeredFrom, setOfferedFrom] = useState<Record<string, Record<string, CarriedSource>>>({})
   const [reqBusy, setReqBusy] = useState<string | null>(null)
   const [reqError, setReqError] = useState<string | null>(null)
 
@@ -535,6 +526,7 @@ export function ClearanceStage({
 
               if (Object.keys(carried).length > 0) {
                 setOffered((o) => ({ ...o, [f.permit_type_code]: carried }))
+                setOfferedFrom((o) => ({ ...o, [f.permit_type_code]: f.prefill_from ?? {} }))
               }
               /*
                * Seed the autosave's baseline with what the server just gave us.
@@ -616,14 +608,12 @@ export function ClearanceStage({
      *
      * This used to call removeHeld inline and carry on. The applicant pressed a
      * button named "Apply" and their uploaded certificate was gone from disk
-     * before the click finished, announced only after the fact in a live
-     * region. Deleting a file is a separate decision from applying, so it is
-     * asked as one; `applyNow` runs from the dialog's confirm.
+     * before the click finished.
+     *
+     * The dialog went with the feature on 4 October 2026 — a clearance can
+     * no longer be satisfied by a copy, so applying destroys nothing and has
+     * nothing to ask about.
      */
-    if (row.held_document) {
-      setApplyPrompt(row)
-      return
-    }
     void applyNow(row)
   }
 
@@ -638,13 +628,6 @@ export function ClearanceStage({
     const code = row.permit_type.code
     if (!unlocked) return
 
-    // Applying for it and already holding it are opposites (same as the wizard,
-    // and the same as ClearanceController::apply, which refuses the overlap).
-    const removingCopy = row.held_document !== null
-    if (removingCopy) {
-      const ok = await runAction(code, '', () => clearances.removeHeld(applicationId, code))
-      if (!ok) return
-    }
     /*
      * ── THE BUG THIS GUARD CAUSED, because it is worth not repeating ─────────
      *
@@ -691,29 +674,25 @@ export function ClearanceStage({
      * reopen never opened. Both halves of the client's report, one missing
      * field. The predicate takes the whole row now and mirrors the server's.
      *
-     * `removingCopy` is the other way in: swapping a held copy back to an
-     * application. The old union spelled that `submitted`; it is a held document
-     * on the row, which the line above already read.
+     * There was a second way in — swapping a held copy back to an
+     * application — until the client had held copies removed on 4 October
+     * 2026. Applying is the only route a clearance has now, so the only
+     * question left is whether it has been started.
      */
-    if (!clearanceStarted(row) || removingCopy) {
+    if (!clearanceStarted(row)) {
       const ok = await runAction(
         code,
         /*
-         * One sentence for both halves of the act, not two announcements where
-         * the second overwrites the first. A live region only ever holds the
-         * last thing written to it, so a deletion announced and then replaced
-         * 200ms later by "Applied for your …" is a deletion nobody was told
-         * about.
+         * It ended "...has been added to your balance due" until the bill
+         * moved to submission, and `apply()` has charged nothing since. What
+         * actually happens next is the form opening, so that is what the live
+         * region announces.
+         *
+         * One sentence, where there were two: the other covered applying
+         * while a held copy was on file, and held copies went on 4 October
+         * 2026.
          */
-        removingCopy
-          /*
-           * Both sentences used to end "...has been added to your balance
-           * due", which `apply()` has not done since the bill moved to
-           * submission. What actually happens next is the form opening, so
-           * that is what the live region announces.
-           */
-          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. Its form is open below — fill it in and press Save. Your fees do not change.`
-          : `Applied for your ${row.permit_type.name}. Its form is open below — fill it in and press Save. Your fees do not change.`,
+        `Applied for your ${row.permit_type.name}. Its form is open below — fill it in and press Save. Your fees do not change.`,
         () => clearances.apply(applicationId, code),
       )
       if (!ok) return
@@ -783,105 +762,6 @@ export function ClearanceStage({
    */
 
   /** Take the uploaded copy back off. Its own labelled control — never Submit. */
-  async function onRemoveHeld(row: Clearance) {
-    await runAction(
-      row.permit_type.code,
-      `Removed the ${row.permit_type.name} copy you had uploaded.`,
-      () => clearances.removeHeld(applicationId, row.permit_type.code),
-    )
-  }
-
-  /**
-   * Send the copy chosen in the SUBMISSION dialog. Costs nothing.
-   *
-   * ── CLR-1, the other direction ─────────────────────────────────────────────
-   *
-   * `onApply` has always resolved this conflict for held → applied. This is its
-   * counterpart, and its absence is the reported bug: the server refuses
-   * `storeHeld` while the permit type is attached (ClearanceController:138) and
-   * the applicant had nothing to press that would satisfy it.
-   *
-   * The withdrawal goes through `clearances.unapply` — the real
-   * DELETE /clearances/{code}/apply endpoint — and NOT through a new
-   * server-side auto-withdraw inside `storeHeld`. Three reasons, all of them
-   * about not weakening a rule that is currently intact:
-   *
-   *   1. It routes through unapply's three guards as written, rather than
-   *      through a second copy of them: the permit type is really attached, no
-   *      Permit has been issued for it, and `officeHasActed` is false. That
-   *      last one is called defence-in-depth by its own test because nothing
-   *      could reach it; a switch is a new way in, and it reaches the guard
-   *      itself rather than a paraphrase.
-   *   2. The invariant survives by construction. Two sequential requests, each
-   *      one guarded, and the state between them ("neither applied for nor
-   *      held") is a legal one the server already models. `storeHeld` never
-   *      has to be taught to write both records, so it can never do it wrong.
-   *   3. `unapply` requires a live business record (assertPriceable) and
-   *      `storeHeld` deliberately does not — 139 filings in the register point
-   *      at a soft-deleted business. Folding the withdraw into `storeHeld`
-   *      would inherit that requirement and start refusing held copies that are
-   *      accepted today. Here it is inherited only by the switch, which is the
-   *      only path that actually re-prices anything.
-   *
-   * Order matters and this order is the recoverable one. Withdraw, then upload:
-   * if the upload then fails, the applicant is left with neither record, which
-   * is one free click from where they started. The other order cannot happen at
-   * all — the server refuses it — and would be the state the whole rule exists
-   * to prevent.
-   */
-  async function onSubmitHeld(row: Clearance, file: File) {
-    setHeldPrompt(null)
-    const code = row.permit_type.code
-    /*
-     * ── The withdraw-first dance is gone, and had to go ──────────────────────
-     *
-     * This called `clearances.unapply` before uploading, because a clearance
-     * used to be "held" precisely by NOT being in `application_permit_types` —
-     * the two records were contradictory and one had to be removed.
-     *
-     * That inverted on 6 September 2026. Every required clearance is on the
-     * pivot from submission whichever way it will be satisfied, and the pivot's
-     * `mode` is what tells apply from upload, so `storeHeld` swaps the mode in
-     * place. It refuses only on TIMING — once the office has moved the permit
-     * past `for_approval` you cannot change the evidence underneath it.
-     *
-     * Worse than redundant: `ClearanceService::unapply` now throws for any
-     * required clearance, and all five are required. So the moment the state
-     * check above was corrected, this line would have turned every
-     * apply-to-upload swap into a 422 — and the applicant would have been told
-     * their clearance "is required and cannot be withdrawn" while trying to
-     * hand in the very certificate that satisfies it.
-     */
-    const switching = clearanceStarted(row) && row.held_document === null
-    setBusyCode(code)
-    setActionError(null)
-    try {
-      const result = await clearances.submitHeld(applicationId, code, file)
-      setRows(result.data)
-      // The ledger moves on every mutation, not just the row that was pressed:
-      // applying re-assesses the whole filing. Setting rows without meta is how
-      // a fee gets charged above a balance that has not budged.
-      setMeta(result.meta)
-      setNote(
-        switching
-          ? `Filed your own ${row.permit_type.name} instead of the application you had started. Nothing was added to your fees.`
-          : `Your ${row.permit_type.name} copy is on file. Nothing was added to your fees.`,
-      )
-    } catch (err) {
-      /*
-       * Upload failures arrive without a usable message twice over; translate.
-       *
-       * There is nothing left to explain about a half-finished withdrawal:
-       * `storeHeld` swaps the mode inside one transaction, so a failure leaves
-       * the filing exactly as it was and the file is the only thing that went
-       * wrong. The longer sentence that used to be printed here described a
-       * two-step this no longer performs.
-       */
-      setActionError(uploadErrorMessage(err))
-    } finally {
-      setBusyCode((c) => (c === code ? null : c))
-    }
-  }
 
   /** Hand the open sheet to its office. Only ever called on a complete one. */
   /**
@@ -1339,10 +1219,14 @@ export function ClearanceStage({
            * true — which would have shown every carried answer as edited the
            * moment it rendered.
            */
-          carriedKeys={Object.keys(offered[formCode] ?? {}).filter(
-            (key) =>
-              JSON.stringify((officeData[formCode] ?? {})[key]) ===
-              JSON.stringify((offered[formCode] ?? {})[key]),
+          carried={Object.fromEntries(
+            Object.keys(offered[formCode] ?? {})
+              .filter(
+                (key) =>
+                  JSON.stringify((officeData[formCode] ?? {})[key]) ===
+                  JSON.stringify((offered[formCode] ?? {})[key]),
+              )
+              .map((key) => [key, offeredFrom[formCode]?.[key] ?? 'previous']),
           )}
           requirementBusy={reqBusy}
           requirementError={reqError}
@@ -1762,14 +1646,6 @@ export function ClearanceStage({
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
         Each of these is a separate certificate for your premises, issued and inspected by its
         own city office. All five are required.
-        {mayUploadHeldCopy && (
-          <>
-            {' '}
-            <span className="font-semibold text-ink">Apply</span> opens that office&rsquo;s own
-            form; <span className="font-semibold text-ink">Upload an existing copy</span> hands
-            them a certificate you already hold.
-          </>
-        )}
       </p>
 
       {/*
@@ -1868,7 +1744,6 @@ export function ClearanceStage({
            * about the pointer and not only about the state.
            */
           const answersReturn = row.state === 'returned' && (row.return_target ?? '') !== ''
-          const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
 
@@ -2153,41 +2028,6 @@ export function ClearanceStage({
                 confirmation and no undo, and destroying something must never be
                 the alternate meaning of the button that created it.
               */}
-              {held && (
-                /*
-                  Row, not one wrapped line. A long filename must not be allowed
-                  to push Remove off the end of the card: as one truncating
-                  paragraph, a 40-character upload name swallowed the only
-                  control that can take the file back. The name is the part that
-                  truncates (it has a title attribute and the applicant chose
-                  it); the control never shrinks.
-                */
-                <p className="mt-2 flex items-baseline gap-1.5 text-xs text-ink-muted">
-                  <CheckIcon size={12} className="shrink-0 self-center text-s-green" />
-                  <span className="truncate" title={`${held.name} · ${formatBytes(held.size)}`}>
-                    {held.name}
-                  </span>
-                  {unlocked && (
-                    <button
-                      type="button"
-                      onClick={() => void onRemoveHeld(row)}
-                      disabled={busy}
-                      /*
-                        Reads "Remove" but is NAMED for its clearance. Six cards
-                        share this grid, so a bare "Remove" is six identical
-                        controls to anyone moving through them by name — while
-                        printing the full clearance name in the button is what
-                        made the old card unreadable. The label carries the
-                        distinction; the card stays quiet.
-                      */
-                      aria-label={`Remove the ${row.permit_type.name} copy`}
-                      className="ml-auto shrink-0 font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-60"
-                    >
-                      {busy ? 'Removing…' : 'Remove'}
-                    </button>
-                  )}
-                </p>
-              )}
 
               {/*
                 ── CLR-1's Withdraw control, and why it is no longer drawn ──────
@@ -2259,69 +2099,6 @@ export function ClearanceStage({
                   * `View submitted form` beside it is the control that still means
                   * something here.
                   */}
-                {!handedIn && mayUploadHeldCopy && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  aria-disabled={!unlocked}
-                  aria-describedby={buttonDescribedBy}
-                  /*
-                   * Named for its clearance, shown as one word. Six cards share
-                   * this grid and the visible labels are identical across all
-                   * of them, so without this a screen-reader user tabbing the
-                   * grid hears "Submit" six times with nothing to tell them
-                   * apart. Long-standing checklist item; the fix belongs in the
-                   * accessible name, not on the face of the card.
-                   */
-                  aria-label={
-                    held
-                      ? `Replace the ${row.permit_type.name} copy you uploaded`
-                      : `Upload an existing copy of the ${row.permit_type.name}`
-                  }
-                  /*
-                   * SUBMIT always opens the upload box. It used to toggle: a
-                   * second click on "Submitted ✓" deleted the copy just
-                   * uploaded. Removing is the labelled control above.
-                   */
-                  onClick={() => {
-                    if (!unlocked) return
-                    setHeldPromptFile(null)
-                    setHeldPromptError(null)
-                    setHeldPrompt(row)
-                  }}
-                  className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
-                    unlocked
-                      ? held
-                        ? 'border-2 border-royal bg-white text-royal'
-                        : 'border-2 border-royal-deep bg-royal-deep text-white hover:bg-royal'
-                      : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
-                  }`}
-                >
-                  {/*
-                    The state lives on the button now that the status chip is
-                    gone. "Submitted ✓" is a label, not a second action — the
-                    press still opens the upload box, and removing is the named
-                    control above.
-                  */}
-                  {/*
-                    "Submit" said nothing about what it did, and sat beside a
-                    sheet whose own button also says Submit — one meaning "hand
-                    the office my answers", this one meaning "hand them a
-                    certificate I already hold". The client: "instead of
-                    'Submit' why not 'Upload an existing copy' to avoid
-                    confusion?"
-
-                    Shortened to two words after that. "Upload an existing copy"
-                    wrapped to two lines in a half-card button and left the pair
-                    uneven — these two sit side by side and have to read as one
-                    choice, which they cannot do at different heights. "Upload"
-                    and "copy" are the two words carrying the meaning; the full
-                    phrase survives in the accessible name below, where length
-                    costs nothing.
-                  */}
-                  {held ? 'Copy uploaded' : 'Upload a copy'}
-                </button>
-                )}
                 {/*
                   The form button gives way to the correction dialog on a
                   returned card. "Finish form" describes work the applicant
@@ -2427,167 +2204,8 @@ export function ClearanceStage({
         this stage is now required of every applicant, so there is nothing left
         to reveal.
       */}
-      {/* ── UPLOAD AN EXISTING COPY · a clearance already held ───────────── */}
-      {heldPrompt && (
-        <ProtoModal
-          title="UPLOAD AN EXISTING COPY"
-          cancelLabel="Cancel"
-          /*
-            Named for the act, like the button that opens it. The title read
-            "SUBMISSION" and the confirm read "Submit", which on this screen is
-            now the word for handing an office your ANSWERS — the sheet's own
-            button. Two different acts cannot share a verb on one page.
-          */
-          confirmLabel="Upload this copy"
-          confirmDisabled={!heldPromptFile}
-          onCancel={() => {
-            setHeldPrompt(null)
-            setHeldPromptFile(null)
-            setHeldPromptError(null)
-          }}
-          onConfirm={() => {
-            if (heldPromptFile) void onSubmitHeld(heldPrompt, heldPromptFile)
-            setHeldPromptFile(null)
-            setHeldPromptError(null)
-          }}
-        >
-          <p className="text-xl font-bold text-ink">{heldPrompt.permit_type.name}</p>
-          <p className="display-serif mt-1 text-sm italic text-ink-secondary">
-            file type: png, jpg, pdf only
-          </p>
-
-          {/*
-            CLR-1 — what changing your mind actually does, before it is done.
-
-            The client's report was *"I cannot remove my application on the
-            Zoning/Locational Clearance once I changed my mind to Submit instead
-            of Apply."* This is where they changed their mind, so this is where
-            the switch is offered and stated: the two halves of the card are
-            alternatives, and until now only one direction resolved itself.
-
-            Stated plainly rather than as a warning. Nothing is destroyed —
-            withdrawing detaches a permit type, the filing is re-assessed
-            without it, and the office sheet's answers are kept — so a red panel
-            here would make a free, reversible change look like the deletion
-            happening in the OTHER dialog, which really is one.
-          */}
-          {clearanceStarted(heldPrompt) && heldPrompt.held_document === null && (
-            <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
-              <p className="text-sm font-semibold text-blue-900">
-                You applied for this one. Submitting your own copy replaces that.
-              </p>
-              {/*
-                Rewritten with the swap. The old copy promised a withdrawal —
-                the permit type coming off the filing and its fee off the
-                balance — which is what the two-step used to do and what
-                `unapply` now refuses outright for a required clearance. The
-                permit stays on the filing; `storeHeld` changes its `mode` from
-                apply to upload, and the one bill raised at submission covered
-                it either way.
-              */}
-              <p className="mt-1 text-xs leading-relaxed text-blue-800">
-                {heldPrompt.permit_type.department?.name ?? 'The issuing office'} will read your
-                copy instead of the application you started
-                {heldPrompt.has_office_form ? ', so its form section closes' : ''}. Nothing you have
-                typed into that form is deleted — press Apply again and it is still there. Your fees
-                do not change.
-              </p>
-            </div>
-          )}
-          {/* A real <label> wrapping the input: the file control is visually
-              replaced but never loses its name or its keyboard reachability. */}
-          <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
-              <UploadIcon size={18} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-ink">
-                {heldPromptFile ? heldPromptFile.name : 'Choose your certificate'}
-              </span>
-              <span className="block text-xs text-ink-secondary">
-                {heldPromptFile
-                  ? formatBytes(heldPromptFile.size)
-                  : 'The copy you already hold, up to 10 MB.'}
-              </span>
-            </span>
-            <input
-              type="file"
-              accept={ACCEPT_ATTR}
-              className="sr-only"
-              onChange={(e) => {
-                const picked = e.target.files?.[0] ?? null
-                e.target.value = ''
-                // Refuse here, not after the upload: naming the actual defect
-                // before it is sent is the only version that says what to do.
-                const rejection = picked ? fileRejection(picked) : null
-                setHeldPromptError(rejection)
-                setHeldPromptFile(rejection ? null : picked)
-              }}
-            />
-          </label>
-          {heldPromptError && (
-            <p role="alert" className="mt-2 text-xs font-medium text-s-red">
-              {heldPromptError}
-            </p>
-          )}
-          <p className="mt-4 text-xs leading-relaxed text-ink-secondary">
-            Submitting a certificate you already hold is not an application: you skip this office’s
-            form, <span className="font-semibold text-ink">nothing is added to your fees</span>, and
-            your copy goes to the reviewers with the rest of your file.
-          </p>
-        </ProtoModal>
-      )}
 
       {/* ── CLR-3 · Apply over a copy already uploaded ────────────────────── */}
-      {applyPrompt?.held_document && (
-        /*
-          The confirmation Apply never had.
-
-          Pressing Apply on a card that already carries an uploaded certificate
-          deletes that certificate — the row AND the file on disk, through
-          HeldPermits::forget. It did so silently, with the only signal a
-          sentence in a live region after the fact, on a button whose name says
-          "Apply". The card three inches away has carried the rule since the day
-          it was written: *"destroying something must never be the alternate
-          meaning of the button that created it."*
-
-          Red, and the confirm says Delete. The applicant is not being asked
-          whether to apply — they pressed Apply and meant it. They are being
-          asked whether that is worth their file, which is a different question
-          and is the one with no undo behind it.
-        */
-        <ProtoModal
-          title="WARNING"
-          tone="red"
-          cancelLabel="Keep my copy"
-          confirmLabel="Delete & apply"
-          onCancel={() => setApplyPrompt(null)}
-          onConfirm={() => {
-            const row = applyPrompt
-            setApplyPrompt(null)
-            void applyNow(row)
-          }}
-        >
-          <p className="text-center text-base text-ink">
-            Applying for the{' '}
-            <span className="font-bold">{applyPrompt.permit_type.name}</span> deletes the copy you
-            submitted.
-          </p>
-          {/* The filename, because "your copy" is not what the applicant is
-              about to lose — a specific file they chose and can see on the card
-              is, and naming it is what makes this a decision rather than a
-              prompt to click through. */}
-          <p className="mt-3 text-center text-sm text-ink-secondary">
-            <span className="font-semibold text-ink">{applyPrompt.held_document.name}</span> is
-            removed from this application and from our storage. You would need the file again to
-            put it back.
-          </p>
-          <p className="mt-3 text-center text-sm text-ink-secondary">
-            A clearance is either one you already hold or one you are asking this office to issue,
-            never both. Your fees do not change either way — they were settled when you paid.
-          </p>
-        </ProtoModal>
-      )}
 
       {/*
         The same modal the sheet branch mounts, and that is the whole point:
@@ -2712,7 +2330,6 @@ export function ClearanceStagePage() {
       <ClearanceStage
         applicationId={application.id}
         business={carriedOver}
-        applicationType={application.application_type}
         openCode={openCode}
         onOpenChange={onOpenChange}
         correctCode={correctCode}

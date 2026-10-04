@@ -11,7 +11,6 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\ApplicationPermitType;
 use App\Models\PermitType;
 use App\Support\Audit;
-use App\Support\HeldPermits;
 use App\Support\PermitFees;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -177,7 +176,6 @@ class ClearanceService
         $application->loadMissing('permitTypes', 'business.lines', 'permits', 'assignments.department');
         $baseline ??= $this->assessableTotal($application, $application->permitTypes);
 
-        $held = HeldPermits::find($application, $type);
         $assignment = $this->assignmentFor($application, $type);
         $form = $this->officeFormFor($application, $type);
 
@@ -191,7 +189,7 @@ class ClearanceService
                     'name' => $type->department->name,
                 ] : null,
             ],
-            'state' => $this->state($application, $type, $held !== null),
+            'state' => $this->state($application, $type),
             /*
              * Which route the applicant took: `apply` (fill in the office's
              * form) or `upload` (hand in a copy they already hold). Null until
@@ -216,12 +214,6 @@ class ClearanceService
              * the applicant having opened the form and saved it.
              */
             'office_form_complete' => $type->hasOfficeForm() && $form !== null,
-            'held_document' => $held ? [
-                'id' => $held->id,
-                'name' => $held->original_filename,
-                'size' => (int) $held->size_bytes,
-                'download_url' => url("/api/v1/documents/{$held->id}/download"),
-            ] : null,
             'assignment' => $assignment ? [
                 'id' => $assignment->id,
                 'status' => $assignment->status?->value,
@@ -332,7 +324,7 @@ class ClearanceService
      * saying so. The value stays in the contract so answering item 80 later
      * does not change the screen's shape.
      */
-    private function state(Application $application, PermitType $type, bool $hasHeld): string
+    private function state(Application $application, PermitType $type): string
     {
         /*
          * The permit's own status, straight through, because it now HAS one.
@@ -361,7 +353,13 @@ class ClearanceService
          * before the permit was started is a half-finished action the applicant
          * should see reflected rather than lose.
          */
-        return $hasHeld ? ClearanceStatus::NotStarted->value : 'available';
+        /*
+         * Nothing started, nothing on file. This read `$hasHeld ? NotStarted
+         * : 'available'` until 4 October 2026, when the client had the
+         * held-copy route removed — no filing can carry one now, so the
+         * other half of that answer was unreachable.
+         */
+        return 'available';
     }
 
     public function isAppliedFor(Application $application, PermitType $type): bool
@@ -582,7 +580,7 @@ class ClearanceService
          * 3 October 2026 when a held-copy test moved onto an amendment and
          * the stage would not shut behind a rejection.
          */
-        if ($application->status?->isTerminal() ?? false) {
+        if ($application->isDecided()) {
             return false;
         }
 
@@ -717,34 +715,6 @@ class ClearanceService
             );
 
             Audit::log('clearance.applied', $application, ['permit_type' => $type->code]);
-        });
-    }
-
-    /**
-     * The applicant hands in a permit they already hold.
-     *
-     * The other half of `apply`, and it goes through the same door on purpose.
-     * Both put the permit into `for_approval` and both route it to its office;
-     * the only difference is `mode`, which tells the office whether there is a
-     * form to read or only an image.
-     *
-     * It does NOT skip the inspection, and that is the client's decision rather
-     * than an oversight (6 September 2026): the LGU inspects the premises, not
-     * the paperwork, so a business handing in last year's Fire Safety
-     * certificate is still visited. Nor does it reduce the fee — the bill was
-     * settled at submission and charges for a permit either way, because the
-     * fee covers that inspection.
-     */
-    public function submitHeld(Application $application, PermitType $type): void
-    {
-        DB::transaction(function () use ($application, $type) {
-            app(WorkflowService::class)->startClearance(
-                $application,
-                $type,
-                ApplicationPermitType::MODE_UPLOAD,
-            );
-
-            Audit::log('clearance.held_submitted', $application, ['permit_type' => $type->code]);
         });
     }
 

@@ -21,6 +21,7 @@ use App\Models\ApplicationStatusHistory;
 use App\Models\Business;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
+use App\Models\Department;
 use App\Models\OfficerRequest;
 use App\Models\Payment;
 use App\Models\Permit;
@@ -29,6 +30,7 @@ use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
 use App\Support\Audit;
+use App\Support\OtherRequirementRules;
 use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
@@ -707,43 +709,9 @@ class WorkflowService
 
         $swept = $this->sweepDeferredFees($app);
         foreach ($swept as $fee) {
-            $items[] = [
-                /*
-                 * The rows own description when it has one, so an amendment
-                 * does not print as a second business-permit fee beside the
-                 * real one. Falls back to the permit type, which is the right
-                 * answer for every clearance row and always was.
-                 */
-                'label' => ($fee->description ?? $fee->permitType?->name.' fee')
-                    .' ('.$fee->incurred_at->format('M Y').', unbilled until now)',
-                'amount' => (float) $fee->amount,
-            ];
-            $total = round($total + (float) $fee->amount, 2);
-
-            /*
-             * The penalty this row was already carrying, as its own line
-             * under the fee it belongs to.
-             *
-             * Read off the row, never recomputed: it was frozen at the late
-             * renewal's filing date (see `latePenaltyFor`), and re-deriving
-             * it here would make the figure depend on when BPLO happened to
-             * draw the bill.
-             *
-             * Its own line rather than folded into the fee, so the sanitary
-             * permit still reads at the ordinance's price and the penalty is
-             * visible as a penalty. An applicant who is being charged extra
-             * should be able to see what for and dispute it.
-             */
-            $penalty = round((float) $fee->surcharge + (float) $fee->interest, 2);
-            if ($penalty > 0.0) {
-                $items[] = [
-                    'label' => 'Late surcharge and interest \u2014 '
-                        .($fee->permitType?->name ?? 'permit')
-                        .' ('.$fee->months_late.' month'
-                        .($fee->months_late === 1 ? '' : 's').' late)',
-                    'amount' => $penalty,
-                ];
-                $total = round($total + $penalty, 2);
+            foreach ($this->deferredFeeLines($fee) as $line) {
+                $items[] = $line;
+                $total = round($total + $line['amount'], 2);
             }
         }
 
@@ -751,6 +719,60 @@ class WorkflowService
             ['application_id' => $app->id],
             ['line_items' => $items, 'total_amount' => $total]
         );
+    }
+
+    /**
+     * The bill lines one deferred fee contributes: the fee, and its penalty.
+     *
+     * Shared by `assessFees` (a bill drawn fresh) and
+     * `foldIntoOpenBusinessPermitBill` (a fee added to a bill already drawn),
+     * so a fee reads the same on either.
+     *
+     * @return list<array{label: string, amount: float}>
+     */
+    private function deferredFeeLines(UnbilledPermitFee $fee): array
+    {
+        $lines = [];
+        $fee->loadMissing('permitType');
+
+        $lines[] = [
+            /*
+             * The rows own description when it has one, so an amendment
+             * does not print as a second business-permit fee beside the
+             * real one. Falls back to the permit type, which is the right
+             * answer for every clearance row and always was.
+             */
+            'label' => ($fee->description ?? $fee->permitType?->name.' fee')
+                .' ('.$fee->incurred_at->format('M Y').', unbilled until now)',
+            'amount' => (float) $fee->amount,
+        ];
+
+        /*
+         * The penalty this row was already carrying, as its own line
+         * under the fee it belongs to.
+         *
+         * Read off the row, never recomputed: it was frozen at the late
+         * renewal's filing date (see `latePenaltyFor`), and re-deriving
+         * it here would make the figure depend on when BPLO happened to
+         * draw the bill.
+         *
+         * Its own line rather than folded into the fee, so the sanitary
+         * permit still reads at the ordinance's price and the penalty is
+         * visible as a penalty. An applicant who is being charged extra
+         * should be able to see what for and dispute it.
+         */
+        $penalty = round((float) $fee->surcharge + (float) $fee->interest, 2);
+        if ($penalty > 0.0) {
+            $lines[] = [
+                'label' => 'Late surcharge and interest \u2014 '
+                    .($fee->permitType?->name ?? 'permit')
+                    .' ('.$fee->months_late.' month'
+                    .($fee->months_late === 1 ? '' : 's').' late)',
+                'amount' => $penalty,
+            ];
+        }
+
+        return $lines;
     }
 
     /**
@@ -852,6 +874,8 @@ class WorkflowService
                 $this->assessFees($app);
             }
 
+            $this->raiseOtherRequirements($app);
+
             /*
              * ── Who is waiting on it, and BPLO is not always the answer ──────
              *
@@ -903,10 +927,64 @@ class WorkflowService
 
             if ($bploReads) {
                 $this->routeTo($app, $this->bploDepartmentId());
+            } else {
+                $this->handCarriedClearancesToTheirOffices($app);
             }
 
             return $app->fresh();
         });
+    }
+
+    /**
+     * Put a clearance-only renewal in front of the offices that must read it.
+     *
+     * ── The filing reached nobody ───────────────────────────────────────────
+     *
+     * Submitting a Sanitary renewal left BIZ-2026-00013 at `for_approval` with
+     * its SANITARY pivot still `not_started`, no mode, and NO ASSIGNMENT —
+     * so the City Health Office queue never showed it and the applicant was
+     * waiting on an office that had never been told (client, 4 October 2026).
+     *
+     * The remark above this says why: *"Apply for the permit below and its
+     * office will review it."* That is the CLEARANCE STAGE's flow, where the
+     * applicant presses Apply per permit and `startClearance` routes the
+     * office. A clearance-only renewal does not go there — its office sheet is
+     * a STEP OF THE WIZARD, filled in before Submit — so nothing ever called
+     * it and the filing stopped at the transition.
+     *
+     * ── Both calls, in this order ───────────────────────────────────────────
+     *
+     * `startClearance` records the mode and, for a permit that HAS an office
+     * form, deliberately stops there: handing the sheet in is a separate act
+     * (see its note on Apply not being Submit). `submitClearanceForm` is that
+     * act — it stamps `submitted_at`, moves the clearance to ForApproval and
+     * routes the issuing department.
+     *
+     * Safe for a permit with no office form too: `startClearance` submits and
+     * routes that one itself, and `submitClearanceForm` then finds a status
+     * outside NotStarted/Returned/Rejected and returns without doing anything.
+     *
+     * MODE_APPLY and never upload: the applicant filled the office's own form
+     * in the wizard. `startClearance` would refuse upload on a renewal anyway
+     * (client, 3 October 2026).
+     */
+    private function handCarriedClearancesToTheirOffices(Application $app): void
+    {
+        $app->load('permitTypes');
+
+        foreach ($app->permitTypes as $type) {
+            /*
+             * The outcome permit is BPLO's and is not on this filing — but
+             * guarded rather than assumed, because `$bploReads` is computed
+             * from the deferral and a filing could in principle carry one.
+             */
+            if ($type->code === PermitType::OUTCOME_CODE) {
+                continue;
+            }
+
+            $this->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+            $this->submitClearanceForm($app->fresh(), $type);
+        }
     }
 
     // ── BPLO: the first approval ────────────────────────────────────────────
@@ -1027,6 +1105,71 @@ class WorkflowService
      * write and a judgement they did not make. The DEPARTMENT is BPLO's,
      * because BPLO is the office that must close it.
      */
+    /**
+     * The Other Requirements the business's nature calls for, raised at submit.
+     *
+     * `OtherRequirementRules` holds the table; this is its one writer. Read
+     * against the same normalised profile the fee assessment just used, so a
+     * requirement is raised exactly where its fee was charged. Each row with
+     * something to ask becomes a system `OfficerRequest` — no requester, a
+     * `system_key`, and the department whose permit it serves — keyed on
+     * (application, system_key) so a draft returned and submitted again does
+     * not raise it twice.
+     *
+     * At SUBMIT rather than at BPLO approval, where the TIN is raised: the
+     * TIN is a gap an officer found in a form they were reading; these are
+     * facts of the business the applicant already declared, and the sooner
+     * they are told what the declaration commits them to, the sooner the
+     * answer is there for the office that needs it.
+     */
+    private function raiseOtherRequirements(Application $app): void
+    {
+        $profile = app(FeeCalculator::class)->facts($app);
+        $rows = OtherRequirementRules::raisable($profile);
+        if ($rows === []) {
+            return;
+        }
+
+        $departments = Department::whereIn('code', array_column($rows, 'department'))
+            ->pluck('id', 'code');
+
+        $raised = 0;
+        foreach ($rows as $row) {
+            $req = OfficerRequest::firstOrCreate(
+                [
+                    'application_id' => $app->id,
+                    'system_key' => OtherRequirementRules::systemKey($row['key']),
+                ],
+                [
+                    'requested_by_user_id' => null,
+                    'department_id' => $departments[$row['department']] ?? $this->bploDepartmentId(),
+                    'title' => $row['title'],
+                    'description' => $row['description'],
+                    'request_type' => $row['request_type'],
+                    'status' => OfficerRequestStatus::Pending,
+                ],
+            );
+            if (! $req->wasRecentlyCreated) {
+                continue;
+            }
+            $raised++;
+            Audit::log('request.raised_by_system', $req, [
+                'application_id' => $app->id,
+                'system_key' => $req->system_key,
+                'rule' => $row['article'],
+            ]);
+        }
+
+        if ($raised > 0) {
+            $this->notify->applicationNote(
+                $app,
+                $raised === 1
+                    ? 'Because of what your business does, one more requirement was added under Other Requirements.'
+                    : "Because of what your business does, {$raised} more requirements were added under Other Requirements.",
+            );
+        }
+    }
+
     private function raiseTinRequirement(Application $app): void
     {
         $business = $app->business;
@@ -1249,9 +1392,8 @@ class WorkflowService
          * message that cannot be unsent has no business inside something
          * that can be rolled back.
          */
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'BPLO changed what needs correcting: '.$remarks,
         );
     }
@@ -1316,9 +1458,8 @@ class WorkflowService
         });
 
         /* Told, for the reason `amendMainFormReturn` gives at length. */
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $row->application,
-            $row->application->status,
             $row->permitType->name.': the office changed what needs correcting — '.$remarks,
         );
     }
@@ -1832,11 +1973,11 @@ class WorkflowService
          * version of this note claimed the evidence was already in hand by now,
          * which is not how the gate works.)
          *
-         * Sending such a filing to AwaitingOtherPermits would
-         * park it in a stage named for waiting, waiting for nothing, until
-         * `refreshReadiness` noticed and moved it on — which is a status the
-         * applicant would watch flash past and, worse, a queue tab an officer
-         * would see it sit in.
+         * Sending such a filing to a gathering stage would park it in a stage
+         * named for waiting, waiting for nothing, until `refreshReadiness`
+         * noticed and moved it on — which is a status the applicant would
+         * watch flash past and, worse, a queue tab an officer would see it sit
+         * in. (The stage was `AwaitingOtherPermits`, removed 4 October 2026.)
          *
          * An AMENDMENT keeps the new-filing path. `attachRequiredPermitTypes`
          * leaves amendments on it deliberately ("the client has said they will
@@ -1892,7 +2033,7 @@ class WorkflowService
          *    were rejected"* — which was written about business permits and
          *    had been applied to new filings alone. A business renewing in
          *    January can trade on it while a clearance catches up.
-         *  - the filing waits at AwaitingOtherPermits for the permits it is
+         *  - the filing waits at Approved, undecided, for the permits it is
          *    actually renewing. A renewal carries ONLY the ticked ones (see
          *    `attachRequiredPermitTypes`), so one renewing nothing else has
          *    nothing to wait for — `refreshReadiness` below closes it in the
@@ -1934,9 +2075,17 @@ class WorkflowService
         $app->load('permitTypes');
         $nothingToGather = $this->outstandingClearances($app)->isEmpty();
 
+        /*
+         * One destination since 4 October 2026, whether or not anything is
+         * left to gather. The branch used to pick `AwaitingOtherPermits` for a
+         * filing with clearances still to come; the client had that status
+         * removed, and what it used to say — the filing is still open — is
+         * `decided_at`, which stays null below unless there is nothing left.
+         * See `Application::isDecided()`.
+         */
         $this->transition(
             $app,
-            $nothingToGather ? ApplicationStatus::Approved : ApplicationStatus::AwaitingOtherPermits,
+            ApplicationStatus::Approved,
             $nothingToGather
                 ? 'Payment received. Your Business Permit has been released, and this filing '
                     .'carries no other permit, so it is closed.'
@@ -2017,9 +2166,8 @@ class WorkflowService
             $this->issuePermitFor($app, $row->permitType);
         });
 
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'Your Business Permit has been released. The other permits on this '
             .'application are still being processed — if one of them is rejected, '
             .'this permit will be suspended until it is settled.',
@@ -2076,9 +2224,23 @@ class WorkflowService
     ): ApplicationPermitType {
         $this->refuseBeforePayment($app);
 
-        if (! in_array($mode, [ApplicationPermitType::MODE_APPLY, ApplicationPermitType::MODE_UPLOAD], true)) {
+        /*
+         * ── Applying is the only way a permit starts ─────────────────────────
+         *
+         * Handing in a copy you already hold was the other, and the client had
+         * it removed on 4 October 2026: *"IT IS NOT POSSIBLE FOR THE USER TO
+         * SUBMIT A COPY OF AN OTHER PERMIT."*
+         *
+         * It had already been refused on new filings and on renewals — a new
+         * business holds nothing to hand in, and on a renewal BizTrack issued
+         * the certificate itself and knows whether it is still valid. That
+         * left amendments as the one path still taking an upload, and the
+         * register records nobody ever having used it: no pivot row has ever
+         * carried `upload`, and no document has ever been attached as one.
+         */
+        if ($mode !== ApplicationPermitType::MODE_APPLY) {
             throw ValidationException::withMessages([
-                'mode' => ['A permit is either applied for or handed in as a copy you already hold.'],
+                'mode' => ['A permit is applied for. Handing in a copy you already hold is no longer accepted.'],
             ]);
         }
 
@@ -2129,16 +2291,6 @@ class WorkflowService
          * its shape is an open question the client will take separately,
          * and answering it here by omission would be answering it.
          */
-        if ($mode === ApplicationPermitType::MODE_UPLOAD
-            && in_array($app->application_type, [ApplicationType::New, ApplicationType::Renewal], true)) {
-            throw ValidationException::withMessages([
-                'mode' => [
-                    $app->application_type === ApplicationType::Renewal
-                        ? 'BizTrack already holds this permit and knows whether it is valid. Apply to renew it instead.'
-                        : 'A new business has no permits to hand in yet. Apply for this one instead.',
-                ],
-            ]);
-        }
 
         return DB::transaction(function () use ($app, $type, $mode) {
             $row = $this->pivotFor($app, $type->code);
@@ -2196,13 +2348,7 @@ class WorkflowService
             }
 
             $row->update(['submitted_at' => now()]);
-            $this->transitionClearance(
-                $row,
-                ClearanceStatus::ForApproval,
-                $mode === ApplicationPermitType::MODE_UPLOAD
-                    ? 'Applicant handed in a permit they already hold.'
-                    : 'Applicant applied for this permit.',
-            );
+            $this->transitionClearance($row, ClearanceStatus::ForApproval, 'Applicant applied for this permit.');
 
             /*
              * ── A renewal's uploaded copy routed NOBODY, and is now refused ──
@@ -2235,10 +2381,13 @@ class WorkflowService
              * 6 September, *"the LGU inspects the premises, not the
              * paperwork"* — and that stands where it was made.
              */
-            $renewalUpload = $mode === ApplicationPermitType::MODE_UPLOAD
-                && $app->application_type === ApplicationType::Renewal;
-
-            if ($type->issuing_department_id !== null && ! $renewalUpload) {
+            /*
+             * Every started permit routes to its office now. The exception was
+             * a renewal's uploaded copy, which routed nobody because no office
+             * was involved in reading it — and uploads are gone (see the mode
+             * check at the top of this method).
+             */
+            if ($type->issuing_department_id !== null) {
                 $this->routeTo($app, $type->issuing_department_id);
             }
 
@@ -2335,9 +2484,8 @@ class WorkflowService
             );
         }
 
-        $this->notify->applicationStatus(
+        $this->notify->applicationNote(
             $app,
-            $app->status,
             'Your City Environmental Certificate has been issued. '
             .count($outstanding).' DENR document(s) are now due under Other Requirements by '
             .$due->toFormattedDateString().'.',
@@ -2604,7 +2752,7 @@ class WorkflowService
         $app = $row->application;
         $type = $row->permitType;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided. Its permits can no longer be acted on.'],
             ]);
@@ -2626,9 +2774,8 @@ class WorkflowService
                 ($type->department?->name ?? 'The office').' accepted the paperwork. A site inspection will be scheduled.',
             );
             $this->completeAssignment($app, $type->issuing_department_id, $remarks);
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $app,
-                $app->status,
                 ($type->department?->name ?? 'An office').' approved your '.$type->name.'. A site inspection will be scheduled.',
             );
         });
@@ -2690,9 +2837,8 @@ class WorkflowService
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
 
             $this->transitionClearance($row, ClearanceStatus::Returned, $remarks);
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $row->application,
-                $row->application->status,
                 $row->permitType->name.' was returned for revision: '.$remarks,
             );
         });
@@ -3170,11 +3316,11 @@ class WorkflowService
             return;
         }
 
+        // Pending Payment, or Approved and still gathering (not yet decided).
         $waiting = $business->applications()
-            ->whereIn('status', [
-                ApplicationStatus::PendingPayment->value,
-                ApplicationStatus::AwaitingOtherPermits->value,
-            ])
+            ->where(fn ($q) => $q
+                ->where('status', ApplicationStatus::PendingPayment->value)
+                ->orWhere(fn ($a) => $a->where('status', ApplicationStatus::Approved->value)->notDecided()))
             ->get();
 
         foreach ($waiting as $app) {
@@ -3415,7 +3561,7 @@ class WorkflowService
          */
         if (! $row->awaitingInspection()) {
             throw ValidationException::withMessages([
-                'status' => $row->application?->status?->isTerminal()
+                'status' => $row->application?->isDecided()
                     ? ['This application has been decided. Its permits can no longer be acted on.']
                     : ['An inspection can only be scheduled once this permit’s paperwork is approved.'],
             ]);
@@ -3444,9 +3590,8 @@ class WorkflowService
                 'scheduled_at' => (string) $visit->scheduled_at,
             ]);
 
-            $this->notify->applicationStatus(
+            $this->notify->applicationNote(
                 $app,
-                $app->status,
                 $row->permitType->name.' inspection is set for '.$visit->scheduled_at->format('d M Y').'.',
             );
 
@@ -3486,7 +3631,7 @@ class WorkflowService
          * conducted visit achieve nothing. The wording is the flow's own, from
          * `ApplicationStatus::allowedNext()`.
          */
-        if ($inspection->application?->status?->isTerminal() ?? false) {
+        if ($inspection->application?->isDecided() ?? false) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided. Its permits can no longer be acted on.'],
             ]);
@@ -3522,9 +3667,15 @@ class WorkflowService
              */
             $app = $inspection->application;
             $office = $inspection->department?->name ?? 'The office';
-            $this->notify->applicationStatus(
+            /*
+             * `inspectionFailed` and not `applicationStatus`: the latter is
+             * silent on Approved, and since 4 October 2026 a filing still
+             * gathering its other permits IS Approved — so routing this
+             * through it put the failure back into the silence the note above
+             * records being fixed.
+             */
+            $this->notify->inspectionFailed(
                 $app,
-                $app->status,
                 "{$office} inspection did not pass."
                 .($findings ? " Findings: {$findings}" : '')
                 .' The office will schedule a re-inspection.',
@@ -3688,10 +3839,28 @@ class WorkflowService
             return;
         }
 
+        /*
+         * `Approved` is in this list since 4 October 2026, and that is not as
+         * strange as it reads: a paid filing stands at Approved from the
+         * moment its Mayor's Permit is released, with its other permits still
+         * to come. It was `AwaitingOtherPermits` until the client had the
+         * status removed.
+         *
+         * Which makes the second test the load-bearing one. Approved is also
+         * where a CLOSED filing ends up, and there is nothing to refresh about
+         * a filing the city has finished with — re-closing one would write a
+         * second closing note on the applicant's timeline and fire the
+         * "permits issued" notice again, every time any clearance row was
+         * touched. `decided_at` is what separates the two.
+         */
         if (! in_array($app->status, [
-            ApplicationStatus::AwaitingOtherPermits,
+            ApplicationStatus::Approved,
             ApplicationStatus::ForFinalApproval,
         ], true)) {
+            return;
+        }
+
+        if ($app->isDecided()) {
             return;
         }
 
@@ -3746,7 +3915,7 @@ class WorkflowService
 
         $ready = $outstanding->isEmpty() && $openRequirements === 0;
 
-        if ($ready && ! $held && $app->status === ApplicationStatus::AwaitingOtherPermits) {
+        if ($ready && ! $held && $app->status === ApplicationStatus::Approved) {
             /*
              * ── No filing type stops for BPLO to re-read the permits ─────────
              *
@@ -3820,10 +3989,17 @@ class WorkflowService
             return;
         }
 
+        /*
+         * A permit reopened while BPLO was holding the filing, so it goes back
+         * to gathering. Gathering is `Approved` with `decided_at` null now,
+         * which is where it stood before Final Approval claimed it — the
+         * status it used to fall back to was `AwaitingOtherPermits`, and the
+         * move is the same move under the name that is left.
+         */
         if (! $ready && $app->status === ApplicationStatus::ForFinalApproval) {
             $this->transition(
                 $app,
-                ApplicationStatus::AwaitingOtherPermits,
+                ApplicationStatus::Approved,
                 // Which of the two it is, because "not ready" with no reason is
                 // a filing that stops moving and says nothing about why.
                 $outstanding->isEmpty()
@@ -3920,14 +4096,40 @@ class WorkflowService
              * permit here: a renewal or amendment, which go back to BPLO
              * after payment and are issued on its press.
              */
-            $this->transition(
-                $app,
-                ApplicationStatus::Approved,
-                $issuedBusinessPermit
-                    ? 'All requirements met. Business permit issued.'
-                    : 'Every other permit is approved. This application is closed, so none of '
-                        .'its permits can suspend your business permit.',
-            );
+            $closingNote = $issuedBusinessPermit
+                ? 'All requirements met. Business permit issued.'
+                : 'Every other permit is approved. This application is closed, so none of '
+                    .'its permits can suspend your business permit.';
+
+            /*
+             * ── The filing may already BE at Approved ────────────────────────
+             *
+             * Since 4 October 2026 a paid filing reaches Approved at payment
+             * and gathers its other permits there, so closing it is a write to
+             * `decided_at` and not a status move. `transition()` returns early
+             * when the status does not change, which would have dropped this
+             * note off the applicant's timeline and swallowed the notification
+             * with it — the one line that tells them the filing is finished
+             * and why that matters.
+             *
+             * So the history row is written directly in that case. It is the
+             * same row `transition()` writes, with `from_status` equal to
+             * `to_status`, which is the honest record: the filing ended where
+             * it already stood.
+             */
+            if ($app->status === ApplicationStatus::Approved) {
+                ApplicationStatusHistory::create([
+                    'application_id' => $app->id,
+                    'from_status' => ApplicationStatus::Approved->value,
+                    'to_status' => ApplicationStatus::Approved->value,
+                    'changed_by_user_id' => Auth::id(),
+                    'note' => $closingNote,
+                ]);
+                Audit::log('application.closed', $app, ['status' => ApplicationStatus::Approved->value]);
+                $this->notify->applicationStatus($app, ApplicationStatus::Approved, $closingNote);
+            } else {
+                $this->transition($app, ApplicationStatus::Approved, $closingNote);
+            }
             $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
         });
@@ -4536,7 +4738,7 @@ class WorkflowService
     {
         $app = $assignment->application;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided and can no longer be approved.'],
             ]);
@@ -4605,7 +4807,7 @@ class WorkflowService
     ): void {
         $app = $assignment->application;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided, so its permits can no longer be refused.'],
             ]);
@@ -4869,7 +5071,7 @@ class WorkflowService
 
         $penalty = $this->latePenaltyFor($app, $this->priorPermitFor($app, $type), $amount);
 
-        UnbilledPermitFee::firstOrCreate(
+        $deferred = UnbilledPermitFee::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
             [
                 'business_id' => $app->business_id,
@@ -4880,6 +5082,9 @@ class WorkflowService
                 'incurred_at' => now(),
             ],
         );
+        $foldedInto = $deferred->wasRecentlyCreated
+            ? $this->foldIntoOpenBusinessPermitBill($deferred)
+            : null;
 
         Audit::log('permit_fee.deferred', $app, [
             'permit_type' => $type->code,
@@ -4908,13 +5113,89 @@ class WorkflowService
             ->where('permit_type_id', $type->id)
             ->first();
 
-        if ($issued !== null) {
+        if ($foldedInto !== null) {
+            $this->notify->applicationNote(
+                $foldedInto,
+                'Your '.$type->name.' fee was added to this Business Permit bill.',
+            );
+        } elseif ($issued !== null) {
             $this->notify->permitIssuedUnbilled(
                 $issued,
                 $amount,
                 round($penalty['surcharge'] + $penalty['interest'], 2),
             );
         }
+    }
+
+    /**
+     * Add a just-deferred clearance fee to the business permit bill still open.
+     *
+     * ── Why ─────────────────────────────────────────────────────────────────
+     *
+     * Since 5 October 2026 every renewal carries one permit (`RenewalScope`),
+     * so a January filer renews the Mayor's Permit and an expiring Sanitary
+     * Permit on two filings. The Sanitary renewal bills nothing itself — its
+     * fee waits for the next business permit bill. Unless the business permit
+     * renewal is ALREADY assessed and still unpaid, that next bill is a year
+     * away, and the city would collect the fee a year late. This puts it on the
+     * bill that is open now.
+     *
+     * ── Which bill ──────────────────────────────────────────────────────────
+     *
+     * A filing of this business that carries the business permit, has been
+     * assessed, is not decided, and has not been paid. A Draft is left alone:
+     * its own submission sweeps the fee in the ordinary way. A bill with a
+     * gateway payment already open is left alone too — changing the amount
+     * under a payment in flight would make the two disagree — and the fee
+     * stays deferred, as before.
+     *
+     * Added to the bill as lines, never by re-assessing: an officer may have
+     * adjusted that bill (`PaymentController::feeAdjust`), and recomputing it
+     * would quietly undo their adjustment.
+     */
+    private function foldIntoOpenBusinessPermitBill(UnbilledPermitFee $deferred): ?Application
+    {
+        $open = Application::query()
+            ->where('business_id', $deferred->business_id)
+            ->whereIn('status', [
+                ApplicationStatus::ForApproval,
+                ApplicationStatus::Returned,
+                ApplicationStatus::PendingPayment,
+            ])
+            ->notDecided()
+            ->whereHas('permitTypes', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->whereHas('feeAssessment')
+            ->whereDoesntHave('payments', fn ($q) => $q->whereIn('status', [
+                PaymentStatus::Pending->value,
+                PaymentStatus::Completed->value,
+            ]))
+            ->latest('id')
+            ->first();
+        if ($open === null) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($open, $deferred) {
+            $deferred->update(['billed_on_application_id' => $open->id]);
+
+            $bill = $open->feeAssessment()->lockForUpdate()->first();
+            $items = (array) $bill->line_items;
+            $total = (float) $bill->total_amount;
+            foreach ($this->deferredFeeLines($deferred) as $line) {
+                $items[] = $line;
+                $total = round($total + $line['amount'], 2);
+            }
+            $bill->update(['line_items' => $items, 'total_amount' => $total]);
+
+            Audit::log('permit_fee.folded_into_open_bill', $open, [
+                'unbilled_permit_fee_id' => $deferred->id,
+                'permit_type_id' => $deferred->permit_type_id,
+                'amount' => (float) $deferred->amount,
+                'new_total' => $total,
+            ]);
+
+            return $open;
+        });
     }
 
     /**
@@ -5082,7 +5363,35 @@ class WorkflowService
         $priorEnds = $prior?->valid_until ? Carbon::parse($prior->valid_until)->startOfDay() : null;
         $continues = $priorEnds !== null && $priorEnds->greaterThanOrEqualTo(now()->startOfDay());
 
-        $validFrom = $continues ? $priorEnds->copy()->addDay() : now()->startOfDay();
+        /*
+         * ── A renewed CLEARANCE starts the day it is issued ──────────────────
+         *
+         * Client, 4 October 2026, having renewed a Sanitary Permit that ran to
+         * the 23rd: *"I just renewed that sanitary form and the expiration date
+         * should be Oct. 4, 2027."* So the term runs from the renewal, not from
+         * where the old one left off, and the certificate reads a plain year:
+         * issued 4 October 2026, valid until 4 October 2027.
+         *
+         * This overrides continue-the-term for the five clearances, and the
+         * cost is the one that rule was written to avoid — renewing early now
+         * shortens the cover rather than extending it. It is bounded: the
+         * renewal window opens thirty days before expiry, so the most anyone
+         * can give up is thirty days, and they give it up knowingly by filing
+         * early. Put to the client against exactly that trade-off and chosen.
+         *
+         * The two certificates overlap for those days. Only one is live —
+         * `supersedePriorPermit` retires the old one the moment the new is
+         * issued — so the overlap is on paper and not in the register.
+         *
+         * The BUSINESS permit keeps continue-the-term, and nothing about it
+         * changes: it is anchored to 20 January either way, so where its term
+         * starts moves no date a reader ever sees.
+         */
+        $renewedClearance = $prior !== null && $type->code !== PermitType::OUTCOME_CODE;
+
+        $validFrom = $continues && ! $renewedClearance
+            ? $priorEnds->copy()->addDay()
+            : now()->startOfDay();
 
         /*
          * ── The BUSINESS permit ends on 20 January, whatever the start ───────
@@ -5126,9 +5435,46 @@ class WorkflowService
          * "ignore me" on others means nothing on any of them, and a future
          * permit type that does run a rolling term will want it back.
          */
-        $validUntil = $type->code === PermitType::OUTCOME_CODE
-            ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
-            : RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom));
+        /*
+         * ── A RENEWAL runs a year; a first issue aligns to the calendar ──────
+         *
+         * Client, 4 October 2026, having renewed a Sanitary Permit that expired
+         * on 23 October and been handed one expiring on 31 December: *"Why this
+         * was NOT RENEWED? The date should have been changed."* And then the
+         * rule: *"The expiration date should be 1 year after when you
+         * renewed."*
+         *
+         * The two-month certificate was the calendar-year anchor doing exactly
+         * what the note below says it does — *"a clearance issued in November
+         * runs about seven weeks rather than a year"* — which reads as a
+         * renewal that did nothing. A renewal is a year of cover bought; that
+         * is the whole of what it is for.
+         *
+         * ── Why this does not undo "always December 31" ──────────────────────
+         *
+         * It keeps it, for everything already on it. A permit ending 31
+         * December is renewed from 1 January, and a year from there is 31
+         * December again — the shape perpetuates itself once a permit is on
+         * the calendar. What changes is only the FIRST renewal of a permit
+         * whose term ends mid-year, which is the case that produced a stub.
+         *
+         * A first issue still anchors to 31 December, which is what puts a
+         * permit on the calendar to begin with [client, 1 October 2026].
+         *
+         * ── Dates ────────────────────────────────────────────────────────────
+         *
+         * Measured from `$validFrom`, which on a renewed clearance is the day
+         * it was issued — see the note above, where that was decided and what
+         * it costs. The anniversary itself, matching the register's own
+         * convention: the demo certificates run 23 October to 23 October.
+         */
+        $validUntil = match (true) {
+            $type->code === PermitType::OUTCOME_CODE => RenewalSeason::endOfTermFor(
+                CarbonImmutable::parse($validFrom),
+            ),
+            $prior !== null => CarbonImmutable::parse($validFrom)->addYear(),
+            default => RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom)),
+        };
 
         /*
          * Who signs it, with one addition only this moment can make.
@@ -5424,7 +5770,7 @@ class WorkflowService
             ]);
         }
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'tier' => ['This application has been decided. Its processing category can no longer be changed.'],
             ]);

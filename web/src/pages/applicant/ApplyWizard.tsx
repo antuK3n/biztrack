@@ -2363,6 +2363,18 @@ function IdentifyFilingModal({
       : allPermits
 
   /*
+   * ── One permit per filing, always ─────────────────────────────────────
+   *
+   * Client, 5 October 2026, on Zoning and the Mayor's Permit ticked
+   * together: *"The applicant should not be allowed to renew multiple
+   * permits at the same time."* Until then the Mayor's Permit opened the
+   * list to several. It does not any more; `RenewalScope` on the API
+   * refuses two of anything, and a clearance renewed separately while the
+   * business permit bill is still open joins that bill
+   * (`WorkflowService::foldIntoOpenBusinessPermitBill`).
+   */
+
+  /*
    * The permits this filing may actually carry, and the rest.
    *
    * Split on the SERVER's own refusal (`renewal_blocked_reason`) rather
@@ -3456,9 +3468,24 @@ export function ApplyWizard() {
    * "has one arrived since?" from in there.
    */
   const applicationIdRef = useRef<number | null>(null)
-  useEffect(() => {
-    applicationIdRef.current = applicationId
-  }, [applicationId])
+  /**
+   * Set the id and the ref together, synchronously.
+   *
+   * The ref was kept in step by a `useEffect`, which runs AFTER the render
+   * that set the state — so between `setApplicationId` and that effect the
+   * ref still read null. A scratch create resolving inside that window read
+   * the stale null, concluded no real draft existed, and stored its id; the
+   * discard effect had already run and found nothing. The duplicate card
+   * this was written to stop came straight back, on amendments.
+   *
+   * A ref exists precisely so a value can be read without waiting for a
+   * render. Updating it through an effect gave away the one property that
+   * made it the right tool.
+   */
+  const rememberApplicationId = (id: number) => {
+    applicationIdRef.current = id
+    setApplicationId(id)
+  }
   /**
    * The wizard steps a returned filing is allowed to show.
    *
@@ -5381,6 +5408,34 @@ export function ApplyWizard() {
   const submitOffice = (clearanceOnlyRenewal ? renewingOffice : null) ?? 'BPLO'
 
   /*
+   * ── The permits being renewed that have already lapsed ──────────────────
+   *
+   * Renewing after expiry is charged for: Revenue Code Sec. 8A.04 adds 25%
+   * once and Sec. 8A.05 adds 2% for every month or part of a month since,
+   * capped at 36. `WorkflowService::latePenaltyFor` has applied it on both
+   * paths since 1 October 2026 — as line items on a business permit's
+   * assessment, and on the deferred fee a clearance carries to January — so
+   * the money is real and the applicant was meeting it for the first time on
+   * the bill. The client asked for it at the point of commitment instead
+   * [4 October 2026].
+   *
+   * Read off the prior permits the applicant TICKED, not off the business:
+   * renewing a lapsed Sanitary Permit is late whatever the state of the four
+   * beside it, and naming the wrong certificate in a warning about money is
+   * worse than not warning at all.
+   */
+  const lapsedBeingRenewed = useMemo(
+    () =>
+      applicationType !== 'renewal'
+        ? []
+        : priorPermitIds
+            .map((id) => renewablePermits.find((p) => p.id === id))
+            .filter((p): p is Permit => p !== undefined)
+            .filter((p) => p.days_until_expiry !== null && p.days_until_expiry < 0),
+    [applicationType, priorPermitIds, renewablePermits],
+  )
+
+  /*
    * Item 110 — the two lines the Business Information summary prints back.
    *
    * The REGISTERED name, not `form.name`: the summary answers "which record is
@@ -5821,7 +5876,32 @@ export function ApplyWizard() {
        */
       const officeCode = officeStepCode(p)
       if (officeCode !== null) {
-        return officeFormMissing(officeCode, officeData[officeCode] ?? {})
+        /*
+         * ── The office's DOCUMENTS gate too, not just its answers ────────
+         *
+         * `officeFormMissing` reads answers and has no business fetching a
+         * document list, so the clearance stage adds the blocking rows to
+         * it separately. This step did not, and so let the applicant walk
+         * past an office sheet with a required attachment missing.
+         *
+         * What that cost: Next was enabled, Review was reached, Submit was
+         * pressed — and `submitClearanceForm` refused the sheet on the
+         * server ("Attach Business permit fee / tax assessment bill from
+         * BPLO before submitting this form"), inside the transaction that
+         * submits the filing. The whole submission rolled back, so the
+         * filing reached no office at all: the same ending as the routing
+         * bug this was found beside, by a different road.
+         *
+         * Which rows gate is the SERVER's call — `blocking` on
+         * `OfficeFormRequirement`, and `WorkflowService::submitClearanceForm`
+         * is what enforces it. This adds no rule, it stops ignoring one.
+         */
+        return [
+          ...officeFormMissing(officeCode, officeData[officeCode] ?? {}),
+          ...(officeReqs[officeCode] ?? [])
+            .filter((row) => row.blocking === true && !row.satisfied)
+            .map((row) => row.label),
+        ]
       }
 
       switch (p) {
@@ -6407,6 +6487,13 @@ export function ApplyWizard() {
        * keystroke of every office sheet, and was the one reader left out.
        */
       officeData,
+      /*
+       * And the documents beside them, for the reason `officeData` is here:
+       * this callback reads it, so it must recompute when it moves. An
+       * attachment that satisfies a blocking row has to reopen the gate it
+       * closed, and uploads land here long after the answers do.
+       */
+      officeReqs,
       applicationType,
       feeLines,
       psic,
@@ -7129,9 +7216,28 @@ export function ApplyWizard() {
     let bid = businessId ?? prefillBusinessId
     if (!bid) {
       bid = (await businesses.create(businessPayload())).id
-    } else {
+    } else if (!clearanceOnlyRenewal) {
       await businesses.update(bid, businessPayload())
     }
+    /*
+     * ── A clearance-only renewal does not rewrite the business ────────────
+     *
+     * It never asks about it. That filing's sequence is Privacy, the office
+     * sheet and Review — no Business Information, no Location & Zoning, no
+     * Business & Tax Profile — so `businessPayload()` here is built entirely
+     * from a prefill, and pushing it back can only ever overwrite the
+     * register with a copy of itself or with something thinner.
+     *
+     * Thinner is what happened. The update answered 422 (the endpoint
+     * requires a complete `address`, among other things), `createDraft`
+     * threw, no application draft was ever created, and Submit then had
+     * nothing to send — which is the "clicking Submit does not work" the
+     * client reported. The press is honest about it now, but the save
+     * should not have been failing in the first place.
+     *
+     * A NEW filing and an AMENDMENT both still update: the first is where
+     * the business is described, and the second exists to change it.
+     */
     setBusinessId(bid)
     const app = await applications.create({
       business_id: bid,
@@ -7144,7 +7250,7 @@ export function ApplyWizard() {
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
       ...amendmentPayload(),
     })
-    setApplicationId(app.id)
+    rememberApplicationId(app.id)
     setFiledAt(app.submitted_at ?? app.created_at)
 
     return app.id
@@ -7941,8 +8047,32 @@ export function ApplyWizard() {
     return rows
   }
 
-  const canCreateDraft =
-    form.permit_type_ids.length > 0 &&
+  /*
+   * ── A clearance-only renewal is gated on what it actually asks ────────
+   *
+   * The chain below is the NEW application's bar: a registration number, a
+   * TIN that parses, at least one line of business, a street, a barangay,
+   * lessor details. Every one of those is collected on Business Information,
+   * Location & Zoning or Business & Tax Profile — and a clearance-only
+   * renewal's sequence is Privacy, the office sheet, Review. It shows none
+   * of those steps.
+   *
+   * So for any business whose registry record is thin in one of those
+   * fields, the gate never opened, no draft was ever created, and
+   * `submit()` returned on `!applicationId` without a word. The applicant
+   * pressed "Yes, submit" and nothing happened, with no step they could
+   * visit to supply what was missing — the form never asks (client,
+   * 4 October 2026).
+   *
+   * What this filing really needs is the business it is against and the
+   * permit it renews, both settled in the entry dialog before the wizard
+   * opens. The API agrees: `fee_profile` is nullable throughout and
+   * `ApplicationController::store` asks only for the business and the
+   * permits, so nothing below was ever a server requirement.
+   */
+  const canCreateDraft = clearanceOnlyRenewal
+    ? prefillBusinessId !== null && form.permit_type_ids.length > 0 && priorPermitAnswered
+    : form.permit_type_ids.length > 0 &&
     form.name.trim() !== '' &&
     /*
      * Item 94: `!== ''` was not enough. A renewal prefilled from a pre-item-94
@@ -8021,7 +8151,13 @@ export function ApplyWizard() {
         capitalInvestment: form.capital_investment,
       })
       if (hadDraft) {
-        const bid = businessId ?? prefillBusinessId
+        /*
+         * Not on a clearance-only renewal, for the reason `createDraft`
+         * gives: that filing never asks about the business, so this would
+         * push a prefill-derived copy back over the register on every save.
+         * It answered 422 there and failed the autosave with it.
+         */
+        const bid = clearanceOnlyRenewal ? null : businessId ?? prefillBusinessId
         if (bid) await businesses.update(bid, businessPayload())
         /*
          * `permit_type_ids` is deliberately NOT sent here.
@@ -8908,7 +9044,29 @@ export function ApplyWizard() {
   }
 
   async function submit() {
-    if (!applicationId) return
+    /*
+     * ── Never a silent no-op ──────────────────────────────────────────
+     *
+     * This was a bare `return`. With no draft on the server there is
+     * nothing to submit, which is true — but the applicant had pressed
+     * "Yes, submit" on a confirmation dialog and got no page change, no
+     * error and no explanation (client, 4 October 2026). A button that
+     * does nothing and says nothing is indistinguishable from a broken one,
+     * and they reported it as exactly that.
+     *
+     * The draft is created by `autosave`, which only runs once
+     * `canCreateDraft` is satisfied. So reaching here means a save has not
+     * landed — a failed request, or answers the gate still wants — and
+     * either way the applicant needs telling rather than ignoring.
+     */
+    if (!applicationId) {
+      setSubmitError(
+        'This application has not been saved yet, so there is nothing to submit. ' +
+          'Check your connection and try again — if it keeps happening, tell BPLO.',
+      )
+
+      return
+    }
     setSubmitError(null)
     setNeedsEmailCode(false)
     const unsaved = await flushAutosave()
@@ -8986,7 +9144,7 @@ export function ApplyWizard() {
         const b = app.business
         const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
         setApplicationType(app.application_type)
-        setApplicationId(app.id)
+        rememberApplicationId(app.id)
         setFiledAt(app.submitted_at ?? app.created_at)
         /*
          * ── Which sections BPLO ticked, when it returned this ───────────
@@ -13165,6 +13323,40 @@ export function ApplyWizard() {
             </div>
             )}
             {/*
+              ── What the business's nature commits them to ──────────────────
+
+              Client, 5 October 2026: rules that tell which Other Requirements
+              a business must hold. The list comes with the estimate
+              (`other_requirements` on the fee preview) so it describes the same
+              business the figure does. Rows that ask for something say so,
+              because those are the ones that reappear under Other Requirements
+              once this is submitted, and an applicant who was told should not
+              be surprised.
+            */}
+            {(feeEstimate?.other_requirements?.length ?? 0) > 0 && (
+              <div className="mt-4 w-full rounded-lg border border-line bg-shell px-5 py-3 text-left">
+                <h2 className="text-[13px] font-bold uppercase tracking-wide text-ink">
+                  Your business will also need
+                </h2>
+                <ul className="mt-2 space-y-2.5">
+                  {feeEstimate!.other_requirements!.map((r) => (
+                    <li key={r.key} className="text-sm">
+                      <p className="font-semibold text-ink">
+                        {r.title}
+                        <span className="ml-2 text-xs font-normal text-ink-muted">{r.article}</span>
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">{r.summary}</p>
+                      {r.asks && (
+                        <p className="mt-0.5 text-xs font-semibold text-royal">
+                          Asked under Other Requirements after you submit.
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/*
               Named as well as numbered. This said "Renewing MCB-2026-000003"
               and nothing else — the one line on the confirmation page that
               says what was just filed, and it said it in a reference code.
@@ -13399,6 +13591,65 @@ export function ApplyWizard() {
           <p className="pt-4 text-center text-lg">
             Submit this application to {submitOffice} for approval?
           </p>
+          {/*
+            ── Late, and it costs something ────────────────────────────────
+
+            Named per permit with its expiry date, because "a permit" is not
+            something an applicant can check and "your Sanitary Permit expired
+            on 23 October" is. The rate is quoted rather than the peso amount:
+            the interest runs per month to the filing date, so a figure shown
+            here would be the one thing on the dialog that could be wrong by
+            the time they press the button.
+          */}
+          {lapsedBeingRenewed.length > 0 && (
+            <div className="mb-2 rounded-lg border border-s-red bg-s-red-tint px-4 py-3 text-sm text-red-900">
+              <p className="font-bold">This renewal is late, so a charge is added.</p>
+              <ul className="mt-1 list-disc pl-5">
+                {lapsedBeingRenewed.map((p) => (
+                  <li key={p.id}>
+                    {p.permit_type?.name ?? 'This permit'} expired on {formatDate(p.valid_until)}.
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">
+                A 25% surcharge plus 2% interest for each month late is added to the fee
+                (Revenue Code 8A.04 and 8A.05).
+              </p>
+            </div>
+          )}
+          {/*
+            ── What else this press commits them to ───────────────────────
+
+            The names only. The review step above explains each; this is the
+            last line before the button, and the client's standing rule for it
+            is *"SIMPLIFY AND SHORTEN"*.
+          */}
+          {(feeEstimate?.other_requirements?.length ?? 0) > 0 && (
+            <div className="mb-2 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
+              <p className="font-bold text-ink">Your business will also need:</p>
+              <p className="mt-1">
+                {feeEstimate!.other_requirements!.map((r) => r.title).join(' · ')}
+              </p>
+            </div>
+          )}
+          {/*
+            ── Nothing to pay today ────────────────────────────────────────
+
+            A clearance renewed on its own is issued unbilled and collected
+            with the next business permit renewal — `Application::defersPayment`,
+            the client's rule of 17 September 2026. The applicant had no way to
+            know that from this screen, and a filing that asks for no payment
+            reads as one that has gone wrong. Said here because this is the
+            press where they expect to be charged [client, 4 October 2026].
+          */}
+          {clearanceOnlyRenewal && (
+            <div className="mb-2 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
+              <p className="font-bold text-ink">Nothing to pay now.</p>
+              <p className="mt-1">
+                You pay for this permit when you renew your Business Permit.
+              </p>
+            </div>
+          )}
           {/*
             ── What the press costs, said before it is pressed ────────────────
             *

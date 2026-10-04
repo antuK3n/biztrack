@@ -179,7 +179,7 @@ it('lets each of the five clearance offices book a visit, and books none for the
      * and would stall the final approval behind it forever.
      */
     expect($offices)->toBe(['BFP', 'CENRO', 'CHO', 'CPDO', 'OBO'])
-        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved)
         ->and(clearancePermitsIssued($app))->toBe(0);
 });
 
@@ -292,7 +292,7 @@ it('holds the business permit until the last of the five visits passes', functio
         authAs(OFFICE_INSPECTOR[$officeCode][1]);
         test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
 
-        expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+        expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
     }
 
     // Four clearances are out — each released by its own office — while the

@@ -100,7 +100,7 @@ it('leaves one at the clearance stage, where the wait may be an office’s', fun
      * last five days may have been CENRO's, so the filing is not the
      * applicant's to lose.
      */
-    $app = staleFiling(ApplicationStatus::AwaitingOtherPermits, 400);
+    $app = staleFiling(ApplicationStatus::Approved, 400);
 
     $this->artisan('applications:purge-abandoned')->assertSuccessful();
 

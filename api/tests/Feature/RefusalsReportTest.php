@@ -61,7 +61,7 @@ it('counts BPLO rejecting a filing as a refused business permit', function () {
 
 it('recovers the earlier refusals the permit row no longer dates, once', function () {
     $business = anaBusiness();
-    $filing = anaFiling($business, ['status' => 'awaiting_other_permits', 'submitted_at' => now()->subDays(20)]);
+    $filing = anaFiling($business, ['status' => 'approved', 'submitted_at' => now()->subDays(20)]);
     $sanitary = anaPermitTypeId('SANITARY');
     $pivot = DB::table('application_permit_types')->insertGetId([
         'application_id' => $filing,

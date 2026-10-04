@@ -119,9 +119,14 @@ class DemoSeeder extends Seeder
         $this->history($app1, [
             [null, 'draft', $owner], ['draft', 'for_approval', $owner],
             ['for_approval', 'pending_payment', $bploStaff],
-            ['pending_payment', 'awaiting_other_permits', null],
-            ['awaiting_other_permits', 'for_final_approval', null],
-            ['for_final_approval', 'approved', $bploStaff],
+            /*
+             * Payment is the last status this filing moves through. It used to
+             * stop at `awaiting_other_permits` and then at `for_final_approval`
+             * on its way here; the first was removed on 4 October 2026 and the
+             * second left the new-filing path on 18 September. What closes a
+             * filing now is `decided_at`, written below.
+             */
+            ['pending_payment', 'approved', null],
         ], now()->subDays(20));
         $this->paidFee($app1, 1150);
         $permit1 = Permit::create([
@@ -150,10 +155,17 @@ class DemoSeeder extends Seeder
             'gender' => 'M', 'is_primary' => true,
         ]);
 
-        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
+        /*
+         * Paid, Mayor's Permit released, clearances still coming in — and
+         * `decided_at` deliberately left null, which is the whole of what
+         * makes this filing live rather than closed. It read
+         * `AwaitingOtherPermits` until the client had that status removed; see
+         * `Application::isDecided()`.
+         */
+        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::Approved, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
         $this->history($app2, [
             [null, 'draft', $owner2], ['draft', 'for_approval', $owner2], ['for_approval', 'pending_payment', null],
-            ['pending_payment', 'awaiting_other_permits', null],
+            ['pending_payment', 'approved', null],
         ], now()->subDays(3));
         $this->paidFee($app2, 2610);
         foreach ([[$bplo, AssignmentStatus::Completed], [$cho, AssignmentStatus::InProgress], [$bfp, AssignmentStatus::Pending]] as [$dept, $st]) {
@@ -194,6 +206,15 @@ class DemoSeeder extends Seeder
             'valid_until' => now()->addDays(7)->toDateString(), 'issued_at' => now()->subMonths(11),
             'issued_by_user_id' => $bploStaff->id,
         ]);
+        /*
+         * Finished eleven months ago, and now it has to SAY so. Nothing read
+         * `decided_at` while `approved` meant decided on its own, so this
+         * filing went out undated and nobody noticed. Since 4 October 2026 an
+         * approved filing with no decision date is one still gathering its
+         * other permits — so undated, a closed demo filing from last year
+         * turned up in officers' live queues. See `Application::isDecided()`.
+         */
+        $app3->update(['decided_at' => now()->subMonths(11)]);
     }
 
     /*

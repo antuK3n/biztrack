@@ -1027,7 +1027,7 @@ class ApplicationController extends Controller
             'reason.required' => 'A rejection reason is required.',
         ]);
 
-        if ($application->status->isTerminal()) {
+        if ($application->isDecided()) {
             throw ValidationException::withMessages(['status' => ['This application is already decided.']]);
         }
 

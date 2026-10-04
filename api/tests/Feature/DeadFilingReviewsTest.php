@@ -90,7 +90,7 @@ it('closes, once and only on dead filings, the reviews the register already left
     $business = anaBusiness();
     $dead = anaFiling($business, ['status' => 'rejected', 'submitted_at' => now()->subDays(9), 'decided_at' => now()->subDays(2)]);
     $cancelled = anaFiling($business, ['status' => 'cancelled', 'submitted_at' => now()->subDays(9)]);
-    $live = anaFiling($business, ['status' => 'awaiting_other_permits', 'submitted_at' => now()->subDays(9)]);
+    $live = anaFiling($business, ['status' => 'approved', 'submitted_at' => now()->subDays(9)]);
 
     $deadOpen = anaAssignment($dead, 'CHO', ['assigned_at' => now()->subDays(8)]);
     $deadReturned = anaAssignment($dead, 'BFP', ['assigned_at' => now()->subDays(8), 'status' => 'returned']);

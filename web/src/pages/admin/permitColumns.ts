@@ -379,17 +379,6 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
     { key: 'c_application_type', label: 'Nature of Application', value: (r) => answer(r, 'application_type') },
     { key: 'c_owner_address', label: 'Owner’s Address', value: (r) => answer(r, 'owner_address') },
     { key: 'c_birthday', label: 'Birthday', tnum: true, value: (r) => answerDate(r, 'owner_birthday') },
-    {
-      key: 'c_certified',
-      label: 'Certification',
-      /*
-       * A checkbox on the paper, stored as 'yes' or absent. Rendered as the
-       * act it is rather than as the raw value: "Certified" is what the
-       * applicant did, and a cell reading "yes" makes the reader work out what
-       * question it answered.
-       */
-      value: (r) => (answer(r, 'certified') === 'yes' ? 'Certified' : null),
-    },
 
     /*
      * ── The DENR block ────────────────────────────────────────────────────

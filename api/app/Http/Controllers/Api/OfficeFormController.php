@@ -11,10 +11,12 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\AccountPrefill;
 use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\RenewalPrefill;
+use App\Support\SanitaryPrefill;
 use App\Support\SheetRequirements;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -49,6 +51,37 @@ class OfficeFormController extends Controller
     private const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued'];
 
     /** GET — owner-of or application.view_all. Derived answers are merged in. */
+    /**
+     * What a sheet is OFFERED, and where each offer came from.
+     *
+     * Three sources, one channel. Last year's answers (`RenewalPrefill`), the
+     * account's (`AccountPrefill`, 5 October 2026 — the owner's home address,
+     * which the business permit never asked), and a reading of the filing
+     * (`SanitaryPrefill` — the sanitary classification from the line of
+     * business). The previous filing wins where two speak: it was given on a
+     * form the applicant signed. `prefill_from` names the source per key so
+     * the browser's flag can say "from your previous application", "from
+     * your account" or "suggested" rather than one phrase that is wrong two
+     * times in three.
+     *
+     * @return array{prefill: array<string, mixed>, prefill_from: array<string, string>}
+     */
+    private function prefillFor(Application $application, string $code, array $stored): array
+    {
+        $previous = RenewalPrefill::forSheet($application, $code);
+        $account = array_diff_key(AccountPrefill::forSheet($application, $code, $stored), $previous);
+        // A reading of the filing itself — the Sanitary classification from the
+        // line of business. Last year's answer and the account both outrank it.
+        $suggested = array_diff_key(SanitaryPrefill::forSheet($application, $code, $stored), $previous, $account);
+
+        return [
+            'prefill' => $previous + $account + $suggested,
+            'prefill_from' => array_fill_keys(array_keys($previous), 'previous')
+                + array_fill_keys(array_keys($account), 'account')
+                + array_fill_keys(array_keys($suggested), 'application'),
+        ];
+    }
+
     public function index(Request $request, Application $application): JsonResponse
     {
         $this->authorizeView($request, $application);
@@ -136,7 +169,7 @@ class OfficeFormController extends Controller
                  * filing that never saved this sheet. See `RenewalPrefill` for
                  * the three kinds of answer that never carry.
                  */
-                'prefill' => RenewalPrefill::forSheet($application, $code),
+                ...$this->prefillFor($application, $code, $stored[$code]->form_data ?? []),
             ])
             ->values();
 
@@ -467,15 +500,22 @@ class OfficeFormController extends Controller
             'submit' => ['sometimes', 'boolean'],
             // Birthdays can never be in the future (CEC "Birthday of Owner").
             'form_data.owner_birthday' => ['sometimes', 'nullable', 'date', 'before:today'],
+            // The owner's Community Tax Certificate (Occupancy sheet) was issued already.
+            'form_data.owner_ctc_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             // An office cannot have issued a document on a future date.
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.date_issued' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
+            // The Sanitary sheet's counts and its one date (5 October 2026).
+            'form_data.toilets_count' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000'],
+            'form_data.seating_capacity' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000'],
+            'form_data.pest_control_last_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
         ], [
             'form_data.owner_birthday.before' => "The owner's birthday must be a date in the past.",
             'form_data.building_permit_date.before_or_equal' => 'The building permit date issued cannot be in the future.',
             'form_data.fsec_date.before_or_equal' => 'The FSEC date issued cannot be in the future.',
             'form_data.date_issued.before_or_equal' => 'The date issued cannot be in the future.',
+            'form_data.pest_control_last_date.before_or_equal' => 'The last pest control date cannot be in the future.',
         ]);
 
         // Opaque JSON: keep the full payload, not validated()'s narrowed keys.
@@ -495,13 +535,41 @@ class OfficeFormController extends Controller
             ->first();
         $current = $existing?->form_data ?? [];
 
+        /*
+         * ── Who may write what ──────────────────────────────────────────────
+         *
+         * The applicant owns the answers; the office dates stay as recorded.
+         *
+         * An OFFICE may correct the answers on the one sheet it issues the
+         * permit for — client, 4 October 2026, on finding Edit mode would not
+         * let them: *"I can't edit fields. PLEASE FIX FOR ALL ADMINS/OFFICES."*
+         * The gate is the department that ISSUES this permit type, strictly,
+         * and not `readableCode()`: an admin who may read every office's sheet
+         * is not thereby every office. A reader from another office, or the
+         * super admin, keeps the old rule — the issuance dates and nothing else.
+         *
+         * Every corrected answer is written to the audit log by key, before and
+         * after, so a sheet an office changed reads as one an office changed.
+         */
+        $ownsSheet = $user->department_id !== null
+            && $user->department_id === $this->issuingDepartmentId($permitTypeCode);
+
         if ($isOwner) {
-            // The applicant owns the answers; the office dates stay as recorded.
             $formData = array_diff_key($submitted, array_flip(self::OFFICER_KEYS))
                 + array_intersect_key($current, array_flip(self::OFFICER_KEYS));
+        } elseif ($ownsSheet) {
+            $formData = $submitted + $current;
         } else {
-            // The officer may only touch the issuance dates.
             $formData = array_intersect_key($submitted, array_flip(self::OFFICER_KEYS)) + $current;
+        }
+
+        $corrected = [];
+        if (! $isOwner && $ownsSheet) {
+            foreach ($formData as $key => $value) {
+                if (($current[$key] ?? null) !== $value) {
+                    $corrected[$key] = ['from' => $current[$key] ?? null, 'to' => $value];
+                }
+            }
         }
 
         $formData = OfficeFormAnswers::derive($application, $permitType->code, $formData);
@@ -511,6 +579,12 @@ class OfficeFormController extends Controller
             ['form_data' => $formData]
         );
         Audit::log('office_form.saved', $form);
+        if ($corrected !== []) {
+            Audit::log('office_form.corrected_by_office', $form, [
+                'department_id' => $user->department_id,
+                'fields' => $corrected,
+            ]);
+        }
 
         /*
          * ── Saving is not submitting. Completing is. ──────────────────────────

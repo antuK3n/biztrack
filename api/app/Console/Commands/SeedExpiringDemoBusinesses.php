@@ -6,8 +6,10 @@ use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessAddress;
+use App\Models\BusinessLine;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
@@ -171,6 +173,42 @@ class SeedExpiringDemoBusinesses extends Command
                 'note' => 'Mayor’s Permit locked until 1 January; Sanitary Permit due in 20 days. Both rules on one screen.',
                 'due' => ['SANITARY' => $now->addDays(20)],
             ],
+            /*
+             * ── Everything due at once, January lock set aside ──────────────
+             *
+             * Client, 5 October 2026: *"Provide me 2 businesses (dummy data)
+             * with ALL OF THEIR PERMITS NEARING EXPIRATION. Don't mind the
+             * January lock for this 2."* So the Mayor's Permit here ends in a
+             * couple of weeks rather than on a 20 January — a term the system
+             * cannot issue, on purpose. `RenewalWindow` opens a Mayor's Permit
+             * on 1 January of its expiry year, which has already passed, so it
+             * is renewable today alongside the five clearances, all inside the
+             * 30-day window. Nothing in the lock itself is changed.
+             */
+            [
+                'name' => 'Hulong Duhat Eatery',
+                'note' => 'ALL six permits expire in 9–16 days — every one renewable today, Mayor’s Permit included.',
+                'due' => [
+                    PermitType::OUTCOME_CODE => $now->addDays(16),
+                    'SANITARY' => $now->addDays(9),
+                    'FSIC' => $now->addDays(10),
+                    'OCCUPANCY' => $now->addDays(12),
+                    'CEC' => $now->addDays(14),
+                    'ZONING' => $now->addDays(15),
+                ],
+            ],
+            [
+                'name' => 'Panghulo Auto Supply',
+                'note' => 'ALL six permits expire in 18–27 days — every one renewable today, Mayor’s Permit included.',
+                'due' => [
+                    PermitType::OUTCOME_CODE => $now->addDays(27),
+                    'SANITARY' => $now->addDays(18),
+                    'FSIC' => $now->addDays(20),
+                    'OCCUPANCY' => $now->addDays(22),
+                    'CEC' => $now->addDays(24),
+                    'ZONING' => $now->addDays(25),
+                ],
+            ],
         ];
 
         $made = 0;
@@ -186,7 +224,15 @@ class SeedExpiringDemoBusinesses extends Command
             $business = Business::create([
                 'owner_user_id' => $owner->id,
                 'name' => $name,
-                'registration_type' => 'DTI',
+                'registration_type' => 'sole_proprietorship',
+                /*
+                 * A registration number and a TIN, because a real one has
+                 * both — `BusinessController` asks for them at registration.
+                 * Left null, the wizard's own draft gate refused to create a
+                 * draft and Submit then did nothing at all.
+                 */
+                'registration_number' => 'DTI-2026-'.random_int(100000, 999999),
+                'tin' => '123-456-789-000',
                 'barangay_id' => $barangayId,
                 'address_line' => 'Demo address, Malabon',
                 'status' => 'active',
@@ -222,6 +268,25 @@ class SeedExpiringDemoBusinesses extends Command
                 'latitude' => 14.6570,
                 'longitude' => 120.9567,
             ]);
+
+            /*
+             * A line of business, because every real one has at least one —
+             * it is what the permit is FOR, and what the fee is assessed on.
+             * A business with none is a shape the register cannot produce
+             * through its own forms, which is the same fault the missing
+             * address and the missing permits were.
+             */
+            $psic = PsicCode::query()->orderBy('id')->first();
+            if ($psic !== null) {
+                BusinessLine::create([
+                    'business_id' => $business->id,
+                    'psic_code_id' => $psic->id,
+                    'line_of_business' => $psic->description ?? 'General merchandise',
+                    'products_services' => 'Everyday goods sold over the counter',
+                    'capitalization' => 250000,
+                    'gross_sales' => 1200000,
+                ]);
+            }
 
             /*
              * `permits.application_id` is NOT NULL — every certificate the
@@ -335,6 +400,7 @@ class SeedExpiringDemoBusinesses extends Command
             $applicationIds = $business->applications()->pluck('id');
 
             $business->address()->delete();
+            $business->lines()->delete();
             $business->permits()->delete();
             Application::whereIn('id', $applicationIds)->delete();
             $business->delete();

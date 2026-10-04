@@ -102,7 +102,7 @@ it('puts the recorded transitions on the application record, oldest first', func
      *    issued was a wrong answer to a question the screen did not ask.
      */
     expect(array_column($history, 'to_status'))
-        ->toBe(['for_approval', 'pending_payment', 'awaiting_other_permits']);
+        ->toBe(['for_approval', 'pending_payment', 'approved']);
 
     expect($history[0])->toHaveKeys(['from_status', 'to_status', 'note', 'changed_by', 'created_at']);
     expect($history[0]['from_status'])->toBe('draft');
@@ -235,10 +235,10 @@ it('carries the history into the officer review sheet without a second request',
         ->json('data.application');
 
     // `under_review` was the third move and is a retired status; the filing now
-    // lands in `awaiting_other_permits`, waiting on the five offices rather than
+    // lands in `approved`, waiting on the five offices rather than
     // sitting in one review queue.
     expect($sheet['status_history'])->toHaveCount(3)
-        ->and($sheet['status_history'][2]['to_status'])->toBe('awaiting_other_permits');
+        ->and($sheet['status_history'][2]['to_status'])->toBe('approved');
 
     // The rail's other input has to survive the same trip.
     expect($sheet['permit_types'][0])->toHaveKey('requires_inspection');

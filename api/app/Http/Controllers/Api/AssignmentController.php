@@ -62,6 +62,24 @@ class AssignmentController extends Controller
             // Repeatable or comma-separated: ?application_status=for_approval,returned
             'application_status' => ['sometimes'],
             /*
+             * ?application_decided=0 — open filings only; =1 — finished ones.
+             *
+             * Added 4 October 2026 with the removal of `awaiting_other_permits`.
+             * `application_status` alone used to separate a filing still
+             * gathering its other permits from one the city had finished with,
+             * because the two wore different statuses. They wear the same one
+             * now — `approved`, reached at payment — and what tells them apart
+             * is `decided_at`. The officer's gathering tab is exactly
+             * `application_status=approved` plus this set to 0.
+             *
+             * A tri-state on purpose: absent means "both", which is what every
+             * caller written before this wanted and still gets.
+             */
+            'application_decided' => ['sometimes', 'boolean'],
+            // Whose holder `oic` is about: the review's officer by default,
+            // or the site visit's inspector. See `scopeToHolder`.
+            'oic_on' => ['sometimes', 'in:review,inspection,any'],
+            /*
              * Repeatable or comma-separated: ?application_type=renewal
              *
              * New, renewal or amendment. `/applications` has taken a `type`
@@ -116,7 +134,16 @@ class AssignmentController extends Controller
 
         $query = ApplicationAssignment::with([
             'department', 'officer',
-            'application:id,tracking_id,business_id,application_type,status',
+            /*
+             * `decided_at` is in this list for `Application::isDecided()`,
+             * which `AssignmentResource` asks for the row's status label and
+             * its `decided` flag. Eloquent hands a model only the columns
+             * named here, so without it `decided_at` read null on every row
+             * and every finished filing came back as still gathering — rows
+             * the server had just SELECTED as decided reported `decided:
+             * false` and wore "Approved" where they had earned "Completed".
+             */
+            'application:id,tracking_id,business_id,application_type,status,decided_at',
             'application.business:id,name',
             /*
              * For `AssignmentResource::clearanceRow()`, which reports the state
@@ -126,6 +153,22 @@ class AssignmentController extends Controller
              * erroring — hence naming the columns it needs here.
              */
             'application.permitTypes:id,code,name,issuing_department_id,requires_inspection',
+            /*
+             * For `AssignmentResource::inspectionRow()`, which names who is
+             * holding the SITE VISIT as opposed to the paperwork review.
+             *
+             * Constrained by `currentPerDepartment()` rather than loading every
+             * visit and picking the latest here: that scope is the only
+             * definition of "the office's current visit" the codebase allows
+             * (see the note on `Inspection`), and a second copy of it written
+             * over a loaded collection is exactly the drift it exists to stop.
+             * What arrives is already current-only, so the resource needs no
+             * rule at all — just the row for its own department.
+             */
+            'application.inspections' => fn ($q) => $q
+                ->currentPerDepartment()
+                ->select('id', 'application_id', 'department_id', 'inspector_user_id', 'status', 'scheduled_at'),
+            'application.inspections.inspector:id,name',
         ]);
 
         $this->scopeToDepartment($request, $query);
@@ -140,6 +183,17 @@ class AssignmentController extends Controller
         $applicationStatuses = $this->applicationStatuses($request);
         if ($applicationStatuses !== []) {
             $query->whereHas('application', fn ($a) => $a->whereIn('status', $applicationStatuses));
+        }
+
+        /*
+         * Open or finished, asked of the ROW and not the status — see
+         * `Application::isDecided()` for why those stopped being the same
+         * question. Its own `whereHas`, like the type filter below, so a
+         * caller sending one of the three does not inherit the others.
+         */
+        if ($request->has('application_decided')) {
+            $decided = $request->boolean('application_decided');
+            $query->whereHas('application', fn ($a) => $decided ? $a->decided() : $a->notDecided());
         }
 
         /*
@@ -904,17 +958,15 @@ class AssignmentController extends Controller
          * and the conflict is with the STATE of this one. The same reasoning
          * the claim endpoint uses for its 409.
          *
-         * `Caseload::decidedStatuses()` rather than a list written here, so
-         * this and every screen that counts open work classify a state the
-         * same way — and a status added later is classified by `isTerminal()`
-         * instead of silently becoming reassignable.
+         * `Application::isDecided()` rather than a list written here, so this
+         * and every screen that counts open work classify a filing the same
+         * way. It asks the ROW and not the status: since 4 October 2026 a
+         * filing reaches `approved` at payment with its other permits still to
+         * come, and reading the status alone would have made every live
+         * gathering filing unreassignable the moment its fees cleared.
          */
         abort_if(
-            in_array(
-                $assignment->application?->status?->value,
-                Caseload::decidedStatuses(),
-                true,
-            ),
+            $assignment->application?->isDecided() ?? false,
             422,
             'This filing has been decided, so its officer in charge can no longer be changed. The record of who handled it stays as it is.',
         );
@@ -1059,6 +1111,91 @@ class AssignmentController extends Controller
         }
 
         $userId = $request->user()->id;
+
+        /*
+         * ── Which holder the question is about ──────────────────────────────
+         *
+         * `?oic_on=inspection` asks about the SITE VISIT's inspector instead of
+         * the review's officer in charge. Added 4 October 2026 on the client's
+         * report that the two names were always the same: *"the officer
+         * assigned on the For Approval is the same as the For Inspection. It
+         * should not be like that."* They were never the same person by rule —
+         * `WorkflowService::leastLoadedInspector()` names the inspector when the
+         * visit is booked, and an admin can move it — the queue was simply
+         * asking the wrong row.
+         *
+         * Scoped to the assignment's OWN department, or an office filtering by
+         * "My assigned" would match on another office's visit of the same
+         * filing. `currentPerDepartment()` again, because a superseded visit's
+         * inspector is a record of who went last time, not who is going.
+         */
+        $on = $request->query('oic_on');
+
+        if ($on === 'inspection' || $on === 'any') {
+            $visit = fn ($i) => $i
+                ->currentPerDepartment()
+                ->whereColumn('inspections.department_id', 'application_assignments.department_id');
+
+            $heldBy = fn ($q, int $id) => $q->whereHas(
+                'application.inspections',
+                fn ($i) => $visit($i)->where('inspector_user_id', $id),
+            );
+            $visitTaken = fn ($q) => $q->whereHas(
+                'application.inspections',
+                fn ($i) => $visit($i)->whereNotNull('inspector_user_id'),
+            );
+
+            if ($on === 'inspection') {
+                match ($narrow) {
+                    'unassigned' => $query->whereHas(
+                        'application.inspections',
+                        fn ($i) => $visit($i)->whereNull('inspector_user_id'),
+                    ),
+                    'mine' => $heldBy($query, $userId),
+                    'others' => $query->whereHas(
+                        'application.inspections',
+                        fn ($i) => $visit($i)->whereNotNull('inspector_user_id')->where('inspector_user_id', '!=', $userId),
+                    ),
+                    default => null,
+                };
+
+                return;
+            }
+
+            /*
+             * ── `any`: either holder, for the All stages list ───────────────
+             *
+             * All stages mixes rows whose work is a review with rows whose work
+             * is a site visit, and the two are held by different columns. Asked
+             * about only one of them, "My assigned" would quietly drop every
+             * visit the reader is out on — which is the opposite of what an
+             * officer means by the words.
+             *
+             * `others` is written as "taken, and not by me" rather than as a
+             * third list of its own, so the three answers stay exhaustive: a
+             * row is unheld, mine, or somebody else's, and no row can fall
+             * between two of them.
+             */
+            match ($narrow) {
+                'unassigned' => $query
+                    ->whereNull('officer_user_id')
+                    ->whereDoesntHave(
+                        'application.inspections',
+                        fn ($i) => $visit($i)->whereNotNull('inspector_user_id'),
+                    ),
+                'mine' => $query->where(fn ($q) => $q
+                    ->where('officer_user_id', $userId)
+                    ->orWhere(fn ($o) => $heldBy($o, $userId))),
+                'others' => $query
+                    ->where(fn ($q) => $q->whereNotNull('officer_user_id')->orWhere(fn ($o) => $visitTaken($o)))
+                    ->whereNot(fn ($q) => $q
+                        ->where('officer_user_id', $userId)
+                        ->orWhere(fn ($o) => $heldBy($o, $userId))),
+                default => null,
+            };
+
+            return;
+        }
 
         match ($narrow) {
             'unassigned' => $query->whereNull('officer_user_id'),

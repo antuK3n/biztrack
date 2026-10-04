@@ -485,7 +485,6 @@ export type ApplicationStatus =
   | 'for_approval'
   | 'returned'
   | 'pending_payment'
-  | 'awaiting_other_permits'
   | 'for_final_approval'
   | 'approved'
   | 'issued'
@@ -639,6 +638,18 @@ export interface ApplicationListItem {
   status: ApplicationStatus
   status_label: string
   /**
+   * Has the city finished with this filing?
+   *
+   * Not derivable from `status` since 4 October 2026, when
+   * `awaiting_other_permits` was removed: `approved` is now both the filing
+   * gathering its other permits and the filing that has ended. The server
+   * tells the two apart by `decided_at` and sends the answer.
+   *
+   * Optional, because a payload from before this shipped carries no such
+   * key; `isGatheringOtherPermits` falls back to counting the permit rows.
+   */
+  decided?: boolean
+  /**
    * Null when the business has been removed from the register — the same cause
    * documented on Assignment below, and missed here.
    *
@@ -725,6 +736,24 @@ export interface FeeLineItem {
 export interface FeeAssessment {
   line_items: FeeLineItem[]
   total_amount: string
+  /**
+   * What the business's nature commits the filing to beyond the fees — the
+   * Liquor Permit behind the liquor filing fee, the Health Certificates
+   * behind the sanitary one. `OtherRequirementRules` on the API; present on
+   * the fee preview since 5 October 2026, and the rows with `asks` are raised
+   * under Other Requirements when the filing is submitted.
+   */
+  other_requirements?: OtherRequirementPreview[]
+}
+
+export interface OtherRequirementPreview {
+  key: string
+  title: string
+  /** The Revenue Code article behind it, e.g. "Revenue Code Art. T, Sec. 3T.01". */
+  article: string
+  summary: string
+  /** Whether something is asked of the applicant after submission. */
+  asks: boolean
 }
 
 /* ── Fee profile (revenue-code inputs; draft applications only) ────────── */
@@ -986,6 +1015,9 @@ export interface Assignment {
      */
     business: { name: string } | null
     application_type: ApplicationType
+    /** See `ApplicationListItem.decided`. */
+    decided?: boolean
+    status_label?: string
     status: ApplicationStatus
   }
   /**
@@ -1005,6 +1037,24 @@ export interface Assignment {
    * `for_approval` from Pending Payment through Final Approval, so BPLO's two
    * acts are told apart by the APPLICATION's status instead.
    */
+  /**
+   * This office's current SITE VISIT on the filing, and who is holding it.
+   *
+   * Distinct from `officer` above, which holds the paperwork review. The two
+   * are different columns and may be different people: an inspector is named
+   * when the visit is booked, an admin can move them, and whoever conducts
+   * the visit claims it. Null when this office has no visit on the filing —
+   * which is most rows, and also a permit whose visit is DUE but not yet
+   * booked.
+   */
+  inspection: {
+    id: number
+    status: string | null
+    scheduled_at: string | null
+    inspector: { id: number; name: string } | null
+    can_claim: boolean
+    can_act: boolean
+  } | null
   clearance: {
     code: string
     name: string
@@ -1257,55 +1307,6 @@ export interface PermitRegisterRow extends Permit {
    * and the table says each of those differently.
    */
   office_form: Record<string, unknown> | null
-}
-
-/**
- * A clearance the applicant already held and submitted a COPY of, instead of
- * asking the office to issue it (`GET /permits/held`).
- *
- * This is NOT a Permit and must never be rendered as one. Nothing in the
- * register issued it: it is a file the applicant uploaded, stored as an
- * ordinary application document carrying a `permit_type_id`
- * (App\Support\HeldPermits), and no Permit row is ever written for it —
- * WorkflowService::approveAndIssue only issues the permit types on the filing,
- * and submitting a copy is precisely the act of leaving one off.
- *
- * That is why this shape has no `permit_number`, no `valid_from` / `valid_until`
- * and no `verify_url`. The absence is the point. The City recorded no number,
- * no validity and no verification for a document it did not issue, so a screen
- * has nothing honest to print in those slots and must not invent one.
- *
- * `id` is the document id. It keys /documents/{id}/download, NOT /permits/{id}.
- */
-export interface HeldClearance {
-  id: number
-  /** Which of the six this is a copy of. Null only if the type row is gone. */
-  permit_type: { code: string; name: string } | null
-  /** The applicant's own filename, as uploaded. */
-  filename: string
-  size_bytes: number
-  /** When the applicant uploaded it — not an issue date. */
-  submitted_at: string | null
-  download_url: string
-  /**
-   * Null when the business has been removed from the register. `Business`
-   * soft-deletes while its filings stay, so this is a real state and readers
-   * must run it through `businessName()` rather than reading `.name`.
-   */
-  business: { id: number; name: string } | null
-  /**
-   * The filing the copy was uploaded to.
-   *
-   * `tracking_id` is nullable and means it: a copy can only be uploaded while
-   * the filing is a draft (ClearanceService::isUnlocked), and a draft has not
-   * been given a tracking ID yet. So the common case for a freshly submitted
-   * copy is null, not a string.
-   */
-  application: {
-    id: number
-    tracking_id: string | null
-    status: ApplicationStatus
-  } | null
 }
 
 /**
@@ -3143,7 +3144,15 @@ export interface OfficeForm {
    * not a fact. See `App\Support\RenewalPrefill`.
    */
   prefill?: Record<string, unknown>
+  /**
+   * Where each offered key came from: last year's sheet, or the applicant's
+   * account (the owner's home address, which the business permit never asked).
+   * The flag beside the field reads this. Absent means `previous`.
+   */
+  prefill_from?: Record<string, CarriedSource>
 }
+
+export type CarriedSource = 'previous' | 'account' | 'application' | 'business'
 
 /**
  * One row of MCG-CPDD-FO-003 v1.2's checklist, answered for this filing.
@@ -3307,13 +3316,6 @@ export interface Clearance {
    * nobody has touched.
    */
   mode: ClearanceMode | null
-  /** The copy the applicant already holds, when they submitted one instead. */
-  held_document: {
-    id: number
-    name: string
-    size: number
-    download_url?: string
-  } | null
   /**
    * The office's review of this clearance, once it has one.
    *

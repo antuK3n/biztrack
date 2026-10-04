@@ -162,7 +162,7 @@ it('moves the held filing on when the business is reinstated, without a second p
     holdSetStatus($app->business_id, $backTo)->assertOk();
 
     $permit = holdBusinessPermit($app);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
         ->and($permit?->status)->toBe(PermitStatus::Active)
         ->and(Payment::where('application_id', $app->id)->count())->toBe(1);
 })->with(['active', 'flagged']);
@@ -181,7 +181,7 @@ it('holds money that lands while the owner is blacklisted, and moves it on when 
         ->postJson("/api/v1/admin/owners/{$owner->id}/lift-blacklist", ['status' => 'active', 'reason' => 'Finding withdrawn.'])
         ->assertOk();
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
         ->and(holdBusinessPermit($app)?->status)->toBe(PermitStatus::Active);
 });
 
@@ -198,7 +198,7 @@ it('moves on a held filing of the owner\'s other business when the blacklisting 
     holdSetStatus($first, 'active')->assertOk();
 
     expect($app->business->fresh()->status)->toBe('active')
-        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 /* ── Nothing else moves a held filing toward a permit ───────────────────── */
@@ -343,7 +343,7 @@ it('refuses BPLO\'s final approval of a held filing', function () {
 
     expect(fn () => app(WorkflowService::class)->approveOverall($app->fresh()))
         ->toThrow(ValidationException::class, HOLD_BLACKLISTED);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('keeps a held filing waiting when its last clearance is in, and closes it once the business is reinstated', function () {
@@ -355,7 +355,7 @@ it('keeps a held filing waiting when its last clearance is in, and closes it onc
 
     app(WorkflowService::class)->refreshReadiness($app->fresh());
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     holdSetStatus($app->business_id, 'active')->assertOk();
 

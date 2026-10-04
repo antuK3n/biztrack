@@ -28,7 +28,7 @@ use Illuminate\Support\Collection;
  *
  * `for_inspection` is no longer a status of the APPLICATION. It is a state of
  * ONE permit, on `application_permit_types`, and a filing whose Fire Safety
- * certificate is being re-inspected reads `awaiting_other_permits` as a whole —
+ * certificate is being re-inspected reads `approved` as a whole —
  * because CHO may already have issued and CPDO may still be reading. Every
  * assertion below that used to read the filing's status now reads the permit's.
  *
@@ -199,14 +199,14 @@ it('schedules a re-inspection from a failed visit and keeps the failure on the r
 
     /*
      * And the applicant is told the same thing they were told before. The
-     * filing reads `awaiting_other_permits`, not `for_inspection`: a single
+     * filing reads `approved`, not `for_inspection`: a single
      * column over five permits being worked at once cannot say which of them
      * is at the premises, so it says the true thing instead.
      */
     $ownerHeaders = authAs('owner@biztrack.local');
     expect(
         test()->withHeaders($ownerHeaders)->getJson("/api/v1/applications/{$appId}")->json('data.status')
-    )->toBe('awaiting_other_permits');
+    )->toBe('approved');
 });
 
 it('issues the permit when the re-inspection passes, over the kept failure', function () use ($deptEmail) {
@@ -241,7 +241,7 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     // auto-approves, and an office with an open visit has not passed.
     expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
     expect(clearancePermitsIssued($appId))->toBe(4);
-    expect(Application::find($appId)->status->value)->toBe('awaiting_other_permits');
+    expect(Application::find($appId)->status->value)->toBe('approved');
 
     test()->withHeaders($officer)
         ->postJson("/api/v1/inspections/{$reinspectionId}/conduct", ['result' => 'passed', 'findings' => 'extinguisher installed'])

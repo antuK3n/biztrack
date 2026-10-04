@@ -85,6 +85,28 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
     $app->priorPermits()->sync(collect($prior)->only($codes)->pluck('id')->all());
     $app->permitTypes()->sync(PermitType::whereIn('code', $codes)->pluck('id')->all());
 
+    /*
+     * ── Whether the sheets go in with the submission ────────────────────────
+     *
+     * A renewal carrying no business permit hands every office sheet in as
+     * part of `submit` since 4 October 2026
+     * (`handCarriedClearancesToTheirOffices`), because on such a filing the
+     * sheet is a step of the wizard rather than a later press of Apply. So the
+     * checklists have to be answered BEFORE the submission, not after it: OBO
+     * and CPDD ask for a dozen documents between them and the submit refuses a
+     * sheet missing one, which rolled this whole fixture back.
+     *
+     * A renewal that DOES carry the business permit still goes to BPLO and
+     * still opens a clearance stage, so its sheets go in down in the loop.
+     */
+    $carriesBusinessPermit = in_array(PermitType::OUTCOME_CODE, $codes, true);
+
+    if (! $carriesBusinessPermit) {
+        foreach ($codes as $code) {
+            satisfyChecklist($app, $code);
+        }
+    }
+
     $workflow->submit($app);
     $app->refresh();
 
@@ -105,13 +127,11 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
      * `issuePermitFor` and `grantClearance` and are indifferent to which office
      * approved, so branching the route here preserves the lot.
      */
-    $carriesBusinessPermit = in_array(PermitType::OUTCOME_CODE, $codes, true);
-
     if ($carriesBusinessPermit) {
         classifyAsOfficer($app);
         $workflow->approveMainForm($app->fresh());
         $app->refresh();
-        $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+        $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
     }
 
     foreach ($codes as $code) {
@@ -122,11 +142,14 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
         }
 
         $type = PermitType::where('code', $code)->firstOrFail();
-        $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
-        // The checklist is complete before the sheet goes in — the submit
-        // refuses one that is not. See satisfyChecklist() in Pest.php.
-        satisfyChecklist($app->fresh(), $type);
-        $workflow->submitClearanceForm($app->fresh(), $type);
+        if ($carriesBusinessPermit) {
+            $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
+            // The checklist is complete before the sheet goes in — the submit
+            // refuses one that is not. See satisfyChecklist() in Pest.php.
+            satisfyChecklist($app->fresh(), $type);
+            $workflow->submitClearanceForm($app->fresh(), $type);
+        }
+
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');
         $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now()->addDay());
@@ -176,30 +199,65 @@ it('keeps the retired permit’s real expiry date', function () {
     expect($prior['SANITARY']->fresh()->valid_until->toDateString())->toBe($realExpiry);
 });
 
-it('starts the renewed permit the day the old one ends', function () {
+it('starts a renewed clearance the day it is issued, and runs it a year', function () {
+    /*
+     * Filed sixty days early on purpose: this is the case where the two
+     * rules differ. Continue-the-term would have begun the new permit the
+     * day after the old one lapsed; since 4 October 2026 it begins today.
+     */
     [$business, $prior] = heldPermits(['SANITARY'], daysToFirstExpiry: 60);
     $old = $prior['SANITARY'];
 
     $app = issuedRenewal(['SANITARY'], $prior, $business->id);
     $new = $app->permits()->firstOrFail();
 
-    expect($new->valid_from->toDateString())
-        ->toBe($old->valid_until->copy()->addDay()->toDateString());
+    expect($new->valid_from->toDateString())->toBe(now()->toDateString())
+        // And NOT where the old term ended, which is the rule this replaced.
+        ->and($new->valid_from->toDateString())
+        ->not->toBe($old->valid_until->copy()->addDay()->toDateString());
 
     /*
-     * And it runs to the end of the year it starts in.
+     * And it runs a full year from there.
      *
-     * This asserted `+365` — the continue-the-term convention — until the
-     * client replaced it for clearances with a fixed year end [1 October 2026,
-     * see `RenewalSeason::endOfCalendarYearFor`]. The START date is unchanged
-     * and still the point of this test: a renewal filed early does not begin
-     * until the old permit lapses, so the two certificates never overlap.
+     * Three rules in three weeks, so the history is worth keeping. It was
+     * `+365` from the start date (continue-the-term); then 31 December of
+     * the starting year, for a common expiry date [client, 1 October 2026];
+     * and now a year again, because the second produced certificates that
+     * did not look renewed. The client renewed a Sanitary Permit expiring
+     * 23 October and was handed one expiring 31 December — *"Why this was
+     * NOT RENEWED? The date should have been changed"* — and set the rule:
+     * *"The expiration date should be 1 year after when you renewed"*
+     * [4 October 2026].
      *
-     * What renewing early now costs is the tail of the term rather than
-     * nothing, which is the documented price of a common expiry date.
+     * The common expiry date survives it. A permit already ending 31
+     * December renews from 1 January, and a year from there is 31 December
+     * again; only the first renewal of a mid-year permit moves off the
+     * calendar, which is the case that produced the stub.
+     *
+     * The START date is unchanged and still the point of this test: a
+     * renewal filed early does not begin until the old permit lapses, so
+     * the two certificates never overlap — and measuring the year from
+     * there is what stops renewing early costing anything at all.
      */
     expect($new->valid_until->toDateString())
-        ->toBe($new->valid_from->copy()->setDate($new->valid_from->year, 12, 31)->toDateString());
+        ->toBe($new->valid_from->copy()->addYear()->toDateString());
+});
+
+it('still continues the term on a renewed BUSINESS permit', function () {
+    /*
+     * The branch the clearance rule above must not flatten. A business
+     * permit is anchored to 20 January whatever day it starts, so where its
+     * term begins moves no date a reader sees — which is exactly why a
+     * careless edit could change it and nothing would look wrong.
+     */
+    [$business, $prior] = heldPermits([PermitType::OUTCOME_CODE], daysToFirstExpiry: 60);
+    $old = $prior[PermitType::OUTCOME_CODE];
+
+    $app = issuedRenewal([PermitType::OUTCOME_CODE], $prior, $business->id);
+    $new = $app->permits()->firstOrFail();
+
+    expect($new->valid_from->toDateString())
+        ->toBe($old->valid_until->copy()->addDay()->toDateString());
 });
 
 it('starts today when the permit being renewed has already lapsed', function () {
@@ -282,7 +340,7 @@ it('leaves a new application’s permits dated from today', function () {
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     foreach (PermitType::REQUIRED_CLEARANCE_CODES as $code) {
         $type = PermitType::where('code', $code)->firstOrFail();

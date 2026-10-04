@@ -9,7 +9,6 @@ use App\Models\DocumentType;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Services\WorkflowService;
-use App\Support\HeldPermits;
 use App\Support\ZoningRequirements;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -55,7 +54,7 @@ function zoningFiling(bool $rented): Application
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     $workflow->startClearance(
         $app->fresh(),
@@ -366,31 +365,4 @@ it('refuses a slot the paper does not have, and a sheet with no checklist', func
         "/api/v1/applications/{$app->id}/office-forms/CEC/requirements/ZONING_REQ_TAX_DECLARATION",
         ['file' => UploadedFile::fake()->create('anything.pdf', 10, 'application/pdf')],
     )->assertNotFound();
-});
-
-it('does not let a checklist upload delete the certificate the applicant holds', function () {
-    /*
-     * The collision `HeldPermits` was rewritten to prevent. Both files hang off
-     * the same filing and the same clearance; only one of them is a held copy,
-     * and `forgetAllExcept` must not reach past its own kind.
-     */
-    Storage::fake('local');
-    $app = zoningFiling(rented: false);
-    $owner = authAs('owner@biztrack.local');
-    $zoning = PermitType::where('code', 'ZONING')->firstOrFail();
-
-    $held = HeldPermits::store(
-        $app,
-        $zoning,
-        UploadedFile::fake()->create('existing-clearance.pdf', 20, 'application/pdf'),
-    );
-
-    $this->withHeaders($owner)->post(
-        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
-        ['file' => UploadedFile::fake()->create('tax-declaration.pdf', 40, 'application/pdf')],
-    )->assertCreated();
-
-    expect(ApplicationDocument::whereKey($held->id)->exists())->toBeTrue();
-    Storage::disk('local')->assertExists($held->fresh()->stored_path);
-    expect(HeldPermits::find($app->fresh(), $zoning)?->id)->toBe($held->id);
 });

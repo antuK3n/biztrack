@@ -200,7 +200,10 @@ final class FilingMover
         $status = $app->status;
         $steps = [];
 
-        if ($status === null || $status->isTerminal()
+        // `isDecided()`, not `status->isTerminal()`: a paid filing gathering
+        // its other permits wears `approved`, and the status alone would
+        // report no steps for every live clearance stage.
+        if ($status === null || $app->isDecided()
             || in_array($status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)) {
             return [];
         }
@@ -248,8 +251,14 @@ final class FilingMover
             $status === null => ['This filing has no status.'],
             $status === ApplicationStatus::Draft => ['The applicant has not submitted this filing yet.'],
             $status === ApplicationStatus::Returned => ['BPLO returned the form. It moves again when the applicant resubmits it.'],
-            $status === ApplicationStatus::Approved => [],
-            $status->isTerminal() => ["This filing is {$status->label()}. Nothing moves it on."],
+            /*
+             * Asked of the row. `approved` is both a filing the city has
+             * finished with and one still gathering its other permits, and
+             * only the first is stuck — the second has steps, which is why
+             * the bare Approved arm that used to sit here (returning no
+             * reason at all) has gone with it.
+             */
+            $app->isDecided() => ["This filing is {$app->statusLabel()}. Nothing moves it on."],
             default => null,
         };
         if ($filing !== null) {
@@ -623,26 +632,39 @@ final class FilingMover
      * Where the filing stands on the road "Advance to" walks. A renewal goes
      * from Pending Payment straight to For Final Approval, so both sit above
      * Paid; Rejected and Cancelled are off the road entirely.
+     *
+     * ── Why this takes the filing and not just its status ───────────────────
+     *
+     * Rank 3 was `AwaitingOtherPermits` until that status was removed on
+     * 4 October 2026. A paid filing gathering its other permits now wears
+     * `approved`, which is also what a FINISHED filing wears — so the status
+     * alone would put a filing that has only just been paid at rank 5, and
+     * "Advance to" would report every remaining stop as already reached. The
+     * row says which of the two it is: see `Application::isDecided()`.
      */
-    private function rank(?ApplicationStatus $status): int
+    private function rank(Application $app): int
     {
-        return match ($status) {
+        if ($app->status === ApplicationStatus::Approved) {
+            return $app->isDecided() ? 5 : 3;
+        }
+
+        return match ($app->status) {
             ApplicationStatus::ForApproval => 1,
             ApplicationStatus::PendingPayment => 2,
-            ApplicationStatus::AwaitingOtherPermits => 3,
             ApplicationStatus::ForFinalApproval => 4,
-            ApplicationStatus::Approved => 5,
             default => 0,
         };
     }
 
     private function reached(Application $app, string $to): bool
     {
-        if ($app->status === ApplicationStatus::Approved) {
+        // Finished, so everything on the road is behind it. Asked of the row
+        // for the reason `rank()` gives: `approved` alone no longer means it.
+        if ($app->isDecided()) {
             return true;
         }
 
-        return $this->rank($app->status) >= match ($to) {
+        return $this->rank($app) >= match ($to) {
             'pending_payment' => 2,
             'paid' => 3,
             default => 5,
@@ -672,7 +694,14 @@ final class FilingMover
     private function inClearanceStage(Application $app): bool
     {
         $status = $app->status;
-        if ($status === null || $status->isTerminal()) {
+        /*
+         * `isDecided()` and not `status->isTerminal()`. A paid filing has
+         * stood at `approved` since 4 October 2026 while it gathers its
+         * other permits, so the status alone reads every live clearance
+         * stage as finished and this returned false for all of them — the
+         * Debug page offered no step on any paid filing at all.
+         */
+        if ($status === null || $app->isDecided()) {
             return false;
         }
 
@@ -705,7 +734,7 @@ final class FilingMover
     private function renewalUpload(Application $app, ApplicationPermitType $row): bool
     {
         return $app->application_type === ApplicationType::Renewal
-            && $row->mode === ApplicationPermitType::MODE_UPLOAD;
+            && $row->mode === 'upload';
     }
 
     /** @return list<array<string, mixed>> */

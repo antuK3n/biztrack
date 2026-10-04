@@ -57,7 +57,9 @@ final class RenewablePermit
         ApplicationStatus::ForApproval,
         ApplicationStatus::Returned,
         ApplicationStatus::PendingPayment,
-        ApplicationStatus::AwaitingOtherPermits,
+        // Only while still gathering, `decided_at` null — see `renewalsNaming`.
+        // It was Awaiting Other Permits until that status was retired.
+        ApplicationStatus::Approved,
         ApplicationStatus::ForFinalApproval,
     ];
 
@@ -153,7 +155,17 @@ final class RenewablePermit
     {
         return Application::query()
             ->where('application_type', ApplicationType::Renewal->value)
-            ->whereIn('status', array_map(fn (ApplicationStatus $s) => $s->value, $statuses))
+            ->where(function (Builder $q) use ($statuses) {
+                $q->whereIn('status', array_map(
+                    fn (ApplicationStatus $s) => $s->value,
+                    array_filter($statuses, fn (ApplicationStatus $s) => $s !== ApplicationStatus::Approved),
+                ));
+
+                // Approved is in progress only until the filing is decided.
+                if (in_array(ApplicationStatus::Approved, $statuses, true)) {
+                    $q->orWhere(fn (Builder $a) => $a->where('status', ApplicationStatus::Approved->value)->notDecided());
+                }
+            })
             ->where(fn (Builder $q) => $q
                 ->whereIn('prior_permit_id', $permitIds)
                 ->orWhereHas('priorPermits', fn (Builder $p) => $p->whereIn('permits.id', $permitIds)));

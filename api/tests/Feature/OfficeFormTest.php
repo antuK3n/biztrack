@@ -4,10 +4,15 @@ use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Enums\ClearanceStatus;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
+use App\Models\Department;
 use App\Models\ApplicationOfficeForm;
+use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\SheetRequirements;
 
 /*
  * Per-office forms: the sheet never asks for what the system already knows
@@ -78,13 +83,27 @@ it('does not trust a client-supplied certificate applied for', function () {
         ->toBe('FSIC for Business Permit (Renewal of Business)');
 });
 
-it('derives the occupancy certificate when an occupancy permit is applied for', function () {
+it('stays the Business Permit certificate even with an Occupancy Permit on the same filing', function () {
+    /*
+     * Until 5 October 2026 this derived "FSIC for Certificate of Occupancy"
+     * and the BFP checklist asked for OBO's papers before OBO had issued any.
+     * Client: *"Make them separate."* The two sheets no longer read each
+     * other: no occupancy certificate, no shared answers, no marker.
+     */
     $app = officeFormApp(['FSIC', 'OCCUPANCY']);
 
     $this->withHeaders(authAs('owner@biztrack.local'))
-        ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", ['form_data' => []])
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", [
+            'form_data' => ['occupancy_type' => 'Mercantile', 'building_storeys' => '2'],
+        ])
         ->assertOk()
-        ->assertJsonPath('data.form_data.certificate_applied_for', 'FSIC for Certificate of Occupancy');
+        ->assertJsonPath('data.form_data.certificate_applied_for', 'FSIC for Business Permit (New Business)')
+        ->assertJsonPath('data.form_data.occupancy_type', 'Mercantile')
+        ->assertJsonMissingPath('data.form_data.occupancy_shared_source');
+
+    $codes = collect(SheetRequirements::for($app->fresh(), 'FSIC'))->pluck('code')->all();
+    expect($codes)->toContain('FSIC_REQ_VALID_COO')
+        ->and($codes)->not->toContain('FSIC_REQ_OBO_ENDORSEMENT');
 });
 
 it('derives the sanitary and CEC application types from the application record', function () {
@@ -211,7 +230,7 @@ it('ignores issuance dates sent by the applicant', function () {
 });
 
 it('lets a reviewing officer record the issuance dates', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -231,8 +250,14 @@ it('lets a reviewing officer record the issuance dates', function () {
         ->toMatchArray(['application_type' => 'Full', 'building_permit_no' => 'BP-001']);
 });
 
-it('does not let an officer overwrite the applicant answers', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+it('does not let ANOTHER office overwrite the applicant answers', function () {
+    /*
+     * BPLO does not issue the Occupancy Permit — the Office of the Building
+     * Official does — so this is a reviewer from outside the sheet's office,
+     * and it keeps the old rule: the issuance dates and nothing else. The
+     * test two below is the office that DOES issue it.
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -248,8 +273,82 @@ it('does not let an officer overwrite the applicant answers', function () {
     expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001');
 });
 
+it('lets the office that issues the permit correct the applicant’s answers, and records each change', function () {
+    /*
+     * Client, 4 October 2026: *"edit mode for the admin side still does not
+     * work. I can't edit fields. PLEASE FIX FOR ALL ADMINS/OFFICES."* Edit
+     * mode had only ever opened the For Office Use fields; the decision taken
+     * was that an office may correct the one sheet it issues the permit for.
+     *
+     * Two things are pinned. The write lands — and the audit row names the
+     * key, what it said and what it says now, so a sheet an office changed
+     * reads as one an office changed. `department_id` is on the row because
+     * the reader of an audit log asks "which office", not "which user id".
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001', 'building_units' => '3'],
+    ]);
+    /*
+     * Routed, as `startClearance` routes it: visibility asks whether the
+     * office holds a review on the filing before the write rule is ever
+     * reached, and an office with no assignment is a stranger to it.
+     */
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'OBO')->value('id'),
+        'status' => 'pending',
+        'assigned_at' => now(),
+    ]);
+
+    $this->withHeaders(authAs('obo@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001-A', 'building_units' => '3'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.building_permit_no', 'BP-001-A');
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001-A');
+
+    $entry = AuditLog::where('action', 'office_form.corrected_by_office')->latest('id')->first();
+    expect($entry)->not->toBeNull()
+        ->and($entry->changes['department_id'])->toBe(User::where('email', 'obo@biztrack.local')->value('department_id'))
+        ->and($entry->changes['fields'])->toBe([
+            'building_permit_no' => ['from' => 'BP-001', 'to' => 'BP-001-A'],
+        ]);
+});
+
+it('refuses the super admin the write outright', function () {
+    /*
+     * The gate is the department that ISSUES the permit, strictly. The super
+     * admin reads every office's sheet and belongs to none, and reading
+     * everything must not become editing everything. In practice the admin
+     * never reaches the write rule: `application.review` is not among its
+     * permissions, so the request is refused at the door. Asserted as the
+     * 403 it is rather than as a silent strip, because a test that passed
+     * either way would not notice the door moving.
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001'],
+    ]);
+
+    $this->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'TAMPERED'],
+        ])
+        ->assertForbidden();
+
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+        ->and(AuditLog::where('action', 'office_form.corrected_by_office')->count())->toBe(0);
+});
+
 it('rejects an issuance date in the future', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
 
     $this->withHeaders(authAs('bplo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
@@ -311,7 +410,7 @@ it('refuses an office-form write from a guest', function () {
  * It said a submitted APPLICATION closed the office sheets — and if that were
  * true no applicant could ever fill one in. The five clearances are reached
  * after the filing has been submitted, accepted by BPLO and paid for
- * (docs/clearances-after-payment.md), so `awaiting_other_permits` is precisely
+ * (docs/clearances-after-payment.md), so `approved` is precisely
  * the state these sheets are written in. The old case only passed because
  * `ownerMayEdit` looked for an assignment on the issuing office and this
  * hand-built fixture never had one; it was asserting the absence of a routing
@@ -327,7 +426,7 @@ it('refuses an office-form write from a guest', function () {
  * independently.
  */
 it('stops the applicant editing an office form once its own clearance has been submitted', function () {
-    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now());
+    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::Approved, now());
     $fsicId = PermitType::where('code', 'FSIC')->value('id');
 
     // The permit's status is the only thing moving here. Driving it through the
@@ -362,4 +461,148 @@ it('stops the applicant editing an office form once its own clearance has been s
 
     // Neither refusal wrote anything, and the last permitted write did.
     expect(savedForm($app, 'FSIC')['fsic_remarks'])->toBe('fixed as BFP asked');
+});
+
+/*
+ * ── The owner's address, from the account ───────────────────────────────────
+ *
+ * Client, 5 October 2026: *"Check the business permit application if there is
+ * no owner's address to derive from … If none, derive this from the user's
+ * address, but still editable."* The business permit holds none, so the sheet
+ * is OFFERED the account's home address on the `prefill` channel — never
+ * written into `form_data` — and `prefill_from` says it came from the account.
+ */
+it('offers the account’s home address to the sheets that ask the owner’s address', function () {
+    User::where('email', 'owner@biztrack.local')->update(homeAddress());
+    $app = officeFormApp(['OCCUPANCY', 'CEC', 'FSIC']);
+
+    $forms = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->keyBy('permit_type_code');
+
+    expect($forms['OCCUPANCY']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
+        ->and($forms['OCCUPANCY']['prefill_from']['owner_address'])->toBe('account')
+        ->and($forms['CEC']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
+        // Offered, not applied: the stored sheet does not have it until the applicant saves.
+        ->and($forms['OCCUPANCY']['form_data'])->not->toHaveKey('owner_address')
+        // The BFP sheet prints no box for it.
+        ->and((array) ($forms['FSIC']['prefill'] ?? []))->not->toHaveKey('owner_address');
+});
+
+it('stops offering the address once the applicant has written one', function () {
+    User::where('email', 'owner@biztrack.local')->update(homeAddress());
+    $app = officeFormApp(['OCCUPANCY']);
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['owner_address' => '7 Somewhere Else, Tonsuya, Malabon'],
+    ]);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'OCCUPANCY');
+
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address')
+        ->and($form['form_data']['owner_address'])->toBe('7 Somewhere Else, Tonsuya, Malabon');
+});
+
+it('offers nothing when the account has no home address', function () {
+    User::where('email', 'owner@biztrack.local')->update([
+        'home_street' => null, 'home_barangay' => null, 'home_city' => null, 'home_province' => null,
+    ]);
+    $app = officeFormApp(['OCCUPANCY']);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'OCCUPANCY');
+
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address');
+});
+
+/*
+ * ── The Sanitary sheet, drawn from the standard PD 856 application ──────────
+ *
+ * Client, 5 October 2026: *"We don't have a paper copy of the sanitary permit
+ * … make the fields yourself … If something needs auto-filling, do so."* and,
+ * on seeing the boxes: *"If fields are auto-filled, show the recorded
+ * information."* The headcount and floor area are the Business & Tax
+ * Profile's and are derived; the classification is suggested from the line of
+ * business on the prefill channel and stays the applicant's to change.
+ */
+it('fills the Sanitary sheet’s headcount and floor area from the fee profile', function () {
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => [
+        'employees' => 2, 'male_employees' => 1, 'female_employees' => 1, 'floor_area_sqm' => 41,
+        'flags' => [],
+    ]]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+            'form_data' => ['sanitary_classification' => 'Food Establishment', 'employees_total' => '99'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.employees_male', '1')
+        ->assertJsonPath('data.form_data.employees_female', '1')
+        // Derived wins over a typed figure: the profile is what the fee was priced on.
+        ->assertJsonPath('data.form_data.employees_total', '2')
+        ->assertJsonPath('data.form_data.total_floor_area_sqm', '41');
+});
+
+it('suggests the sanitary classification from the line of business, as an offer', function () {
+    $bar = PsicCode::where('category', 'bar_nightclub')->firstOrFail();
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => ['lines' => [['psic_code_id' => $bar->id]], 'flags' => []]]);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'SANITARY');
+
+    expect($form['prefill']['sanitary_classification'])->toBe('Food Establishment')
+        ->and($form['prefill_from']['sanitary_classification'])->toBe('application')
+        // Offered, not applied.
+        ->and($form['form_data'])->not->toHaveKey('sanitary_classification');
+
+    // And not once the applicant has chosen.
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'form_data' => ['sanitary_classification' => 'Non-Food Establishment'],
+    ]);
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'SANITARY');
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('sanitary_classification');
+});
+
+it('sorts the sanitary classes the way a health officer would', function () {
+    expect(App\Support\SanitaryPrefill::classify(['manufacturer', 'restaurant']))->toBe('Food Establishment')
+        ->and(App\Support\SanitaryPrefill::classify(['manufacturer']))->toBe('Industrial')
+        ->and(App\Support\SanitaryPrefill::classify(['retailer', 'barber_shop']))->toBe('Personal / Public Service')
+        ->and(App\Support\SanitaryPrefill::classify(['retailer']))->toBe('Non-Food Establishment');
+});
+
+it('refuses a future pest-control date and a negative toilet count on the Sanitary sheet', function () {
+    $app = officeFormApp(['SANITARY']);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+            'form_data' => ['pest_control_last_date' => now()->addDay()->toDateString(), 'toilets_count' => '-1'],
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['form_data.pest_control_last_date', 'form_data.toilets_count']);
 });

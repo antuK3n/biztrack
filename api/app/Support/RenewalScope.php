@@ -2,24 +2,45 @@
 
 namespace App\Support;
 
+
 /**
  * How many permits one renewal may carry: one.
  *
  * ── The rule ────────────────────────────────────────────────────────────────
  *
- * Every permit is renewed on its own application — the Mayor's / Business
- * Permit included (Ken, 5 October 2026).
+ * A renewal carries exactly ONE permit — the Mayor's / Business Permit
+ * included, since 5 October 2026.
  *
- * The client's rule of 3 October 2026 had already made the other permits one
- * per filing: they are independent (six permits on six expiry dates, the
- * client's rule of 9 September), and CHO's Sanitary Permit and BFP's FSIC have
- * no step, no fee and no office in common. The business permit renewal was
- * left able to carry whatever else was due alongside it, so a January filer's
- * Sanitary fee would not move a year later. Ken removed that exception: a
- * clearance renewed on its own defers its fee to the next renewal season, as
- * it does any other month, and a bundle meant that revoking one carried permit
- * mid-renewal left a filing half about a permit that no longer existed
- * (scenario run, owner-renew 47).
+ * Client, on seeing Zoning and the Mayor's Permit ticked together: *"The
+ * applicant should not be allowed to renew multiple permits at the same
+ * time."* The exception below — the Mayor's Permit carrying whatever else was
+ * due — is gone. Its reason was the fee, and the fee is now handled where it
+ * arises: a clearance renewed on its own while the business permit renewal is
+ * still unpaid joins THAT bill (`WorkflowService::foldIntoOpenBusinessPermitBill`)
+ * instead of waiting a year for the next one.
+ *
+ * ── The history, kept because the reasoning still holds ─────────────────────
+ *
+ * Client, 3 October 2026: *"since all permits are independent of each other
+ * (can be renewed in different applications), do you recommend the picking at
+ * the start to allow only one renewal application?"*
+ *
+ * They are independent — the client's own rule of 9 September: the six permits
+ * expire on six different dates and a renewal is of whichever are actually due.
+ * So a standalone renewal of two clearances at once was the one filing shape
+ * that grew a wizard section per permit, and it is the shape this rule removes:
+ * CHO's Sanitary Permit and BFP's FSIC have no step, no fee and no office in
+ * common, and putting them on one form only ever meant one applicant filling in
+ * two unrelated sheets before either office saw anything.
+ *
+ * The business permit renewal is deliberately NOT narrowed, and the reason is
+ * money rather than tidiness. A clearance-only renewal defers its fee to the
+ * next January (`Application::defersPayment`), so forcing a January filer to
+ * split "renew my Mayor's Permit and my expiring Sanitary Permit" into two
+ * would move the sanitary fee a year later than the city collects it today.
+ * Bundling also costs no sections there: `officeSteps` returns none when the
+ * business permit is on the filing, because those clearances are applied for at
+ * the clearance stage after payment, exactly as on a new filing.
  *
  * ── Why it lives here ───────────────────────────────────────────────────────
  *
@@ -45,6 +66,10 @@ final class RenewalScope
             return null;
         }
 
-        return 'Each permit is renewed on its own application. Choose one here and file the next separately.';
+        /*
+         * Names the way out, not just the refusal: one filing each. Short, per
+         * the client's rule for validation messages.
+         */
+        return 'Each permit is renewed on its own application.';
     }
 }

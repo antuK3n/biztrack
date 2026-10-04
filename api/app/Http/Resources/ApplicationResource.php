@@ -106,7 +106,21 @@ class ApplicationResource extends JsonResource
                 'summary' => $this->resource->amendmentKinds(),
             ] : null,
             'status' => $this->status?->value,
-            'status_label' => $this->status?->label(),
+            // Row-aware: `approved` is "Approved" while the other permits are
+            // still coming in and "Completed" once the filing has ended. See
+            // `Application::statusLabel()`.
+            'status_label' => $this->resource->statusLabel(),
+            /*
+             * Has the city finished with this filing?
+             *
+             * Sent as its own field because the status stopped answering it on
+             * 4 October 2026: `approved` is both the filing that is gathering
+             * its other permits and the filing that has ended, told apart by
+             * `decided_at`. The browser draws a different badge, a different
+             * guide line and a different queue tab for the two, so it needs
+             * the answer rather than a rule for deriving it. See
+             * `Application::isDecided()`.
+             */            'decided' => $this->resource->isDecided(),
             'business' => $this->whenLoaded('business', fn () => new BusinessResource($this->business)),
             'applicant' => $this->relationLoaded('applicant') && $this->applicant ? [
                 'id' => $this->applicant->id,
@@ -123,9 +137,9 @@ class ApplicationResource extends JsonResource
              * This is the second state machine reaching the browser
              * (docs/application-flow-2026-09.md). The application's `status`
              * above says where the filing is; these say where each permit is,
-             * and the two move independently — a filing reading
-             * `awaiting_other_permits` can have one permit issued, one being
-             * inspected and three not started.
+             * and the two move independently — a filing reading `approved`,
+             * which is where payment leaves it, can have one permit issued, one
+             * being inspected and three not started.
              *
              * `requires_inspection` stays because the progression rail must not
              * draw a stage a permit will never enter: an office whose permit
@@ -711,7 +725,7 @@ class ApplicationResource extends JsonResource
              */
             'set_by' => $setBy ? ['id' => $setBy->id, 'name' => $setBy->name] : null,
             'set_at' => optional($this->complexity_set_at)->toISOString(),
-            'editable' => ! (bool) $this->status?->isTerminal(),
+            'editable' => ! $this->resource->isDecided(),
             'tiers' => Ra11032::tierOptions(),
         ];
     }

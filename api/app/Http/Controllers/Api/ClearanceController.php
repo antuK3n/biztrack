@@ -7,7 +7,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\PermitType;
 use App\Services\ClearanceService;
-use App\Support\HeldPermits;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -62,14 +61,6 @@ class ClearanceController extends Controller
             'You have already applied for the '.$type->name.' on this application.'
         );
 
-        // The two routes are alternatives, and the screen renders one state per
-        // card. Making the applicant take the copy back first is what keeps
-        // "submitted" and "applied for" from both being true at once.
-        abort_if(
-            HeldPermits::find($application, $type) !== null,
-            422,
-            'You have already submitted a '.$type->name.' you hold. Remove that copy first if you want to apply for a new one.'
-        );
 
         $this->clearances->apply($application, $type);
 
@@ -81,17 +72,16 @@ class ClearanceController extends Controller
      *
      * The only thing in the system that detaches a permit type from a filing,
      * and therefore the only way out of `apply`. For four days it had no caller
-     * on any screen while `storeHeld` went on telling applicants to use it
-     * (CLR-1): 15 real drafts could not withdraw a clearance, 5 of them could
-     * not be submitted at all because applying spawns a mandatory office sheet,
-     * and the one route out was to destroy the whole filing.
+     * on any screen while the held-copy endpoint went on telling applicants to
+     * use it (CLR-1): 15 real drafts could not withdraw a clearance, 5 of them
+     * could not be submitted at all because applying spawns a mandatory office
+     * sheet, and the one route out was to destroy the whole filing.
      *
-     * It now has two callers, both on the clearance card, and both arrive here
-     * rather than at a paraphrase of it: the Withdraw control, and the Submit
-     * dialog on an applied card, which withdraws and then uploads. The three
-     * guards below are the reason that is the right shape — a switch is a new
-     * way into all three, and `officeHasActed` in particular was written as
-     * defence in depth when nothing could reach it.
+     * Its caller is the Withdraw control on the clearance card. There were two
+     * until 4 October 2026 — the other was the Submit dialog, which withdrew
+     * and then uploaded a copy the applicant held, and uploads are gone. The
+     * guards below stay: `officeHasActed` in particular was written as defence
+     * in depth when nothing could reach it, and that is still its value.
      */
     public function unapply(Request $request, Application $application, string $code): JsonResponse
     {
@@ -122,97 +112,6 @@ class ClearanceController extends Controller
         );
 
         $this->clearances->unapply($application, $type);
-
-        return $this->rowResponse($application, $type);
-    }
-
-    /**
-     * POST {code}/held — the copy the business already holds.
-     *
-     * Deliberately does NOT attach the permit type. Uploading here is the
-     * applicant saying "I have this already", and the fee gating means that
-     * escapes the charge — which is an open question, recorded rather than
-     * quietly fixed: the Fire Code and sanitary inspection fees stay gated on
-     * their clearance even though RA 9514 arguably charges them regardless.
-     * Changing what a citizen is billed on our own reading of a statute is
-     * BPLO's call, not this endpoint's.
-     */
-    public function storeHeld(Request $request, Application $application, string $code): JsonResponse
-    {
-        $this->authorizeOwner($request, $application);
-        $type = $this->clearance($code);
-        $this->assertUnlocked($application);
-
-        $request->validate([
-            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
-        ], [
-            'file.required' => 'Choose the certificate file to upload.',
-            'file.max' => 'The file may not be larger than 10MB.',
-            'file.mimes' => 'Upload a PDF, JPG, or PNG file.',
-        ]);
-
-        /*
-         * ── The mutual exclusion INVERTED on 6 September 2026 ─────────────────
-         *
-         * It used to be that a clearance was "held" precisely because its permit
-         * type was NOT in `application_permit_types` — that absence spared the
-         * applicant the office form, the assignment and the fee, and having both
-         * records at once would have put two contradictory claims about one
-         * clearance in the register.
-         *
-         * None of that is true now. Five of the six permits are REQUIRED, so
-         * every one of them is in the pivot from submission whether the
-         * applicant will fill a form or hand in a copy; the pivot's `mode` is
-         * what tells them apart. Both are reviewed by the office, both are
-         * inspected, and both were charged for in the one bill at submission —
-         * so there is nothing left for the absence to spare them.
-         *
-         * What replaces the rule is a narrower one: you cannot change your mind
-         * after the office has acted. Once the permit is past `for_approval` the
-         * office has accepted the paperwork and booked or conducted a visit, and
-         * swapping the evidence underneath that is not a correction, it is a
-         * different application.
-         */
-        $row = $this->clearances->pivotRow($application, $type);
-        /*
-         * `ClearanceStatus::Rejected` was in this list and is gone with the
-         * state (see the enum). It does not widen or narrow the rule: the three
-         * left are exactly the states in which the office has not yet accepted
-         * the paperwork, which is what "has not acted" means here.
-         */
-        $acted = $row !== null && ! in_array($row->status, [
-            ClearanceStatus::NotStarted,
-            ClearanceStatus::ForApproval,
-            ClearanceStatus::Returned,
-        ], true);
-
-        abort_if(
-            $acted,
-            422,
-            $type->department?->name.' has already accepted your '.$type->name
-            .' application, so the copy you hold can no longer replace it.'
-        );
-
-        HeldPermits::store($application, $type, $request->file('file'));
-        $this->clearances->submitHeld($application, $type);
-
-        return $this->rowResponse($application, $type, 201);
-    }
-
-    /** DELETE {code}/held — take the copy back off the filing. */
-    public function destroyHeld(Request $request, Application $application, string $code): JsonResponse
-    {
-        $this->authorizeOwner($request, $application);
-        $type = $this->clearance($code);
-        $this->assertUnlocked($application);
-
-        abort_if(
-            HeldPermits::find($application, $type) === null,
-            404,
-            'No '.$type->name.' copy has been submitted on this application.'
-        );
-
-        HeldPermits::forget($application, $type);
 
         return $this->rowResponse($application, $type);
     }

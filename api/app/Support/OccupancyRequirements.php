@@ -59,9 +59,17 @@ final class OccupancyRequirements
         ],
         [
             'key' => 'COMPLETION',
-            'label' => 'Certificate of Completion, notarised',
+            'label' => 'Certificate of Completion, notarised — all pages',
             'when' => 'always',
-            'note' => 'Form B-10, signed and sealed by your architect or civil engineer. The blank form comes from the Office of the Local Building Official.',
+            /*
+             * Named as the whole instrument since 4 October 2026. Form B-10
+             * carries the cost summary and the Design Professionals and
+             * Supervisors of Specialty Works pages — some eighty PRC, PTR and
+             * TIN entries signed and sealed by each professional. The client
+             * chose to take those as this attachment rather than have the owner
+             * type them: *"Attach them; the owner types the rest."*
+             */
+            'note' => 'Form B-10, signed and sealed by your architect or civil engineer, including the Design Professionals and Supervisors of Specialty Works pages. The blank form comes from the Office of the Local Building Official.',
             'carried_from' => null,
             'blocking' => true,
         ],

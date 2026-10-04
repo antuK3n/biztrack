@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ApplicationStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Jobs\SendOwnerUpdateEmail;
@@ -22,12 +23,21 @@ use Illuminate\Support\Facades\Queue;
  * owners only, and never at the cost of the action that caused it.
  */
 
-/** An open filing whose owner still has an account. */
+/**
+ * An open filing whose owner still has an account.
+ *
+ * `notDecided()` beside the status list, and the list alone is not enough:
+ * `approved` belongs on it — a filing gathering its other permits is live and
+ * its owner is very much still being e-mailed — but since 4 October 2026 it is
+ * also what a FINISHED filing wears. Without the scope this helper handed back
+ * a decided filing and every test in the file failed on the first action with
+ * "This application is already decided." See `Application::isDecided()`.
+ */
 function emailableApplication(): Application
 {
     return Application::whereIn('status', [
-        'for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'returned',
-    ])->whereHas('applicant')->firstOrFail();
+        'for_approval', 'pending_payment', 'approved', 'for_final_approval', 'returned',
+    ])->notDecided()->whereHas('applicant')->firstOrFail();
 }
 
 function rejectAsBplo(Application $app, string $reason = 'The lease contract is expired.')
@@ -55,7 +65,17 @@ it('queues one e-mail per in-app notice an owner is given, and none beyond', fun
     $owner = $app->applicant;
     $before = AppNotification::where('user_id', $owner->id)->count();
 
-    app(NotificationService::class)->applicationStatus($app, $app->status, 'A site inspection will be scheduled.');
+    /*
+     * An explicit status rather than the filing's own, because this test is
+     * about the PAIRING — one e-mail per in-app notice — and not about which
+     * status raised it. `applicationStatus` deliberately stays silent on
+     * Approved and Rejected, each having a dedicated notice of its own, and
+     * every filing the demo seed leaves open is Approved since 4 October
+     * 2026. Passing the filing's own status counted one notice where the
+     * test means two, which is a fact about the fixture and not about the
+     * rule being tested.
+     */
+    app(NotificationService::class)->applicationStatus($app, ApplicationStatus::PendingPayment, 'A site inspection will be scheduled.');
     app(NotificationService::class)->feeAdjusted($app);
 
     $given = AppNotification::where('user_id', $owner->id)->count() - $before;
@@ -163,7 +183,12 @@ it('keeps the decision when the queue will not take the job', function () {
 
 it('tells the owner, in the app and by e-mail, when an inspection fails', function () {
     Queue::fake();
-    $app = Application::where('status', 'awaiting_other_permits')->whereHas('applicant')->firstOrFail();
+    /*
+     * Undecided, or `recordInspection` refuses it: a filing the city has
+     * finished with cannot have its permits acted on. `approved` alone stopped
+     * meaning live on 4 October 2026 — see `Application::isDecided()`.
+     */
+    $app = Application::where('status', 'approved')->notDecided()->whereHas('applicant')->firstOrFail();
     $fire = Department::where('code', 'BFP')->firstOrFail();
     $visit = Inspection::create([
         'application_id' => $app->id,

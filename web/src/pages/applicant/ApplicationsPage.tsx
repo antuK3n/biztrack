@@ -25,6 +25,10 @@ import {
   applicationStatusMeta,
   clearanceStatusMeta,
   statusDetoursFor,
+  GATHERING_META,
+  GUIDE_BY_FLOW,
+  filingStatusMeta,
+  isGatheringOtherPermits,
   statusFlowFor,
   type GuideFlow,
   type StatusTone,
@@ -65,7 +69,32 @@ type TypeFilter = '' | 'new' | 'renewal' | 'amendment'
  * (WorkflowService::approveAndIssue), so an approved application always has its
  * permits waiting in Profile. Rejected stays here — it still needs a re-apply.
  */
+/*
+ * The statuses a FINISHED filing wears — but not, on their own, the test for
+ * one. See `isFinished` below, and the client's report of 4 October 2026:
+ * *"after paying for the application, THE BUSINESS IS ALREADY GONE IN THE
+ * TRACKING PAGE. WHERE IS THE PART THAT I SHOULD APPLY FOR OTHER PERMITS?"*
+ */
 const FINISHED: ApplicationStatus[] = ['approved', 'issued']
+
+/**
+ * Has this filing left the applicant's hands for good?
+ *
+ * It was `FINISHED.includes(status)`, and that was exactly right while a paid
+ * filing still gathering its five clearances wore `awaiting_other_permits`.
+ * The client had that status removed on 4 October 2026, and a paid filing
+ * wears `approved` from the moment its Mayor's Permit is released — so the
+ * status test filed every freshly-paid application under "completed" and
+ * dropped it from this page, taking with it the only screen that offers
+ * "apply for your other permits". The applicant paid and the filing vanished.
+ *
+ * `isGatheringOtherPermits` is the row's own answer: it reads the server's
+ * `decided` flag, falling back to the permit rows. A filing is finished when
+ * it wears a finished status AND nothing is still being gathered on it.
+ */
+function isFinished(app: ApplicationListItem): boolean {
+  return FINISHED.includes(app.status) && !isGatheringOtherPermits(app)
+}
 
 const FILTERS: { label: string; value: TypeFilter }[] = [
   { label: 'All', value: '' },
@@ -109,9 +138,10 @@ const SORTS: SortFilterOption[] = [
  *
  * `submitted`, `under_review` and `for_inspection` were here and are gone with
  * the enum. Their replacements are not a rename: `for_approval` and
- * `for_final_approval` are BPLO's two separate acts, and `awaiting_other_permits`
- * is the stage that used to be described — wrongly, once five permits could be
- * at five different points — as one filing-wide "For Inspection".
+ * `for_final_approval` are BPLO's two separate acts, and the gathering stage
+ * (`awaiting_other_permits` then, an undecided `approved` now) is what used to
+ * be described — wrongly, once five permits could be at five different points
+ * — as one filing-wide "For Inspection".
  *
  * `approved`/`issued` stay out (those filings have moved to Profile — see
  * FINISHED) and so does `draft` (drafts have their own page): offering a status
@@ -130,7 +160,7 @@ const SORTS: SortFilterOption[] = [
 const FILTERABLE_STATUSES: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
-  'awaiting_other_permits',
+  'approved',
   'returned',
   'rejected',
   'cancelled',
@@ -139,7 +169,16 @@ const FILTERABLE_STATUSES: ApplicationStatus[] = [
 /** "All" stays first: SortFilter marks Filter active by comparing to `options[0]`. */
 const STATUS_FILTERS: SortFilterOption[] = [
   { value: '', label: 'All statuses' },
-  ...FILTERABLE_STATUSES.map((s) => ({ value: s, label: applicationStatusMeta(s).label })),
+  /*
+   * `approved` is on the list because a filing gathering its other permits
+   * wears it and this page shows those (finished ones have left for Profile).
+   * Labelled "Approved", not the status's own "Completed": here the word
+   * only ever means the gathering kind.
+   */
+  ...FILTERABLE_STATUSES.map((s) => ({
+    value: s,
+    label: s === 'approved' ? GATHERING_META.label : applicationStatusMeta(s).label,
+  })),
 ]
 
 /**
@@ -386,16 +425,22 @@ function permitChip(
   if (
     permitCode === 'BUSINESS' &&
     permitStatus === 'for_approval' &&
-    appStatus === 'awaiting_other_permits'
+    appStatus === 'approved'
   ) {
     /*
-     * The FILING's tone, because that is whose situation this is: the permit is
-     * waiting on `awaiting_other_permits`, and the badge saying so is on the
-     * row header directly above. `tint-gray` made the one row that explains
-     * the wait the only row not coloured like it.
+     * The FILING's tone, because that is whose situation this is: the permit
+     * is waiting on the other five, and the badge saying so is on the row
+     * header directly above. `tint-gray` made the one row that explains the
+     * wait the only row not coloured like it.
+     *
+     * `GATHERING_META` rather than a status lookup. It read
+     * `applicationStatusMeta('awaiting_other_permits').tone` until that
+     * status was removed on 4 October 2026 — after which the lookup missed,
+     * fell through to the neutral default and turned this row grey, which is
+     * the exact complaint the comment above records.
      */
     return {
-      tone: applicationStatusMeta('awaiting_other_permits').tone,
+      tone: GATHERING_META.tone,
       label: 'Waiting for your other permits',
     }
   }
@@ -816,7 +861,7 @@ function StatusGuide() {
             Approved on purpose: that is the thing the applicant is waiting
             for, and it is what lets the main flow continue to step 5.
           */}
-          {withSubFlow && status === 'awaiting_other_permits' && (
+          {withSubFlow && status === 'approved' && (
             <div className="mt-2.5 rounded-lg border border-line bg-shell px-3.5 py-2.5">
               <p className="text-xs font-semibold text-ink-secondary">Each permit, on its own:</p>
               <ol className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
@@ -960,7 +1005,22 @@ function StatusGuide() {
 
         <ol className="mt-3">
           {rail.map((status, index) => (
-            <Step key={status} status={status} index={index} last={index === rail.length - 1} />
+            <Step
+              key={status}
+              status={status}
+              index={index}
+              last={index === rail.length - 1}
+              description={GUIDE_BY_FLOW[flow]?.[status]}
+              /*
+               * The five-clearance sub-flow hangs off `approved` since
+               * 4 October 2026, and `approved` is on every rail — so it has to
+               * be said here which rail it belongs to. It was `awaiting_other_permits`,
+               * which only the new rail carried, and the restriction came for
+               * free. A renewal gathers nothing; nesting five clearances under
+               * its last step would claim the opposite of what that rail says.
+               */
+              withSubFlow={flow === 'new'}
+            />
           ))}
         </ol>
 
@@ -1149,7 +1209,10 @@ function ApplicationRow({
    *     `isPaidStatus` is still exported and used elsewhere; it simply has no
    *     business deciding what a status badge says.
    */
-  const meta = applicationStatusMeta(app.status)
+  // `filingStatusMeta` and not `applicationStatusMeta`: `approved` reads
+  // "Completed" as a status and "Approved" on a filing whose other permits
+  // are still coming in, and this row is about a particular filing.
+  const meta = filingStatusMeta(app)
   /*
    * Layout only. The colour — background, text AND border — comes from
    * TONE_CLASSES at each use, so `text-white` cannot live here: two
@@ -1269,7 +1332,7 @@ function ApplicationRow({
    * gathering permits and at least one office has already conducted its visit.
    */
   const someOfficeFinished =
-    app.status === 'awaiting_other_permits' &&
+    isGatheringOtherPermits(app) &&
     detail !== undefined &&
     rows.some((pt) => officeProgressFor(pt.code).inspection !== undefined)
 
@@ -1490,7 +1553,7 @@ function ApplicationRow({
                * from a link further inside the application.
                */
               const canStart =
-                pt.status === 'not_started' && app.status === 'awaiting_other_permits'
+                pt.status === 'not_started' && isGatheringOtherPermits(app)
 
               /*
                * ── An office has asked for something, and the row says so ──────
@@ -1919,8 +1982,8 @@ export function ApplicationsPage() {
   // Drafts have their own page; keep this list to submitted work still in play.
   const submitted = (data ?? []).filter((a) => a.status !== 'draft')
   const byType = (a: ApplicationListItem) => !type || a.application_type === type
-  const inPlay = submitted.filter((a) => !FINISHED.includes(a.status)).filter(byType)
-  const finishedCount = submitted.filter((a) => FINISHED.includes(a.status)).filter(byType).length
+  const inPlay = submitted.filter((a) => !isFinished(a)).filter(byType)
+  const finishedCount = submitted.filter(isFinished).filter(byType).length
 
   /*
    * The rejection reason lives on the detail payload, not the list one, so the

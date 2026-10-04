@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
 import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
@@ -6,7 +6,7 @@ import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../component
 import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
-import type { OfficeFormRequirement } from '../../lib/types'
+import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
 import { ACCEPT_ATTR, MAX_UPLOAD_BYTES } from './uploads'
 
 /*
@@ -197,11 +197,15 @@ export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 /**
  * Keys that are machinery, not answers — never shown to a reader.
  *
- * Both say which OTHER sheet owns a question when two papers print it: the
- * authorised representative (FSIC owns it, CPDD carries it) and the occupancy
- * type and storey count (OBO owns them, BFP carries them). The applicant never
- * sees them and the officer should not either — printed in the review grid they
- * read as a field the applicant answered "OCCUPANCY" to.
+ * Says which OTHER sheet owns a question when two papers print it: the
+ * authorised representative (FSIC owns it, CPDD carries it). The applicant never
+ * sees it and the officer should not either — printed in the review grid it
+ * reads as a field the applicant answered "FSIC" to.
+ *
+ * `occupancy_shared_source` was written until 5 October 2026, when the BFP
+ * sheet carried the occupancy type and storey count from OBO's. The sheets are
+ * separate now (client: *"Make them separate"*); the key stays listed so a
+ * sheet saved while it was written keeps it out of the grid.
  */
 export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
   'authorized_representative_source',
@@ -237,7 +241,13 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'OCCUPANCY.fsec_date': 'FSEC — Date Issued',
   'OCCUPANCY.owner_address': 'Address of Owner / Permittee',
   'OCCUPANCY.owner_zip': 'ZIP Code',
+  'OCCUPANCY.owner_tel': 'Tel. No.',
+  'OCCUPANCY.owner_ctc_no': 'Community Tax Certificate No.',
+  'OCCUPANCY.owner_ctc_date': 'CTC — Date Issued',
+  'OCCUPANCY.owner_ctc_place': 'CTC — Place Issued',
   'OCCUPANCY.project_name': 'Name of Project',
+  'OCCUPANCY.project_location': 'Location of Project',
+  'OCCUPANCY.total_floor_area_sqm': 'Total Floor Area (sq. m.)',
   'OCCUPANCY.occupancy_type': 'Use / Character of Occupancy',
   'OCCUPANCY.building_storeys': 'No. of Storeys',
   'OCCUPANCY.building_units': 'No. of Units',
@@ -251,6 +261,25 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
 
   /* CHO */
   'SANITARY.application_type': 'Nature of Application',
+  'SANITARY.sanitary_classification': 'Sanitary Classification',
+  'SANITARY.employees_male': 'No. of Employees — Male',
+  'SANITARY.employees_female': 'No. of Employees — Female',
+  'SANITARY.employees_total': 'No. of Employees — Total',
+  'SANITARY.total_floor_area_sqm': 'Floor Area (sq. m.)',
+  'SANITARY.operating_hours': 'Operating Hours',
+  'SANITARY.seating_capacity': 'Seating Capacity',
+  'SANITARY.has_kitchen': 'Food Preparation Area',
+  'SANITARY.has_cold_storage': 'Refrigeration / Cold Storage',
+  'SANITARY.water_source': 'Water Source',
+  'SANITARY.toilets_count': 'No. of Toilets',
+  'SANITARY.toilet_type': 'Type of Toilet',
+  'SANITARY.toilets_separate_sexes': 'Separate Toilets for Men and Women',
+  'SANITARY.sewage_disposal': 'Sewage Disposal',
+  'SANITARY.solid_waste_disposal': 'Solid Waste Disposal',
+  'SANITARY.waste_segregation': 'Waste Segregation Practised',
+  'SANITARY.pest_control': 'Pest Control',
+  'SANITARY.pest_control_last_date': 'Last Pest Control Treatment',
+  'SANITARY.certified': 'Certification',
 }
 
 /**
@@ -287,17 +316,32 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'application_date',
     'application_type',
     'sanitary_classification',
+    'employees_male',
+    'employees_female',
+    'employees_total',
     'workers_requiring_health_certs',
+    'total_floor_area_sqm',
+    'operating_hours',
+    'seating_capacity',
+    'has_kitchen',
+    'has_cold_storage',
     'water_source',
+    'toilets_count',
+    'toilet_type',
+    'toilets_separate_sexes',
+    'sewage_disposal',
+    'solid_waste_disposal',
+    'waste_segregation',
+    'pest_control',
+    'pest_control_last_date',
   ],
-  CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday', 'certified'],
+  CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday'],
   FSIC: [
     'application_date',
     'authorized_representative',
     'occupancy_type',
     'building_storeys',
     'certificate_applied_for',
-    'certified',
   ],
   OCCUPANCY: [
     'application_date',
@@ -308,10 +352,16 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'fsec_date',
     'owner_address',
     'owner_zip',
+    'owner_tel',
+    'owner_ctc_no',
+    'owner_ctc_date',
+    'owner_ctc_place',
     'project_name',
+    'project_location',
     'occupancy_type',
     'building_storeys',
     'building_units',
+    'total_floor_area_sqm',
     'completion_date',
   ],
 }
@@ -631,16 +681,32 @@ export function WhatToCorrect({
                   </>
                 ) : (
                   /*
-                    An answer. `set` is the sheet's own setter, so this writes
-                    the same value the field below shows and autosave carries
-                    it like any other keystroke.
+                    An answer, drawn with the SAME control the sheet draws.
+
+                    This was a bare text box for every field. The client
+                    returned a Sanitary Classification — four chips on the
+                    sheet — and was handed a free-text input to retype it in
+                    (4 October 2026): "ALL RETURNED FIELDS SHOULD BE SIMILAR
+                    TO THEIR ORIGINAL COUNTERPARTS, WITH SAME
+                    RULES/VALIDATIONS."
+
+                    That is not only inconsistent, it loses the rule. Four
+                    chips are a closed set the office can act on; a text box
+                    accepts "food est." and "Foods" and sends either back as
+                    the correction, so the office returns it again over a
+                    spelling. The same argument the citizenship select was
+                    added for on the main form's corrections.
+
+                    `set` is still the sheet's own setter either way, so the
+                    value lands in the same place and autosave carries it
+                    like any other keystroke.
                   */
-                  <input
-                    type="text"
+                  <CorrectionAnswer
+                    code={code}
+                    field={item.target}
+                    label={item.label}
                     value={String(data[item.target] ?? '')}
-                    onChange={(e) => set(item.target, e.target.value)}
-                    aria-label={`Correct ${item.label}`}
-                    className="mt-1.5 block w-full rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:border-royal focus:outline-none"
+                    onChange={(v) => set(item.target, v)}
                   />
                 )}
               </div>
@@ -716,7 +782,16 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   // it does ask, the paper marks neither mandatory, and inventing a requirement
   // the counter does not enforce is the same mistake in the other direction.
   if (code === 'SANITARY') {
+    /*
+     * The four facilities PD 856 has the health officer look at on every
+     * establishment, and the applicant's own word. The food-only answers and
+     * the dates are not gated: a sari-sari store has no seating to count.
+     */
     if (!has('sanitary_classification')) missing.push('Sanitary Classification')
+    if (!has('water_source')) missing.push('Water Source')
+    if (!has('toilets_count')) missing.push('No. of Toilets')
+    if (!has('sewage_disposal')) missing.push('Sewage Disposal')
+    if (!has('solid_waste_disposal')) missing.push('Solid Waste Disposal')
   }
   if (code === 'CEC') {
     if (has('owner_birthday') && (data.owner_birthday as string) >= todayISO()) {
@@ -739,7 +814,6 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      * ZONING.
      */
     if (!has('owner_address')) missing.push('Owner’s Address')
-    if (data.certified !== 'yes') missing.push('The certification that the details are correct')
   }
   if (code === 'FSIC') {
     /*
@@ -751,16 +825,15 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      */
     if (!has('occupancy_type')) missing.push('Type of Occupancy / Business Nature')
     if (!has('building_storeys')) missing.push('No. of Storeys')
-    if (data.certified !== 'yes') {
-      missing.push('The certification that the details and attachments are correct')
-    }
   }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
     if (!has('project_name')) missing.push('Name of Project')
+    if (!has('project_location')) missing.push('Location of Project')
     if (!has('occupancy_type')) missing.push('Use / Character of Occupancy')
     if (!has('building_storeys')) missing.push('No. of Storeys')
     if (!has('building_units')) missing.push('No. of Units')
+    if (!has('total_floor_area_sqm')) missing.push('Total Floor Area')
     if (!has('completion_date')) missing.push('Date of Completion')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
@@ -838,6 +911,132 @@ function ChipOption({
  * control — the listener hears "Commercial, radio button" with nothing saying
  * what is being chosen. Optional only because the four older sheets predate it.
  */
+/**
+ * The office-form fields that are NOT a plain text box on their own sheet.
+ *
+ * Keyed `CODE.field`, because two sheets use the same key for different
+ * questions — `application_type` is Occupancy's Full/Partial chips and
+ * Zoning's derived Nature of Application, and a bare field name would have
+ * drawn one over the other.
+ *
+ * Everything absent from here is a text input on the sheet and stays one in
+ * the correction dialog. `building_storeys`, `building_units` and `owner_zip`
+ * carry `inputMode="numeric"` rather than a different control, and that is
+ * reproduced below for the same reason the chips are: a tablet keypad is part
+ * of the field.
+ */
+type CorrectionControl =
+  | { kind: 'chips'; options: string[] }
+  | { kind: 'select'; options: string[] }
+  | { kind: 'date' }
+  | { kind: 'numeric' }
+
+/*
+ * A function rather than a table, because the option lists are declared
+ * further down this file: a `const` map here would read them before they are
+ * initialised. Function declarations hoist and this is only ever called from
+ * render, by which time they exist.
+ */
+function correctionControl(key: string): CorrectionControl | undefined {
+  const controls: Record<string, CorrectionControl> = {
+    'SANITARY.sanitary_classification': { kind: 'chips', options: SANITARY_CLASSIFICATIONS },
+    'SANITARY.water_source': { kind: 'select', options: WATER_SOURCES },
+    'SANITARY.seating_capacity': { kind: 'numeric' },
+    'SANITARY.has_kitchen': { kind: 'chips', options: YES_NO },
+    'SANITARY.has_cold_storage': { kind: 'chips', options: YES_NO },
+    'SANITARY.toilets_count': { kind: 'numeric' },
+    'SANITARY.toilet_type': { kind: 'select', options: TOILET_TYPES },
+    'SANITARY.toilets_separate_sexes': { kind: 'chips', options: YES_NO },
+    'SANITARY.sewage_disposal': { kind: 'select', options: SEWAGE_DISPOSALS },
+    'SANITARY.solid_waste_disposal': { kind: 'select', options: SOLID_WASTE_DISPOSALS },
+    'SANITARY.waste_segregation': { kind: 'chips', options: YES_NO },
+    'SANITARY.pest_control': { kind: 'select', options: PEST_CONTROL_MEASURES },
+    'SANITARY.pest_control_last_date': { kind: 'date' },
+    'OCCUPANCY.application_type': { kind: 'chips', options: OCCUPANCY_SCOPES },
+    'OCCUPANCY.completion_date': { kind: 'date' },
+    'OCCUPANCY.building_storeys': { kind: 'numeric' },
+    'OCCUPANCY.building_units': { kind: 'numeric' },
+    'OCCUPANCY.owner_zip': { kind: 'numeric' },
+    'OCCUPANCY.owner_ctc_date': { kind: 'date' },
+    'OCCUPANCY.total_floor_area_sqm': { kind: 'numeric' },
+    'ZONING.zoning_industrial_project_type': {
+      kind: 'chips',
+      options: ZONING_INDUSTRIAL_PROJECT_TYPES,
+    },
+    'ZONING.building_storeys': { kind: 'numeric' },
+    'FSIC.building_storeys': { kind: 'numeric' },
+  }
+
+  return controls[key]
+}
+
+/**
+ * One returned answer, drawn the way its own sheet draws it.
+ *
+ * The control carries the rule. A closed set of chips is a closed set here
+ * too, so a correction cannot introduce a spelling the office would have to
+ * return a second time.
+ */
+export function CorrectionAnswer({
+  code,
+  field,
+  label,
+  value,
+  onChange,
+}: {
+  code: OfficeFormCode
+  field: string
+  label: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const control = correctionControl(`${code}.${field}`)
+  const box =
+    'mt-1.5 block w-full rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:border-royal focus:outline-none'
+
+  if (control?.kind === 'chips') {
+    return (
+      <div className="mt-2">
+        <ChipRow
+          options={control.options}
+          value={value}
+          onChange={onChange}
+          label={`Correct ${label}`}
+        />
+      </div>
+    )
+  }
+
+  if (control?.kind === 'select') {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`Correct ${label}`}
+        className={box}
+      >
+        <option value="">Select…</option>
+        {control.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <input
+      type={control?.kind === 'date' ? 'date' : 'text'}
+      inputMode={control?.kind === 'numeric' ? 'numeric' : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={`Correct ${label}`}
+      className={box}
+    />
+  )
+}
+
 function ChipRow({
   options,
   value,
@@ -894,7 +1093,7 @@ function ControlNoField({
  * fields that need it are scattered, the value is the same for all of them,
  * and passing it by hand is how one sheet ends up not getting it.
  */
-const CarriedContext = createContext<string[]>([])
+const CarriedContext = createContext<Record<string, CarriedSource>>({})
 
 /**
  * "From your 2026 application" — the flag on a carried answer.
@@ -917,12 +1116,24 @@ const CarriedContext = createContext<string[]>([])
  * inventing "2026" would be wrong the moment a business skipped a year.
  */
 function CarriedTag({ field }: { field: string }) {
-  const carried = useContext(CarriedContext)
-  if (! carried.includes(field)) return null
+  const source = useContext(CarriedContext)[field]
+  if (!source) return null
 
+  /*
+   * Two sources, two phrases. The owner's home address comes from the account
+   * since 5 October 2026 (`AccountPrefill`), and "from your previous
+   * application" on a first filing would send the applicant looking for a
+   * filing that does not exist.
+   */
   return (
     <span className="mt-1 block text-xs font-normal text-s-orange-ink">
-      From your previous application — check this is still right
+      {source === 'account'
+        ? 'From your account’s home address — check this is still right'
+        : source === 'application'
+          ? 'Suggested from your line of business — change it if it is wrong'
+          : source === 'business'
+            ? 'From your Business Permit application — change it if it is wrong'
+            : 'From your previous application — check this is still right'}
     </span>
   )
 }
@@ -1087,6 +1298,27 @@ export const SANITARY_CLASSIFICATIONS = [
   'Personal / Public Service',
   'Industrial',
 ]
+/*
+ * ── The rest of the Sanitary sheet's choices, 5 October 2026 ─────────────────
+ *
+ * The City has no paper for this permit; client: *"Is it good if you make the
+ * fields yourself … base it off from the common sanitary permit fields."* These
+ * are the facilities PD 856 (Code on Sanitation) has the health officer check
+ * on every establishment — water, toilets, sewage, refuse, vermin — in the
+ * wording the standard LGU "Application for Sanitary Permit to Operate" uses.
+ * Each list ends in Other so a true answer the list did not foresee is not
+ * forced into a wrong one.
+ */
+export const TOILET_TYPES = ['Water-sealed flush', 'Pour-flush', 'Other']
+export const SEWAGE_DISPOSALS = ['Public sewer (Maynilad)', 'Septic tank', 'Other']
+export const SOLID_WASTE_DISPOSALS = [
+  'City garbage collection',
+  'Private hauler',
+  'Composting / recycling',
+  'Other',
+]
+export const PEST_CONTROL_MEASURES = ['Contracted pest control service', 'Own measures', 'None']
+export const YES_NO = ['Yes', 'No']
 
 export const OCCUPANCY_SCOPES = ['Full', 'Partial']
 
@@ -1404,6 +1636,29 @@ function ZoningFields({
   )
 }
 
+/**
+ * The Sanitary Permit sheet.
+ *
+ * ── Drawn, not transcribed ───────────────────────────────────────────────────
+ *
+ * The City Health Office gave us no paper for this permit. Client, 5 October
+ * 2026: *"Is it good if you make the fields yourself. You may base it off from
+ * the common sanitary permit fields in the internet. If something needs
+ * auto-filling, do so."* So this is the standard LGU "Application for Sanitary
+ * Permit to Operate" under PD 856: the establishment's class and size, then
+ * the five things the sanitary inspector checks everywhere — water, toilets,
+ * sewage, refuse, vermin — then the food-establishment extras. If the CHO's
+ * own form ever turns up, these sections are
+ * reordered to it and nothing else moves.
+ *
+ * ── What is carried and what is asked ────────────────────────────────────────
+ *
+ * Headcount, floor area and the health-certificate count are the Business &
+ * Tax Profile's and are derived server-side (`OfficeFormAnswers`); the
+ * classification is suggested from the line of business (`SanitaryPrefill`)
+ * and editable; everything else is the applicant's to answer, because nothing
+ * on the filing knows how many toilets a shop has.
+ */
 function SanitaryFields({
   data,
   set,
@@ -1412,6 +1667,35 @@ function SanitaryFields({
   set: (key: string, value: string) => void
 }) {
   const ro = useReadOnly()
+  const isFood = get(data, 'sanitary_classification') === 'Food Establishment'
+  const select = (key: string, options: readonly string[], required = false) => (
+    <label className="block">
+      <FieldLabel required={required}>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <select
+        value={get(data, key)}
+        onChange={(e) => set(key, e.target.value)}
+        disabled={ro}
+        aria-disabled={ro}
+        className={inputCls}
+      >
+        <option value="">Select…</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      <CarriedTag field={key} />
+    </label>
+  )
+  const yesNo = (key: string) => (
+    <div>
+      <FieldLabel>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <ChipRow options={YES_NO} value={get(data, key)} onChange={(v) => set(key, v)} />
+      <CarriedTag field={key} />
+    </div>
+  )
+
   return (
     <div className="space-y-7">
       <section className="space-y-3">
@@ -1441,7 +1725,7 @@ function SanitaryFields({
       </section>
 
       <section className="space-y-3">
-        <SectionMarker letter="B" label="Establishment Sanitation Profile" />
+        <SectionMarker letter="B" label="Establishment Profile" />
         <div>
           <FieldLabel required>Sanitary Classification</FieldLabel>
           <ChipRow
@@ -1450,6 +1734,29 @@ function SanitaryFields({
             onChange={(v) => set('sanitary_classification', v)}
           />
           <CarriedTag field="sanitary_classification" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/*
+            The headcount and the floor area are the Business & Tax Profile's —
+            the figures the sanitary inspection fee is bracketed on — so they
+            are carried, not asked again. See `OfficeFormAnswers`.
+          */}
+          <DerivedField
+            label={<>Employees — Male<FromApplicationTag /></>}
+            value={get(data, 'employees_male')}
+          />
+          <DerivedField
+            label={<>Employees — Female<FromApplicationTag /></>}
+            value={get(data, 'employees_female')}
+          />
+          <DerivedField
+            label={<>Employees — Total<FromApplicationTag /></>}
+            value={get(data, 'employees_total')}
+          />
+          <DerivedField
+            label={<>Floor Area (sq. m.)<FromApplicationTag /></>}
+            value={get(data, 'total_floor_area_sqm')}
+          />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
@@ -1476,37 +1783,91 @@ function SanitaryFields({
             value={get(data, 'workers_requiring_health_certs')}
             hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
           />
-          {/*
-            * A <label>, not a <div>. FieldLabel renders a <span>, so outside a
-            * label element it is text near a control rather than the control's
-            * name — this <select> reached a screen reader as an unnamed combo
-            * box offering four values with nothing to say what they answered.
-            * Every other field on this sheet is already wrapped this way.
-            */}
           <label className="block">
-            <FieldLabel>Water Source</FieldLabel>
-            <select
-              value={get(data, 'water_source')}
-              onChange={(e) => set('water_source', e.target.value)}
-              disabled={ro}
-              aria-disabled={ro}
+            <FieldLabel>Operating Hours</FieldLabel>
+            <input
+              value={get(data, 'operating_hours')}
+              onChange={(e) => set('operating_hours', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 8:00 AM – 10:00 PM, Mon–Sat"
               className={inputCls}
-            >
-              <option value="">Select…</option>
-              {WATER_SOURCES.map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-            <CarriedTag field="water_source" />
+            />
+            <CarriedTag field="operating_hours" />
           </label>
         </div>
       </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="Water and Sanitation Facilities" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('water_source', WATER_SOURCES, true)}
+          <label className="block">
+            <FieldLabel required>No. of Toilets</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'toilets_count')}
+              onChange={(e) => set('toilets_count', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum`}
+            />
+            <CarriedTag field="toilets_count" />
+          </label>
+          {select('toilet_type', TOILET_TYPES)}
+        </div>
+        {yesNo('toilets_separate_sexes')}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('sewage_disposal', SEWAGE_DISPOSALS, true)}
+          {select('solid_waste_disposal', SOLID_WASTE_DISPOSALS, true)}
+        </div>
+        {yesNo('waste_segregation')}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('pest_control', PEST_CONTROL_MEASURES)}
+          <label className="block">
+            <FieldLabel>Last Pest Control Treatment</FieldLabel>
+            <input
+              type="date"
+              max={todayISO()}
+              value={get(data, 'pest_control_last_date')}
+              onChange={(e) => set('pest_control_last_date', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="pest_control_last_date" />
+          </label>
+        </div>
+      </section>
+
+      {/*
+        Only a food establishment has seating to count or a kitchen to keep
+        clean; shown when the classification says so, and the answers stay on
+        the sheet if the classification is changed back.
+      */}
+      {isFood && (
+        <section className="space-y-3">
+          <SectionMarker letter="D" label="Food Establishment" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="block">
+              <FieldLabel>Seating Capacity</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'seating_capacity')}
+                onChange={(e) => set('seating_capacity', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. 40"
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="seating_capacity" />
+            </label>
+            {yesNo('has_kitchen')}
+            {yesNo('has_cold_storage')}
+          </div>
+        </section>
+      )}
+
     </div>
   )
 }
-
 /**
  * The paper's legend, in the wording the client settled on.
  *
@@ -1808,7 +2169,6 @@ function RequirementRow({
    * this stage begins after payment. `code` is null on the sheet row and
    * non-null on the rest, so it carries the distinction on its own.
    */
-  const takesFile = row.code !== null && !readOnly && onChange
   /*
    * Every file on this row. `documents` is the list the API sends now;
    * `document` is its first, and the fallback keeps a row rendering if a
@@ -1821,6 +2181,20 @@ function RequirementRow({
    * business permit", so it is not offered on these.
    */
   const fromPermit = new Set(row.carried_document_ids ?? [])
+  /*
+   * ── A row the business permit already answered is read-only ─────────────
+   *
+   * Client, 5 October 2026, on the zoning checklist: *"Why are some other
+   * fields here already answered? If they came from fields from the business
+   * permit application, then they should not be editable."* The dropzone on
+   * a carried row dates from 30 September, for the applicant whose business
+   * permit had NOTHING attached and who was otherwise stuck. That case keeps
+   * it. A carried row the permit's own copy answers shows that copy and
+   * where it came from, and takes no file — the place to change it is the
+   * business permit's documents, which is where it lives.
+   */
+  const answeredByPermit = row.source === 'carried' && fromPermit.size > 0
+  const takesFile = row.code !== null && !readOnly && onChange && !answeredByPermit
 
   return (
     <div
@@ -1948,8 +2322,20 @@ function RequirementRow({
         </label>
       ) : (
         <>
-          <p className="text-sm font-bold text-ink">{row.label}</p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{row.note}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-ink">
+            {row.label}
+            {row.blocking === true && <span className="-ml-1 text-s-red">*</span>}
+            {answeredByPermit && (
+              <span className="rounded-full bg-royal-tint px-2 py-0.5 text-[11px] font-semibold text-royal">
+                From your Business Permit application
+              </span>
+            )}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+            {answeredByPermit
+              ? 'Already attached to your Business Permit application. To change it, update that attachment.'
+              : row.note}
+          </p>
         </>
       )}
 
@@ -2220,9 +2606,9 @@ function DenrRequirementsPanel({ data }: { data: OfficeFormData }) {
  *    BPLO form yet. It is asked here, plainly, rather than left blank on a
  *    sheet that prints a box for it. If the BPLO form ever grows item A16, this
  *    becomes a carried-over field like the rest and the question comes off.
- *  - THE CERTIFICATION. "I hereby certify that all information contained herein
- *    is true and correct", over the owner's printed name. The printed name is
- *    BPLO's answer; the certifying is an act, so it is a real tick.
+ *  - THE CERTIFICATION was asked here as a tick over the owner's printed name,
+ *    and removed on 5 October 2026 from every office sheet. Client: *"For ALL
+ *    application forms containing this, please remove this."*
  *
  * Everything below the paper's REMARKS FINDINGS AND RECOMMENDATIONS rule is the
  * office's half — the evaluator, the chief, the DENR permit checklist — and is
@@ -2404,34 +2790,6 @@ function CecFields({
             value={business.mobile}
           />
         </div>
-
-        {/*
-          The paper's certification and signature block, as the one part of it
-          that can be done in a browser. The printed name is the owner BPLO
-          already knows; what the applicant supplies is the act of certifying, so
-          that is the control.
-        */}
-        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={get(data, 'certified') === 'yes'}
-              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
-              disabled={ro}
-              aria-disabled={ro}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
-            />
-            <span className="text-sm leading-relaxed text-ink">
-              I hereby certify that all information contained herein is true and correct.
-            </span>
-          </label>
-          <div className="mt-3 sm:w-2/3">
-            <DerivedField
-              label={<>Printed Name of Owner<FromApplicationTag /></>}
-              value={business.ownerName}
-            />
-          </div>
-        </div>
       </section>
 
       {/*
@@ -2472,12 +2830,6 @@ function FsicFields({
   business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
-  /*
-   * The Occupancy sheet owns the occupancy type and the storey count when it
-   * is on the filing — one paper asks both, and the client chose shared
-   * answers over a merged sheet. See the note above the component.
-   */
-  const sharedWithObo = get(data, 'occupancy_shared_source') === 'OCCUPANCY'
   return (
     <div className="space-y-7">
       <section className="space-y-3">
@@ -2546,55 +2898,36 @@ function FsicFields({
             restaurant is "Assembly" to a fire officer — and the applicant is
             the one who knows which.
           */}
-          {sharedWithObo ? (
-            <DerivedField
-              className="grow basis-[16rem]"
-              label={
-                <>
-                  Type of Occupancy / Business Nature
-                  <span className="font-normal text-ink-muted"> (from your Occupancy form)</span>
-                </>
-              }
+          {/*
+            Asked here, on BFP's own paper, since 5 October 2026. These two were
+            read-only copies of the Occupancy sheet whenever that permit was on
+            the filing, which made this sheet wait on that one. The sheets are
+            separate now — client: "Make them separate" — and each paper asks
+            its own boxes.
+          */}
+          <label className="block grow basis-[16rem]">
+            <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
+            <input
               value={get(data, 'occupancy_type')}
+              onChange={(e) => set('occupancy_type', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. Mercantile, Assembly, Business"
+              className={inputCls}
             />
-          ) : (
-            <label className="block grow basis-[16rem]">
-              <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
-              <input
-                value={get(data, 'occupancy_type') || business.lineOfBusiness}
-                onChange={(e) => set('occupancy_type', e.target.value)}
-                readOnly={ro}
-                placeholder="e.g. Mercantile, Assembly, Business"
-                className={inputCls}
-              />
-              <CarriedTag field="occupancy_type" />
-            </label>
-          )}
-          {sharedWithObo ? (
-            <DerivedField
-              className="shrink-0"
-              label={
-                <>
-                  No. of Storeys
-                  <span className="font-normal text-ink-muted"> (from Occupancy)</span>
-                </>
-              }
+            <CarriedTag field="occupancy_type" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Storeys</FieldLabel>
+            <input
+              inputMode="numeric"
               value={get(data, 'building_storeys')}
+              onChange={(e) => set('building_storeys', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum w-[7rem]`}
             />
-          ) : (
-            <label className="block shrink-0">
-              <FieldLabel required>No. of Storeys</FieldLabel>
-              <input
-                inputMode="numeric"
-                value={get(data, 'building_storeys')}
-                onChange={(e) => set('building_storeys', e.target.value)}
-                readOnly={ro}
-                placeholder="e.g. 2"
-                className={`${inputCls} tnum w-[7rem]`}
-              />
-              <CarriedTag field="building_storeys" />
-            </label>
-          )}
+            <CarriedTag field="building_storeys" />
+          </label>
           {/*
             The three the applicant has already given. Floor area is the same
             figure the zoning sheet is assessed on — item 1 of Business
@@ -2621,8 +2954,10 @@ function FsicFields({
       <section className="space-y-3">
         <SectionMarker letter="C" label="Certificate Applied For" />
         {/*
-         * The permits you picked and the application type already decide this,
-         * so the BFP sheet carries it without asking the applicant to repeat it.
+         * The application type already decides this — new or renewal of the
+         * Business Permit — so the BFP sheet carries it without asking the
+         * applicant to repeat it. Never the Occupancy kind on a business filing;
+         * see `OfficeFormAnswers`.
          */}
         <DerivedField
           label={
@@ -2632,41 +2967,10 @@ function FsicFields({
             </>
           }
           value={get(data, 'certificate_applied_for')}
-          hint="Set from the permits and application type you chose in step 1. To change it, go back to Permit Selection."
+          hint="Set from the application type you chose in step 1: a new business or a renewal."
         />
       </section>
 
-      <section className="space-y-3">
-        <SectionMarker letter="D" label="Certification" />
-        {/*
-          The sentence above the signature on BFP's form. It gates the submit —
-          see `officeFormMissing` — because a sheet handed in without it is one
-          the office gives back, and being stopped here costs a tick where
-          being stopped there costs a trip.
-        */}
-        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={get(data, 'certified') === 'yes'}
-              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
-              disabled={ro}
-              aria-disabled={ro}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
-            />
-            <span className="text-sm leading-relaxed text-ink">
-              I hereby certify the correctness of the information provided above and the
-              completeness of the attached documents.
-            </span>
-          </label>
-          <div className="mt-3 sm:w-2/3">
-            <DerivedField
-              label={<>Printed Name of Owner<FromApplicationTag /></>}
-              value={business.ownerName}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   )
 }
@@ -2794,6 +3098,59 @@ function OccupancyFields({
             />
             <CarriedTag field="owner_zip" />
           </label>
+          {/*
+            ── From the paper, 4 October 2026 ───────────────────────────────
+
+            The unified OBO form prints Tel. No. beside the owner's address,
+            and under "Submitted by: Owner/Permittee" asks for the Community
+            Tax Certificate — number, date and place issued. All four are the
+            owner's to answer and were not asked. The CTC is optional: not
+            every owner holds one today, and a blank the office can ask for is
+            better than a gate that stops the sheet.
+          */}
+          <label className="block shrink-0">
+            <FieldLabel>Tel. No.</FieldLabel>
+            <input
+              inputMode="tel"
+              value={get(data, 'owner_tel')}
+              onChange={(e) => set('owner_tel', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="owner_tel" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>Community Tax Certificate No.</FieldLabel>
+            <input
+              value={get(data, 'owner_ctc_no')}
+              onChange={(e) => set('owner_ctc_no', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[12rem]`}
+            />
+            <CarriedTag field="owner_ctc_no" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>CTC — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'owner_ctc_date')}
+              onChange={(e) => set('owner_ctc_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="owner_ctc_date" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>CTC — Place Issued</FieldLabel>
+            <input
+              value={get(data, 'owner_ctc_place')}
+              onChange={(e) => set('owner_ctc_place', e.target.value)}
+              readOnly={ro}
+              placeholder="Malabon City"
+              className={`${inputCls} w-[12rem]`}
+            />
+            <CarriedTag field="owner_ctc_place" />
+          </label>
           <DerivedField
             className="grow basis-[12rem]"
             label={
@@ -2818,12 +3175,23 @@ function OccupancyFields({
           <label className="block grow basis-[14rem]">
             <FieldLabel required>Name of Project</FieldLabel>
             <input
-              value={get(data, 'project_name') || business.name}
+              value={get(data, 'project_name')}
               onChange={(e) => set('project_name', e.target.value)}
               readOnly={ro}
               className={inputCls}
             />
             <CarriedTag field="project_name" />
+          </label>
+          <label className="block grow basis-[18rem]">
+            <FieldLabel required>Location of Project</FieldLabel>
+            <input
+              value={get(data, 'project_location')}
+              onChange={(e) => set('project_location', e.target.value)}
+              readOnly={ro}
+              placeholder="Lot / Block / Street / Barangay"
+              className={inputCls}
+            />
+            <CarriedTag field="project_location" />
           </label>
           <DerivedField
             className="grow basis-[18rem]"
@@ -2843,7 +3211,7 @@ function OccupancyFields({
           <label className="block grow basis-[16rem]">
             <FieldLabel required>Use / Character of Occupancy</FieldLabel>
             <input
-              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              value={get(data, 'occupancy_type')}
               onChange={(e) => set('occupancy_type', e.target.value)}
               readOnly={ro}
               placeholder="e.g. Mercantile, Assembly, Business"
@@ -2874,6 +3242,18 @@ function OccupancyFields({
               className={`${inputCls} tnum w-[7rem]`}
             />
             <CarriedTag field="building_units" />
+          </label>
+          {/* On both the unified form and the Certificate of Completion; it was asked on neither sheet here. */}
+          <label className="block shrink-0">
+            <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
+            <input
+              inputMode="decimal"
+              value={get(data, 'total_floor_area_sqm')}
+              onChange={(e) => set('total_floor_area_sqm', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} tnum w-[10rem]`}
+            />
+            <CarriedTag field="total_floor_area_sqm" />
           </label>
           <DerivedField
             className="shrink-0"
@@ -2913,7 +3293,7 @@ export function OfficeFormSheet({
   requirements,
   returnTarget = null,
   returnNotes = null,
-  carriedKeys = [],
+  carried = {},
   requirementBusy = null,
   requirementError = null,
   onRequirementChange,
@@ -2949,7 +3329,7 @@ export function OfficeFormSheet({
    * reviewed. Flagged per field by `CarriedTag`; see the note there for why it
    * is not one banner.
    */
-  carriedKeys?: string[]
+  carried?: Record<string, CarriedSource>
   /** The document code with an upload in flight, so one row can say so. */
   requirementBusy?: string | null
   requirementError?: string | null
@@ -2975,10 +3355,56 @@ export function OfficeFormSheet({
   const meta = OFFICE_FORM_META[code]
   const set = (key: string, value: string) => onChange({ ...data, [key]: value })
 
+  /*
+   * ── Shown is answered ─────────────────────────────────────────────────
+   *
+   * Three boxes used to DISPLAY a value from the Business Permit
+   * application when empty — `value={answer || business.lineOfBusiness}` —
+   * without it ever becoming the answer. The required-field check then
+   * read the box as blank and refused "Next" over a field that looked
+   * filled in. Client, 5 October 2026: *"Why is this auto-filled, but not
+   * considered an answer"*.
+   *
+   * So the value is written into the sheet as its answer, ONCE per field
+   * per opening: an applicant who clears the box to type their own is not
+   * refilled under their cursor. Flagged "From your Business Permit
+   * application" while it still reads as seeded, so it is visibly not the
+   * applicant's own words, and editable like any answer.
+   */
+  const seeds: Record<string, string> =
+    code === 'FSIC'
+      ? { occupancy_type: business.lineOfBusiness }
+      : code === 'OCCUPANCY'
+        ? { project_name: business.name, occupancy_type: business.lineOfBusiness }
+        : {}
+  const seededOnce = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    /*
+     * Not before the saved sheet has arrived. A sheet read from the server
+     * always carries its derived answers (the application date at least),
+     * so an empty one is still loading — and seeding it would race the
+     * saved answers, which the caller will not merge over an edit.
+     */
+    if (readOnly || Object.keys(data).length === 0) return
+    const fill: OfficeFormData = {}
+    for (const [key, value] of Object.entries(seeds)) {
+      if (seededOnce.current.has(key) || !value.trim()) continue
+      seededOnce.current.add(key)
+      if (!get(data, key).trim()) fill[key] = value
+    }
+    if (Object.keys(fill).length > 0) onChange({ ...data, ...fill })
+    // Keyed on the seed values: `seeds` is a fresh object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, code, business.name, business.lineOfBusiness, data])
+  const carriedShown: Record<string, CarriedSource> = { ...carried }
+  for (const [key, value] of Object.entries(seeds)) {
+    if (!carriedShown[key] && value.trim() && get(data, key) === value) carriedShown[key] = 'business'
+  }
+
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       {/* Which answers are still last year’s; see CarriedTag. */}
-      <CarriedContext.Provider value={carriedKeys}>
+      <CarriedContext.Provider value={carriedShown}>
     <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
       {readOnly && (
         <div className="mb-4 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">

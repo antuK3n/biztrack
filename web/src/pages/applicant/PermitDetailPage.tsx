@@ -158,6 +158,22 @@ export function PermitDetailPage() {
    */
   const suspended = permit.status === 'suspended'
   const revoked = permit.status === 'revoked'
+  /*
+   * ── Replaced by a renewal, and the page has to say so ───────────────────
+   *
+   * `superseded` is what every renewal leaves behind, and this screen printed
+   * nothing for it — so last year's certificate opened looking exactly like a
+   * live one, with last year's VALID UNTIL on its face. The client read it as
+   * the renewal having failed: *"I just renewed that sanitary form and the
+   * expiration date should be Oct. 4, 2027"* [4 October 2026], on
+   * `/permits/159` — the superseded one, while the permit they had just been
+   * issued sat at a different id with the right dates.
+   *
+   * The PDF has always stamped it: `permit.blade.php` prints any status but
+   * Active in red. This is the screen catching up, the same gap the suspended
+   * and revoked notices above were added to close.
+   */
+  const superseded = permit.status === 'superseded'
   const cert = permit.certificate
   /*
    * The owner's name comes off the permit, not off the session.
@@ -329,6 +345,25 @@ export function PermitDetailPage() {
               <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
                 Revoked
               </p>
+            )}
+            {superseded && (
+              <div className="mx-auto mt-3 max-w-xl rounded-md border border-line bg-shell px-4 py-3 print:hidden">
+                <p className="text-center text-sm font-bold uppercase tracking-wide text-ink-secondary">
+                  Replaced by a newer permit
+                </p>
+                <p className="mt-1.5 text-center text-xs leading-relaxed text-ink-secondary">
+                  This is the certificate you held before renewing, kept as your record. The
+                  dates below are its own. Your current one is under My Permits.
+                </p>
+                <p className="mt-2 text-center">
+                  <Link
+                    to="/permits"
+                    className="text-xs font-semibold text-royal underline underline-offset-2 hover:no-underline"
+                  >
+                    Go to My Permits
+                  </Link>
+                </p>
+              </div>
             )}
 
             {/*

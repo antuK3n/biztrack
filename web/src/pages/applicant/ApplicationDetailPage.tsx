@@ -16,7 +16,12 @@ import { PillButton, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
-import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
+import {
+  TONE_CLASSES,
+  applicationStatusMeta,
+  isGatheringOtherPermits,
+  otherPermitProgress,
+} from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
@@ -649,8 +654,8 @@ export function ApplicationDetailPage() {
           * These were two, and both were testing statuses the September flow
           * change deleted: `submitted`/`under_review` on the first and
           * `for_inspection` on the second. Neither condition can be true any
-          * more, so an applicant sitting at `for_approval`,
-          * `awaiting_other_permits` or `for_final_approval` — which is most of
+          * more, so an applicant sitting at `for_approval`, the gathering
+          * stage or `for_final_approval` — which is most of
           * the life of a filing — opened "Application Status" and was shown no
           * status card at all. The bug was invisible from the officer side,
           * where the same staleness printed raw enum values instead.
@@ -711,7 +716,7 @@ export function ApplicationDetailPage() {
           what a rejection would cost, because a green card that mentioned
           only good news would be the other half of the same mistake.
         */}
-        {status === 'awaiting_other_permits' && (
+        {isGatheringOtherPermits(app) && (
           <StatusCard tone="green">
             <div className="flex items-center gap-5 py-2 text-ink">
               <MagnifierCheckIcon />
@@ -762,7 +767,15 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
-        {(status === 'approved' || status === 'issued') && (
+        {/*
+          The END card. Gated on the row and not the status since 4 October
+          2026: a paid filing wears `approved` while its other permits come
+          in, and on that filing this card stacked under the
+          Business-Permit-Released card above it — two cards, one saying
+          "apply for your other permits", the next saying the application
+          was done.
+        */}
+        {(status === 'approved' || status === 'issued') && !isGatheringOtherPermits(app) && (
           <StatusCard tone="green">
             <div className="flex items-center gap-5 py-2 text-ink">
               <CheckRingIcon />

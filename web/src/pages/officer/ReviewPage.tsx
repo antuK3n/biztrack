@@ -42,9 +42,11 @@ import {
   officeFormFieldLabel,
   officeFormFieldRank,
   officeFormMeta,
+  CorrectionAnswer,
+  type OfficeFormCode,
 } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
-import { otherPermitProgress } from '../../lib/status'
+import { isGatheringOtherPermits, otherPermitProgress } from '../../lib/status'
 import {
   admin,
   applications,
@@ -2176,6 +2178,47 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * where the filing has not arrived yet.
    */
   const [fieldEdits, setFieldEdits] = useState<Record<string, string>>({})
+  /*
+   * ── The office's own sheet, corrected in Edit mode ──────────────────────
+   *
+   * Client, 4 October 2026: *"edit mode for the admin side still does not
+   * work. I can't edit fields."* It worked exactly as designed — Edit mode
+   * turned on the For Office Use fields and nothing the applicant had
+   * written — and the design was the complaint. The decision taken: an
+   * office may correct the answers on the ONE sheet it issues the permit
+   * for, and the server records each change by key, before and after
+   * (`OfficeFormController::upsert`, `office_form.corrected_by_office`).
+   *
+   * Its own buffer and its own Save, not folded into `fieldEdits`: that one
+   * writes the business record through `applications.updateFields`, this
+   * writes a sheet through `officeForms.save`, and one button that did two
+   * different writes could half-succeed. Keyed by sheet, because BPLO's
+   * sheet may be beside the office's own on the same page.
+   */
+  const [sheetEdits, setSheetEdits] = useState<Record<string, Record<string, string>>>({})
+  const [sheetSaving, setSheetSaving] = useState<string | null>(null)
+  const [sheetSaveError, setSheetSaveError] = useState<string | null>(null)
+  const editSheet = (code: string, key: string, value: string) =>
+    setSheetEdits((prev) => ({ ...prev, [code]: { ...(prev[code] ?? {}), [key]: value } }))
+  async function saveSheet(code: string, saved: Record<string, unknown>) {
+    const edits = sheetEdits[code]
+    if (!edits || sheetSaving !== null) return
+    setSheetSaving(code)
+    setSheetSaveError(null)
+    try {
+      await officeFormsApi.save(app.id, code, { ...saved, ...edits })
+      setSheetEdits((prev) => {
+        const next = { ...prev }
+        delete next[code]
+        return next
+      })
+      reload()
+    } catch (err) {
+      setSheetSaveError(toApiError(err).message)
+    } finally {
+      setSheetSaving(null)
+    }
+  }
   const [savingFields, setSavingFields] = useState(false)
   const [fieldSaveError, setFieldSaveError] = useState<string | null>(null)
   const [confirmFieldSave, setConfirmFieldSave] = useState(false)
@@ -3295,7 +3338,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * there is no Approve button.
    */
   const notReadyToSign = (() => {
-    if (app.status !== 'awaiting_other_permits') return null
+    if (! isGatheringOtherPermits(app)) return null
     // An office's sheet folds the filed application away; BPLO's does not.
     // That is the nearest thing this screen has to "am I BPLO", and it is
     // already the flag the rest of the sheet branches on.
@@ -3744,7 +3787,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * finished its review was handed the whole application form back, which is
    * the exact thing the client twice asked to have removed.
    *
-   * The stage it was describing is now `awaiting_other_permits`, and the shape
+   * The stage it was describing is now an undecided `approved`, and the shape
    * is unchanged underneath. `approveClearance` completes an office's
    * assignment at the moment it accepts the paperwork and leaves the permit at
    * `for_inspection`, so an office in the old "reviewed, now waiting on the
@@ -3775,7 +3818,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * It was keyed on `for_final_approval` alone, which left BPLO a hole exactly
    * one stage wide. `approveMainForm` completes BPLO's assignment at initial
    * approval, so from the moment BPLO approves until the last clearance lands,
-   * the filing sits at `awaiting_other_permits` with `owesReview` false — and
+   * the filing sits at an undecided `approved` with `owesReview` false — and
    * BPLO, the office that signed the form and is fielding the applicant's
    * questions about it, could not open the form it had signed. That is
    * checklist item 8 as the office admin experiences it, "the application
@@ -3783,14 +3826,48 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * missing rather than the half that was working.
    *
    * Nothing is handed back except the READING. `decided` is still true for BPLO
-   * at `awaiting_other_permits`, so the sheet opens in view mode with its
+   * while the filing gathers, so the sheet opens in view mode with its
    * decision already recorded and no Approve — the controls are settled by
    * `decided` and `canAct`, which have not moved, and the API is unchanged
    * either way.
    */
   const bploCoordinatesThroughout = data.department.code === 'BPLO'
+
+  /*
+   * ── This office's own permit is accepted but not yet granted ────────────
+   *
+   * The third way in, and the one a clearance-only renewal needed. Client,
+   * 4 October 2026, on a Sanitary renewal sitting at its site visit: *"This
+   * should NOT BE APPROVED. IT IS STILL FOR INSPECTION"* — and then the
+   * remedy, which is the right one: *"why not just make it similar to the
+   * New Permit filing view where the admin can Approve or Reject, and even
+   * Set Schedule For Inspection."*
+   *
+   * The two filings were reaching different screens from the same situation,
+   * and the reason was that the test above asks the FILING's status. A new
+   * filing is `approved` and gathering by the time its office accepts the
+   * paperwork, so it took this branch and got the inspection panel — the only
+   * place in the product that draws Set Schedule for Inspection. A renewal
+   * carrying one clearance never leaves `for_approval`: its office's work IS
+   * the filing, so there is no gathering stage for it to be in. It fell
+   * through to the full review sheet, which has no inspection panel at all
+   * and stamps a green "Approved" the moment the assignment closes — over a
+   * progress rail reading For Inspection, two inches below.
+   *
+   * So the question is asked of the PERMIT instead, which is what both cases
+   * actually have in common: this office has accepted the paperwork
+   * (`!owesReview`) and its permit has not been granted or refused yet.
+   * `data.clearance` is the office's own permit on this filing, matched
+   * server-side on `issuing_department_id` — see the note on
+   * `bookFirstInspection` for why nothing else here may be used for it.
+   */
+  const myPermitInFlight =
+    data.clearance !== null &&
+    data.clearance.status !== null &&
+    !['approved', 'rejected'].includes(data.clearance.status)
+
   const nothingLeftForThisOffice =
-    (app.status === 'awaiting_other_permits' || app.status === 'for_final_approval') &&
+    (isGatheringOtherPermits(app) || app.status === 'for_final_approval' || myPermitInFlight) &&
     !owesReview &&
     !bploCoordinatesThroughout
 
@@ -3798,7 +3875,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     return (
       <div>
         {backLink}
-        <PageTitle>Business Permit</PageTitle>
+        {/*
+          Named, because this screen is not only the Business Permit's any
+          more. It reads "Business Permit" on BPLO's seat and whenever the
+          office's own permit cannot be named, and the permit's own name
+          everywhere else — a Sanitary officer sent here by a clearance-only
+          renewal was being shown a heading about a permit their office does
+          not issue.
+        */}
+        <PageTitle>{data.clearance?.name ?? 'Business Permit'}</PageTitle>
 
         <div className="mx-auto max-w-3xl">
           <p
@@ -4953,7 +5038,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       {/*
         * ── Why this one cannot be signed yet ────────────────────────────────
         *
-        * A paid filing sits at `awaiting_other_permits` until every clearance
+        * A paid filing sits at an undecided `approved` until every clearance
         * is approved AND every Other Requirement is closed, and it now appears
         * in BPLO's Final Approval tab for that whole stretch — which is the
         * point: somebody has to be able to notice a filing that has stopped
@@ -5661,13 +5746,57 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   </p>
                 ) : (
                   <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
-                    {entries.map(([key, value]) => (
-                      <Field
-                        key={key}
-                        label={officeFormFieldLabel(form.permit_type_code, key)}
-                        value={officeFormValueText(key, value)}
-                      />
-                    ))}
+                    {entries.map(([key, value]) =>
+                      editing ? (
+                        /*
+                         * The same control the applicant answers a returned
+                         * field with — chips where the sheet offers chips, a
+                         * date where it asks a date — so a correction cannot
+                         * write a value the sheet itself would never produce.
+                         */
+                        <div key={key} className="min-w-[12rem] grow basis-[14rem]">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+                            {officeFormFieldLabel(form.permit_type_code, key)}
+                          </p>
+                          <CorrectionAnswer
+                            code={form.permit_type_code as OfficeFormCode}
+                            field={key}
+                            label={officeFormFieldLabel(form.permit_type_code, key)}
+                            value={
+                              sheetEdits[form.permit_type_code]?.[key] ??
+                              (value == null ? '' : String(value))
+                            }
+                            onChange={(v) => editSheet(form.permit_type_code, key, v)}
+                          />
+                        </div>
+                      ) : (
+                        <Field
+                          key={key}
+                          label={officeFormFieldLabel(form.permit_type_code, key)}
+                          value={officeFormValueText(key, value)}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
+                {editing && sheetEdits[form.permit_type_code] && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void saveSheet(form.permit_type_code, form.form_data ?? {})}
+                      aria-disabled={sheetSaving !== null || undefined}
+                      className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+                    >
+                      {sheetSaving === form.permit_type_code ? 'Saving…' : 'Save corrections to this sheet'}
+                    </button>
+                    <span className="text-xs text-ink-muted">
+                      {Object.keys(sheetEdits[form.permit_type_code]).length}
+                      {Object.keys(sheetEdits[form.permit_type_code]).length === 1 ? ' answer' : ' answers'}{' '}
+                      changed · recorded under your name
+                    </span>
+                    {sheetSaveError && (
+                      <span className="text-xs font-semibold text-s-red">{sheetSaveError}</span>
+                    )}
                   </div>
                 )}
                 {/*

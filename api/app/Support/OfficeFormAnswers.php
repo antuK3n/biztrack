@@ -200,6 +200,30 @@ final class OfficeFormAnswers
                 // nothing rather than print a zero the office would act on.
                 default => '',
             };
+
+            /*
+             * ── The rest of the sheet's numbers, 5 October 2026 ─────────────
+             *
+             * The City has no paper for this permit, so the sheet was drawn
+             * from the standard PD 856 application. Its headcount and floor
+             * area are the Business & Tax Profile's — the same figures the
+             * sanitary inspection fee (Sec. 4D.01) is bracketed on — and are
+             * carried rather than asked a second time, for the reason the
+             * health-certificate count above is. Blank where the profile is
+             * blank: a zero the office would act on is worse than an empty box.
+             */
+            $count = fn ($n) => is_numeric($n) ? (string) (int) $n : '';
+            $male = $application->fee_profile['male_employees'] ?? null;
+            $female = $application->fee_profile['female_employees'] ?? null;
+            $derived['employees_male'] = $count($male);
+            $derived['employees_female'] = $count($female);
+            $derived['employees_total'] = match (true) {
+                is_numeric($employees) => (string) (int) $employees,
+                is_numeric($male) || is_numeric($female) => (string) ((int) $male + (int) $female),
+                default => '',
+            };
+            $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
+            $derived['total_floor_area_sqm'] = is_numeric($floorArea) ? (string) (0 + $floorArea) : '';
         }
         if ($permitTypeCode === 'CEC') {
             $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';
@@ -274,34 +298,28 @@ final class OfficeFormAnswers
             }
         }
         if ($permitTypeCode === 'FSIC') {
-            $forOccupancy = $application->permitTypes()->where('code', 'OCCUPANCY')->exists();
-            $derived['certificate_applied_for'] = match (true) {
-                $forOccupancy => 'FSIC for Certificate of Occupancy',
-                $existingBusiness => 'FSIC for Business Permit (Renewal of Business)',
-                default => 'FSIC for Business Permit (New Business)',
-            };
-
             /*
-             * ── The two boxes both papers print ──────────────────────────
+             * ── Always the Business Permit certificate ───────────────────
              *
-             * BFP-QSF-FSED-002 asks the type of occupancy and the number of
-             * storeys; so does MCG-OBO's unified form, which is one paper for
-             * the Certificate of Occupancy AND this certificate. When both
-             * permits are on the filing the applicant answers them on the OBO
-             * sheet and this one carries them.
+             * BFP-QSF-FSED-002 prints three boxes: FSIC for Certificate of
+             * Occupancy, and FSIC for Business Permit, new or renewal. Until
+             * 5 October 2026 an Occupancy Permit on the same filing ticked the
+             * first — and with it the BFP checklist asked for OBO's
+             * endorsement, the Certificate of Completion and the occupancy
+             * assessment, none of which exist until OBO has acted, while the
+             * OBO sheet in turn asked for BFP's FSEC. Two sheets, filled in
+             * parallel, each waiting on the other.
              *
-             * The marker is what the sheet reads to know which it is — the
-             * same shape `authorized_representative_source` uses for the
-             * question this sheet owns and CPDD's carries. Derived even when
-             * blank, so clearing the answer on the OBO sheet clears it here
-             * rather than leaving two visible fields that disagree.
+             * Client, 5 October 2026: *"Make them separate."* A fire
+             * certificate on a business filing is now always the Business
+             * Permit kind; the Occupancy kind belongs with a building, not a
+             * trade, and is not something this filing applies for. The type of
+             * occupancy and the storey count are asked on this sheet — the BFP
+             * paper prints both boxes — and no longer carried from OBO's.
              */
-            if ($forOccupancy) {
-                $obo = self::sheetData($application, 'OCCUPANCY');
-                $derived['occupancy_shared_source'] = 'OCCUPANCY';
-                $derived['occupancy_type'] = trim((string) ($obo['occupancy_type'] ?? ''));
-                $derived['building_storeys'] = trim((string) ($obo['building_storeys'] ?? ''));
-            }
+            $derived['certificate_applied_for'] = $existingBusiness
+                ? 'FSIC for Business Permit (Renewal of Business)'
+                : 'FSIC for Business Permit (New Business)';
         }
         // The MARKET branch was here. Market Clearance and the CMO Market Office
         // were removed from the system on 6 September 2026 — see the note in

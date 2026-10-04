@@ -63,7 +63,7 @@ function zoningSheetOpen(): array
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     $type = PermitType::where('code', 'ZONING')->firstOrFail();
     // Applying OPENS the sheet and stops there; submitting it is the act

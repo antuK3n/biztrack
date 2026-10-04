@@ -35,11 +35,16 @@ function openAssignmentFor(string $email): ?ApplicationAssignment
 
     return ApplicationAssignment::query()
         ->where('department_id', $user->department_id)
-        ->whereHas('application', fn ($a) => $a->whereNotIn('status', [
-            ApplicationStatus::Approved->value,
-            ApplicationStatus::Rejected->value,
-            ApplicationStatus::Cancelled->value,
-        ])->whereNotNull('submitted_at'))
+        /*
+         * `notDecided()` and not a list of statuses to avoid. It was the three
+         * terminal ones until 4 October 2026, when `awaiting_other_permits`
+         * was removed and `approved` became the status a paid filing WAITS at
+         * while its other permits come in. Listing it then excluded every
+         * live gathering filing, which on the demo register is most of them —
+         * this helper returned null and seven tests in this file failed on
+         * their first assertion. See `Application::isDecided()`.
+         */
+        ->whereHas('application', fn ($a) => $a->notDecided()->whereNotNull('submitted_at'))
         ->first();
 }
 
@@ -220,12 +225,15 @@ it('refuses to reclassify a filing that has already been decided', function () {
      * issued permits. Moving the tier under one of those rewrites whether the
      * LGU met its statutory deadline on a closed case.
      */
+    /*
+     * `decided()` and not a list of statuses: `approved` covers a filing still
+     * gathering its other permits since 4 October 2026, and that one is NOT
+     * decided — reclassifying it is allowed, because its deadline has not been
+     * met or missed yet. Picking one of those here asked the endpoint to refuse
+     * something it is right to accept.
+     */
     $assignment = ApplicationAssignment::query()
-        ->whereHas('application', fn ($a) => $a->whereIn('status', [
-            ApplicationStatus::Approved->value,
-            ApplicationStatus::Rejected->value,
-            ApplicationStatus::Cancelled->value,
-        ]))
+        ->whereHas('application', fn ($a) => $a->decided())
         ->first();
 
     if ($assignment === null) {
