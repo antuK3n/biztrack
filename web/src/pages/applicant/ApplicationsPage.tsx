@@ -787,7 +787,15 @@ function StatusGuide() {
      */
     withSubFlow?: boolean
   }) => {
-    const meta = applicationStatusMeta(status)
+    /*
+     * "Approved", never "Completed", on the rail. The badge for `approved`
+     * reads Completed once a filing is decided, and the guide's last step was
+     * borrowing that word. Client, 5 October 2026: *"Approved means the
+     * permit is issued while Completed means the whole process is done"* —
+     * and a completed filing has left this page, so the guide has no step to
+     * call by that name.
+     */
+    const meta = status === 'approved' ? GATHERING_META : applicationStatusMeta(status)
 
     return (
       /*
@@ -892,7 +900,7 @@ function StatusGuide() {
                   existed. Now there are three rails and the number has to
                   follow the step it is standing on.
                 */}
-                Once every permit is approved, your application moves on to step {index + 2}.
+                Once every permit is approved, your application is complete and leaves this page.
               </p>
             </div>
           )}

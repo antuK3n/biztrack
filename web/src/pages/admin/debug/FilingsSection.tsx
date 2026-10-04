@@ -3,7 +3,6 @@ import type { FormEvent, ReactNode } from 'react'
 import { debugFilings } from './api'
 import type {
   DebugAdvanceTarget,
-  DebugFiling,
   DebugFilingHit,
   DebugFilingStep,
   DebugStepResult,
@@ -242,7 +241,7 @@ function MoveFiling({ id, onMoved }: { id: number; onMoved: () => void }) {
    * FilingMover::describe; typed here until DebugFiling in ./api carries it.
    */
   if (!f) return null
-  const decided = (f as DebugFiling & { decided?: boolean }).decided === true
+  const decided = f.decided === true
 
   const takesNote = f.steps.some((step) => step.note !== null)
   const ahead = f.targets.filter((target) => !target.reached)

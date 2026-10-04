@@ -146,6 +146,8 @@ export interface DebugFiling {
   type_label: string
   status: string
   status_label: string
+  /** Finished, as the register sees it (`decided_at`); Approved alone is still open. */
+  decided: boolean
   business: string | null
   applicant: string | null
   submitted_at: string | null

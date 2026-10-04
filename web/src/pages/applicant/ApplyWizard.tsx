@@ -4361,14 +4361,10 @@ export function ApplyWizard() {
      * answer a future release asks for is simply not shown here, rather than
      * shown to everybody.
      *
-     * NOT re-checked on the server, and that is worth knowing rather than
-     * assuming. `ApplicationController::submit` enforces no documentary
-     * requirement at all — it never has — so this list is what asks for a
-     * document and BPLO's review is what catches a missing one. The gating
-     * above therefore decides what the applicant is SHOWN, not what the API
-     * will accept. If these copies ever need to block submission, the gate
-     * belongs in `submit` beside the amendment and prior-permit checks, and it
-     * would be a new refusal on a path that currently accepts everything.
+     * Re-checked at submit by `App\Support\RequiredDocuments`, which ports
+     * this rule line for line (5 October 2026) — change both together. The
+     * gating above decides what the applicant is SHOWN; the server decides
+     * what it accepts, and the two must agree.
      */
     /*
      * ── An AMENDMENT has its own requirement list ─────────────────────────
