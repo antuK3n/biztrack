@@ -14,10 +14,11 @@ use Illuminate\Support\Facades\Cache;
  *
  * ── What this is, and what it is not ───────────────────────────────────────
  *
- * The headline of the zoning check: is the trade on the list of any zone in
- * the barangay. Everything the ordinance attaches to that answer — the
- * "provided that" conditions, the overlays, the special uses, the
- * non-conforming rules — is App\Support\Zoning\ZoningCheck, which reads this.
+ * The note under the map on Location & Zoning: is the trade on the list of
+ * any zone in the barangay. Everything the ordinance attaches to that answer —
+ * the "provided that" conditions, the overlays, the special uses, the
+ * non-conforming rules — was a rule-by-rule checklist built on this, which Ken
+ * removed on 5 October 2026; CPDO applies those rules itself.
  *
  * It is still not a verdict, for the reason that was always true and the
  * ordinance itself writes down: the lists are open. Art. III §2(a) reads "and
@@ -48,7 +49,7 @@ use Illuminate\Support\Facades\Cache;
  * 133 codes read one by one against the lists and Annex A's definitions —
  * names the line. A line it marks as only possibly this trade (a scale, a
  * "like:" list, a code nobody has read yet) is POSSIBLE: CPDO checks, never
- * Met. One shared word is no longer evidence of anything; it reported a
+ * listed. One shared word is no longer evidence of anything; it reported a
  * gasoline station as a water refilling station (audit of 3 October 2026).
  *
  * ── Why `not_listed` is still worth showing ────────────────────────────────
@@ -182,8 +183,8 @@ class ZoningConformance
      * The lines of a zone's own list a business can be: its own uses, less
      * the family-only recreation (R-1 §2.1: "for the exclusive use of the
      * members of the family") and the home-occupation and home-industry
-     * clauses, which ZoningCheck applies on their own six and four conditions
-     * rather than as a listing.
+     * clauses, which say which households may run a business at home rather
+     * than naming a business (Ordinance::HOME_OCCUPATION).
      *
      * @return list<string>
      */
@@ -206,17 +207,11 @@ class ZoningConformance
      * listing. Certain lines anywhere in the zone's reach are preferred to a
      * possible line in its own list.
      *
-     * `$facts` are the applicant's answers the reading turns on (a hotel's
-     * in-room kitchens, a dry cleaner's solvents, a lessor's families, a
-     * shop or a factory); `$description` is the applicant's own description
-     * of the line, which decides when the question is unanswered.
-     *
-     * @param  array<string, mixed>  $facts
-     * @return array{use: string, from: string, via: ?string, certain: bool, basis: string, definition: ?string}|null
+     * @return array{use: string, from: string, via: ?string, certain: bool, basis: string}|null
      */
-    public static function lookup(string $zone, PsicCode $psic, array $facts = [], string $description = ''): ?array
+    public static function lookup(string $zone, PsicCode $psic): ?array
     {
-        $spec = TradeUses::for((string) $psic->code, $facts, $description);
+        $spec = TradeUses::for((string) $psic->code);
         foreach (['is', 'maybe'] as $tier) {
             foreach (Ordinance::closure($zone) as $source) {
                 $uses = self::matchable($source);
@@ -236,7 +231,6 @@ class ZoningConformance
                         // the table has not read; the line is the nearest
                         // wording, offered under Art. III §1 for CPDO to read.
                         'basis' => $spec['curated'] ? ($tier === 'is' ? 'listed' : 'similar') : 'unvetted',
-                        'definition' => $spec['def'],
                     ];
                 }
             }
@@ -246,36 +240,9 @@ class ZoningConformance
     }
 
     /**
-     * The first line in `$zone`'s reach containing one of `$phrases` — for a
-     * use named by the applicant's answer rather than by a PSIC code (a pay
-     * parking lot, a taxi garage), which the register has no code for.
-     *
-     * @param  list<string>  $phrases
-     * @return array{use: string, from: string, via: ?string, certain: bool, basis: string, definition: ?string}|null
-     */
-    public static function lookupPhrases(string $zone, array $phrases): ?array
-    {
-        foreach (Ordinance::closure($zone) as $source) {
-            $matched = self::firstPhrase($phrases, self::matchable($source));
-            if ($matched !== null) {
-                return [
-                    'use' => $matched,
-                    'from' => $source,
-                    'via' => Ordinance::inheritanceRule($zone, $source),
-                    'certain' => true,
-                    'basis' => 'listed',
-                    'definition' => null,
-                ];
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * The zones in a barangay: Art. IV §5's text, and the CPDO sheet.
      *
-     * `governing` is what the check decides on. It is the text's list (Art.
+     * `governing` is what the headline decides on. It is the text's list (Art.
      * IV §6: the text prevails over the map), plus Parks and Utilities where
      * the sheet draws them, since §5 places those two city-wide on existing
      * facilities rather than in any barangay. A barangay the text does not
@@ -408,14 +375,13 @@ class ZoningConformance
 
     /**
      * Whether any line of `$uses` is `$psic`'s activity, certainly or
-     * possibly — for the questions that ask "is it on THIS list at all"
-     * (the Basic R-3 inheritance gap).
+     * possibly: the first such line, or null.
      *
      * @param  list<string>  $uses
      */
-    public static function matchUse(PsicCode $psic, array $uses, array $facts = [], string $description = ''): ?string
+    public static function matchUse(PsicCode $psic, array $uses): ?string
     {
-        $spec = TradeUses::for((string) $psic->code, $facts, $description);
+        $spec = TradeUses::for((string) $psic->code);
         if ($spec['curated']) {
             return self::firstPhrase($spec['is'], $uses) ?? self::firstPhrase($spec['maybe'], $uses);
         }

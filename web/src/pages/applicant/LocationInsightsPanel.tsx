@@ -572,8 +572,7 @@ export function LocationInsightsPanel({
  * Ordinance No. 24-2018 Art. IX §16(2) sends appeals from the Zoning
  * Administrator's grant or denial to the Local Zoning Board of Appeals, and a
  * use the zone does not list goes there as an exception (Art. VIII §1.2).
- * questions-for-malabon C12 records it; the checklist under this note spells
- * out the procedure.
+ * questions-for-malabon C12 records it.
  */
 export function ZoningConformanceNote({
   zoning,

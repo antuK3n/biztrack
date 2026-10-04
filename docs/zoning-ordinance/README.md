@@ -15,13 +15,21 @@ The source PDF is not committed. It is the city's document, not ours.
 
 | File | Article | Contents |
 | --- | --- | --- |
-| **`rules.json` / `rules.md`** | **all, pp. 1–110** | **Every normative statement — 364 of them — with its verbatim text, article, section and printed page, what data it needs, and its status in BizTrack (implemented, shown, not applicable, question). The file the zoning check reads its wording from. `rules.md` is generated from it by `scripts/zoning-rules.py`.** |
+| **`rules.json` / `rules.md`** | **all, pp. 1–110** | **Every normative statement — 364 of them — with its verbatim text, article, section and printed page, what data it needs, and its status in BizTrack (implemented, shown, not applicable, question). Its statuses describe the rule-by-rule checklist removed on 5 October 2026 (below); nothing reads it at run time now. `rules.md` is generated from it by `scripts/zoning-rules.py`.** |
 | `zone-boundaries.json` / `-summary.md` | IV §5 | 99 (zone, barangay) pairs: which base zones and overlays fall in which barangay, with the location prose |
 | `zone-uses.json` / `-summary.md` | V §2.1–2.20 | 695 allowed uses across all 20 base zones. The special uses, overlays and incentives (§3–5) are in `rules.json`, not here |
 | `definitions-and-standards.md` | III, VI, VII, VIII | 89 defined terms; performance standards with thresholds; general regulations; variance/exception procedure |
 | `annex-a-glossary.json` / `-md` | Annex A | 89 further definitions, 39 of them declarable business types |
 
 ## The load-bearing conclusion
+
+> **5 October 2026: the rule-by-rule checklist described below is gone.** Ken
+> removed it from the applicant's Location & Zoning step, from Review and from
+> CPDO's review sheet, with the questions it asked and the answers it saved.
+> `ZoningCheck` and its helpers are in the history, not the tree, and what
+> `rules.json` marks "implemented" or "shown" was implemented or shown by it.
+> What still reads this folder at run time is the note under the map
+> (`ZoningConformance`, from `zone-uses.json` and `zone-boundaries.json`).
 
 **The ordinance cannot be turned into a machine that says "allowed" or
 "refused" — but it can be applied rule by rule, and BizTrack now does that.**

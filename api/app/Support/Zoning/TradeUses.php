@@ -4,8 +4,7 @@ namespace App\Support\Zoning;
 
 /**
  * What City Ordinance No. 24-2018 calls each trade on the register's PSIC
- * list: the use-list lines that ARE the trade, the ones that MAY be, and the
- * definition that decides between them.
+ * list: the use-list lines that ARE the trade, and the ones that MAY be.
  *
  * ── Why a table, and not word overlap ──────────────────────────────────────
  *
@@ -15,8 +14,8 @@ namespace App\Support\Zoning;
  * because they share "station" or "vehicles" with "Water refilling Station,
  * with parking space for delivery vehicles"; trucking matched "Small scale
  * eatery" on the word "road"; a bar matched the Institutional zone's "Places
- * of worship". Each of those said "Met". Two texts sharing a word is not two
- * texts naming the same activity.
+ * of worship". Each of those was reported as allowed. Two texts sharing a word
+ * is not two texts naming the same activity.
  *
  * The register's list is closed (134 codes and an "Other" row, ReferenceSeeder and
  * a later migration), so every code
@@ -24,16 +23,17 @@ namespace App\Support\Zoning;
  * ordinance's definitions (Art. III §1, Annex A):
  *
  *  - `is`: a use line containing one of these phrases names this trade. The
- *    check says Met.
+ *    note under the map says "Allowed here".
  *  - `maybe`: a line that is this trade only at some scale, for some goods,
  *    or as an instance of a "like:" list (Art. III §2(a): "and the like"
- *    takes in similar uses, and similarity is CPDO's to judge). The check says
- *    CPDO checks — never Met.
- *  - `def`: the definition that decided the reading, quoted to the officer.
+ *    takes in similar uses, and similarity is CPDO's to judge). The note says
+ *    it may be on the list — never allowed.
+ *  - `def`: the rule in docs/zoning-ordinance/rules.json whose definition
+ *    decided the reading.
  *
- * A code not in this table (one added to the register later) is never Met: its
- * nearest line is offered to CPDO as a possibility, under Art. III §1 (terms
- * the ordinance does not define take their national-code meaning) — see
+ * A code not in this table (one added to the register later) is never listed:
+ * its nearest line is offered as a possibility, under Art. III §1 (terms the
+ * ordinance does not define take their national-code meaning) — see
  * ZoningConformance::lookup.
  *
  * Phrases are lowercase substrings of a use line. A phrase starting `=` must
@@ -45,8 +45,20 @@ namespace App\Support\Zoning;
  * says: "All uses allowed in …" pointers, customary accessory uses (R-1:
  * "shall not include any activity conducted for monetary gain"), family
  * recreation "for the exclusive use of the members of the family", and the
- * home-occupation and home-industry clauses, which ZoningCheck applies on
- * their own conditions (V-2.1-HO, V-2.1-HI).
+ * home-occupation and home-industry clauses, which are a question of the
+ * trade rather than a line it can be (Ordinance::HOME_OCCUPATION).
+ *
+ * ── The readings that needed an answer are gone ────────────────────────────
+ *
+ * Several codes used to be narrowed by the applicant's answers to the zoning
+ * checklist or by the words of their own description: a tailor or a garment
+ * factory, a driving school or a tutorial service, a dry cleaner's solvents, a
+ * hotel's in-room kitchens, what a lessor leases, a junk shop or a car wash
+ * filed under "Other". The checklist that asked those questions was removed on
+ * 5 October 2026 (Ken), so those readings (`DECIDED`, `DESCRIBED` and the
+ * definitions quoted beside them) went with it; they are in this file's
+ * history. Unanswered, each such code was always read by its row below, every
+ * candidate line a possibility, and that is how it is read now.
  */
 final class TradeUses
 {
@@ -74,8 +86,7 @@ final class TradeUses
         '16220' => ['is' => ['manufacture of doors, windows and sashes', 'miscellaneous fabricated mill work'],
             'maybe' => ['woodworking establishments', 'furniture shops service operation']],
         // 14100, 15200 (and 47522, 85490, 95220 below) cover more than one
-        // listed use; DECIDED says which answer picks which line. Unanswered,
-        // every candidate is only "maybe".
+        // listed use, and nothing says which: every candidate is only "maybe".
         '14100' => ['maybe' => ['tailoring and dressmaking', 'dressmaking and tailoring', 'garments factory', 'garment and undergarment factories', 'miscellaneous wearing apparel']],
         '15200' => ['maybe' => ['manufacture of shoes except', 'manufacture of slipper and sandal', 'footwear parts except', 'rubber shoes and slippers', 'manufacture of plastic footwear', 'wooden shoes, shoe lace']],
         '17020' => ['is' => ['containers and boxes of paper and paper boards', 'wood and cardboard box factories']],
@@ -127,7 +138,7 @@ final class TradeUses
         '47214' => ['is' => ['frozen foods like meat'], 'maybe' => ['wet and dry markets']],
         // Small shops with no line of their own are Maximum R-2's "Other
         // related small scale stores", which it allows on the Zoning
-        // Administrator's conditions — listed, but never Met without them.
+        // Administrator's conditions.
         //
         // "Dry goods" here is food; the ordinance's "Dry goods" sits with
         // haberdashery and knitted wear, which is cloth. Same words, different
@@ -175,8 +186,8 @@ final class TradeUses
         '53100' => ['is' => ['courier services']],
 
         // ── Accommodation and food (55-56) ─────────────────────────────────
-        // 55101 is read per Annex A 44 in TradeUses::for(): rooms with their
-        // own cooking make it a hotel apartment (item 45), not a hotel.
+        // Annex A 44: a hotel has no cooking in its rooms; with it, it is a
+        // hotel apartment (item 45), which is 55102's line.
         '55101' => ['is' => ['=hotels', '=hotel', 'resort complexes'], 'def' => 'A-44'],
         '55102' => ['is' => ['pension house', 'hotel apartments or apartels', '=apartel']],
         '55103' => ['is' => ['=motel'], 'maybe' => ['=boarding houses', '=boarding house'], 'def' => 'A-60'],
@@ -199,7 +210,9 @@ final class TradeUses
         '64920' => ['is' => ['=money lending', '=pawnshops']],
         '64990' => ['is' => ['=bayad centers'], 'maybe' => ['=foreign exchange', '=banks']],
         '65120' => ['is' => ['=insurance']],
-        // 68100 is read per Art. III's "apartment building" in TradeUses::for().
+        // A lessor's line depends on what it leases — a house (Residential-1),
+        // an apartment building (Art. III §1: three or more families), stalls
+        // or parking — and nothing asks which. See PENDING.
         '68100' => [],
         '68200' => ['is' => ['=offices']],
         '69100' => ['is' => ['=offices']],
@@ -244,226 +257,44 @@ final class TradeUses
         '95290' => ['maybe' => ['=watch repair shops', 'bicycle repair', 'repair shops for watches, bags']],
         '96110' => ['is' => ['barbershop', 'barber shop']],
         '96120' => ['is' => ['beauty parlor', 'wellness facilities such as sauna, spa']],
-        // 96200 is read per Annex A 28 in TradeUses::for(): dry cleaning with
-        // flammable solvents is I-2's "Dry cleaning plants using flammable
-        // liquids", not a laundry.
+        // Annex A 28: dry cleaning with flammable solvents is I-2's "Dry
+        // cleaning plants using flammable liquids", not a laundry.
         '96200' => ['is' => ['laundries and laundromats', '=laundries'], 'def' => 'A-48'],
         '96301' => ['is' => ['funeral parlors']],
         '96990' => [],
     ];
 
     /**
-     * Codes that cover more than one listed use, and the answer that says
-     * which. `fact` is asked on the use finding; `words` read the applicant's
-     * own description of the line when the question is unanswered; `by` gives
-     * each answer's lines (`is`) and possibilities (`maybe`). A bool fact's
-     * answers are keyed 'true' and 'false'. Unanswered and undescribed, the
-     * row in USES stands — every candidate only "maybe".
+     * Trades the lists cannot place at all without knowing more than the code
+     * says, with the neutral reason. The headline under the map stays
+     * undetermined for them (ZoningConformance::forBarangay).
      *
-     * @var array<string, array{fact: string, words?: array<string, string>, by: array<string, array{is?: list<string>, maybe?: list<string>}>}>
+     * @var array<string, string>
      */
-    public const DECIDED = [
-        // A tailoring shop is a personal service shop (Maximum R-2, C-1); a
-        // garment factory is industry (I-1, I-2).
-        '14100' => ['fact' => 'apparel_kind',
-            'words' => ['factory' => '/\b(?:factory|factories|manufactur\w*|garments?\s+(?:making|production|plant))\b/i', 'tailoring' => '/\b(?:tailor\w*|dressmak\w*|alterations?|sastre)\b/i'],
-            'by' => [
-                'tailoring' => ['is' => ['tailoring and dressmaking', 'dressmaking and tailoring']],
-                'factory' => ['is' => ['garments factory', 'garment and undergarment factories', 'miscellaneous wearing apparel']],
-            ]],
-        // Tutorial services are Residential-1's; a driving school is only in
-        // C-1's and General Commercial's short-term special education.
-        '85490' => ['fact' => 'school_kind',
-            // "Tutorial services" are Residential-1's; "tutorial centers" only
-            // C-1's and General Commercial's. A bare "tutorial" says neither.
-            'words' => ['driving' => '/\bdriving\b/i', 'vocational' => '/\b(?:vocational|technical\s+school|tesda|trade\s+school)\b/i',
-                'short_course' => '/\b(?:dance|self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|speech)\b/i',
-                'tutorial_centre' => '/\b(?:review|tutorial|learning|tutoring)\s+cent(?:er|re)s?\b/i',
-                'tutorial_service' => '/\b(?:home\s+tutor\w*|private\s+tutor\w*|tutoring\s+services?)\b/i'],
-            'by' => [
-                'tutorial_service' => ['is' => ['=tutorial services'], 'maybe' => ['=tutorial centers']],
-                'tutorial_centre' => ['is' => ['=tutorial centers'], 'maybe' => ['=tutorial services', 'training centers']],
-                'driving' => ['is' => ['=driving school']],
-                'vocational' => ['is' => ['vocational school', 'vocational/technical school', 'vocational and trade schools']],
-                'short_course' => ['is' => ['=dance schools', '=schools for self-defense', '=speech clinics'], 'maybe' => ['special education (sped)']],
-            ]],
-        // Industrial-1 takes shoes "except rubber, plastic and wood";
-        // Industrial-2 takes rubber and plastic; wooden shoes are I-1's own line.
-        '15200' => ['fact' => 'footwear_material',
-            'words' => ['rubber_plastic' => '/\b(?:rubber|plastic|pvc)\b/i', 'wood' => '/\bwood(?:en)?\b/i', 'leather' => '/\b(?:leather|fabric|canvas)\b/i'],
-            'by' => [
-                'leather' => ['is' => ['manufacture of shoes except', 'manufacture of slipper and sandal', 'footwear parts except']],
-                'rubber_plastic' => ['is' => ['rubber shoes and slippers', 'manufacture of plastic footwear']],
-                'wood' => ['is' => ['wooden shoes, shoe lace']],
-            ]],
-        // Commercial-2: "Paint stores without bulk handling"; Industrial-2:
-        // "Paint stores with bulk handling".
-        '47522' => ['fact' => 'paint_bulk_handling',
-            'by' => [
-                'false' => ['is' => ['paint stores without bulk handling', '=lumber/hardware'], 'maybe' => ['construction supply stores/depots', 'glassware']],
-                'true' => ['is' => ['paint stores with bulk handling'], 'maybe' => ['=lumber/hardware']],
-            ]],
-        '95220' => ['fact' => 'neighbourhood_scale',
-            'by' => [
-                'true' => ['is' => ['=house furniture and appliances repair shops', 'repair shops on neighborhood scale']],
-                'false' => ['is' => ['=house furniture and appliances repair shops']],
-            ]],
+    public const PENDING = [
+        '68100' => 'Which zones list a lessor depends on what it leases: a house or duplex (Residential-1), an apartment building for three or more families (Basic Residential-2 and the zones above it), stalls or commercial space, or parking.',
     ];
 
     /**
-     * Listed uses no register code reaches — a medium junk shop, a lechon
-     * store, a car wash, an event planner, the short-course schools. A filer
-     * under "Other (not listed)" lands on one by picking it (`listed_use`, which
-     * CPDO may also record for them) or by the words of their description; a
-     * register trade whose description names one is offered the line as a
-     * possibility for CPDO.
+     * The table's reading of `$code`.
      *
-     * @var array<string, array{words: string, is: list<string>}>
-     */
-    public const DESCRIBED = [
-        'junk_shop' => ['words' => '/\b(?:junk\s*shop|junkshop|scrap\s+(?:metal|dealer|buyer))\b/i', 'is' => ['medium scale junk shop']],
-        'lechon' => ['words' => '/\blechon\b/i', 'is' => ['=lechon stores']],
-        'chicharon' => ['words' => '/\bchicharr?on\b/i', 'is' => ['=chicharon factory']],
-        'car_wash' => ['words' => '/\bcar\s*wash\b/i', 'is' => ['car wash, subject to conditions', 'vulcanizing shops and carwash']],
-        'event_planner' => ['words' => '/\bevents?\s+(?:plann\w+|organi[sz]\w+|coordinat\w+)\b/i', 'is' => ['=event planners']],
-        'vocational' => ['words' => '/\b(?:vocational|technical\s+school|tesda)\b/i', 'is' => ['vocational school', 'vocational/technical school', 'vocational and trade schools']],
-        'dance_school' => ['words' => '/\bdance\s+(?:school|studio|class(?:es)?)\b/i', 'is' => ['=dance schools']],
-        'self_defense' => ['words' => '/\b(?:self[- ]defen[cs]e|martial\s+arts?|karate|taekwondo|judo|arnis)\b/i', 'is' => ['=schools for self-defense']],
-        'sped' => ['words' => '/\b(?:sped|special\s+education)\b/i', 'is' => ['special education (sped)']],
-    ];
-
-    /**
-     * The definitions this file reads, in the ordinance's words (shortened),
-     * keyed by the rule id that holds each in rules.json. Quoted on the use
-     * finding so the officer sees why a trade was read as a given use.
-     */
-    public const DEFINITIONS = [
-        'A-5' => 'Annex A 5: a bar is a place where liquor is sold for a price.',
-        'A-18' => 'Annex A 18: car barns are terminals or garages for public utility vehicles, stored, repaired and maintained on their own premises.',
-        'A-24' => 'Annex A 24: a department store, mall or shopping centre is a large store divided into departments selling different goods.',
-        'A-27' => 'Annex A 27: a dormitory boards ten or more people, sleeping and eating in common halls; fewer is a boarding house.',
-        'A-28' => 'Annex A 28: dry cleaning cleans textiles with solvents. Industrial-2 lists "dry cleaning plants using flammable liquids"; a laundry using none is a laundry.',
-        'A-41' => 'Annex A 41: a gasoline service station sells fuel and lubricants, with washing and minor adjustments.',
-        'A-44' => 'Annex A 44: a hotel has rooms for hire with a general kitchen and dining room, and no cooking in any room.',
-        'A-45' => 'Annex A 45: a hotel apartment is an apartment that may give dining and other services to its own tenants; with cooking in the rooms it is not a hotel.',
-        'A-48' => 'Annex A 48: a laundromat provides washing machines for customers to use themselves.',
-        'A-60' => 'Annex A 60: a motel is a hotel for motorists along a highway, for short stays.',
-        'A-76' => 'Annex A 76: a restaurant is any establishment where food is cooked and served.',
-        'A-86' => 'Annex A 86: a wet or dry market is a facility selling fresh produce, meat and poultry and basic household wares.',
-        'III-1-APT' => 'Art. III §1: an apartment building is designed for three or more families living independently; one or two is a single-detached or duplex house.',
-        'III-1-WAREHOUSE' => 'Art. III §1: a warehouse is storage run for profit as a service to others; a store’s own stockroom is an accessory use.',
-    ];
-
-    /**
-     * The table's reading of `$code`, after the answers and definitions that
-     * decide between its lines.
+     * `curated` is false for a code the table has not read; `pending` is the
+     * reason for a trade it cannot place (PENDING), else null.
      *
-     * `$description` is the applicant's own description of the line; it
-     * decides a DECIDED code when its question is unanswered, and lands an
-     * "Other" filer on a DESCRIBED use. `asks` are the facts the reading turns
-     * on, for the use finding to put to the applicant.
-     *
-     * @param  array<string, mixed>  $facts
-     *                                       `pending` is a neutral sentence for a trade the lists cannot place at
-     *                                       all until a question is answered (a lessor: homes, stalls or parking).
-     * @return array{curated: bool, is: list<string>, maybe: list<string>, def: ?string, asks: list<string>, pending: ?string}
+     * @return array{curated: bool, is: list<string>, maybe: list<string>, pending: ?string}
      */
-    public static function for(string $code, array $facts = [], string $description = ''): array
+    public static function for(string $code): array
     {
         if (! array_key_exists($code, self::USES)) {
-            return ['curated' => false, 'is' => [], 'maybe' => [], 'def' => null, 'asks' => [], 'pending' => null];
+            return ['curated' => false, 'is' => [], 'maybe' => [], 'pending' => null];
         }
         $spec = self::USES[$code];
-        $out = ['curated' => true, 'is' => $spec['is'] ?? [], 'maybe' => $spec['maybe'] ?? [], 'def' => $spec['def'] ?? null, 'asks' => [], 'pending' => null];
 
-        if (isset(self::DECIDED[$code])) {
-            $decided = self::DECIDED[$code];
-            $out['asks'][] = $decided['fact'];
-            $answer = $facts[$decided['fact']] ?? null;
-            $key = is_bool($answer) ? ($answer ? 'true' : 'false') : $answer;
-            if ($key === null) {
-                foreach ($decided['words'] ?? [] as $option => $pattern) {
-                    if (preg_match($pattern, $description) === 1) {
-                        $key = $option;
-                        break;
-                    }
-                }
-            }
-            if (is_string($key) && isset($decided['by'][$key])) {
-                $out['is'] = $decided['by'][$key]['is'] ?? [];
-                $out['maybe'] = $decided['by'][$key]['maybe'] ?? [];
-            }
-        }
-
-        // "Other (not listed)": the pick, else the description's words.
-        if ($code === '00000') {
-            $out['asks'][] = 'listed_use';
-            $pick = $facts['listed_use'] ?? null;
-            if (is_string($pick) && isset(self::DESCRIBED[$pick])) {
-                $out['is'] = self::DESCRIBED[$pick]['is'];
-            } elseif ($pick === null) {
-                foreach (self::DESCRIBED as $use) {
-                    if (preg_match($use['words'], $description) === 1) {
-                        $out['is'] = $use['is'];
-                        break;
-                    }
-                }
-            }
-        } else {
-            // A register trade described as one of these is offered the line,
-            // ahead of the code's own loose possibilities: the applicant's
-            // words say more than the code's.
-            foreach (self::DESCRIBED as $use) {
-                if (preg_match($use['words'], $description) === 1) {
-                    $out['maybe'] = array_merge($use['is'], $out['maybe']);
-                }
-            }
-        }
-
-        // Annex A 44-45: a hotel whose rooms have their own cooking is a
-        // hotel apartment, which the lists name separately.
-        if ($code === '55101' && ($facts['rooms_have_kitchens'] ?? null) === true) {
-            $out['is'] = ['hotel apartments or apartels', '=apartel', 'resort complexes'];
-            $out['def'] = 'A-45';
-        }
-
-        // Annex A 28 with Industrial-2's line: flammable solvents make it a
-        // dry-cleaning plant, which only Industrial-2 lists.
-        if ($code === '96200' && ($facts['flammable_solvents'] ?? null) === true) {
-            $out['is'] = ['dry cleaning plants using flammable liquids'];
-            $out['def'] = 'A-28';
-        }
-
-        // Art. III §1, apartment building: three or more families. The
-        // register's one code covers houses, apartments, commercial space
-        // and parking slots.
-        if ($code === '68100') {
-            $what = $facts['leases_what'] ?? null;
-            $families = $facts['families_in_building'] ?? null;
-            $out['asks'] = $what === 'dwellings' ? ['leases_what', 'families_in_building'] : ['leases_what'];
-            if ($what === null) {
-                // Until it says, nothing is read in: not "Apartments" for a
-                // lessor whose description says it runs a pay parking lot.
-                $out['is'] = [];
-                $out['maybe'] = [];
-                $out['pending'] = 'Which zones list a lessor depends on what it leases: a house or duplex (Residential-1), an apartment building for three or more families (Basic Residential-2 and the zones above it), stalls or commercial space, or parking. Say what you lease.';
-            } elseif ($what === 'commercial') {
-                $out['is'] = [];
-                $out['maybe'] = [];
-            } elseif ($what === 'parking') {
-                $out['is'] = Ordinance::VEHICLE_USES['parking_lot']['phrases'];
-                $out['maybe'] = [];
-            } elseif ($what === 'dwellings' && is_numeric($families)) {
-                $out['is'] = match (true) {
-                    (float) $families >= 3 => ['=apartments', '=apartment', 'residential condominiums'],
-                    (float) $families >= 2 => ['semi-detached family dwelling units'],
-                    default => ['single-detached dwelling units'],
-                };
-                $out['maybe'] = [];
-            }
-            $out['def'] = $what === 'parking' ? null : 'III-1-APT';
-        }
-
-        return $out;
+        return [
+            'curated' => true,
+            'is' => $spec['is'] ?? [],
+            'maybe' => $spec['maybe'] ?? [],
+            'pending' => self::PENDING[$code] ?? null,
+        ];
     }
 }

@@ -84,12 +84,13 @@ class Application extends Model
          */
         'prior_permit_declared_none',
         /*
-         * The answers City Ordinance No. 24-2018 needs that nothing else on the
-         * filing carries — the applicant's, and the zoning officer's own. Two
-         * columns so neither side's endpoint can overwrite the other's; see
-         * the migration 2026_10_03_000100 and App\Support\Zoning\ZoningFacts.
+         * `zoning_facts` and `zoning_officer_facts` are no longer here. They
+         * held the answers to the rule-by-rule zoning checklist (migration
+         * 2026_10_03_000100), which Ken removed on 5 October 2026. The columns
+         * are left in place, unread and unwritten, so the answers already
+         * given are not destroyed by a code change; dropping them is a
+         * migration of its own, and bringing the checklist back is a revert.
          */
-        'zoning_facts', 'zoning_officer_facts',
     ];
 
     protected $casts = [
@@ -101,8 +102,6 @@ class Application extends Model
         'complexity_set_at' => 'datetime',
         'last_opened_at' => 'datetime',
         'fee_profile' => 'array',
-        'zoning_facts' => 'array',
-        'zoning_officer_facts' => 'array',
         /*
          * What each returned field said when the officer sent it back, plus
          * the moment they did. Compared once at resubmission and cleared —

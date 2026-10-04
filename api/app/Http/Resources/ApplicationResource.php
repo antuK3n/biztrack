@@ -14,8 +14,6 @@ use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
-use App\Support\Zoning\ZoningCheck;
-use App\Support\Zoning\ZoningContext;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -291,12 +289,6 @@ class ApplicationResource extends JsonResource
                 : [],
             'fee_profile' => $this->fee_profile,
             /*
-             * The applicant's answers to the zoning ordinance's questions, so
-             * a reopened draft shows them as they were left. The zoning
-             * officer's own answers travel inside `zoning_check` below.
-             */
-            'zoning_facts' => $this->zoning_facts,
-            /*
              * Per-office questionnaires, filtered to the sheets THIS reader
              * owns (SEP-1). See ApplicationVisibility::readsOfficeSheet().
              *
@@ -391,17 +383,6 @@ class ApplicationResource extends JsonResource
                              * cannot is half a feature. Both doors, one builder.
                              */
                             'requirements' => SheetRequirements::for($this->resource, $type->code),
-                            /*
-                             * City Ordinance No. 24-2018, rule by rule, for the
-                             * office that decides the locational clearance —
-                             * the same evaluator the applicant's wizard asks,
-                             * so the early warning and the officer's cited
-                             * checklist cannot disagree. Only on CPDD's sheet:
-                             * no other office applies the zoning ordinance.
-                             */
-                            'zoning_check' => $type->code === 'ZONING'
-                                ? ZoningCheck::evaluate(ZoningContext::fromApplication($this->resource))
-                                : null,
                             /*
                              * What the applicant changed on the rows this
                              * office last asked about — was and now.
