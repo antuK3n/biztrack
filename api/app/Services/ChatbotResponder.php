@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\PaymentMethod;
 use App\Models\Application;
 use App\Models\Department;
 use App\Models\FeeRule;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\PaymentMode;
 use App\Support\Ra11032;
 use Illuminate\Support\Collection;
 
@@ -785,11 +787,28 @@ class ChatbotResponder
             .'You can copy yours from the application card in My Applications and paste it here.';
     }
 
+    /**
+     * How to pay, as the payment switch has it right now (PaymentMode).
+     *
+     * This used to say "payment is simulated, no real money moves" and "there
+     * is no over-the-counter option" whatever the switch said. Both stopped
+     * being true: KwikPay takes real money when the super admin turns it on,
+     * and BPLO marks a bill paid at the City Hall counter
+     * (`POST applications/{id}/counter-payment`, Ken, 4 October 2026). The
+     * methods are the ones the Pay online screen offers in that mode.
+     */
     private function payment(string $text, ?PermitType $type): string
     {
+        $simulated = ! PaymentMode::isKwikPay();
+        $counter = 'You can also pay in person at the BPLO counter at Malabon City Hall, and BPLO marks the bill paid in BizTrack.';
+
         if ($this->mentionsAny($text, self::METHOD_TERMS)) {
-            return "BizTrack accepts GCash, Maya, and credit or debit card on the Pay online screen. Payment is simulated in this prototype, so no real money moves.\n"
-                .'There is no over-the-counter option in the system yet, so pay from your application page and keep the receipt it issues.';
+            $methods = collect(PaymentMethod::forMode(PaymentMode::current()))->map(fn (PaymentMethod $m) => $m->label())->all();
+            $list = implode(', ', array_slice($methods, 0, -1)).' and '.end($methods);
+
+            return "BizTrack accepts {$list} on the Pay online screen."
+                .($simulated ? ' Payment is simulated in this prototype, so no real money moves.' : '')
+                ."\n{$counter}";
         }
 
         if ($type) {
@@ -797,9 +816,12 @@ class ChatbotResponder
                 .'Open the application in My Applications and use Pay online once the Tax Order of Payment is ready.';
         }
 
-        return "Paying in BizTrack is simulated for this prototype, so no real money moves.\n"
+        return ($simulated ? "Paying in BizTrack is simulated for this prototype, so no real money moves.\n" : '')
             .'Open your application from My Applications; once your Tax Order of Payment is ready, use the Pay online button on the application detail page. '
-            .'You get a receipt right away and your application moves to review.';
+            .($simulated
+                ? 'You get a receipt right away and your application moves to review.'
+                : 'Your receipt is issued once the payment is confirmed.')
+            ."\n{$counter}";
     }
 
     private function renewal(?PermitType $type): string

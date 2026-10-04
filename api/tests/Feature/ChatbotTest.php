@@ -3,6 +3,7 @@
 use App\Models\Application;
 use App\Models\ChatbotConversation;
 use App\Models\User;
+use App\Support\PaymentMode;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -269,6 +270,31 @@ it('answers payment method questions with the accepted methods', function () {
     expect(ask('can I pay with gcash?'))
         ->toContain('GCash')
         ->toContain('Maya');
+});
+
+it('tells owners how payment really works in the current payment mode', function () {
+    // Simulated: nothing moves, and the BPLO counter is still a way to pay.
+    expect(ask('can I pay cash over the counter?'))
+        ->toContain('no real money moves')
+        ->toContain('BPLO counter')
+        ->not->toContain('There is no over-the-counter option');
+
+    // Online payment switched on: no "simulated" claim, and the methods it offers.
+    config([
+        'payments.kwikpay.base_url' => 'https://kwikpay.invalid',
+        'payments.kwikpay.merchant' => 'TEST',
+        'payments.kwikpay.key' => 'test-key',
+        'payments.kwikpay.payment_type' => 'TEST',
+    ]);
+    PaymentMode::set(PaymentMode::KWIKPAY);
+
+    $method = ask('can I pay with gcash?');
+    expect($method)->toContain('GCash')->toContain('QR Ph')->toContain('GoTyme')
+        ->toContain('BPLO counter')
+        ->not->toContain('no real money moves')
+        ->not->toContain('Credit / Debit Card')
+        ->not->toContain('There is no over-the-counter option');
+    expect(ask('how do I pay?'))->not->toContain('simulated')->not->toContain('no real money moves');
 });
 
 it('scopes the offices answer to the named permit', function () {
