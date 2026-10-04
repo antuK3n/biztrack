@@ -446,3 +446,68 @@ it('stops the applicant editing an office form once its own clearance has been s
     // Neither refusal wrote anything, and the last permitted write did.
     expect(savedForm($app, 'FSIC')['fsic_remarks'])->toBe('fixed as BFP asked');
 });
+
+/*
+ * ── The owner's address, from the account ───────────────────────────────────
+ *
+ * Client, 5 October 2026: *"Check the business permit application if there is
+ * no owner's address to derive from … If none, derive this from the user's
+ * address, but still editable."* The business permit holds none, so the sheet
+ * is OFFERED the account's home address on the `prefill` channel — never
+ * written into `form_data` — and `prefill_from` says it came from the account.
+ */
+it('offers the account’s home address to the sheets that ask the owner’s address', function () {
+    User::where('email', 'owner@biztrack.local')->update(homeAddress());
+    $app = officeFormApp(['OCCUPANCY', 'CEC', 'FSIC']);
+
+    $forms = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->keyBy('permit_type_code');
+
+    expect($forms['OCCUPANCY']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
+        ->and($forms['OCCUPANCY']['prefill_from']['owner_address'])->toBe('account')
+        ->and($forms['CEC']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
+        // Offered, not applied: the stored sheet does not have it until the applicant saves.
+        ->and($forms['OCCUPANCY']['form_data'])->not->toHaveKey('owner_address')
+        // The BFP sheet prints no box for it.
+        ->and((array) ($forms['FSIC']['prefill'] ?? []))->not->toHaveKey('owner_address');
+});
+
+it('stops offering the address once the applicant has written one', function () {
+    User::where('email', 'owner@biztrack.local')->update(homeAddress());
+    $app = officeFormApp(['OCCUPANCY']);
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['owner_address' => '7 Somewhere Else, Tonsuya, Malabon'],
+    ]);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'OCCUPANCY');
+
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address')
+        ->and($form['form_data']['owner_address'])->toBe('7 Somewhere Else, Tonsuya, Malabon');
+});
+
+it('offers nothing when the account has no home address', function () {
+    User::where('email', 'owner@biztrack.local')->update([
+        'home_street' => null, 'home_barangay' => null, 'home_city' => null, 'home_province' => null,
+    ]);
+    $app = officeFormApp(['OCCUPANCY']);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'OCCUPANCY');
+
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address');
+});

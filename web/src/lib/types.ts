@@ -3131,7 +3131,15 @@ export interface OfficeForm {
    * not a fact. See `App\Support\RenewalPrefill`.
    */
   prefill?: Record<string, unknown>
+  /**
+   * Where each offered key came from: last year's sheet, or the applicant's
+   * account (the owner's home address, which the business permit never asked).
+   * The flag beside the field reads this. Absent means `previous`.
+   */
+  prefill_from?: Record<string, CarriedSource>
 }
+
+export type CarriedSource = 'previous' | 'account'
 
 /**
  * One row of MCG-CPDD-FO-003 v1.2's checklist, answered for this filing.
