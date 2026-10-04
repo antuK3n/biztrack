@@ -179,7 +179,11 @@ function OwnerHome() {
    */
   const { data: myPermits } = useAsync(() => permits.list({ per_page: 100 }), [])
   const dueForRenewal = (myPermits ?? []).filter(
-    (p) => p.status === 'active' && (p.renewal_blocked_reason ?? null) === null,
+    (p) =>
+      p.status === 'active' &&
+      (p.renewal_blocked_reason ?? null) === null &&
+      // Already being renewed: the chooser greys it out, so it is not due here either.
+      !p.renewal_in_progress,
   ).length
 
   return (

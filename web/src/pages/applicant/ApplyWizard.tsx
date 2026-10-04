@@ -2195,8 +2195,8 @@ function IdentifyFilingModal({
    *
    * Nor is a permit another filing is already renewing: the picker greys it
    * out as `Renewal in progress`, so counting it would promise one more thing
-   * due than there is to tick (Ken, 5 October 2026). The Home tile reads the
-   * same list without this flag, so the two can differ by exactly those.
+   * due than there is to tick (Ken, 5 October 2026). The Home tile skips them
+   * too, so the two still agree.
    */
   const { data: ownPermits } = useAsync(
     () =>
