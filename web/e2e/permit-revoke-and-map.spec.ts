@@ -90,16 +90,26 @@ test.describe('BPLO revokes a permit', () => {
   })
 })
 
-test.describe('another office cannot revoke', () => {
+test.describe('an office revokes its own certificates, and maps them', () => {
   test.use({ storageState: sessionFor('fire') })
 
-  test('the fire office’s table offers no Revoke and no Map', async ({ page }) => {
+  /*
+   * Client, 4 October 2026: "yung mga kanya kanya nilang permit pwede nilang
+   * irevoke syempre tas maglagay din ng maps tulad sa bplo".
+   */
+  test('the fire office is offered Revoke on FSICs only, and a Map of its own certificate', async ({ page }) => {
     await page.goto('/staff/admin/permits')
     await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
 
-    await expect(page.getByRole('button', { name: /^Revoke / })).toHaveCount(0)
-    // The map is BPLO's and the super admin's; the switch is not drawn.
-    await expect(page.getByRole('group', { name: 'Permits view' })).toHaveCount(0)
+    // Every Revoke on its table is on one of its own certificates.
+    for (const label of await page.getByRole('button', { name: /^Revoke / }).evaluateAll((els) =>
+      els.map((e) => e.getAttribute('aria-label') ?? ''),
+    )) {
+      expect(label).toMatch(/^Revoke FSIC-/)
+    }
+
+    await page.getByRole('group', { name: 'Permits view' }).getByRole('button', { name: 'Map' }).click()
+    await expect(page.getByText(/businesses holding a Fire Safety Inspection Certificate carry a/)).toBeVisible({ timeout: 30_000 })
   })
 })
 

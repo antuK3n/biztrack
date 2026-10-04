@@ -557,13 +557,15 @@ class PermitController extends Controller
 
     /**
      * Revoke a permit (checklist item 23). Behind `permit.revoke` on the
-     * route, which BPLO alone holds. See `WorkflowService::revokePermit`
-     * for what may be revoked and what the act writes.
+     * route, which BPLO and the five clearance offices hold. See
+     * `WorkflowService::revokePermit` for what may be revoked and what the act
+     * writes.
      *
-     * And the Mayor's Permit only [client, 4 October 2026: "paki tanggal ang
-     * revoke sa super admin, at bplo, dapat sa bplo ayon lang kaya nyang i
-     * revoke"]. BPLO reads every office's certificates, but a Sanitary Permit
-     * or an FSIC is the issuing office's to take back, not BPLO's. Refused
+     * And only by the office that ISSUED it [client, 4 October 2026: "yung
+     * cert na nirerelease ng office na yon sya lang pwede mag revoke, sa side
+     * ng bplo mayors permit lang"]. BPLO reads every office's certificates but
+     * revokes only the Mayor's Permit; CHO revokes its Sanitary Permits, and so
+     * on. The super admin belongs to no office and revokes nothing. Refused
      * here rather than only hidden on screen, so a direct request is refused too.
      *
      * Answers with the register row rather than the contracted payload, so the
@@ -578,10 +580,11 @@ class PermitController extends Controller
             'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
         ]);
 
+        $issuer = $permit->permitType?->issuing_department_id;
         abort_unless(
-            $permit->permitType?->code === PermitType::OUTCOME_CODE,
+            $issuer !== null && (int) $issuer === (int) $request->user()->department_id,
             403,
-            'Only the Mayor\x27s / Business Permit can be revoked here. Another office\x27s permit is that office\x27s to revoke.',
+            'Only the office that issued this permit can revoke it.',
         );
 
         $this->workflow->revokePermit($permit, $data['reason']);

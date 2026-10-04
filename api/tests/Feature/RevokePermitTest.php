@@ -96,18 +96,27 @@ it('refuses BPLO on another office’s permit — it revokes the Mayor’s Permi
     }
 });
 
-it('refuses every other office, and the owner', function () {
+it('lets an office revoke the certificate it issued', function () {
+    // Client, 4 October 2026: "yung mga kanya kanya nilang permit pwede nilang irevoke".
+    $permit = revocablePermit('SANITARY');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Failed the sanitary re-inspection.'])
+        ->assertOk()
+        ->assertJsonPath('data.status', 'revoked');
+});
+
+it('refuses every office but the issuer, and the owner', function () {
     /*
-     * Ken's decision: BPLO and the super admin, nobody else. The clearance
-     * offices hold `permit.view_all` and can SEE this permit's row on their
-     * own table when it is theirs, so the refusal has to come from the route,
-     * not from the row being out of reach. The owner is here because the one
-     * person who must never be able to touch a revocation is its subject.
+     * "yung cert na nirerelease ng office na yon sya lang pwede mag revoke".
+     * The other offices can SEE this permit's row where they read it, so the
+     * refusal has to come from the server, not from the row being out of
+     * reach. The owner is here because the one person who must never be able
+     * to touch a revocation is its subject.
      */
     $permit = revocablePermit('SANITARY');
 
     foreach ([
-        'sanitary@biztrack.local',
         'fire@biztrack.local',
         'zoning@biztrack.local',
         'obo@biztrack.local',
