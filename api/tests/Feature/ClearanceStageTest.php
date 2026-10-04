@@ -557,6 +557,35 @@ it('refuses to start a permit on a submitted filing that has not been paid for',
         ->toBeFalse();
 });
 
+/*
+ * The other door to an office, shut the same way (owner-clearances row 2).
+ *
+ * `startClearance` refused before payment and the sheet's own Submit did not:
+ * the five permits are attached at submission, so a hand-made PUT with
+ * `submit: true` on an unpaid For Approval filing routed CHO, and CHO could
+ * approve, book and pass a visit and mint a Sanitary Permit on a filing BPLO
+ * had not yet approved, let alone billed.
+ */
+it('refuses an office sheet handed in on a submitted filing that has not been paid for', function () {
+    $app = submittedClearanceApplication();
+    satisfyChecklist($app->fresh(), 'SANITARY');
+
+    $this->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+        'form_data' => [],
+        'submit' => true,
+    ])->assertStatus(422)
+        ->assertJsonPath('message', 'The other permits open once this application is paid.');
+
+    $row = ApplicationPermitType::where('application_id', $app->id)
+        ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
+        ->firstOrFail();
+
+    expect($row->status)->toBe(ClearanceStatus::NotStarted)
+        ->and(ApplicationAssignment::where('application_id', $app->id)
+            ->where('department_id', Department::where('code', 'CHO')->value('id'))->exists())
+        ->toBeFalse();
+});
+
 it('keeps the stage shut on a filing that was rejected', function () {
     $app = paidClearanceApplication();
 

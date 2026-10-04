@@ -1978,6 +1978,33 @@ class WorkflowService
     // ── B: one other permit ─────────────────────────────────────────────────
 
     /**
+     * Paid, OR nothing to pay — the gate in front of every office.
+     *
+     * A clearance-only renewal is never billed — its fee is swept onto the
+     * next business-permit renewal — so gating it on payment refused for ever
+     * the one permit the filing existed to renew. See
+     * `Application::defersPayment`, which both this and
+     * `ClearanceService::isUnlocked` ask so the two cannot drift.
+     *
+     * TWO doors ask it, and for a while only one did. `startClearance` refused
+     * an unpaid filing; `submitClearanceForm` did not, and since the five
+     * permits are attached at submission there was a NotStarted row to hand in
+     * from the moment BPLO had the form. A PUT with `submit: true` on an unpaid
+     * For Approval filing routed the office, and the office could approve,
+     * inspect and issue a certificate on a filing nobody had paid for
+     * (owner-clearances row 2). The screens never offered it; a rule the
+     * server does not hold is a suggestion.
+     */
+    private function refuseBeforePayment(Application $app): void
+    {
+        if (! $app->status?->isPaid() && ! $app->defersPayment()) {
+            throw ValidationException::withMessages([
+                'status' => ['The other permits open once this application is paid.'],
+            ]);
+        }
+    }
+
+    /**
      * B: apply for, or upload, ONE other permit. not_started → for_approval.
      *
      * `$mode` is how the applicant satisfied it — they filled the office's form
@@ -1996,18 +2023,7 @@ class WorkflowService
         PermitType $type,
         string $mode,
     ): ApplicationPermitType {
-        /*
-         * Paid, OR nothing to pay. A clearance-only renewal is never billed —
-         * its fee is swept onto the next business-permit renewal — so gating it
-         * on payment refused for ever the one permit the filing existed to
-         * renew. See `Application::defersPayment`, which both this and
-         * `ClearanceService::isUnlocked` ask so the two cannot drift.
-         */
-        if (! $app->status?->isPaid() && ! $app->defersPayment()) {
-            throw ValidationException::withMessages([
-                'status' => ['The other permits open once this application is paid.'],
-            ]);
-        }
+        $this->refuseBeforePayment($app);
 
         if (! in_array($mode, [ApplicationPermitType::MODE_APPLY, ApplicationPermitType::MODE_UPLOAD], true)) {
             throw ValidationException::withMessages([
@@ -2338,6 +2354,13 @@ class WorkflowService
         ], true)) {
             return;
         }
+
+        /*
+         * After the state check, so re-saving a sheet that is already with
+         * its office stays the quiet no-op it has always been; before
+         * anything moves, so a refused hand-in leaves no trace.
+         */
+        $this->refuseBeforePayment($app);
 
         DB::transaction(function () use ($app, $type, $row, $resubmitting) {
             /*
