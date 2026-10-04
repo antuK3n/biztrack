@@ -1261,6 +1261,8 @@ export interface PermitRegisterRow extends Permit {
     filename: string
     status: string | null
     download_url: string
+    /** Sent under Other Requirements, in answer to an office's request. */
+    from_request?: boolean
   }[] | null
 }
 

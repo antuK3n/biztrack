@@ -289,10 +289,25 @@ function UploadsCell({ permit }: { permit: PermitRegisterRow }) {
         <ul className="mt-2 space-y-2.5">
           {docs.map((d) => (
             <li key={d.id}>
+              {/*
+                A file the office asked for after filing, under Other
+                Requirements, says so — otherwise it reads as one of the
+                requirements filed at the start [client, 4 October 2026].
+              */}
+              {d.from_request && (
+                <div className="mb-1">
+                  <StatusChip tone="tint-orange">Other Requirements</StatusChip>
+                </div>
+              )}
               <p className="text-xs font-semibold text-ink">{d.name}</p>
               <p className="max-w-[16rem] truncate text-[11px] text-ink-muted" title={d.filename}>
                 {d.filename}
               </p>
+              {d.from_request && (
+                <p className="mt-0.5 max-w-[16rem] text-[11px] leading-snug text-ink-muted">
+                  Sent by the business owner when the office requested it.
+                </p>
+              )}
               <div className="mt-1">
                 <DocumentActions id={d.id} filename={d.filename} label={d.name} />
               </div>
