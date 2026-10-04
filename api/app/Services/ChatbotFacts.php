@@ -229,9 +229,11 @@ class ChatbotFacts
     }
 
     /*
-     * RenewalSeason (when each permit expires), RenewalWindow (when renewal
-     * opens and when it is too late), RenewalScope (one permit per renewal)
-     * and the late charges from the penalty rule.
+     * When each permit expires as WorkflowService::issuePermitFor dates it
+     * (RenewalSeason for the business permit and a clearance's first issue, a
+     * year from the renewal for a renewed clearance), RenewalWindow (when
+     * renewal opens and when it is too late), RenewalScope (one permit per
+     * renewal) and the late charges from the penalty rule.
      */
     private function renewal(): string
     {
@@ -242,9 +244,9 @@ class ChatbotFacts
 
         $lines = [
             'RENEWAL',
-            "• The {$mayors} always expires on {$closes} of the year after it was issued. Renew it in the first ".RenewalSeason::CLOSES_DAY.' days of January; renewal opens on 1 January.',
-            '• The other permits expire on 31 December of the year they were issued'
-                .($opensBefore !== null ? ", and can be renewed from {$opensBefore} days before they expire." : '.'),
+            "• The {$mayors} always expires on {$closes} of the year after it is issued or renewed. Renew it in the first ".RenewalSeason::CLOSES_DAY.' days of January; renewal opens on 1 January.',
+            '• The other permits expire on 31 December of the year they are first issued, and a renewal runs one year from the day it is renewed'
+                .($opensBefore !== null ? ". They can be renewed from {$opensBefore} days before they expire." : '.'),
             '• Each permit is renewed on its own application: one permit per renewal.',
             "• Renewing after a permit has expired (for the {$mayors}, after {$closes}) adds the late charges. ".$this->rules->penaltyPhrase(),
         ];

@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Support\ChatbotReply;
 use App\Support\PaymentMode;
 use App\Support\Ra11032;
+use App\Support\RenewalSeason;
+use App\Support\RenewalWindow;
 use Illuminate\Support\Collection;
 
 /**
@@ -967,15 +969,32 @@ class ChatbotResponder
             ."\n{$counter}";
     }
 
+    /**
+     * When a named permit runs out, as WorkflowService::issuePermitFor dates
+     * it, and when it can be renewed.
+     *
+     * This read `validity_days` ("valid for 365 days from the date it is
+     * issued") and told every permit to renew with the business permit in
+     * January. Nothing dates a permit with that column any more: the business
+     * permit ends on 20 January of the year after it starts
+     * (RenewalSeason::endOfTermFor), a clearance's first issue on 31 December
+     * of its year, and a renewed clearance one year from the day it is
+     * renewed. Clearances renew on their own application (RenewalScope) from
+     * RenewalWindow::opensDaysBefore() days before they expire.
+     */
     private function renewal(?PermitType $type): string
     {
-        if ($type) {
-            // validity_days is the column BizTrack really issues permits with.
-            $years = max(1, (int) round(($type->validity_days ?: 365) / 365));
-            $span = $years === 1 ? 'one year' : "{$years} years";
+        if ($type?->code === PermitType::OUTCOME_CODE) {
+            return "The {$type->name} expires on ".RenewalSeason::CLOSES_DAY." January of the year after it is issued or renewed.\n"
+                .'Renew it during the first '.RenewalSeason::CLOSES_DAY.' days of January. '.$this->penaltyPhrase();
+        }
 
-            return "The {$type->name} is valid for {$type->validity_days} days (about {$span}) from the date it is issued.\n"
-                .'Renew it with your business permit during the first 20 days of January. '.$this->penaltyPhrase();
+        if ($type) {
+            $opens = RenewalWindow::opensDaysBefore();
+
+            return "The {$type->name} expires on 31 December of the year it is first issued, and a renewal runs one year from the day it is renewed.\n"
+                .($opens !== null ? "You can renew it from {$opens} days before it expires, on its own application. " : 'Renew it on its own application. ')
+                .$this->penaltyPhrase();
         }
 
         return "Business permits are renewed during the first 20 days of January every year.\n"

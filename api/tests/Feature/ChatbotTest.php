@@ -317,12 +317,27 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
         ->not->toContain('Office of the Local Building Official');
 });
 
-it('scopes renewal answers to the named permit validity', function () {
-    $body = ask('kailan mag-expire ang fsic ko?');
+it('dates a permit the way it is issued: 20 January for the business permit, 31 December or a year for the rest', function () {
+    /*
+     * WorkflowService::issuePermitFor: the business permit ends on 20 January
+     * of the year after it starts (RenewalSeason::endOfTermFor), a clearance's
+     * first issue ends on 31 December of its year, and a renewed clearance
+     * runs one year from the day it is renewed. This test used to pin "365
+     * days" and "renew it with your business permit in January", read from
+     * `validity_days`, which nothing dates a permit with any more.
+     */
+    $fsic = ask('kailan mag-expire ang fsic ko?');
+    expect($fsic)->toContain('Fire Safety Inspection Certificate')
+        ->toContain('expires on 31 December of the year it is first issued')
+        ->toContain('a renewal runs one year from the day it is renewed')
+        ->toContain('You can renew it from 30 days before it expires, on its own application.')
+        ->not->toContain('365 days')
+        ->not->toContain('first 20 days of January');
 
-    expect($body)->toContain('Fire Safety Inspection Certificate')
-        ->toContain('365 days')
-        ->toContain('first 20 days of January');
+    $mayors = ask("when does the mayor's permit expire?");
+    expect($mayors)->toContain("Mayor's / Business Permit expires on 20 January of the year after it is issued or renewed")
+        ->toContain('first 20 days of January')
+        ->not->toContain('365 days');
 });
 
 it('answers a bare permit name with what it can tell you about it', function () {
