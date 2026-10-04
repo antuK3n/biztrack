@@ -890,9 +890,8 @@ class PermitController extends Controller
          * Laid out from the issued certificate [client, 4 October 2026]. What
          * it needs beyond the face, all from what the system already holds:
          *
-         *   - which certificate: For Certificate of Occupancy, For Business
-         *     Permit (New/Renewal), or Others — read off the FSIC sheet's
-         *     derived "Certificate Applied For";
+         *   - which certificate: always For Business Permit (New/Renewal) —
+         *     see the note on `$purpose` below;
          *   - the description line: occupancy, floor area and storeys, from the
          *     sheet and the fee profile, printed only as far as they are known;
          *   - the Fire Code fee: the BFP's own line(s) of the assessment, not
@@ -909,12 +908,15 @@ class PermitController extends Controller
                 ? OfficeFormAnswers::derive($application, 'FSIC', is_array($saved?->form_data) ? $saved->form_data : [])
                 : [];
 
-            $appliedFor = (string) ($sheet['certificate_applied_for'] ?? '');
-            $purpose = match (true) {
-                str_contains($appliedFor, 'Occupancy') => 'occupancy',
-                str_contains($appliedFor, 'Business Permit') => 'business',
-                default => 'other',
-            };
+            /*
+             * Always FOR BUSINESS PERMIT (NEW/RENEWAL) [client, 5 October
+             * 2026: "For Business Permit (New/Renewal) dapat"]. This system
+             * issues the FSIC as a clearance for the Mayor's Permit, so that
+             * is the box it ticks — even on a filing that also carries an
+             * Occupancy Permit, whose sheet's "Certificate Applied For" reads
+             * "FSIC for Certificate of Occupancy".
+             */
+            $purpose = 'business';
 
             $profile = $application?->fee_profile ?? [];
             $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
@@ -935,12 +937,8 @@ class PermitController extends Controller
 
             $sheetFields = [
                 'fsic_purpose' => $purpose,
-                'fsic_others' => $purpose === 'other' && $appliedFor !== '' ? $appliedFor : null,
-                'fsic_valid_for' => match ($purpose) {
-                    'occupancy' => 'Issuance of FSIC for Certificate of Occupancy only',
-                    'business' => 'Issuance of FSIC for Business Permit only',
-                    default => 'Issuance of FSIC',
-                },
+                'fsic_others' => null,
+                'fsic_valid_for' => 'Issuance of FSIC for Business Permit only',
                 'fsic_description' => $description !== '' ? $description : null,
                 'office_amount_paid' => $paid ? '₱'.number_format($bfpShare, 2) : null,
                 'or_number' => $paid?->reference_number,

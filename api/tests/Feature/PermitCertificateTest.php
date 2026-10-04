@@ -358,7 +358,9 @@ it('draws the FSIC as the BFP issues it, signed by the fire office and not the M
     $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
 
     expect($cert['is_fsic'])->toBeTrue()
-        ->and($cert['fsic_purpose'])->toBeIn(['occupancy', 'business', 'other'])
+        // Always the Business Permit box [client, 5 October 2026].
+        ->and($cert['fsic_purpose'])->toBe('business')
+        ->and($cert['fsic_valid_for'])->toBe('Issuance of FSIC for Business Permit only')
         ->and(array_column($cert['signatories'], 'role'))
         ->toBe(['Chief, Fire Safety Enforcement Section', 'City Fire Marshal'])
         ->and($cert['signatories'][1]['name'])->toBe('Eduardo R. Lacson')
