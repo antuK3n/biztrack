@@ -71,6 +71,12 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
     return { tone: 'warning', Glyph: AlertTriangleIcon }
   }
 
+  // A revoked permit is enforcement, never a success. Older notices carried
+  // the generic `decision` type and showed a green tick; the title catches them.
+  if (n.type === 'permit_revoked' || (n.type === 'decision' && /revoked/i.test(n.title))) {
+    return { tone: 'warning', Glyph: XCircleIcon }
+  }
+
   if (n.type === 'decision') {
     return /reject/i.test(n.title)
       ? { tone: 'warning', Glyph: XCircleIcon }
