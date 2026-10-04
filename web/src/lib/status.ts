@@ -146,24 +146,6 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
   returned: { label: 'Returned', tone: 'warning', icon: InfoCircleIcon },
   pending_payment: { label: 'Pending Payment', tone: 'attention', icon: PaymentsIcon },
   /*
-   * "Permit Released" since 24 September 2026 — MIRROR OF
-   * `ApplicationStatus::AwaitingOtherPermits->label()`, which carries the
-   * reasoning. StatusLabelParityTest fails if these two drift.
-   *
-   * `verify` (teal), and it took two goes to get right. `progress` blue was
-   * wrong because a stage where the applicant is holding their permit is not
-   * "in progress" from their side. Then it was `success` green, which the
-   * client read off the guide immediately: two green badges in a row, this
-   * one and Completed, so the rail appeared to end twice.
-   *
-   * Teal is the honest middle. The certificate is live — the LABEL carries
-   * that, and the label is what a reader takes the news from — while the
-   * colour says the filing is still moving, which it is: an office can still
-   * refuse a permit here and suspend the certificate. Exactly one badge on
-   * this rail is green now, and it is the one that means finished.
-   */
-  awaiting_other_permits: { label: 'Approved', tone: 'verify', icon: CheckCircleIcon },
-  /*
    * "With BPLO", not "For Final Approval".
    *
    * The old label named an internal stage, and named one the applicant is
@@ -269,10 +251,66 @@ export function clearanceStatusMeta(status: string): StatusMeta {
   )
 }
 
+/**
+ * What a status the API can no longer send should be CALLED, on a timeline.
+ *
+ * `awaiting_other_permits` was removed on 4 October 2026 at the client's
+ * instruction — *"we no longer need that status"*. Its history rows stay: they
+ * are the record of what actually happened to filings that passed through it,
+ * and rewriting an audit trail to tidy a label is not a trade worth making.
+ *
+ * Which leaves `humanizeStatus` to name them, and it would name them
+ * "Awaiting Other Permits" — printing the exact words the removal was asked
+ * for, on the one screen nobody thought to check. So the label it carried
+ * while it was live is kept here instead.
+ */
+const RETIRED_STATUS_LABELS: Record<string, string> = {
+  awaiting_other_permits: 'Approved',
+}
+
+/**
+ * The badge a filing wears while its other permits are still coming in.
+ *
+ * Both halves are the client's own decision of 26 September 2026, made about
+ * the status this replaces: *"Approved does not mean it is Completed, and it
+ * is similar to the other permits where Approved means the permit was
+ * released already."* The word is "Approved" because the Mayor's Permit is
+ * genuinely out, and the colour is teal rather than green because the filing
+ * is still moving — an office can still refuse a clearance here and suspend
+ * the certificate. Green is kept for the one badge that means finished.
+ *
+ * It was `APPLICATION_STATUS.awaiting_other_permits` until that status was
+ * removed on 4 October 2026. Nothing about what it SAYS changed; it is
+ * chosen by `decided` now instead of by a status of its own.
+ */
+export const GATHERING_META: StatusMeta = {
+  label: 'Approved',
+  tone: 'verify',
+  icon: CheckCircleIcon,
+}
+
+/**
+ * A FILING's own badge, which its status alone no longer determines.
+ *
+ * `applicationStatusMeta` answers for a status in the abstract — a rail node,
+ * a filter option, a timeline entry — and still should. This answers for a
+ * particular filing, and the two differ on exactly one status: `approved`
+ * reads "Completed" in the abstract and "Approved" on a filing that has not
+ * finished gathering. Drawing the abstract label on a live filing would put a
+ * green "Completed" on an application with five permits outstanding.
+ */
+export function filingStatusMeta(app: {
+  status: ApplicationStatus
+  decided?: boolean
+  permit_types?: { code: string; status: string | null; is_required?: boolean }[]
+}): StatusMeta {
+  return isGatheringOtherPermits(app) ? GATHERING_META : applicationStatusMeta(app.status)
+}
+
 export function applicationStatusMeta(status: string, fallbackLabel?: string): StatusMeta {
   return (
     APPLICATION_STATUS[status as ApplicationStatus] ?? {
-      label: fallbackLabel || humanizeStatus(status),
+      label: fallbackLabel || RETIRED_STATUS_LABELS[status] || humanizeStatus(status),
       tone: 'neutral',
       icon: DotIcon,
     }
@@ -396,7 +434,6 @@ export function clearanceWithOffice(state: ClearanceState): boolean {
  */
 export function isPaidStatus(status: ApplicationStatus): boolean {
   return (
-    status === 'awaiting_other_permits' ||
     status === 'for_final_approval' ||
     status === 'approved' ||
     status === 'issued'
@@ -406,7 +443,7 @@ export function isPaidStatus(status: ApplicationStatus): boolean {
 /**
  * How far along the SECOND state machine is — the other permits.
  *
- * `awaiting_other_permits` is one application status covering five permits that
+ * An undecided `approved` is one application status covering five permits that
  * each move on their own, and it is the longest stage of a filing. Both the
  * officer's progress rail and the applicant's status card have to say what is
  * still outstanding inside it, so the rule lives here once rather than being
@@ -455,16 +492,58 @@ export function otherPermitProgress(
   }
 }
 
+/**
+ * Paid, the Business Permit is out, and the other permits are still coming in.
+ *
+ * This was an application STATUS until 4 October 2026 — `awaiting_other_permits`
+ * — and the client had it removed: *"we no longer need that status"*. The
+ * reason it could go is that it never gated anything. The Mayor's Permit is
+ * released at PAYMENT, on both branches of `WorkflowService::onPaymentCompleted`,
+ * so the status named a period rather than a wait, and the period is already
+ * written down per permit in the pivot rows this reads. One fact, stored once.
+ *
+ * Gated on a PAID status because the outstanding count alone does not
+ * distinguish this from a filing BPLO has not even read yet: a form at
+ * `for_approval` also carries five unapproved clearances.
+ */
+export function isGatheringOtherPermits(app: {
+  status: ApplicationStatus
+  /** The server's own answer; see the note inside. */
+  decided?: boolean
+  /*
+   * The minimum shape rather than `ApplicationPermitType[]`, because both
+   * feeds have to answer this and only one of them is that type. The LIST
+   * endpoint sends `{code, name, status, status_label}` and no
+   * `is_required`, so `otherPermitProgress` — which filters on it — counts
+   * zero required permits on a list row and would report every filing as
+   * finished. Absent is read as required: the API attaches the five
+   * clearances precisely because they are, and a filing carrying an
+   * optional permit is the case that does not exist yet.
+   */
+  permit_types?: { code: string; status: string | null; is_required?: boolean }[]
+}): boolean {
+  if (app.status !== 'approved' && app.status !== 'issued') return false
+
+  /*
+   * The server's answer wins where there is one. It reads `decided_at`, which
+   * is the fact itself; counting the permit rows is a reconstruction of it,
+   * and the two can disagree on a feed that trims `permit_types` — an empty
+   * list would read as "nothing outstanding" and quietly call a live filing
+   * finished.
+   */
+  if (typeof app.decided === 'boolean') return !app.decided
+
+  return (app.permit_types ?? []).some(
+    (pt) => pt.code !== 'BUSINESS' && pt.is_required !== false && pt.status !== 'approved',
+  )
+}
+
 /** The applicant-facing "what happens next" line for a status. */
 export const NEXT_ACTION: Partial<Record<ApplicationStatus, string>> = {
   draft: 'Finish and submit your application when you are ready.',
   for_approval: 'BPLO is reading your form — the first of its two approvals. No action needed yet.',
   returned: 'BPLO asked for changes. Review the remarks, then resubmit.',
   pending_payment: 'Your fees are assessed. Pay to continue processing.',
-  awaiting_other_permits:
-    'Your Business Permit is released — download it from your profile. Now apply for your other permits, '
-    +'or hand in copies of the ones you already hold. Each is approved on its own, and if one is rejected '
-    +'your Business Permit is suspended until it is settled.',
   for_final_approval: 'BPLO is finishing this application. Nothing to do.',
   // Nothing is "being issued" here since 24 September 2026 — the permit went
   // out at payment. What happens next is that this filing leaves the list.
@@ -563,19 +642,6 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
   for_approval: 'BPLO is reading your form. Nothing to do yet.',
   pending_payment: 'Your fees are ready. Pay to carry on.',
   /*
-   * This said "the last one issues your Mayor's Permit", which stopped being
-   * true on 24 September 2026 — the permit is issued at PAYMENT now, two
-   * steps earlier. A guide is the one place a wrong sentence is worst: it is
-   * read by people checking whether the thing they expected has happened.
-   */
-  /*
-   * The suspension clause moved out of this line on 26 September 2026 — it is
-   * the Suspended row under "If something interrupts it", which is where a
-   * thing that might go wrong belongs. Printed here it made the sentence
-   * announcing GOOD news the longest on the panel.
-   */
-  awaiting_other_permits: 'Your Mayor’s Permit is released. Apply for your other permits.',
-  /*
    * No longer on a new application's path — see STATUS_FLOW. The line has to
    * describe the cases that still reach it without naming the machinery, since
    * a guide is read by people who do not know what a processing category is.
@@ -666,7 +732,6 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
 export const STATUS_FLOW: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
-  'awaiting_other_permits',
   'approved',
 ]
 
@@ -763,7 +828,7 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    * waits for a second BPLO act. Listed rather than left to fall into the
    * detours, where they would read as things that might happen to it.
    */
-  amendment: ['awaiting_other_permits', 'for_final_approval'],
+  amendment: ['for_final_approval'],
   /*
    * A NEW filing can still reach For Final Approval, but only when it becomes
    * ready with no confirmed RA 11032 processing category and falls back to BPLO
@@ -783,21 +848,33 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    * removed the For Final Approval?"* — and dropping it without this line
    * would file it beside Returned and Rejected as something that might
    * interrupt a renewal.
-   *
-   * `awaiting_other_permits` is omitted for a subtler reason, and it is not
-   * "never happens" any more. A renewal that ticks an EXPIRING clearance
-   * does wait there while that office issues it. But the lead above this
-   * rail says what the rail is about — *"Renews your business permit only.
-   * The other permits are separate filings."* — and the filing it describes
-   * carries nothing to gather. The clearance case is drawn on its own rail,
-   * OTHER_PERMIT_FLOW, which is where a reader who ticked one will look.
    */
-  renewal: ['draft', 'awaiting_other_permits', 'for_final_approval'],
+  renewal: ['draft', 'for_final_approval'],
 }
 
 /** The rail for one kind of filing, or null where there is nothing to draw yet. */
 export function statusFlowFor(flow: GuideFlow): ApplicationStatus[] {
   return FLOW_BY_TYPE[flow]
+}
+
+/**
+ * Where one flow needs its own words for a step the others share.
+ *
+ * Only `approved`, and only on the NEW rail, and the reason is the status
+ * removed on 4 October 2026. `awaiting_other_permits` used to be the node
+ * between payment and the end, and STATUS_GUIDE could give `approved` the one
+ * meaning it had on every path: everything is done, the filing moves to your
+ * Profile.
+ *
+ * A new filing now REACHES `approved` at payment, with five permits still to
+ * come, so the shared line would greet it with "Every permit is approved" at
+ * the exact moment none of them is. A renewal is unaffected — it carries
+ * nothing to gather — so this overrides rather than replaces.
+ */
+export const GUIDE_BY_FLOW: Partial<Record<GuideFlow, Partial<Record<ApplicationStatus, string>>>> = {
+  new: {
+    approved: 'Your Business Permit is released. Now apply for your other permits.',
+  },
 }
 
 /**
@@ -937,7 +1014,8 @@ export const GUIDE_OMITTED: ApplicationStatus[] = ['issued']
  */
 
 /**
- * What one of the OTHER permits goes through, inside `awaiting_other_permits`.
+ * What one of the OTHER permits goes through, while the filing waits at an
+ * undecided `approved`.
  *
  * The flow above is the APPLICATION's, and at that step it waits while five
  * clearances run their own course — each reviewed by its own office, each

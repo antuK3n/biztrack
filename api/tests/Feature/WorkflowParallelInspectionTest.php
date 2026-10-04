@@ -183,7 +183,7 @@ it('moves only the approving office’s permit, and books no visit at all', func
      */
     expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::ForInspection);
     expect(permitStatus($app, 'FSIC'))->toBe(ClearanceStatus::ForApproval);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     /*
      * And no visit exists. Accepting the paperwork is not the same act as
@@ -213,7 +213,7 @@ it('books a visit only for the office that picked a date', function () {
     // Still no CLEARANCE issued, and the filing has not moved: booking a visit
     // is not progress on the application, it is progress on one permit.
     expect(clearancePermitsIssued($app))->toBe(0);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('releases each permit as its own office passes it, without waiting for the others', function () {
@@ -236,7 +236,7 @@ it('releases each permit as its own office passes it, without waiting for the ot
 
     // BFP is untouched by that, and so is the application.
     expect(permitStatus($app, 'FSIC'))->toBe(ClearanceStatus::ForApproval);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('keeps the application off BPLO’s desk while any required permit is outstanding', function () {
@@ -256,7 +256,7 @@ it('keeps the application off BPLO’s desk while any required permit is outstan
     }
 
     expect(clearancePermitsIssued($app))->toBe(4);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     // The fifth is what tips it, and only the fifth — and since 18 September
     // 2026 it tips the filing all the way to Approved rather than into BPLO's

@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\Queue;
 function emailableApplication(): Application
 {
     return Application::whereIn('status', [
-        'for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'returned',
+        'for_approval', 'pending_payment', 'approved', 'for_final_approval', 'returned',
     ])->whereHas('applicant')->firstOrFail();
 }
 
@@ -163,7 +163,7 @@ it('keeps the decision when the queue will not take the job', function () {
 
 it('tells the owner, in the app and by e-mail, when an inspection fails', function () {
     Queue::fake();
-    $app = Application::where('status', 'awaiting_other_permits')->whereHas('applicant')->firstOrFail();
+    $app = Application::where('status', 'approved')->whereHas('applicant')->firstOrFail();
     $fire = Department::where('code', 'BFP')->firstOrFail();
     $visit = Inspection::create([
         'application_id' => $app->id,

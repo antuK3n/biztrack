@@ -582,7 +582,7 @@ class ClearanceService
          * 3 October 2026 when a held-copy test moved onto an amendment and
          * the stage would not shut behind a rejection.
          */
-        if ($application->status?->isTerminal() ?? false) {
+        if ($application->isDecided()) {
             return false;
         }
 

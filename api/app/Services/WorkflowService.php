@@ -1757,11 +1757,11 @@ class WorkflowService
          * version of this note claimed the evidence was already in hand by now,
          * which is not how the gate works.)
          *
-         * Sending such a filing to AwaitingOtherPermits would
-         * park it in a stage named for waiting, waiting for nothing, until
-         * `refreshReadiness` noticed and moved it on — which is a status the
-         * applicant would watch flash past and, worse, a queue tab an officer
-         * would see it sit in.
+         * Sending such a filing to a gathering stage would park it in a stage
+         * named for waiting, waiting for nothing, until `refreshReadiness`
+         * noticed and moved it on — which is a status the applicant would
+         * watch flash past and, worse, a queue tab an officer would see it sit
+         * in. (The stage was `AwaitingOtherPermits`, removed 4 October 2026.)
          *
          * An AMENDMENT keeps the new-filing path. `attachRequiredPermitTypes`
          * leaves amendments on it deliberately ("the client has said they will
@@ -1817,7 +1817,7 @@ class WorkflowService
          *    were rejected"* — which was written about business permits and
          *    had been applied to new filings alone. A business renewing in
          *    January can trade on it while a clearance catches up.
-         *  - the filing waits at AwaitingOtherPermits for the permits it is
+         *  - the filing waits at Approved, undecided, for the permits it is
          *    actually renewing. A renewal carries ONLY the ticked ones (see
          *    `attachRequiredPermitTypes`), so one renewing nothing else has
          *    nothing to wait for — `refreshReadiness` below closes it in the
@@ -1859,9 +1859,17 @@ class WorkflowService
         $app->load('permitTypes');
         $nothingToGather = $this->outstandingClearances($app)->isEmpty();
 
+        /*
+         * One destination since 4 October 2026, whether or not anything is
+         * left to gather. The branch used to pick `AwaitingOtherPermits` for a
+         * filing with clearances still to come; the client had that status
+         * removed, and what it used to say — the filing is still open — is
+         * `decided_at`, which stays null below unless there is nothing left.
+         * See `Application::isDecided()`.
+         */
         $this->transition(
             $app,
-            $nothingToGather ? ApplicationStatus::Approved : ApplicationStatus::AwaitingOtherPermits,
+            ApplicationStatus::Approved,
             $nothingToGather
                 ? 'Payment received. Your Business Permit has been released, and this filing '
                     .'carries no other permit, so it is closed.'
@@ -2474,7 +2482,7 @@ class WorkflowService
         $app = $row->application;
         $type = $row->permitType;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided. Its permits can no longer be acted on.'],
             ]);
@@ -3130,7 +3138,7 @@ class WorkflowService
          */
         if (! $row->awaitingInspection()) {
             throw ValidationException::withMessages([
-                'status' => $row->application?->status?->isTerminal()
+                'status' => $row->application?->isDecided()
                     ? ['This application has been decided. Its permits can no longer be acted on.']
                     : ['An inspection can only be scheduled once this permit’s paperwork is approved.'],
             ]);
@@ -3201,7 +3209,7 @@ class WorkflowService
          * conducted visit achieve nothing. The wording is the flow's own, from
          * `ApplicationStatus::allowedNext()`.
          */
-        if ($inspection->application?->status?->isTerminal() ?? false) {
+        if ($inspection->application?->isDecided() ?? false) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided. Its permits can no longer be acted on.'],
             ]);
@@ -3379,10 +3387,28 @@ class WorkflowService
             return;
         }
 
+        /*
+         * `Approved` is in this list since 4 October 2026, and that is not as
+         * strange as it reads: a paid filing stands at Approved from the
+         * moment its Mayor's Permit is released, with its other permits still
+         * to come. It was `AwaitingOtherPermits` until the client had the
+         * status removed.
+         *
+         * Which makes the second test the load-bearing one. Approved is also
+         * where a CLOSED filing ends up, and there is nothing to refresh about
+         * a filing the city has finished with — re-closing one would write a
+         * second closing note on the applicant's timeline and fire the
+         * "permits issued" notice again, every time any clearance row was
+         * touched. `decided_at` is what separates the two.
+         */
         if (! in_array($app->status, [
-            ApplicationStatus::AwaitingOtherPermits,
+            ApplicationStatus::Approved,
             ApplicationStatus::ForFinalApproval,
         ], true)) {
+            return;
+        }
+
+        if ($app->isDecided()) {
             return;
         }
 
@@ -3437,7 +3463,7 @@ class WorkflowService
 
         $ready = $outstanding->isEmpty() && $openRequirements === 0;
 
-        if ($ready && $app->status === ApplicationStatus::AwaitingOtherPermits) {
+        if ($ready && $app->status === ApplicationStatus::Approved) {
             /*
              * ── No filing type stops for BPLO to re-read the permits ─────────
              *
@@ -3511,10 +3537,17 @@ class WorkflowService
             return;
         }
 
+        /*
+         * A permit reopened while BPLO was holding the filing, so it goes back
+         * to gathering. Gathering is `Approved` with `decided_at` null now,
+         * which is where it stood before Final Approval claimed it — the
+         * status it used to fall back to was `AwaitingOtherPermits`, and the
+         * move is the same move under the name that is left.
+         */
         if (! $ready && $app->status === ApplicationStatus::ForFinalApproval) {
             $this->transition(
                 $app,
-                ApplicationStatus::AwaitingOtherPermits,
+                ApplicationStatus::Approved,
                 // Which of the two it is, because "not ready" with no reason is
                 // a filing that stops moving and says nothing about why.
                 $outstanding->isEmpty()
@@ -3608,14 +3641,40 @@ class WorkflowService
              * permit here: a renewal or amendment, which go back to BPLO
              * after payment and are issued on its press.
              */
-            $this->transition(
-                $app,
-                ApplicationStatus::Approved,
-                $issuedBusinessPermit
-                    ? 'All requirements met. Business permit issued.'
-                    : 'Every other permit is approved. This application is closed, so none of '
-                        .'its permits can suspend your business permit.',
-            );
+            $closingNote = $issuedBusinessPermit
+                ? 'All requirements met. Business permit issued.'
+                : 'Every other permit is approved. This application is closed, so none of '
+                    .'its permits can suspend your business permit.';
+
+            /*
+             * ── The filing may already BE at Approved ────────────────────────
+             *
+             * Since 4 October 2026 a paid filing reaches Approved at payment
+             * and gathers its other permits there, so closing it is a write to
+             * `decided_at` and not a status move. `transition()` returns early
+             * when the status does not change, which would have dropped this
+             * note off the applicant's timeline and swallowed the notification
+             * with it — the one line that tells them the filing is finished
+             * and why that matters.
+             *
+             * So the history row is written directly in that case. It is the
+             * same row `transition()` writes, with `from_status` equal to
+             * `to_status`, which is the honest record: the filing ended where
+             * it already stood.
+             */
+            if ($app->status === ApplicationStatus::Approved) {
+                ApplicationStatusHistory::create([
+                    'application_id' => $app->id,
+                    'from_status' => ApplicationStatus::Approved->value,
+                    'to_status' => ApplicationStatus::Approved->value,
+                    'changed_by_user_id' => Auth::id(),
+                    'note' => $closingNote,
+                ]);
+                Audit::log('application.closed', $app, ['status' => ApplicationStatus::Approved->value]);
+                $this->notify->applicationStatus($app, ApplicationStatus::Approved, $closingNote);
+            } else {
+                $this->transition($app, ApplicationStatus::Approved, $closingNote);
+            }
             $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
         });
@@ -4202,7 +4261,7 @@ class WorkflowService
     {
         $app = $assignment->application;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided and can no longer be approved.'],
             ]);
@@ -4271,7 +4330,7 @@ class WorkflowService
     ): void {
         $app = $assignment->application;
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'status' => ['This application has been decided, so its permits can no longer be refused.'],
             ]);
@@ -5027,7 +5086,7 @@ class WorkflowService
             ]);
         }
 
-        if ($app->status?->isTerminal()) {
+        if ($app->isDecided()) {
             throw ValidationException::withMessages([
                 'tier' => ['This application has been decided. Its processing category can no longer be changed.'],
             ]);

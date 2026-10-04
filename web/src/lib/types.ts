@@ -440,7 +440,6 @@ export type ApplicationStatus =
   | 'for_approval'
   | 'returned'
   | 'pending_payment'
-  | 'awaiting_other_permits'
   | 'for_final_approval'
   | 'approved'
   | 'issued'
@@ -593,6 +592,18 @@ export interface ApplicationListItem {
   title: string | null
   status: ApplicationStatus
   status_label: string
+  /**
+   * Has the city finished with this filing?
+   *
+   * Not derivable from `status` since 4 October 2026, when
+   * `awaiting_other_permits` was removed: `approved` is now both the filing
+   * gathering its other permits and the filing that has ended. The server
+   * tells the two apart by `decided_at` and sends the answer.
+   *
+   * Optional, because a payload from before this shipped carries no such
+   * key; `isGatheringOtherPermits` falls back to counting the permit rows.
+   */
+  decided?: boolean
   /**
    * Null when the business has been removed from the register — the same cause
    * documented on Assignment below, and missed here.
@@ -869,6 +880,9 @@ export interface Assignment {
      */
     business: { name: string } | null
     application_type: ApplicationType
+    /** See `ApplicationListItem.decided`. */
+    decided?: boolean
+    status_label?: string
     status: ApplicationStatus
   }
   /**

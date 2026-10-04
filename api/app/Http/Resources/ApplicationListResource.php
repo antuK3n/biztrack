@@ -17,7 +17,21 @@ class ApplicationListResource extends JsonResource
             // Null falls back to the business name on the Drafts page.
             'title' => $this->title,
             'status' => $this->status?->value,
-            'status_label' => $this->status?->label(),
+            // Row-aware: `approved` is "Approved" while the other permits are
+            // still coming in and "Completed" once the filing has ended. See
+            // `Application::statusLabel()`.
+            'status_label' => $this->resource->statusLabel(),
+            /*
+             * Has the city finished with this filing?
+             *
+             * Sent as its own field because the status stopped answering it on
+             * 4 October 2026: `approved` is both the filing that is gathering
+             * its other permits and the filing that has ended, told apart by
+             * `decided_at`. The browser draws a different badge, a different
+             * guide line and a different queue tab for the two, so it needs
+             * the answer rather than a rule for deriving it. See
+             * `Application::isDecided()`.
+             */            'decided' => $this->resource->isDecided(),
             'business' => $this->relationLoaded('business') && $this->business ? [
                 'id' => $this->business->id,
                 'name' => $this->business->name,
@@ -43,8 +57,8 @@ class ApplicationListResource extends JsonResource
              * status, which is the only evidence there was before the pivot
              * existed. Both inferences are now wrong in opposite directions: a
              * completed BPLO assignment means "the form was accepted", not "the
-             * permit is approved", and a filing at `awaiting_other_permits` says
-             * nothing about whether any particular permit has been applied for.
+             * permit is approved", and the filing's own status says nothing
+             * about whether any particular permit has been applied for.
              * The screen showed the Business Permit as Approved and five
              * untouched permits as For Approval on a filing where none of that
              * was true.

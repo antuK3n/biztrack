@@ -451,7 +451,7 @@ it('opens the stage the moment the payment clears', function () {
 
     $meta = clearanceMeta($app);
 
-    expect(Application::findOrFail($app->id)->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+    expect(Application::findOrFail($app->id)->status)->toBe(ApplicationStatus::Approved)
         ->and($meta['unlocked'])->toBeTrue()
         ->and($meta['locked_reason'])->toBeNull()
         ->and($meta['balance_due'])->toBe(0.0);
@@ -467,7 +467,7 @@ it('opens the stage the moment the payment clears', function () {
  * stage is shut, and it cannot be otherwise: the point of returning a form is
  * that BPLO has not accepted it. An OP office returning ITS permit happens
  * after the money, moves only `application_permit_types.status`, and the
- * application stays `awaiting_other_permits` with the stage open — which is
+ * application stays `approved` with the stage open — which is
  * what lets the applicant fix what the office asked for.
  *
  * Both halves are asserted here because it is the distinction that is easy to
@@ -504,7 +504,7 @@ it('keeps the stage open when an office returns its own permit, and shut when BP
     authAs('owner@biztrack.local');
     $settled = Application::findOrFail($paid->id);
 
-    expect($settled->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+    expect($settled->status)->toBe(ApplicationStatus::Approved)
         ->and(clearanceMeta($paid)['unlocked'])->toBeTrue()
         ->and(clearanceRow($paid, 'ZONING')['state'])->toBe(ClearanceStatus::Returned->value);
 });
@@ -1133,7 +1133,7 @@ it('lets the applicant fill in the sheet for a permit started after payment', fu
     $app = paidClearanceApplication();
     $zoning = PermitType::where('code', 'ZONING')->firstOrFail();
 
-    expect($app->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->status)->toBe(ApplicationStatus::Approved);
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
     $this->putJson("/api/v1/applications/{$app->id}/office-forms/ZONING", [
@@ -1180,7 +1180,7 @@ it('releases each permit the moment its own office passes the inspection', funct
         )->count())->toBe(1)
         // Nothing else moved. The other four are untouched and the application
         // is still waiting on them, which is the whole point of rule 7.
-        ->and($issued->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+        ->and($issued->status)->toBe(ApplicationStatus::Approved)
         ->and(clearanceRow($app, 'SANITARY')['state'])->toBe(ClearanceStatus::NotStarted->value);
 });
 
@@ -1257,7 +1257,7 @@ it('refuses BPLO’s final approval outright while a required permit is outstand
     // not decided. (The business permit is out too, since payment — which is
     // why this counts clearances rather than every permit on the filing.)
     expect(clearancePermitsIssued($held))->toBe(1)
-        ->and($held->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+        ->and($held->status)->toBe(ApplicationStatus::Approved);
 });
 
 /*
@@ -1460,7 +1460,7 @@ it('opens the stage for the service at payment, and not one step before', functi
     $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     $paid = $app->fresh();
-    expect($paid->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
+    expect($paid->status)->toBe(ApplicationStatus::Approved)
         ->and($service->isUnlocked($paid))->toBeTrue()
         ->and($service->lockedReason($paid))->toBeNull();
 });

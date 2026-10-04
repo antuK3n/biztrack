@@ -239,7 +239,7 @@ it('releases the business permit as soon as the money lands', function () {
         ->and($permit->issued_at)->not->toBeNull();
 
     // And the filing is still open, because the other five are still running.
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
 /*
@@ -290,16 +290,28 @@ it('rejects a filing that has released nothing, and touches no permit', function
 
 it('does not close the filing just because the permit is out', function () {
     /*
-     * The distinction the whole design rests on. `approved` is terminal —
-     * `Inspection::canBeReinspected()` refuses a visit on a decided filing, and
-     * the RA 11032 analytics measure submission→approved — so a filing that
-     * became Approved at payment would stop the five offices inspecting and
-     * would report days-to-payment as its processing time.
+     * The distinction the whole design rests on, and since 4 October 2026 it
+     * is a distinction within one status rather than between two.
+     *
+     * A paid filing DOES reach `approved` now — the client had
+     * `awaiting_other_permits` removed — so `status->isTerminal()` is true and
+     * can no longer be asked. Everything that depended on it asks
+     * `isDecided()`, which reads `decided_at`: `Inspection::canBeReinspected()`
+     * refuses a visit on a decided filing, `ClearanceService::isUnlocked()`
+     * shuts the clearance stage on one, and `rejectAssignment()` refuses an
+     * office the right to turn a permit down. Were this to answer true at
+     * payment, the five offices could neither inspect nor refuse, and the
+     * applicant could not apply for a single other permit.
+     *
+     * The RA 11032 clock is unaffected either way: `FilingClock` measures
+     * submission→`decided_at`, which is the same instant it always was.
      */
     $app = paidNewFiling();
 
-    expect($app->status->isTerminal())->toBeFalse()
-        ->and($app->decided_at)->toBeNull();
+    expect($app->isDecided())->toBeFalse()
+        ->and($app->decided_at)->toBeNull()
+        // The status alone says the opposite, which is the point.
+        ->and($app->status->isTerminal())->toBeTrue();
 });
 
 it('leaves only an amendment to BPLO, releasing nothing at payment', function () {

@@ -108,10 +108,20 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
      */
     expect(ApplicationStatus::ForApproval->label())->toBe('For Approval')
         ->and(ApplicationStatus::PendingPayment->label())->toBe('Pending Payment')
-        // Renamed 24 September 2026 when the LGU moved the release to payment;
-        // the reasoning is on the enum. BPLO's QUEUE TAB keeps the old words,
-        // which is a different string in QueuePage and not this one.
-        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Approved')
+        /*
+         * "Completed" is the STATUS's word, and it is the right one for a
+         * filing the city has finished with.
+         *
+         * The other word the LGU signed off — "Approved", for a filing whose
+         * Mayor's Permit is out while the other permits are still coming in —
+         * belonged to `awaiting_other_permits` until the client had that
+         * status removed on 4 October 2026. Both words survive the removal;
+         * what changed is that `Application::statusLabel()` picks between
+         * them on `decided_at` rather than the enum picking on the status.
+         * Asserted below, because a wording the design specifies is still a
+         * wording this file is here to hold.
+         */
+        ->and(ApplicationStatus::Approved->label())->toBe('Completed')
         /*
          * ── A DEPARTURE from the spec wording, taken deliberately ─────
          *

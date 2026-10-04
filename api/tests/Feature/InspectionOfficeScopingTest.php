@@ -61,7 +61,7 @@ const OTHER_OFFICE_FINDINGS = 'Food handlers without current health certificates
  *
  * The BPLO assignment is deliberately not in the approval loop any more. BPLO
  * acts twice and its first act already happened above; pressing Approve again
- * at `awaiting_other_permits` is refused, and rightly — there is nothing for it
+ * at `approved` is refused, and rightly — there is nothing for it
  * to approve until every other permit is in.
  *
  * @return array{app: Application, visit: Inspection}

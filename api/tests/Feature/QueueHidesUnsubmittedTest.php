@@ -81,7 +81,7 @@ it('keeps a clearance the applicant never submitted out of its office queue', fu
     $app = filingAwaitingBplo();
     app(WorkflowService::class)->approveMainForm($app->fresh());
     $app->refresh();
-    app(WorkflowService::class)->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     // Routed to CPDO, ZONING never started — the client's exact row.
     legacyAssignment($app->fresh(), 'ZONING');
@@ -124,7 +124,7 @@ it('shows the clearance the moment its sheet is handed in', function () {
     $app = filingAwaitingBplo();
     app(WorkflowService::class)->approveMainForm($app->fresh());
     $app->refresh();
-    app(WorkflowService::class)->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     $type = PermitType::where('code', 'ZONING')->firstOrFail();
     $workflow = app(WorkflowService::class);
@@ -155,7 +155,7 @@ it('counts the tab badge the same way it fills the list', function () {
     $app = filingAwaitingBplo();
     app(WorkflowService::class)->approveMainForm($app->fresh());
     $app->refresh();
-    app(WorkflowService::class)->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
     legacyAssignment($app->fresh(), 'ZONING');
 
     $zoning = authAs('zoning@biztrack.local');
@@ -178,7 +178,7 @@ it('judges an office on its own permit and not on the one beside it', function (
     $app = filingAwaitingBplo();
     app(WorkflowService::class)->approveMainForm($app->fresh());
     $app->refresh();
-    app(WorkflowService::class)->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     // CHO's sheet is in; CPDO's was never started.
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();

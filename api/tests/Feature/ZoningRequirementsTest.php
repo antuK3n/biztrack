@@ -55,7 +55,7 @@ function zoningFiling(bool $rented): Application
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     $workflow->startClearance(
         $app->fresh(),

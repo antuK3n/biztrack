@@ -160,17 +160,24 @@ it('closes a renewal that carries nothing but the business permit', function () 
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     /*
-     * And it never touched the gathering stage on the way — the history is the
-     * record, because a status the filing passed through for a millisecond is
-     * still a status an officer's queue could have caught it in.
+     * And it never parked in the gathering stage on the way.
      *
-     * This is why `onPaymentCompleted` asks what is outstanding BEFORE it
-     * announces where the filing is going, rather than parking it and tidying
-     * up afterwards.
+     * There is no longer a STATUS to look for in the history: the client had
+     * `awaiting_other_permits` removed on 4 October 2026, and gathering is
+     * `approved` with `decided_at` null — a row, not a transition. So the
+     * claim is put the only way left to put it, and it is the stronger one
+     * anyway: the filing arrived CLOSED. One move out of Pending Payment, no
+     * stop at Final Approval, and decided in the same request.
+     *
+     * This is still why `onPaymentCompleted` asks what is outstanding BEFORE
+     * it announces where the filing is going, rather than parking it and
+     * tidying up afterwards — a filing left undecided for a millisecond is one
+     * an officer's gathering tab could have caught.
      */
     $visited = $app->fresh()->statusHistory()->pluck('to_status')->all();
-    expect($visited)->not->toContain(ApplicationStatus::AwaitingOtherPermits->value)
-        ->and($visited)->not->toContain(ApplicationStatus::ForFinalApproval->value);
+    expect($visited)->not->toContain(ApplicationStatus::ForFinalApproval->value)
+        ->and($app->fresh()->decided_at)->not->toBeNull()
+        ->and($app->fresh()->isDecided())->toBeTrue();
 });
 
 it('releases the renewed business permit the moment the money lands', function () {
@@ -217,7 +224,7 @@ it('waits for the office of a clearance the renewal actually renews', function (
     $workflow = app(WorkflowService::class);
     $workflow->onPaymentCompleted(settle($app, 'RENEW-SKIP-3'));
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     /* And BPLO is refused while CHO has not issued it. */
     expect(fn () => $workflow->approveOverall($app->fresh(), 'Closing early.'))

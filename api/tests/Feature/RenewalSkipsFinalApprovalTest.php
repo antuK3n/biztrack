@@ -54,7 +54,7 @@ function ffaFiling(string $type, string $clearanceStatus = 'for_approval'): arra
         'business_id' => $business->id,
         'applicant_user_id' => $owner->id,
         'application_type' => $type,
-        'status' => 'awaiting_other_permits',
+        'status' => 'approved',
     ]);
 
     $permitType = PermitType::whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)
@@ -167,5 +167,5 @@ it('leaves a renewal where it is while a clearance is still outstanding', functi
 
     app(WorkflowService::class)->refreshReadiness($app);
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -349,6 +350,97 @@ class Application extends Model
      * path — its shape is a question the client has said they will take
      * separately.
      */
+    /**
+     * Has the city finished with this filing?
+     *
+     * ── Why this is not `status->isTerminal()` ──────────────────────────────
+     *
+     * It was, in thirteen places, until 4 October 2026. The client had
+     * `awaiting_other_permits` removed — *"we no longer need that status"* —
+     * and it was removable because it never gated anything: the Mayor's Permit
+     * is released at PAYMENT, so the status named a period rather than a wait.
+     *
+     * But it did one more job nobody had written down. It was the thing that
+     * said the filing was still OPEN. A paid new filing now reaches `Approved`
+     * with five clearances still to come, and `Approved` is terminal, so every
+     * one of those thirteen guards would have read a live filing as finished:
+     * `ClearanceService::isUnlocked` would have shut the clearance stage on an
+     * applicant who had not yet applied for a single other permit, and
+     * `rejectAssignment` would have refused an office the right to turn one
+     * down.
+     *
+     * So the question moved from the status to the ROW. `decided_at` is
+     * written in the same breath as the last permit is granted — and, on a
+     * filing with nothing to gather, in the same transaction as the payment —
+     * which makes it the exact instant the old status used to end on. One
+     * fact, stored once, which is the whole reason the status could go.
+     *
+     * Rejected and Cancelled are decided on their status alone: neither has a
+     * gathering period to be in the middle of.
+     */
+    public function isDecided(): bool
+    {
+        if (! ($this->status?->isTerminal() ?? false)) {
+            return false;
+        }
+
+        return $this->status !== ApplicationStatus::Approved || $this->decided_at !== null;
+    }
+
+    /**
+     * What to CALL this filing's status, which the status alone no longer says.
+     *
+     * ── Two words for one status ────────────────────────────────────────────
+     *
+     * `Approved` is labelled "Completed", and that was exactly right while it
+     * meant the filing had ended. Since 4 October 2026 a paid filing reaches
+     * it at payment and sits there while its other permits come in, so the
+     * bare label would greet an applicant with a green "Completed" on a filing
+     * with five clearances still outstanding.
+     *
+     * The distinction is the client's own, made on 26 September 2026 about the
+     * status this replaced: *"Approved does not mean it is Completed, and it
+     * is similar to the other permits where Approved means the permit was
+     * released already."* Both words stay, and both mean what they meant; what
+     * changed is that `decided_at` picks between them instead of two statuses.
+     *
+     * Everything else reads straight off the enum, so a status added later is
+     * named in one place.
+     */
+    public function statusLabel(): ?string
+    {
+        if ($this->status === ApplicationStatus::Approved && ! $this->isDecided()) {
+            return 'Approved';
+        }
+
+        return $this->status?->label();
+    }
+    /**
+     * The SQL half of `isDecided()`, for the places that ask it of a set.
+     *
+     * `Caseload` and the OIC register ask "is this officer still holding a live
+     * case" of thousands of rows at once, so they cannot load each one. The two
+     * must agree: a filing this scope calls decided and `isDecided()` calls
+     * open would take an officer's caseload off one screen and leave it on
+     * another, which is the three-screens-three-answers defect the comment on
+     * `Caseload::reviews` was written for.
+     */
+    public function scopeDecided(Builder $query): void
+    {
+        $query->where(function (Builder $q) {
+            $q->whereIn('status', [ApplicationStatus::Rejected->value, ApplicationStatus::Cancelled->value])
+                ->orWhere(fn (Builder $a) => $a
+                    ->where('status', ApplicationStatus::Approved->value)
+                    ->whereNotNull('decided_at'));
+        });
+    }
+
+    /** Everything `scopeDecided` leaves out. Written as its complement so the two are exhaustive. */
+    public function scopeNotDecided(Builder $query): void
+    {
+        $query->whereNot(fn (Builder $q) => $q->decided());
+    }
+
     public function defersPayment(): bool
     {
         /*

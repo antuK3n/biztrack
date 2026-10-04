@@ -4,7 +4,7 @@ import { admin, applications } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import { businessName, formatDate } from '../../lib/format'
-import { BUSINESS_STATUS, applicationStatusMeta } from '../../lib/status'
+import { BUSINESS_STATUS, filingStatusMeta } from '../../lib/status'
 import type {
   AdminBusiness,
   AdminUser,
@@ -121,7 +121,8 @@ interface RecordRow {
  */
 
 function applicationRow(app: ApplicationListItem): RecordRow {
-  const meta = applicationStatusMeta(app.status, app.status_label)
+  // A filing, not a status in the abstract — see `filingStatusMeta`.
+  const meta = filingStatusMeta(app)
   return {
     key: `application-${app.id}`,
     primary: app.tracking_id,

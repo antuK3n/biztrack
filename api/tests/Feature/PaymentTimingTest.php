@@ -129,7 +129,7 @@ it('takes the payment once BPLO has approved the form, and opens the other permi
 
     // The whole point of the ordering: paying is what unlocks the other five.
     $app->refresh();
-    expect($app->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->status)->toBe(ApplicationStatus::Approved);
     expect($app->status->isPaid())->toBeTrue();
 });
 

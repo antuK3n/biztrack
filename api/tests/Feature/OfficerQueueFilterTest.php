@@ -10,7 +10,7 @@ use App\Models\Application;
  * WHICH tabs is not what it was. There are four now (QueuePage.tsx), and the two
  * that partition this endpoint by application status are BPLO's two acts at
  * opposite ends of the flow: "For Approval" (`for_approval`, `returned`,
- * `awaiting_other_permits`) and "Final Approval" (`for_final_approval`). Those
+ * `approved`) and "Final Approval" (`for_final_approval`). Those
  * are the pair driven below.
  *
  * "For Inspection" is deliberately not the other half any more. It filtered on
@@ -18,7 +18,7 @@ use App\Models\Application;
  * permits are inspected independently, so one filing can hold a booked fire
  * inspection and a passed sanitary one at once, and no single column can say so.
  * That tab asks `clearance_status` against the reader's own office instead, and
- * every row in it reads `awaiting_other_permits`. It therefore OVERLAPS For
+ * every row in it reads `approved`. It therefore OVERLAPS For
  * Approval on this axis, and a pair that overlaps cannot show that the axis
  * partitions anything.
  *
@@ -57,7 +57,7 @@ it('filters the queue by application status on the server', function () {
      * has its own tab, on `/applications` (see PendingPaymentQueueTest). Neither
      * belongs on a feed of what an office owes.
      */
-    $approvalStatuses = ['for_approval', 'returned', 'awaiting_other_permits'];
+    $approvalStatuses = ['for_approval', 'returned', 'approved'];
     $finalStatuses = ['for_final_approval'];
 
     $approval = test()->withHeaders($bplo)

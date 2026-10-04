@@ -616,7 +616,7 @@ function filingWithClearancesSettled(string $name, string $registrationNumber): 
     DB::table('application_permit_types')
         ->where('application_id', $appId)
         ->update(['status' => ClearanceStatus::Approved->value]);
-    $app->update(['status' => ApplicationStatus::AwaitingOtherPermits]);
+    $app->update(['status' => ApplicationStatus::Approved]);
 
     return $appId;
 }
@@ -653,7 +653,7 @@ it('holds a filing out of Final Approval while a requirement is still open', fun
         ->assertCreated()->json('data.id');
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
 
     // The applicant answers — and it STILL waits, because the office has not
     // accepted the answer yet.
@@ -663,7 +663,7 @@ it('holds a filing out of Final Approval while a requirement is still open', fun
         ])->assertOk();
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
 
     // The office accepts it, and the filing is free to move.
     test()->withHeaders(authAs('sanitary@biztrack.local'))
@@ -688,7 +688,7 @@ it('pulls a filing back out of Final Approval when a new requirement is raised',
         ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'One more document'])
         ->assertCreated();
 
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
 });
 
 it('says on the filing how many requirements are holding it', function () {
@@ -718,7 +718,7 @@ it('does not let a post-issuance obligation hold the filing', function () {
      * that follows the permit, not a condition of it. A rule that counted them
      * would freeze every filing that touches a CEC for half a year, which the
      * full-lifecycle test caught: five clearances approved, and the filing
-     * still sitting at `awaiting_other_permits`.
+     * still sitting at `approved`.
      *
      * The line is WHO ASKED. A requirement raised by an officer is an office
      * asking this applicant for something before it will sign; one raised by
@@ -762,5 +762,5 @@ it('still lets an office’s own request hold it, beside a system one', function
 
     app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
 
-    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Approved);
 });
