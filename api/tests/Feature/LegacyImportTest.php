@@ -230,6 +230,21 @@ it('never brings a revoked or superseded permit back into force on re-import', f
         ->and(test()->getJson('/api/v1/verify/OLD-MP-2025-0001')->json('data.is_valid'))->toBeFalse();
 });
 
+// Nor does an old file saying "active" lift a suspension BizTrack recorded.
+it('never lifts a suspension on re-import', function () {
+    $rows = [legacyRow()];
+    runImport(previewAsAdmin(legacyCsv($rows))['id']);
+
+    $permit = Permit::where('legacy_id', 'P-1')->firstOrFail();
+    $permit->update(['status' => PermitStatus::Suspended]); // as a business suspension leaves it
+
+    $rows[0]['valid_until'] = '2098-06-30';
+    runImport(previewAsAdmin(legacyCsv($rows))['id']);
+
+    expect($permit->fresh()->status)->toBe(PermitStatus::Suspended)
+        ->and($permit->fresh()->valid_until->toDateString())->toBe('2098-06-30');
+});
+
 it('rejects a permit number BizTrack already issued, and a business account number already taken', function () {
     $taken = Permit::whereNull('legacy_id')->firstOrFail();
     $takenBan = Business::whereNull('legacy_id')->whereNotNull('ban')->value('ban');

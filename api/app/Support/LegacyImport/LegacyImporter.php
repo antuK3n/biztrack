@@ -45,8 +45,8 @@ use Illuminate\Support\Facades\DB;
  * name, address or owner: from that point the owner keeps those details in
  * BizTrack, and the old export is the stale copy. Its permits are still
  * upserted — a certificate the old system issued is the old system's record —
- * except that a permit BizTrack has since revoked or superseded keeps that
- * status (see `apply`).
+ * except that a permit BizTrack has since revoked, superseded or suspended
+ * keeps that status (see `apply`).
  *
  * ── Chunks ─────────────────────────────────────────────────────────────────
  *
@@ -238,10 +238,12 @@ class LegacyImporter
              *
              * Revoked and Superseded are both ends of a permit's life that
              * happened HERE, after the old system's record was taken, so the
-             * export cannot know about them. The rest of the row is still
-             * the old register's and is still refreshed.
+             * export cannot know about them. A suspension is kept the same
+             * way: an old file saying "active" never lifts one (Ken's call,
+             * 5 October 2026). The rest of the row is still the old
+             * register's and is still refreshed.
              */
-            if ($permit->exists && in_array($permit->status, [PermitStatus::Revoked, PermitStatus::Superseded], true)) {
+            if ($permit->exists && in_array($permit->status, [PermitStatus::Revoked, PermitStatus::Superseded, PermitStatus::Suspended], true)) {
                 unset($fields['status']);
             }
 
