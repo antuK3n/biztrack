@@ -2996,9 +2996,11 @@ class WorkflowService
      * Refuse while the business is suspended or blacklisted.
      *
      * The one refusal behind every act that moves a filing toward a permit:
-     * BPLO's approvals and its counter payment, an office's approval and a
-     * passing inspection, the Debug panel's versions of those, BPLO lifting a
-     * permit's suspension, and the minting itself in `issuePermitFor`.
+     * BPLO's approvals and its counter payment, an office's approval, booking
+     * or moving an inspection and passing one, the Debug panel's versions of
+     * those, BPLO lifting a permit's suspension, and the minting itself in
+     * `issuePermitFor`. (Booking was added on Ken's call, 5 October 2026: it
+     * grants nothing, but a visit to a business on hold is not to be set up.)
      * Return, Reject, messages and reading stay open — none of them hands the
      * business anything. See `Business::filingsOnHoldReason`
      * for what is on hold and why.
@@ -3348,6 +3350,9 @@ class WorkflowService
      */
     public function scheduleClearanceInspection(ApplicationPermitType $row, mixed $scheduledAt): Inspection
     {
+        // Suspended or blacklisted: no visit is booked either (refuseWhileOnHold).
+        $this->refuseWhileOnHold($row->application?->business);
+
         /*
          * Both halves of the question, through the pivot's own predicate: the
          * permit is for inspection AND the filing is not decided. Asking only
@@ -3491,6 +3496,9 @@ class WorkflowService
      */
     public function scheduleReinspection(Inspection $failed, mixed $scheduledAt): Inspection
     {
+        // Suspended or blacklisted: no visit is booked either (refuseWhileOnHold).
+        $this->refuseWhileOnHold($failed->application?->business);
+
         return DB::transaction(function () use ($failed, $scheduledAt) {
             $app = $failed->application;
             $visit = $this->openInspection($app, $failed->department_id, $scheduledAt);

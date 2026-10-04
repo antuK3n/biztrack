@@ -282,6 +282,46 @@ it('refuses a passing visit on a held filing and issues nothing, but still recor
         ->assertOk();
 });
 
+it('refuses booking, moving or re-booking a visit on a held filing', function () {
+    $appId = scopedAssignmentFiling('Held Booking Shop');
+    $app = Application::findOrFail($appId);
+    authAs('sanitary@biztrack.local');
+    test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
+    $visit = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+    ])->assertCreated()->json('data.id');
+
+    holdSetStatus($app->business_id, 'suspended')->assertOk();
+
+    authAs('sanitary@biztrack.local');
+    test()->postJson("/api/v1/inspections/{$visit}/reschedule", ['scheduled_at' => now()->addDays(5)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('message', HOLD_SUSPENDED);
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'failed', 'findings' => 'No handwashing sink.'])
+        ->assertOk();
+    test()->postJson("/api/v1/inspections/{$visit}/reinspect", ['scheduled_at' => now()->addDays(5)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('message', HOLD_SUSPENDED);
+
+    expect(Inspection::where('application_id', $appId)->count())->toBe(1);
+});
+
+it('refuses booking the first visit on a held filing', function () {
+    $appId = scopedAssignmentFiling('Held First Visit Shop');
+    $app = Application::findOrFail($appId);
+    authAs('sanitary@biztrack.local');
+    test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
+
+    holdSetStatus($app->business_id, 'suspended')->assertOk();
+
+    authAs('sanitary@biztrack.local');
+    test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+    ])->assertStatus(422)->assertJsonPath('message', HOLD_SUSPENDED);
+
+    expect(Inspection::where('application_id', $appId)->count())->toBe(0);
+});
+
 it('refuses BPLO lifting a permit while its business is suspended', function () {
     $appId = scopedAssignmentFiling('Held Lift Shop');
     $app = Application::findOrFail($appId);

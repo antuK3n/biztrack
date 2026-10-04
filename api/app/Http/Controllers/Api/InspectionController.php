@@ -189,6 +189,7 @@ class InspectionController extends Controller
     public function reschedule(Request $request, Inspection $inspection): JsonResponse
     {
         $this->authorizeDepartment($request, $inspection);
+        $this->workflow->refuseWhileOnHold($inspection->application?->business);
 
         $data = $request->validate([
             'scheduled_at' => ['required', 'date'],
