@@ -3139,7 +3139,7 @@ export interface OfficeForm {
   prefill_from?: Record<string, CarriedSource>
 }
 
-export type CarriedSource = 'previous' | 'account' | 'application'
+export type CarriedSource = 'previous' | 'account' | 'application' | 'business'
 
 /**
  * One row of MCG-CPDD-FO-003 v1.2's checklist, answered for this filing.
