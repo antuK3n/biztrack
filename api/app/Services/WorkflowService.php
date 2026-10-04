@@ -2998,8 +2998,29 @@ class WorkflowService
     public function reconsiderSuspension(Application $app): void
     {
         $app->load('permitTypes');
+
+        /*
+         * A failed inspection counts as a refusal too, since 5 October 2026
+         * (see recordInspection): the client reads the visit's Reject as the
+         * permit being rejected. Per office, the LATEST CONDUCTED visit — a
+         * re-inspection that is booked but not yet done answers nothing, so
+         * it must not let another office's approval lift the suspension.
+         * Settled when that office's clearance is Approved, which a passing
+         * re-inspection does.
+         */
+        $failedOffices = Inspection::where('application_id', $app->id)
+            ->where('status', InspectionStatus::Completed->value)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('department_id')
+            ->map(fn ($visits) => $visits->last())
+            ->filter(fn (Inspection $visit) => $visit->failed())
+            ->keys();
+
         $stillRefused = $app->permitTypes->contains(
-            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected,
+            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected
+                || ($pt->pivot->status !== ClearanceStatus::Approved
+                    && $failedOffices->contains($pt->issuing_department_id)),
         );
 
         if ($stillRefused) {
@@ -3283,8 +3304,8 @@ class WorkflowService
      * the office says when. An automatic date is a promise made to the applicant
      * by a scheduler that does not know whether anyone is free.
      *
-     * The least-loaded inspector is still assigned, because somebody has to be
-     * named on the visit and the office has not been asked to pick one.
+     * Nobody is named on the visit any more: since 5 October 2026 the office
+     * types the inspector's name for the record (openInspection).
      *
      * Refuses a second CURRENT visit for the same office. A failed visit is kept
      * forever (see recordInspection), and `currentPerDepartment()` is what stops
@@ -3320,6 +3341,7 @@ class WorkflowService
             ]);
         }
 
+        $scheduledAt = $this->visitInstant($scheduledAt);
         $this->refusePastVisitDate($scheduledAt);
 
         return DB::transaction(function () use ($app, $departmentId, $scheduledAt, $row) {
@@ -3423,12 +3445,36 @@ class WorkflowService
              * through it put the failure back into the silence the note above
              * records being fixed.
              */
+            /*
+             * ── A failed visit suspends the business permit ──────────────
+             *
+             * The client, 5 October 2026: *"I thought when a permit was
+             * Rejected (which was done through For Inspection), the business
+             * permit is automatically Suspended? We already built that right,
+             * so where is that? Kindly FIX."* Only `rejectClearance` — the
+             * office formally refusing — suspended, and the client reads the
+             * inspection's Reject as the refusal. So a failure suspends the
+             * same way, through the same method (it does nothing when no
+             * Mayor's Permit is active). The way back is the passing
+             * re-inspection: grantClearance → reconsiderSuspension, which now
+             * counts an unanswered failure as still refused.
+             */
+            $permit = $this->outcomePermitFor($app);
+            $suspends = $permit !== null
+                && in_array($permit->status, [PermitStatus::Active, PermitStatus::Suspended], true);
+
             $this->notify->inspectionFailed(
                 $app,
                 "{$office} inspection did not pass."
                 .($findings ? " Findings: {$findings}" : '')
-                .' The office will schedule a re-inspection.',
+                .' The office will schedule a re-inspection.'
+                .($suspends ? ' Your Business Permit is suspended until this is settled.' : ''),
             );
+
+            $refused = $this->pivotForDepartment($app, $inspection->department_id)?->permitType;
+            if ($refused !== null) {
+                $this->suspendOutcomePermit($app, $refused, $findings ?: 'Inspection did not pass.');
+            }
 
             return;
         }
@@ -3450,6 +3496,7 @@ class WorkflowService
      */
     public function scheduleReinspection(Inspection $failed, mixed $scheduledAt): Inspection
     {
+        $scheduledAt = $this->visitInstant($scheduledAt);
         $this->refusePastVisitDate($scheduledAt);
 
         return DB::transaction(function () use ($failed, $scheduledAt) {
@@ -5382,6 +5429,7 @@ class WorkflowService
      */
     public function rescheduleInspection(Inspection $inspection, mixed $scheduledAt): Inspection
     {
+        $scheduledAt = $this->visitInstant($scheduledAt);
         $this->refusePastVisitDate($scheduledAt);
 
         return DB::transaction(function () use ($inspection, $scheduledAt) {
@@ -5407,6 +5455,25 @@ class WorkflowService
     }
 
     /**
+     * The booked instant, in the app's clock (Asia/Manila).
+     *
+     * The browser sends `toISOString()` — a UTC "…Z" string — and
+     * `Carbon::parse` keeps that zone, so a visit booked for 06:28 Manila was
+     * stored as "22:28" the day before while every other column is Manila
+     * (found shifting the register's timestamps, 5 October 2026). That also
+     * put the "no result before the booked day" check a day out. Converted
+     * here, once, for all three ways a visit gets a date.
+     */
+    private function visitInstant(mixed $scheduledAt): CarbonImmutable
+    {
+        $when = $scheduledAt instanceof \DateTimeInterface
+            ? CarbonImmutable::instance($scheduledAt)
+            : CarbonImmutable::parse((string) $scheduledAt);
+
+        return $when->setTimezone(config('app.timezone'));
+    }
+
+    /**
      * A visit is booked for today or later (browser testing, 5 October 2026:
      * one was booked in the past). Today is Manila's — config/app.php.
      */
@@ -5423,6 +5490,18 @@ class WorkflowService
         }
     }
 
+    /**
+     * A new visit, with nobody named on it.
+     *
+     * This used to name an account as inspector — `leastLoadedInspector()`,
+     * the office's active user with the fewest open visits. The client,
+     * 5 October 2026: *"since an inspector can have no account in the system,
+     * would it be better if the admin just type the name of the inspector
+     * assigned?"* An account picked by load was a guess the card then printed
+     * as fact, so the visit now opens blank and the office types the name
+     * (InspectionController::nameInspector). The officer in charge books it
+     * and decides it either way.
+     */
     private function openInspection(Application $app, int $departmentId, mixed $scheduledAt): Inspection
     {
         return Inspection::create([
@@ -5430,17 +5509,7 @@ class WorkflowService
             'department_id' => $departmentId,
             'status' => InspectionStatus::Scheduled,
             'scheduled_at' => $scheduledAt,
-            'inspector_user_id' => $this->leastLoadedInspector($departmentId),
         ]);
-    }
-
-    private function leastLoadedInspector(int $departmentId): ?int
-    {
-        return User::where('department_id', $departmentId)
-            ->where('is_active', true)
-            ->withCount(['inspections' => fn ($q) => $q->whereIn('status', ['scheduled', 'in_progress'])])
-            ->orderBy('inspections_count')
-            ->value('id');
     }
 
     /** The pivot row for one permit code on this filing, or null. */

@@ -49,6 +49,7 @@ class InspectionResource extends JsonResource
          * it.
          */
         $readsDetail = ApplicationVisibility::readsInspectionDetail($request->user(), $this->resource);
+        $readsName = ApplicationVisibility::readsInspectorName($request->user(), $this->resource);
 
         return [
             'id' => $this->id,
@@ -103,11 +104,27 @@ class InspectionResource extends JsonResource
              * only ever asked to show a clearance's standing. `department` stays
              * — which OFFICE inspected is the coordination fact every office on
              * the filing needs — but WHO is that office's own personnel record.
+             *
+             * Staff only since 5 October 2026, with `inspector_name` below: the
+             * applicant was handed this account until then.
              */
-            'inspector' => $readsDetail && $this->relationLoaded('inspector') && $this->inspector ? [
+            'inspector' => $readsName && $this->relationLoaded('inspector') && $this->inspector ? [
                 'id' => $this->inspector->id,
                 'name' => $this->inspector->name,
             ] : null,
+            /*
+             * Who went, as the office typed it (client, 5 October 2026: "just
+             * for the record"). It replaced the account above for every new
+             * visit; `inspector` stays for older rows that carry one. Staff
+             * only — the applicant is told the result, not the office's
+             * staffing (ApplicationVisibility::readsInspectorName).
+             */
+            'inspector_name' => $readsName ? $this->inspector_name : null,
+            /*
+             * May the reader type or change that name now? See
+             * Inspection::inspectorNameEditableBy — the PATCH's own tests.
+             */
+            'can_name_inspector' => $this->resource->inspectorNameEditableBy($request->user()),
             'application' => $app ? [
                 'id' => $app->id,
                 'tracking_id' => $app->tracking_id,

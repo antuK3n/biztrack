@@ -184,13 +184,14 @@ it('lets each of the five clearance offices book a visit, and books none for the
         ->and(clearancePermitsIssued($app))->toBe(0);
 });
 
-it('gives every inspecting office an active officer to book the visit to', function () {
+it('gives every inspecting office an officer, and books every visit with no inspector named yet', function () {
     /*
-     * WorkflowService::leastLoadedInspector returns null when an office has no
-     * active user, and a visit created with a null inspector is not fatal — the
-     * queue is scoped by department, and conduct() adopts the officer who
-     * closes it. But it does mean nobody is named on the sheet, so it is worth
-     * knowing which offices are staffed rather than discovering it on a filing.
+     * The visit used to be booked to an account — the office's least-loaded
+     * active user. Since 5 October 2026 the inspector is a name the office
+     * types "just for the record" (an inspector may have no account at all),
+     * so a visit opens blank, and nothing — booking or conducting — fills
+     * `inspector_user_id` in. Each office still needs an active officer: it
+     * is the officer in charge who books the visit and decides it.
      */
     foreach (array_keys(OFFICE_INSPECTOR) as $code) {
         $departmentId = Department::where('code', $code)->value('id');
@@ -203,7 +204,8 @@ it('gives every inspecting office an active officer to book the visit to', funct
         bookVisitFor($app, $officeCode);
     }
 
-    expect($app->inspections()->whereNull('inspector_user_id')->count())->toBe(0);
+    expect($app->inspections()->whereNotNull('inspector_user_id')->count())->toBe(0)
+        ->and($app->inspections()->whereNotNull('inspector_name')->count())->toBe(0);
 });
 
 it('lets each of the five offices see and close its own visit, releasing that permit at once', function () {

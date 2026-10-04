@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\ClearanceStatus;
 use App\Models\ApplicationReturnNote;
 use App\Support\ApplicationVisibility;
 use Illuminate\Http\Request;
@@ -247,25 +248,28 @@ class AssignmentResource extends JsonResource
     }
 
     /**
-     * This office's current site visit, and WHO is holding it.
+     * This office's current site visit, and the inspector's name typed on it.
      *
-     * ── Why this is not the officer above ───────────────────────────────────
+     * ── Not a second officer in charge ──────────────────────────────────────
      *
-     * Client, 4 October 2026: *"the officer assigned on the For Approval is the
-     * same as the For Inspection. It should not be like that because it is
-     * possible that a new officer may be assigned in the For Inspection."*
+     * On 4 October 2026 this carried an inspector ACCOUNT with Claim/Release
+     * flags, after the client said the For Inspection officer could differ
+     * from the For Approval one. On 5 October they settled what that means:
+     * *"since an inspector can have no account in the system, would it be
+     * better if the admin just type the name of the inspector assigned? The
+     * officer in charge is still the one to approve or reject the inspection,
+     * but he/she must still be able to put the inspector name just for the
+     * record. The field must be editable."*
      *
-     * Right, and the register already agreed — `inspections.inspector_user_id`
-     * is its own column, `WorkflowService::leastLoadedInspector()` names
-     * somebody when the visit is booked, the admin user editor can move it, and
-     * `InspectionController::conduct()` claims it for whoever turns up. Two
-     * people, two columns. Only the queue was reading one of them twice,
-     * printing the reviewer's name over the inspection stage.
+     * So the officer in charge (`officer` above) holds the visit as it holds
+     * the review, and this row only adds the typed name and whether the
+     * reader may change it.
      *
-     * They agree on the client's own register because these offices are small
-     * enough that the least-loaded inspector IS the reviewer. That is a fact
-     * about the staffing, not a rule, and the screen should not have made it
-     * look like one.
+     * `can_name_inspector` is worked out from what the queue already loaded —
+     * the office's permit pivot and the filing's `decided_at` — rather than
+     * `Inspection::inspectorNameEditableBy()`, which asks two queries per row
+     * on a 25-row page. Same rule: the reader's own office, `inspection.manage`,
+     * the permit still for inspection on an undecided filing.
      *
      * Null where there is no visit, which is most rows: the collection arrives
      * already narrowed to current visits (see the eager load in
@@ -288,32 +292,22 @@ class AssignmentResource extends JsonResource
         }
 
         $user = $request->user();
-        /*
-         * The same office test the review's own buttons use. An inspector from
-         * ANOTHER office can still be the holder — `authorizeDepartment` on
-         * InspectionController allows it, and a transfer can leave it that way
-         * — but they are not offered the buttons here, because this queue is
-         * scoped to one office's work.
-         */
-        $sameOffice = $user !== null
-            && $user->department_id !== null
-            && $user->department_id === $this->department_id;
+        $permit = $this->application->relationLoaded('permitTypes')
+            ? $this->application->permitTypes
+                ->first(fn ($pt) => $pt->issuing_department_id === $this->department_id)
+            : null;
 
         return [
             'id' => $visit->id,
             'status' => $visit->status?->value,
             'scheduled_at' => optional($visit->scheduled_at)->toISOString(),
-            'inspector' => $visit->relationLoaded('inspector') && $visit->inspector !== null
-                ? ['id' => $visit->inspector->id, 'name' => $visit->inspector->name]
-                : null,
-            'can_claim' => $sameOffice && $visit->inspector_user_id === null,
-            /*
-             * Unheld counts as actionable, mirroring `canAct` below and the
-             * server rule it mirrors: turning up to a visit nobody is named on
-             * claims it, so offering the button is honest.
-             */
-            'can_act' => $sameOffice
-                && ($visit->inspector_user_id === null || $visit->inspector_user_id === $user->id),
+            'inspector_name' => $visit->inspector_name,
+            'can_name_inspector' => $user !== null
+                && $user->department_id !== null
+                && $user->department_id === $this->department_id
+                && $user->hasPermission('inspection.manage')
+                && $permit?->pivot?->status === ClearanceStatus::ForInspection
+                && ! $this->application->isDecided(),
         ];
     }
 

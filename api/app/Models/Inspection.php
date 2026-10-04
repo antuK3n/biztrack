@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Inspection extends Model
 {
     protected $fillable = [
-        'application_id', 'department_id', 'inspector_user_id', 'status',
+        'application_id', 'department_id', 'inspector_user_id', 'inspector_name', 'status',
         'result', 'scheduled_at', 'conducted_at', 'findings', 'photo_paths',
     ];
 
@@ -134,6 +134,39 @@ class Inspection extends Model
             && ! $this->filingIsDecided()
             && $this->permitIsAwaitingInspection()
             && $this->isCurrent();
+    }
+
+    /**
+     * May the office still type or change the inspector's name on this visit?
+     *
+     * The client, 5 October 2026: the name is "just for the record" and "must
+     * be editable" — so it stays open for as long as the clearance does, a
+     * failed visit included, and closes with it. Once the visit passes the
+     * permit is issued, and once the filing is decided nothing on it moves; a
+     * name changed after either would be rewriting a closed record.
+     *
+     * The same predicate re-inspection uses for "is this permit still being
+     * inspected", rather than a third copy of it.
+     */
+    public function inspectorNameEditable(): bool
+    {
+        return $this->permitIsAwaitingInspection();
+    }
+
+    /**
+     * May THIS user type the name now? The three tests the PATCH applies —
+     * `inspection.manage` (the route), the visit's own office
+     * (InspectionController::authorizeDepartment) and the clearance still
+     * open — so a screen offers the field exactly where the save would be
+     * accepted. The open test costs queries, so it goes last.
+     */
+    public function inspectorNameEditableBy(?User $user): bool
+    {
+        return $user !== null
+            && $user->hasPermission('inspection.manage')
+            && (($user->department_id !== null && $user->department_id === $this->department_id)
+                || ($this->inspector_user_id !== null && $this->inspector_user_id === $user->id))
+            && $this->inspectorNameEditable();
     }
 
     /**

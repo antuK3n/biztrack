@@ -37,6 +37,14 @@ use App\Models\PsicCode;
 const OTHER_OFFICE_FINDINGS = 'Food handlers without current health certificates on the premises.';
 
 /**
+ * The inspector BFP typed on its visit. Since 5 October 2026 the inspector is
+ * a name the office types "just for the record" rather than an account, so
+ * the fixture names one the way an office does — and it crosses the same
+ * boundary the findings do.
+ */
+const OTHER_OFFICE_INSPECTOR = 'Ramon Bautista';
+
+/**
  * A paid filing routed to BPLO, CHO and BFP, with both clearance offices having
  * approved their permit and booked a visit — and BFP's visit conducted and
  * written up, so there is something on the record for CHO to be refused.
@@ -158,6 +166,9 @@ function filingWithOneOfficesVisitWrittenUp(): array
         ->firstOrFail();
 
     authAs('fire@biztrack.local');
+    test()->patchJson("/api/v1/inspections/{$visit->id}/inspector", [
+        'inspector_name' => OTHER_OFFICE_INSPECTOR,
+    ])->assertOk();
     test()->postJson("/api/v1/inspections/{$visit->id}/conduct", [
         'result' => 'failed',
         'findings' => OTHER_OFFICE_FINDINGS,
@@ -202,7 +213,7 @@ it('withholds another office’s findings and inspector from the assignment revi
     $leaked = visitIn($payload, $bfpVisit->id);
 
     expect($leaked['findings'])->toBeNull()
-        ->and($leaked['inspector'])->toBeNull()
+        ->and($leaked['inspector_name'])->toBeNull()
         // Bare progress is shared on purpose: CHO's own clearance cannot issue
         // until BFP's visit passes, so it has to be able to see that it did not.
         ->and($leaked['status'])->toBe('completed')
@@ -223,7 +234,7 @@ it('withholds another office’s findings and inspector from the filing detail e
     );
 
     expect($leaked['findings'])->toBeNull()
-        ->and($leaked['inspector'])->toBeNull();
+        ->and($leaked['inspector_name'])->toBeNull();
 });
 
 it('keeps an office’s own findings and inspector on its own visit', function () {
@@ -239,14 +250,16 @@ it('keeps an office’s own findings and inspector on its own visit', function (
     );
 
     expect($own['findings'])->toBe(OTHER_OFFICE_FINDINGS)
-        ->and($own['inspector']['name'])->not->toBeNull();
+        ->and($own['inspector_name'])->toBe(OTHER_OFFICE_INSPECTOR);
 });
 
-it('keeps the write-up for the applicant whose premises were inspected', function () {
+it('keeps the findings for the applicant whose premises were inspected, but not who inspected', function () {
     ['app' => $app, 'visit' => $bfpVisit] = filingWithOneOfficesVisitWrittenUp();
 
     // The findings are what the owner has to put right before a re-inspection
-    // can pass. Hiding them would break the filing.
+    // can pass. Hiding them would break the filing. The inspector's name is
+    // the office's own record (client, 5 October 2026: "just for the
+    // record"), so the applicant was given it until then and is not now.
     authAs('owner@biztrack.local');
     $own = visitIn(
         test()->getJson("/api/v1/applications/{$app->id}")->assertOk()->json('data.inspections'),
@@ -254,7 +267,8 @@ it('keeps the write-up for the applicant whose premises were inspected', functio
     );
 
     expect($own['findings'])->toBe(OTHER_OFFICE_FINDINGS)
-        ->and($own['inspector']['name'])->not->toBeNull();
+        ->and($own['inspector_name'])->toBeNull()
+        ->and($own['inspector'])->toBeNull();
 });
 
 it('keeps the write-up for BPLO and the super admin, who read across offices by design', function (string $email, callable $read) {
@@ -264,7 +278,7 @@ it('keeps the write-up for BPLO and the super admin, who read across offices by 
     $seen = visitIn($read($app), $bfpVisit->id);
 
     expect($seen['findings'])->toBe(OTHER_OFFICE_FINDINGS)
-        ->and($seen['inspector']['name'])->not->toBeNull();
+        ->and($seen['inspector_name'])->toBe(OTHER_OFFICE_INSPECTOR);
 })->with([
     // BPLO coordinates every clearance, and reads the filing through its own
     // assignment; the super admin has no department at all, so /assignments is
@@ -287,7 +301,7 @@ it('keeps the write-up on the conducting office’s own /inspections feed', func
     $shown = test()->getJson("/api/v1/inspections/{$bfpVisit->id}")->assertOk()->json('data');
 
     expect($shown['findings'])->toBe(OTHER_OFFICE_FINDINGS)
-        ->and($shown['inspector']['name'])->not->toBeNull();
+        ->and($shown['inspector_name'])->toBe(OTHER_OFFICE_INSPECTOR);
 
     $listed = visitIn(test()->getJson('/api/v1/inspections')->assertOk()->json('data'), $bfpVisit->id);
     expect($listed['findings'])->toBe(OTHER_OFFICE_FINDINGS);

@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import { CalendarIcon, CheckCircleFilledIcon, XCircleIcon, XIcon } from './icons'
+import { InspectorNameField } from './InspectorNameField'
 import { ProtoModal } from './ui/Proto'
 import { toApiError } from '../lib/api'
 import { formatDate } from '../lib/format'
@@ -46,8 +47,9 @@ import type { Inspection } from '../lib/types'
  *  - Approve, and Reject through the REMARKS FOR REJECTION dialog — already
  *    here, and in a better shape (see `InspectionRemarksModal` on why Proceed
  *    stays reachable rather than `disabled`).
- *  - Findings, the scheduled/finished date, the inspector's name with the
- *    department fallback — already on the card below.
+ *  - Findings, the scheduled/finished date and the inspector's name — on the
+ *    card below. The name is typed by the office for the record since
+ *    5 October 2026 (see InspectorNameField).
  *  - "Schedule re-inspection", the way out of a failed visit — here, and the
  *    gate that kept it invisible on this payload is fixed in `canReinspect`.
  *  - "Reschedule this inspection", moving a visit that has not happened yet —
@@ -119,6 +121,17 @@ function RejectGlyph() {
  * so three fields called "Date and time" are three identical stops for anyone
  * moving through the page by form control.
  */
+/**
+ * Today at 00:00 on the officer's own clock, in the shape `datetime-local`
+ * wants for `min`. The API refuses a past visit (5 October 2026: one was
+ * booked in the past); this stops the picker offering one at all.
+ */
+function localTodayMin(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`
+}
+
 function InspectionDateInput({
   label,
   value,
@@ -131,6 +144,7 @@ function InspectionDateInput({
   return (
     <input
       type="datetime-local"
+      min={localTodayMin()}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       aria-label={label}
@@ -458,6 +472,23 @@ export function InspectionDecisionCard({
         </p>
 
         {/*
+          * Who inspected, typed for the record (client, 5 October 2026). Only
+          * where the server sent it — the visit's own office, BPLO and the
+          * super admin; the officer in charge still decides the visit. Falls
+          * back to the account an older visit was booked to.
+          */}
+        {(mine || item.inspector_name || item.inspector) && (
+          <div className="mt-2">
+            <InspectorNameField
+              inspectionId={item.id}
+              name={item.inspector_name ?? item.inspector?.name ?? null}
+              canEdit={item.can_name_inspector === true}
+              context={`${office} inspection`}
+            />
+          </div>
+        )}
+
+        {/*
          * What a finished visit does and does not settle.
          *
          * The outstanding case already says whose visit it is, further down,
@@ -587,28 +618,13 @@ export function InspectionDecisionCard({
              * every field that page did: the result, the date, the findings and
              * the inspector.
              *
-             * An empty span rather than nothing, so the inspector's name stays
-             * pinned to the right of a `justify-between` row instead of sliding
-             * across to the left on conducted visits only.
+             * The inspector's name chip that sat to the right of this row
+             * went on 5 October 2026: the name is the typed field under the
+             * date now, and saying it twice on one card is the restatement
+             * the client keeps asking to cut.
              */
-            <span />
+            null
           )}
-
-          {/*
-            Every link in this chain is nullable on the wire: a visit can be
-            scheduled before an inspector is named, and InspectionResource emits
-            `department: null` for a relation nobody asked it to load.
-          */}
-          <span className="flex items-center gap-2.5 text-royal">
-            <span className="text-sm font-medium">
-              {item.inspector?.name ?? item.department?.name ?? 'Unassigned'}
-            </span>
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-royal text-white">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 4.5V20h14v-1.5C19 16 16 14 12 14Z" />
-              </svg>
-            </span>
-          </span>
         </div>
 
         {reinspect && !reinspect.open && (
@@ -847,6 +863,8 @@ export function InspectionDecisionPanel({
   const user = useAuth((s) => s.user)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [rejecting, setRejecting] = useState<Inspection | null>(null)
+  /** The visit whose Approve is waiting on "Yes, approve". */
+  const [approving, setApproving] = useState<Inspection | null>(null)
   const [reinspectId, setReinspectId] = useState<number | null>(null)
   const [reinspectValue, setReinspectValue] = useState('')
   const [reschedId, setReschedId] = useState<number | null>(null)
@@ -1223,7 +1241,10 @@ export function InspectionDecisionPanel({
             mine={isMine(item)}
             canAct={canAct(item)}
             busy={busyId === item.id}
-            onApprove={() => conduct(item, 'passed')}
+            onApprove={() => {
+              setError(null)
+              setApproving(item)
+            }}
             onReject={() => {
               setError(null)
               setRejecting(item)
@@ -1273,6 +1294,30 @@ export function InspectionDecisionPanel({
       </ul>
 
       {bookingAnnouncement}
+
+      {/*
+        Approve's confirmation, the same dialog every other Approve uses
+        (ReviewPage). It was one click with no way back: passing the visit
+        issues the office's permit at once.
+      */}
+      {approving && (
+        <ProtoModal
+          title="Approve this inspection?"
+          tone="green"
+          onCancel={() => setApproving(null)}
+          confirmLabel={busyId === approving.id ? 'Approving…' : 'Yes, approve'}
+          confirmDisabled={busyId === approving.id}
+          onConfirm={() => {
+            const item = approving
+            setApproving(null)
+            void conduct(item, 'passed')
+          }}
+        >
+          <p className="text-sm text-ink-secondary">
+            The inspection passes and your office’s permit is issued. This cannot be undone.
+          </p>
+        </ProtoModal>
+      )}
 
       {rejecting && (
         <InspectionRemarksModal

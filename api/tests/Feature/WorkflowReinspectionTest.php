@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
 use App\Models\AppNotification;
+use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Inspection;
 use App\Models\Permit;
@@ -564,4 +565,92 @@ it('tells the applicant when a visit is moved', function () use ($deptEmail) {
     expect(AppNotification::where('user_id', $owner)
         ->where('body', 'like', '%inspection has been moved to '.$to->format('d M Y').'.')
         ->exists())->toBeTrue();
+});
+
+/*
+ * ── A failed visit suspends the business permit ─────────────────────────────
+ *
+ * The client, 5 October 2026: *"I thought when a permit was Rejected (which
+ * was done through For Inspection), the business permit is automatically
+ * Suspended? We already built that right, so where is that? Kindly FIX."*
+ * Only the office's formal refusal (`rejectClearance`) suspended; the
+ * inspection's Reject — a failed result — left the Mayor's Permit active.
+ */
+
+/** The Mayor's Permit this filing released at payment. */
+function mayorsPermitOf(int $appId): Permit
+{
+    return Permit::where('application_id', $appId)
+        ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+        ->latest('id')
+        ->firstOrFail();
+}
+
+it('suspends the Mayor’s Permit when a visit fails, and tells the applicant', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Suspended By Visit');
+    expect(mayorsPermitOf($appId)->status->value)->toBe('active');
+
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    test()->withHeaders(authAs($deptEmail['BFP']))
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+
+    $permit = mayorsPermitOf($appId);
+    expect($permit->status->value)->toBe('suspended');
+
+    $audit = AuditLog::where('action', 'permit.suspended')
+        ->where('auditable_id', $permit->id)->sole();
+    expect($audit->changes['because_permit_type'])->toBe(PermitType::where('code', 'FSIC')->value('name'))
+        ->and($audit->changes['reason'])->toBe('no extinguisher');
+
+    $owner = Application::findOrFail($appId)->applicant_user_id;
+    expect(AppNotification::where('user_id', $owner)
+        ->where('body', 'like', '%Your Business Permit is suspended until this is settled.')
+        ->exists())->toBeTrue();
+});
+
+it('reinstates the Mayor’s Permit once the re-inspection passes', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Reinstated By Visit');
+
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+    $again = test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->toDateTimeString()])
+        ->assertCreated()->json('data.id');
+    expect(mayorsPermitOf($appId)->status->value)->toBe('suspended');
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$again}/conduct", ['result' => 'passed'])
+        ->assertOk();
+
+    $permit = mayorsPermitOf($appId);
+    expect(clearanceStatusOf($appId, 'FSIC'))->toBe('approved')
+        ->and($permit->status->value)->toBe('active')
+        ->and(AuditLog::where('action', 'permit.reinstated')->where('auditable_id', $permit->id)->exists())
+        ->toBeTrue();
+});
+
+it('keeps the Mayor’s Permit suspended while another office passes and the failure is unanswered', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Still Suspended');
+
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+    // A re-inspection booked but not yet done answers nothing.
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->toDateTimeString()])
+        ->assertCreated();
+
+    $cho = $visits->firstWhere('department.code', 'CHO');
+    test()->withHeaders(authAs($deptEmail['CHO']))
+        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'])
+        ->assertOk();
+
+    expect(clearanceStatusOf($appId, 'SANITARY'))->toBe('approved')
+        ->and(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 });
