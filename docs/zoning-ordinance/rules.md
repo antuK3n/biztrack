@@ -1145,7 +1145,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-8-CHANGE** · Art. IX §8 · p. 64 — **A change of activity or a bigger area needs a new locational clearance** · _Implemented_
   If the activity changes or the area grows, the owner applies for a new locational clearance. BizTrack puts a zoning clearance on any amendment that changes the line of business or enlarges the floor area.
   > Should there be any change in the activity or expansion of the area subject of the Locational Clearance, the owner/developer shall apply for a new Locational Clearance. Section 9
-  checked at `api/app/Services/WorkflowService.php:489`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
+  checked at `api/app/Services/WorkflowService.php:493`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
 - **IX-9-USE** · Art. IX §9 · p. 64 — **A locational clearance lapses if not used within a year** · _Implemented_
   The holder has one year from issue to start the use; an unused clearance expires automatically and a new one is needed.
   > Upon issuance of an LC, the grantee thereof shall have one year within which to commence or undertake the use, activity or development covered by such clearance on his property. Non-use of LC within said period shall result in its automatic expiration, cancellation and the grantee shall not proceed with his project without applying for a new clearance.
@@ -1153,7 +1153,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-9-CHANGE** · Art. IX §9 · p. 64 — **(Repeated) a change of activity or a bigger area needs a new clearance** · _Implemented_
   §9 repeats §8: a change of activity or expansion of area needs a new locational clearance.
   > Should there be any change in the activity or expansion of the area subject of the Locational Clearance, the owner/developer shall apply for a new Locational Clearance. Section 10
-  checked at `api/app/Services/WorkflowService.php:489`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
+  checked at `api/app/Services/WorkflowService.php:493`; proved by `AmendmentFlowTest.php` — “carries a new zoning clearance when an amendment changes the trade or enlarges the floor area”
 - **IX-10.1-a** · Art. IX §10 · p. 64 — **Filing fees** · _Question for Malabon_
   Filing fee ₱45 per locational clearance application (approved or not); ₱330 motion for reconsideration; ₱660 reclassification petition (plus its costs); ₱100 complaint, free for paupers.
   > Fees for zoning and/or locational clearance for land use shall be collected from the owners and/or contractors of land development, construction, renovation, expansion projects and activities as follows: a) Application/Filing Fee – For every application for locational clearance irrespective of whether approved or not, motions for reconsideration, reclassification and for filing of complaint, as follows: 1) Locational clearance ……………………………………………… 45.00 2) Motion for reconsideration …………………………………… 330.00 3) Petition/request for reclassification …………………. 660.00 This excludes the cost of …
@@ -1181,7 +1181,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-10.1-c12-13** · Art. IX §10.1 · p. 65 — **Filing fee before acceptance; verification fee before release** · _Implemented_
   The filing fee is paid before the application is accepted, and the verification fee before the approved clearance is released. BizTrack collects both before CPDO receives the sheet, which satisfies both.
   > Payment under schedule (a) shall be made prior to acceptance of application. 13) Payment under schedule (b) shall be made prior to the release of approved application.
-  checked at `api/app/Services/WorkflowService.php:2025`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
+  checked at `api/app/Services/WorkflowService.php:2051`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
 - **IX-10.1-c16** · Art. IX §10.1 · p. 65 — **Subdivision and condominium clearance fees** · _Not applicable_
   Subdivision and condominium clearances follow the PD 957 rates.
   Subdivision and condominium projects only; not a business filing.
@@ -1206,7 +1206,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-10.4** · Art. IX §10.4 · p. 66 — **Fees paid to the City Treasurer before the permit** · _Implemented_
   The fees are paid to the City Treasurer before the permit to develop, build, renovate or expand is issued.
   > The fees imposed in this Article shall be paid to the City Treasurer before the permit to develop land, construct, renovate and expand, in Malabon City is issued.
-  checked at `api/app/Services/WorkflowService.php:2025`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
+  checked at `api/app/Services/WorkflowService.php:2051`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
 - **IX-10.5** · Art. IX §10.5 · p. 66 — **The Mayor administers the fees** · _Not applicable_
   The City Mayor administers the fee provisions.
   Assigns administrative responsibility within City Hall; nothing on a filing depends on it.
