@@ -29,7 +29,10 @@ The source PDF is not committed. It is the city's document, not ours.
 > `ZoningCheck` and its helpers are in the history, not the tree, and what
 > `rules.json` marks "implemented" or "shown" was implemented or shown by it.
 > What still reads this folder at run time is the note under the map
-> (`ZoningConformance`, from `zone-uses.json` and `zone-boundaries.json`).
+> (`ZoningConformance`, from `zone-uses.json` and `zone-boundaries.json`), and
+> the one refusal that replaced the checklist: a line of business the zone
+> under the owner's pin clearly does not allow (`App\Support\Zoning\PinZone`,
+> from `zone-uses.json` and the traced `web/public/zoning/*.geojson`).
 
 **The ordinance cannot be turned into a machine that says "allowed" or
 "refused" — but it can be applied rule by rule, and BizTrack now does that.**

@@ -22,6 +22,7 @@ use App\Support\RenewalScope;
 use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
+use App\Support\Zoning\PinZone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -677,6 +678,21 @@ class ApplicationController extends Controller
                     .'what the detail should say now, not only that it changed.',
                 ],
             ]);
+        }
+
+        /*
+         * ── Not where the zone at the pin clearly does not allow it ──────────
+         *
+         * The wizard stops the owner on Location & Zoning when the zone under
+         * their pin clearly does not allow their line of business (Ken, 5
+         * October 2026). This is the same rule, and the same sentence, on the
+         * server, so a filing cannot be made around the wizard: a new filing
+         * on its pin and line, an amendment only when it moves the business or
+         * changes its line. Anything unclear passes; see PinZone.
+         */
+        $zoning = PinZone::refusalFor($application);
+        if ($zoning !== null) {
+            throw ValidationException::withMessages(['zoning' => [$zoning]]);
         }
 
         /*

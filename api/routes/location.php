@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\LocationInsightsController;
+use App\Http\Controllers\Api\ZoneAtPinController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -13,3 +14,11 @@ use Illuminate\Support\Facades\Route;
  */
 Route::middleware(['auth:sanctum', 'permission:application.create'])
     ->get('location-insights', [LocationInsightsController::class, 'show']);
+
+/*
+ * The zone under the owner's pin, and the sentence that stops them when their
+ * line of business is clearly not allowed in it (App\Support\Zoning\PinZone).
+ * Beside location-insights because the wizard asks both as the pin settles.
+ */
+Route::middleware(['auth:sanctum', 'permission:application.create'])
+    ->get('zone-at-pin', [ZoneAtPinController::class, 'show']);

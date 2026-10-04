@@ -119,8 +119,13 @@ class MalabonGeo
             : "The pin is outside {$barangay}. Move the pin into {$barangay}, or change the barangay.";
     }
 
-    /** @param list<list<array{0: float, 1: float}>> $rings Outer ring first, then holes. */
-    private static function inPolygon(float $lng, float $lat, array $rings): bool
+    /**
+     * Even-odd point in polygon, [lng, lat]. Public for PinZone, which asks
+     * the same question of the traced zoning polygons.
+     *
+     * @param  list<list<array{0: float, 1: float}>>  $rings  Outer ring first, then holes.
+     */
+    public static function inPolygon(float $lng, float $lat, array $rings): bool
     {
         if ($rings === [] || ! self::inRing($lng, $lat, $rings[0])) {
             return false;

@@ -246,6 +246,21 @@ final class Ordinance
         'like_divisions' => ['47', '56', '62', '73', '74', '82', '85', '95', '96'],
     ];
 
+    /**
+     * Whether Art. V §2.1 lets a household run `$psic` from its home: one of
+     * the home occupations it names, any manufacturing as a home industry
+     * ("cottage industry"), or a small trade its "and the like" reaches. By
+     * trade alone; whether a given business meets the clause's conditions
+     * (floor area, people, equipment, capital) is CPDO's to judge. PinZone
+     * never refuses one of these where a zone takes in Residential-1's list.
+     */
+    public static function homeBusiness(string $psic): bool
+    {
+        return in_array($psic, self::HOME_OCCUPATION['is'], true)
+            || self::isManufacturing($psic)
+            || in_array(substr($psic, 0, 2), self::HOME_OCCUPATION['like_divisions'], true);
+    }
+
     /** PSIC section C, divisions 10-33: manufacturing. */
     public static function isManufacturing(string $psic): bool
     {

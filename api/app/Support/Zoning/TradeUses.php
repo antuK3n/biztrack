@@ -34,7 +34,8 @@ namespace App\Support\Zoning;
  * A code not in this table (one added to the register later) is never listed:
  * its nearest line is offered as a possibility, under Art. III §1 (terms the
  * ordinance does not define take their national-code meaning) — see
- * ZoningConformance::lookup.
+ * ZoningConformance::lookup. Nor is it ever refused at a pin: PinZone refuses
+ * only a trade this table has read, and passes a `maybe`.
  *
  * Phrases are lowercase substrings of a use line. A phrase starting `=` must
  * be the whole of the line's last segment ("Commercial housing like: Hotel"
@@ -267,7 +268,8 @@ final class TradeUses
     /**
      * Trades the lists cannot place at all without knowing more than the code
      * says, with the neutral reason. The headline under the map stays
-     * undetermined for them (ZoningConformance::forBarangay).
+     * undetermined for them (ZoningConformance::forBarangay), and PinZone never
+     * refuses them: their row above names no line.
      *
      * @var array<string, string>
      */
