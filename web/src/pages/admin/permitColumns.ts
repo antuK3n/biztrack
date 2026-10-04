@@ -250,8 +250,16 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      * a column, so ordering by it would mean ordering by `valid_until` under
      * another name — and a header that sorted by a DIFFERENT column than the
      * one it sits on is worse than one that does not sort.
+     *
+     * A dash on a superseded or revoked permit (5 October 2026). Its term
+     * still has days on paper, but the permit no longer runs to them — a
+     * renewal replaced it, or the City took it back — so a countdown on that
+     * row reads as a live permit expiring (tester).
      */
-    value: (r) => (typeof r.days_until_expiry === 'number' ? String(r.days_until_expiry) : null),
+    value: (r) =>
+      r.status === 'superseded' || r.status === 'revoked' || typeof r.days_until_expiry !== 'number'
+        ? null
+        : String(r.days_until_expiry),
   },
   { key: 'issued_at', label: 'Issued on', sort: 'issued_at', tnum: true, value: (r) => formatDate(r.issued_at) },
   { key: 'issued_by', label: 'Issued by', value: (r) => r.issued_by ?? null },

@@ -2088,8 +2088,8 @@
       "BUSINESS"
     ],
     "conditions": {
-      "flags": [
-        "has_signage"
+      "business_category": [
+        "movie_house"
       ]
     },
     "basis": "fixed",
@@ -2098,7 +2098,7 @@
       "amount": 300.0
     },
     "cap": null,
-    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution. Conditioned on the movie_house category, not on has_signage, since 5 October 2026: the Code makes this payable by owners of movie houses or theaters, and on the signboard tick alone every restaurant with a sign was billed it (tester, 5 October 2026).",
     "defects": []
   },
   {
@@ -2112,8 +2112,8 @@
       "BUSINESS"
     ],
     "conditions": {
-      "flags": [
-        "has_signage"
+      "business_category": [
+        "movie_house"
       ]
     },
     "basis": "fixed",
@@ -2122,7 +2122,7 @@
       "amount": 2000.0
     },
     "cap": null,
-    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution. Conditioned on the movie_house category, not on has_signage, since 5 October 2026: the Code makes this payable by owners of movie houses or theaters, and on the signboard tick alone every restaurant with a sign was billed it (tester, 5 October 2026).",
     "defects": []
   },
   {

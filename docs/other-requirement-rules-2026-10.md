@@ -4,7 +4,8 @@
 **Client instruction [C]:** *"I am planning to have rules that will tell which Other Requirements are
 required to have for a business. Does the revenue code or any other files you have state something
 about this?"* — picker answered **2 — tell him before AND after**, and **1 — add yes/no questions**
-for the facts the wizard did not ask.
+for the facts the wizard did not ask. (Those yes/no questions went again the same day with the
+quantity-priced rows — see *Not built*.)
 
 ## What the Revenue Code says
 
@@ -16,9 +17,6 @@ this change the system knew them only as **fees** (`fee_rules`). It now also kno
 |---|---|---|---|---|
 | Sells / serves liquor | Art. T, Sec. 3T.01, 3T.04 | `liquor_permit` | `sells_liquor` | **message** — nearest school/church/hospital and distance (3T.04: 50 m bars, 200 m night clubs) |
 | Sells tobacco | Art. U, Sec. 3U.01 | `tobacco_permit` | `sells_tobacco_retail` / `_wholesale` | told only — fee already assessed |
-| Stores flammables | Art. O, Sec. 3O.01 | `flammables_storage_permit` | `stores_flammables` *(new)* | **message** — kinds and quantities; Art. O prices by litre/case/kilo/ton |
-| Engines, generators, machinery | Art. N, Sec. 3N.01 | `machinery_inspection` | `operates_machinery` *(new question; flag already in fee rules)* | **message** — each machine and its horsepower |
-| Lumberyard | Art. AC, Sec. 3AC.01 | `lumberyard_special_permit` | `is_lumberyard` *(new)* | told only |
 | Staff handle food / personal care | Art. 4D | `health_certificates` | `employees_need_health_certificates` | **document** — Health Certificates from CHO, to CHO |
 | Peddler / ambulant | Sec. 3X.03, 3X.05 | `ambulant_vendor` | `is_ambulant_vendor` | told only — zoning-exempt; Mayor's EO sets where |
 
@@ -43,6 +41,12 @@ row asks for it.
 
 ## Not built (deliberately)
 
+- **Quantity-priced permits — dropped 5 October 2026.** Storage of flammables (Art. O, Sec. 3O.01),
+  engines and machinery (Art. N, Sec. 3N.01) and lumberyards (Art. AC, Sec. 3AC.01) were rows for a
+  day, with three new wizard ticks (`stores_flammables`, `operates_machinery`, `is_lumberyard`).
+  Client: *"safe to not include this for less complexity."* The rows and the ticks are gone; bringing
+  one back means the row in `OtherRequirementRules` and its tick in `FeeProfileStep` together.
+
 - **Admin-editable rules** (picker option 3). The table is code; a change is a commit.
 - **Amusement Special Permit** as its own row. Sec. 3T.02's ₱5,000 special permit is a *liquor*
   permit for amusement places; it is covered by `liquor_permit` when `amusement_place` businesses
@@ -52,5 +56,4 @@ row asks for it.
 
 1. Does BPLO want **documents** for the Liquor Permit (e.g. barangay clearance, police clearance)
    beyond the Sec. 3T.04 distance check? The Code lists none.
-2. Who inspects under **Art. O / Art. N** — BFP or BPLO? Rows are raised to BPLO (it assesses the fee).
-3. Should **Health Certificates** gate the Sanitary Permit's release, or only be collected?
+2. Should **Health Certificates** gate the Sanitary Permit's release, or only be collected?

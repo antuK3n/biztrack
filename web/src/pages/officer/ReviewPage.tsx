@@ -521,6 +521,52 @@ function FeeFactRow({ facts }: { facts: { label: string; value: string }[] }) {
   )
 }
 
+/**
+ * The answers the API writes over whatever the sheet holds, per sheet.
+ *
+ * Mirrors `OfficeFormAnswers::derive`, whose result is `$derived + $formData`:
+ * these keys always win, so a value typed into one is thrown away on the next
+ * read. The officer's review grid offered every key as "Correct …" in Edit
+ * mode, derived ones included — CENRO was handed "Denr Basis" and "Denr Pco"
+ * to correct, and a correction would have saved and silently reverted
+ * (tester, 5 October 2026). Shown, never offered for correction or return.
+ *
+ * Only the keys derive() writes UNCONDITIONALLY. ZONING's floor area and
+ * storeys are derived only when the fee profile holds a number, so they stay
+ * correctable; listing them would lock an answer the applicant typed. Change
+ * this with derive(). Kept here rather than beside OFFICE_FORM_INTERNAL_KEYS
+ * because this screen is its only reader.
+ */
+const OFFICE_FORM_DERIVED_KEYS: Record<OfficeFormCode, readonly string[]> = {
+  ZONING: ['application_date', 'application_type', 'site_is_rented'],
+  SANITARY: [
+    'application_date',
+    'application_type',
+    'workers_requiring_health_certs',
+    'employees_male',
+    'employees_female',
+    'employees_total',
+    'total_floor_area_sqm',
+  ],
+  CEC: [
+    'application_date',
+    'application_type',
+    'denr_reason',
+    'denr_basis',
+    'denr_certificate',
+    'denr_permits',
+    'denr_pco',
+    'denr_remarks',
+  ],
+  FSIC: ['application_date', 'certificate_applied_for'],
+  OCCUPANCY: ['application_date'],
+}
+
+/** Does the API write this answer itself, so nobody may correct it? */
+function officeFormKeyIsDerived(code: string, key: string): boolean {
+  return OFFICE_FORM_DERIVED_KEYS[code as OfficeFormCode]?.includes(key) ?? false
+}
+
 /** One answer the applicant submitted, presented as a record, never a control. */
 /**
  * The officer's unsaved edits, and the rules they are held to.
@@ -2827,6 +2873,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * filing about a field the applicant has never seen.
            */
           .filter((key) => !OFFICE_FORM_INTERNAL_KEYS.includes(key))
+          /*
+           * Nor is an answer the API writes itself (`OfficeFormAnswers::derive`).
+           * The applicant cannot change it, so returning the filing over one
+           * asks for a fix nobody can make. 5 October 2026.
+           */
+          .filter((key) => !officeFormKeyIsDerived(form.permit_type_code, key))
           .sort(
             (a, b) =>
               officeFormFieldRank(form.permit_type_code, a) -
@@ -3379,6 +3431,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     if (failed !== undefined) fieldEditErrors[key] = failed
   }
   const fieldEditsDirty = Object.keys(fieldEdits).length > 0
+  /** Anything typed in Edit mode and not yet written, in either buffer. */
+  const unsavedEdits = fieldEditsDirty || Object.keys(sheetEdits).length > 0
   const fieldEditsValid = Object.keys(fieldEditErrors).length === 0
 
   /*
@@ -4411,7 +4465,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * this, where somebody questioning the lock will look for it, rather
    * than on screen above every filing.
    */
-  const lockedNote = 'The applicant’s answers are locked — return the filing to have one fixed.'
+  /*
+   * Rewritten 5 October 2026. "The applicant's answers are locked" stopped
+   * being true on 1 October, when Edit mode began correcting the filing's
+   * own answers (a968ca5), and on 4 October the office's own sheet joined
+   * them. A tester typed into Street under that banner, saw no Save near the
+   * box, and reloaded to find it gone. Neither path autosaves — the client's
+   * instruction — so what the officer needs to know is where the Save is.
+   */
+  const lockedNote = 'Changed answers are kept only when you press Save.'
 
   /*
    * The one genuinely good sentence in the old copy, kept: an office's own
@@ -4780,9 +4842,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             )}
           </div>
         </div>
-        <span className="hidden items-center gap-2 text-xs italic text-ink-muted sm:flex">
+        {/*
+          Says so when it is not true. It read "All Changes Saved" with
+          typed corrections sitting unsaved in either buffer, and nothing
+          autosaves here (tester, 5 October 2026).
+        */}
+        <span
+          role="status"
+          className={`hidden items-center gap-2 text-xs italic sm:flex ${
+            unsavedEdits ? 'font-semibold text-s-orange-ink' : 'text-ink-muted'
+          }`}
+        >
           <CloudIcon />
-          All Changes Saved
+          {unsavedEdits ? 'Unsaved changes' : 'All Changes Saved'}
         </span>
         {decided ? (
           <span
@@ -5747,7 +5819,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 ) : (
                   <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
                     {entries.map(([key, value]) =>
-                      editing ? (
+                      /*
+                       * Not on a derived answer. The API writes those over
+                       * whatever the sheet holds (`$derived + $formData`), so
+                       * CENRO was offered "Correct Denr Basis" for a value
+                       * that would save and silently come back (tester,
+                       * 5 October 2026). They show as the record they are.
+                       */
+                      editing && !officeFormKeyIsDerived(form.permit_type_code, key) ? (
                         /*
                          * The same control the applicant answers a returned
                          * field with — chips where the sheet offers chips, a
