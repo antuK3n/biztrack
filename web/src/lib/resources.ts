@@ -1066,12 +1066,6 @@ export interface AssignmentFilters extends PageParams {
    */
   application_decided?: 0 | 1
   /**
-   * Whose holder `oic` is about: the review's officer in charge by default,
-   * the site visit's inspector, or either. The two are different columns and
-   * often different people — see `AssignmentResource::inspectionRow()`.
-   */
-  oic_on?: 'review' | 'inspection' | 'any'
-  /**
    * The state of THIS OFFICE'S own permit on the filing — the second machine.
    * Comma-separated, e.g. 'for_inspection'.
    *
@@ -1258,14 +1252,16 @@ export const inspections = {
     unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
   /**
-   * Become this visit's inspector, or stop being it.
+   * Type, change or clear (null) the inspector's name on a visit.
    *
-   * The twins of `assignments.claim` / `assignments.release`, and separate
-   * from them on purpose: the review and the visit are held by different
-   * people, so taking one must not take the other.
+   * For the record only (client, 5 October 2026): an inspector may have no
+   * account, and the officer in charge still decides the visit. It replaced
+   * `claim` / `release`, which made the inspector an account.
    */
-  claim: (id: number) => unwrap<Inspection>(api.post(`/inspections/${id}/claim`)),
-  release: (id: number) => unwrap<Inspection>(api.post(`/inspections/${id}/release`)),
+  nameInspector: (id: number, inspectorName: string | null) =>
+    unwrap<Inspection>(api.patch(`/inspections/${id}/inspector`, { inspector_name: inspectorName })),
+  /** Names this office has typed before, newest first, at most 20. */
+  inspectorNames: () => unwrap<string[]>(api.get('/inspections/inspector-names')),
   /**
    * Book the FIRST visit on one permit. Answers with the inspection it creates.
    *

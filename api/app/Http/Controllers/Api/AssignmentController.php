@@ -76,9 +76,6 @@ class AssignmentController extends Controller
              * caller written before this wanted and still gets.
              */
             'application_decided' => ['sometimes', 'boolean'],
-            // Whose holder `oic` is about: the review's officer by default,
-            // or the site visit's inspector. See `scopeToHolder`.
-            'oic_on' => ['sometimes', 'in:review,inspection,any'],
             /*
              * Repeatable or comma-separated: ?application_type=renewal
              *
@@ -154,8 +151,8 @@ class AssignmentController extends Controller
              */
             'application.permitTypes:id,code,name,issuing_department_id,requires_inspection',
             /*
-             * For `AssignmentResource::inspectionRow()`, which names who is
-             * holding the SITE VISIT as opposed to the paperwork review.
+             * For `AssignmentResource::inspectionRow()`, which carries the
+             * inspector's typed name for the office's current visit.
              *
              * Constrained by `currentPerDepartment()` rather than loading every
              * visit and picking the latest here: that scope is the only
@@ -167,8 +164,7 @@ class AssignmentController extends Controller
              */
             'application.inspections' => fn ($q) => $q
                 ->currentPerDepartment()
-                ->select('id', 'application_id', 'department_id', 'inspector_user_id', 'status', 'scheduled_at'),
-            'application.inspections.inspector:id,name',
+                ->select('id', 'application_id', 'department_id', 'inspector_name', 'status', 'scheduled_at'),
         ]);
 
         $this->scopeToDepartment($request, $query);
@@ -1113,90 +1109,12 @@ class AssignmentController extends Controller
         $userId = $request->user()->id;
 
         /*
-         * ── Which holder the question is about ──────────────────────────────
-         *
-         * `?oic_on=inspection` asks about the SITE VISIT's inspector instead of
-         * the review's officer in charge. Added 4 October 2026 on the client's
-         * report that the two names were always the same: *"the officer
-         * assigned on the For Approval is the same as the For Inspection. It
-         * should not be like that."* They were never the same person by rule —
-         * `WorkflowService::leastLoadedInspector()` names the inspector when the
-         * visit is booked, and an admin can move it — the queue was simply
-         * asking the wrong row.
-         *
-         * Scoped to the assignment's OWN department, or an office filtering by
-         * "My assigned" would match on another office's visit of the same
-         * filing. `currentPerDepartment()` again, because a superseded visit's
-         * inspector is a record of who went last time, not who is going.
+         * Always the officer in charge. A `?oic_on=inspection|any` parameter
+         * asked about the site visit's inspector ACCOUNT from 4 October 2026;
+         * it went on 5 October, when the client made the inspector a typed
+         * name "just for the record" and kept the OIC as the one who approves
+         * the inspection. There is no second holder left to ask about.
          */
-        $on = $request->query('oic_on');
-
-        if ($on === 'inspection' || $on === 'any') {
-            $visit = fn ($i) => $i
-                ->currentPerDepartment()
-                ->whereColumn('inspections.department_id', 'application_assignments.department_id');
-
-            $heldBy = fn ($q, int $id) => $q->whereHas(
-                'application.inspections',
-                fn ($i) => $visit($i)->where('inspector_user_id', $id),
-            );
-            $visitTaken = fn ($q) => $q->whereHas(
-                'application.inspections',
-                fn ($i) => $visit($i)->whereNotNull('inspector_user_id'),
-            );
-
-            if ($on === 'inspection') {
-                match ($narrow) {
-                    'unassigned' => $query->whereHas(
-                        'application.inspections',
-                        fn ($i) => $visit($i)->whereNull('inspector_user_id'),
-                    ),
-                    'mine' => $heldBy($query, $userId),
-                    'others' => $query->whereHas(
-                        'application.inspections',
-                        fn ($i) => $visit($i)->whereNotNull('inspector_user_id')->where('inspector_user_id', '!=', $userId),
-                    ),
-                    default => null,
-                };
-
-                return;
-            }
-
-            /*
-             * ── `any`: either holder, for the All stages list ───────────────
-             *
-             * All stages mixes rows whose work is a review with rows whose work
-             * is a site visit, and the two are held by different columns. Asked
-             * about only one of them, "My assigned" would quietly drop every
-             * visit the reader is out on — which is the opposite of what an
-             * officer means by the words.
-             *
-             * `others` is written as "taken, and not by me" rather than as a
-             * third list of its own, so the three answers stay exhaustive: a
-             * row is unheld, mine, or somebody else's, and no row can fall
-             * between two of them.
-             */
-            match ($narrow) {
-                'unassigned' => $query
-                    ->whereNull('officer_user_id')
-                    ->whereDoesntHave(
-                        'application.inspections',
-                        fn ($i) => $visit($i)->whereNotNull('inspector_user_id'),
-                    ),
-                'mine' => $query->where(fn ($q) => $q
-                    ->where('officer_user_id', $userId)
-                    ->orWhere(fn ($o) => $heldBy($o, $userId))),
-                'others' => $query
-                    ->where(fn ($q) => $q->whereNotNull('officer_user_id')->orWhere(fn ($o) => $visitTaken($o)))
-                    ->whereNot(fn ($q) => $q
-                        ->where('officer_user_id', $userId)
-                        ->orWhere(fn ($o) => $heldBy($o, $userId))),
-                default => null,
-            };
-
-            return;
-        }
-
         match ($narrow) {
             'unassigned' => $query->whereNull('officer_user_id'),
             'mine' => $query->where('officer_user_id', $userId),
