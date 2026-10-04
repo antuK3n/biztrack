@@ -365,16 +365,23 @@ class NotificationService
             return;
         }
 
-        $permit->loadMissing('permitType');
+        $permit->loadMissing('permitType.department');
         $name = $permit->permitType?->name ?? 'Permit';
+        // The office that revoked it, since each office now revokes its own.
+        $office = $permit->permitType?->department?->name ?? 'issuing office';
 
+        /*
+         * Its own type, `permit_revoked`, not the generic `decision` [client,
+         * 5 October 2026]: the owner's screen raises a modal the first time it
+         * sees one unread, and it has to be able to tell this notice apart
+         * from an approval to do that.
+         */
         $this->push(
             $owner,
-            'decision',
+            'permit_revoked',
             "{$name} revoked",
             "Your {$name} {$permit->permit_number} has been revoked and is no longer valid. "
-                ."Reason: {$reason} Contact the Business Permits and Licensing Office if you "
-                .'believe this is wrong.',
+                ."Reason: {$reason} Contact the {$office} if you believe this is wrong.",
             '/permits',
             $permit,
             disapproval: true,
