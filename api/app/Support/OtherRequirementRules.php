@@ -9,9 +9,8 @@ namespace App\Support;
  *
  * The Revenue Code names permits a business must secure on top of the Mayor's
  * Permit — a Liquor Permit before serving a drink (Art. T), a tobacco permit
- * before selling a pack (Art. U), a storage permit for flammables (Art. O), an
- * inspection of every engine (Art. N), a Health Certificate for each food
- * handler (Art. 4D). Until 5 October 2026 the system knew these only as FEES:
+ * before selling a pack (Art. U), a Health Certificate for each food handler
+ * (Art. 4D). Until 5 October 2026 the system knew these only as FEES:
  * tick "sells liquor" and `FeeCalculator` priced the liquor filing fee, and
  * nothing told the applicant there was a permit behind the fee or asked for
  * what the office needs to issue it. Client: *"I am planning to have rules
@@ -44,10 +43,20 @@ namespace App\Support;
  * very filing. Asking the applicant to UPLOAD a Liquor Permit the City has not
  * yet issued would be a dead end, so a row raises a requirement only where the
  * Code gives the office something it needs from the applicant: the distance
- * to the nearest school or church (Sec. 3T.04), the quantity of fuel stored
- * (Art. O prices by the litre), the horsepower of each engine (Art. N). Rows
- * with `request_type => null` are told before submission and raise nothing
- * after — a tobacco permit needs nothing more than the fee already assessed.
+ * to the nearest school or church (Sec. 3T.04), the staff's Health
+ * Certificates (Art. 4D). Rows with `request_type => null` are told before
+ * submission and raise nothing after — a tobacco permit needs nothing more
+ * than the fee already assessed.
+ *
+ * ── The quantity-priced permits were dropped, 5 October 2026 ────────────────
+ *
+ * The storage permit for flammables (Art. O), the engine and machinery
+ * inspection (Art. N) and the lumberyard Special Permit (Art. AC) were rows
+ * here for a day. The first two are priced by a quantity — litres,
+ * horsepower — the applicant would have had to reply with and BPLO re-assess
+ * by hand. Client: *"safe to not include this for less complexity."* The
+ * three wizard flags that turned them on went with them. Bringing one back
+ * means a row here AND its flag back in `FeeProfileStep`'s BUSINESS_FLAGS.
  */
 final class OtherRequirementRules
 {
@@ -86,40 +95,6 @@ final class OtherRequirementRules
             'department' => 'BPLO',
             'conditions' => ['flags' => ['sells_tobacco_retail', 'sells_tobacco_wholesale']],
             'summary' => "A Mayor's Permit to sell tobacco or cigarettes, issued by BPLO with this filing. The annual fee is on your assessment.",
-            'request_type' => null,
-            'description' => null,
-        ],
-        [
-            'key' => 'flammables_storage_permit',
-            'title' => 'Permit to store flammable and combustible materials',
-            'article' => 'Revenue Code Art. O, Sec. 3O.01',
-            'department' => 'BPLO',
-            'conditions' => ['flags' => ['stores_flammables']],
-            'summary' => 'An annual storage permit for flammable or combustible materials. Its fee depends on what you store and how much, which BPLO assesses from your reply.',
-            'request_type' => 'message',
-            'description' => 'Because your business stores flammable or combustible materials, it needs a storage permit (Revenue Code Sec. 3O.01). '
-                .'The fee is set by kind and quantity — litres of fuel or paint, cases of matches or celluloid, kilos of tar, tons of coal — so reply with each material you keep on the premises and the largest amount you hold at one time. '
-                .'BPLO adds the fee to your assessment from this.',
-        ],
-        [
-            'key' => 'machinery_inspection',
-            'title' => 'Permit and inspection of engines and machinery',
-            'article' => 'Revenue Code Art. N, Sec. 3N.01',
-            'department' => 'BPLO',
-            'conditions' => ['flags' => ['operates_machinery']],
-            'summary' => 'An annual permit and inspection for each engine, generator or machine you operate, priced by horsepower from your reply.',
-            'request_type' => 'message',
-            'description' => 'Because your business operates engines, generators or machinery, each one needs an annual permit and inspection (Revenue Code Sec. 3N.01). '
-                .'The fee is bracketed by horsepower, so reply with a list: each engine or machine, what it is for, and its horsepower or kilowatt rating. '
-                .'BPLO adds the fee to your assessment from this.',
-        ],
-        [
-            'key' => 'lumberyard_special_permit',
-            'title' => 'Special Permit for a lumberyard',
-            'article' => 'Revenue Code Art. AC, Sec. 3AC.01',
-            'department' => 'BPLO',
-            'conditions' => ['flags' => ['is_lumberyard']],
-            'summary' => "A Special Permit from the City Mayor's Office through BPLO to establish or operate a lumberyard, with a flat annual fee.",
             'request_type' => null,
             'description' => null,
         ],

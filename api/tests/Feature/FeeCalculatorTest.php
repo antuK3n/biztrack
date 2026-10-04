@@ -228,3 +228,48 @@ it('records the Sec. 3.D.01(d) ambiguity as a defect on the rule', function () {
     expect($rule->defects)->not->toBeEmpty()
         ->and($rule->defects[0])->toContain('345.00');
 });
+
+it('bills a restaurant with a signboard the signage fee only, no movie-house or office-only line (Sec. 3Z.01)', function () {
+    /*
+     * Tester, 5 October 2026: every restaurant with a signboard paid ₱300 for
+     * "slides in movie houses" and ₱2,000 for "film exhibition". Both are
+     * payable by owners of movie houses or theaters (Sec. 3Z.01(3)-(4)) and
+     * were conditioned on the signboard tick alone. They now key on the
+     * movie_house category; the signboard is billed by its own area.
+     */
+    $app = feeApp(['BUSINESS'], 'new', [
+        'lines' => [[
+            'category' => 'restaurant',
+            'permit_category' => 'restaurant_nonfranchised_fastfood',
+            'capitalization' => 300000,
+        ]],
+        'capitalization' => 300000,
+        'floor_area_sqm' => 40,
+        'flags' => ['has_signage'],
+        'sign_billboard_sqm' => 2,
+    ]);
+    $r = app(FeeCalculator::class)->assess($app);
+
+    expect(amountOf($r, 'permit.sign_billboard'))->toBe(50.0)
+        ->and(amountOf($r, 'permit.sign_movie_slide'))->toBeNull()
+        ->and(amountOf($r, 'permit.sign_film_exhibition'))->toBeNull()
+        ->and(amountOf($r, 'permit.catchall_office_area'))->toBeNull()
+        ->and(amountOf($r, 'permit.restaurant_nonfranchised_fastfood'))->not->toBeNull();
+});
+
+it('bills the movie-house advertising fees to a movie house, signboard or not (Sec. 3Z.01(3)-(4))', function () {
+    $app = feeApp(['BUSINESS'], 'new', [
+        'lines' => [[
+            'category' => 'amusement_place',
+            'permit_category' => 'movie_house',
+            'capitalization' => 300000,
+        ]],
+        'capitalization' => 300000,
+        'floor_area_sqm' => 400,
+    ]);
+    $r = app(FeeCalculator::class)->assess($app);
+
+    expect(amountOf($r, 'permit.sign_movie_slide'))->toBe(300.0)
+        ->and(amountOf($r, 'permit.sign_film_exhibition'))->toBe(2000.0)
+        ->and(amountOf($r, 'permit.movie_house'))->toBe(4400.0);
+});

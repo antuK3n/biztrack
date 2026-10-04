@@ -17,13 +17,17 @@ use App\Models\DocumentType;
  * it needs. Recording "2" against a single PDF would be recording a fact about
  * a process this system replaces.
  *
- * ── Three rows the checklist names are not uploads ───────────────────────────
+ * ── Rows the checklist names that are not uploads ────────────────────────────
  *
  * The application form for the Certificate of Occupancy and the FSIC
  * application form are both sheets in BizTrack — this one and BFP's — so they
- * are ticked by being submitted rather than attached. The zoning clearance is
- * an attachment the business permit application already collected, so it is
- * carried rather than asked for twice.
+ * are ticked by being submitted rather than attached.
+ *
+ * The zoning clearance was "carried" from the business permit too, until
+ * 5 October 2026 — pointed at LOCATION_SKETCH, so the row showed the
+ * applicant's location sketch under "Local / Zoning Clearance" (tester). The
+ * business permit collects no zoning clearance; CPDO issues one on this very
+ * filing. It is now a plain, non-blocking upload row — see the row.
  *
  * ── What stays a document, and why ───────────────────────────────────────────
  *
@@ -154,7 +158,15 @@ final class OccupancyRequirements
         ],
         [
             'key' => 'CHANGE_OF_PROFESSIONAL',
-            'label' => 'Affidavit of Change of Professional',
+            /*
+             * Worded the paper's way since 5 October 2026. The label said
+             * nothing of the condition, so `statedAsConditional` read it as
+             * unconditional and blocked every filing on an affidavit that only
+             * a project whose professional changed can have (tester). The
+             * "(if …)" clause is what the note always said, and it carries the
+             * asterisk, the gate and the paper together as on AS_BUILT.
+             */
+            'label' => 'Affidavit of Change of Professional (if the professional in charge changed)',
             'when' => 'always',
             'note' => 'Only where the professional in charge of the project changed.',
             'carried_from' => null,
@@ -163,8 +175,19 @@ final class OccupancyRequirements
             'key' => 'ZONING_CLEARANCE',
             'label' => 'Local / Zoning Clearance',
             'when' => 'always',
-            'note' => 'Carried from your business permit documents.',
-            'carried_from' => 'LOCATION_SKETCH',
+            /*
+             * Not carried, and not blocking, since 5 October 2026. It pointed
+             * at LOCATION_SKETCH, so the location sketch stood in for the
+             * clearance on screen. No business-permit attachment is a zoning
+             * clearance: CPDO issues it on this filing, alongside this sheet,
+             * and that issued clearance is what OBO reads. Blocking the sheet
+             * on an upload of a paper the City has not yet issued would be a
+             * dead end, so the row asks only for a copy the applicant may
+             * already hold.
+             */
+            'note' => 'The Zoning Clearance issued on this filing answers this. Upload one only if you already hold it.',
+            'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'FIRE_SAFETY_CHECKLIST',

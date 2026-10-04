@@ -14,8 +14,8 @@ use App\Support\OtherRequirementRules;
  *
  * Client, 5 October 2026: *"I am planning to have rules that will tell which
  * Other Requirements are required to have for a business. Does the revenue
- * code … state something about this?"* It does — Articles T, U, O, N, AC, 4D
- * and Sec. 3X — and `OtherRequirementRules` is that statement as a table.
+ * code … state something about this?"* It does — Articles T, U, 4D and
+ * Sec. 3X — and `OtherRequirementRules` is that statement as a table.
  * These tests pin its two readers: the preview the wizard shows before the
  * press, and the system requirements raised by the press itself.
  */
@@ -43,6 +43,7 @@ function filingDeclaring(array $flags): Application
         ->putJson("/api/v1/applications/{$appId}", ['fee_profile' => ['flags' => $flags]])
         ->assertOk();
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return Application::findOrFail($appId);
@@ -139,6 +140,7 @@ it('does not raise a rule twice on the same filing', function () {
         'status' => 'pending',
     ]);
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     expect(ruleRequestsOn(Application::findOrFail($appId)))->toHaveCount(1);
@@ -162,13 +164,13 @@ it('hands the wizard the same list beside the fee estimate', function () {
 
     $preview = test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/fee-preview", [
-            'fee_profile' => ['flags' => ['sells_liquor', 'stores_flammables', 'is_ambulant_vendor']],
+            'fee_profile' => ['flags' => ['sells_liquor', 'sells_tobacco_retail', 'is_ambulant_vendor']],
         ])
         ->assertOk()
         ->json('data.other_requirements');
 
-    expect(array_column($preview, 'key'))->toBe(['liquor_permit', 'flammables_storage_permit', 'ambulant_vendor'])
-        ->and(array_column($preview, 'asks'))->toBe([true, true, false])
+    expect(array_column($preview, 'key'))->toBe(['liquor_permit', 'tobacco_permit', 'ambulant_vendor'])
+        ->and(array_column($preview, 'asks'))->toBe([true, false, false])
         ->and($preview[0])->toHaveKeys(['title', 'article', 'summary']);
 
     // And nothing declared is nothing listed — the key is always present.
@@ -190,4 +192,18 @@ it('names only departments that exist and keys that are its own', function () {
         );
     }
     expect(OtherRequirementRules::systemKey('liquor_permit'))->toBe('rule.liquor_permit');
+});
+
+it('no longer carries the quantity-priced permits the client dropped', function () {
+    /*
+     * Client, 5 October 2026, on the flammables, machinery and lumberyard
+     * rows: *"safe to not include this for less complexity."* Each was priced
+     * by a quantity the applicant would have had to reply with. A profile
+     * still carrying one of their old flags gets nothing from them.
+     */
+    $keys = array_column(OtherRequirementRules::all(), 'key');
+    expect($keys)->toBe(['liquor_permit', 'tobacco_permit', 'health_certificates', 'ambulant_vendor']);
+
+    $profile = ['flags' => ['stores_flammables', 'operates_machinery', 'is_lumberyard'], 'categories' => []];
+    expect(OtherRequirementRules::matching($profile))->toBe([]);
 });

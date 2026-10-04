@@ -2258,7 +2258,7 @@ export function QueuePage() {
                     }`}
                     title={
                       impossible
-                        ? 'A new filing is issued when its last clearance is approved, so none waits here.'
+                        ? 'A new filing completes by itself when its last clearance is issued, so none waits here.'
                         : undefined
                     }
                   >
@@ -2413,9 +2413,16 @@ export function QueuePage() {
                          *
                          * An empty destructive-looking queue makes people go
                          * looking for the filings they think they have lost, so
-                         * the emptiness is explained rather than merely stated.
+                         * the emptiness was explained rather than merely stated.
+                         *
+                         * Cut to one line on 5 October 2026. The Business
+                         * Permit is released at payment and the BPLO closing
+                         * step is going — a filing completes by itself when its
+                         * last clearance is issued — so "issued as soon as the
+                         * last clearance is approved" described a step that no
+                         * longer exists (tester).
                          */
-                        'Nothing is waiting on your final approval. New applications no longer stop here — their Mayor’s Permit is issued as soon as the last clearance is approved. Renewals still arrive here for you to check the certificates they uploaded.'
+                        'Nothing is waiting on BPLO here.'
                       : // Both halves of what this tab now holds: filings this
                         // office has signed off and that have not finished.
                         'Nothing your office has approved is still in progress.'

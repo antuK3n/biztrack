@@ -277,16 +277,25 @@ export function PayPage() {
           choosing among them is not on offer; and this payment already covered
           all of them, so none of them adds a fee. What is released and when
           also changed: the gate is five approvals, not a zero balance.
+
+          And that gate is gone too. Since 643b890 the Business Permit is
+          released AT payment, and the clearances are approved each on its own
+          — so "released once all five are approved" told a business owner to
+          wait for a permit they already held (tester, 5 October 2026). A
+          renewal of the Business Permit has no clearance stage at all: this
+          payment closes it, so it is told so and offered no clearances button.
         */}
         <p className="mt-6 text-center text-sm text-ink-secondary">
-          Your five LGU Clearances are now open, and this payment already covered them. Apply for
-          each one, or hand in a copy if you already hold it — your Business Permit is released
-          once all five are approved.
+          {app.application_type === 'renewal'
+            ? 'Your renewed Business Permit is released.'
+            : 'Your Business Permit is released. Your five LGU Clearances are now open — apply for each under Permit Tracking; each is approved on its own.'}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-3">
-          <PillButton onClick={() => navigate(`/applications/${appId}/clearances`)}>
-            Apply for LGU Clearances
-          </PillButton>
+          {app.application_type !== 'renewal' && (
+            <PillButton onClick={() => navigate(`/applications/${appId}/clearances`)}>
+              Apply for LGU Clearances
+            </PillButton>
+          )}
           <PillButton
             className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
             onClick={() => navigate(`/applications/${appId}`)}

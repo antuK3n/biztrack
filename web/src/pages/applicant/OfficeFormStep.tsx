@@ -206,10 +206,16 @@ export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
  * sheet carried the occupancy type and storey count from OBO's. The sheets are
  * separate now (client: *"Make them separate"*); the key stays listed so a
  * sheet saved while it was written keeps it out of the grid.
+ *
+ * `denr_reason` joined on 5 October 2026. It says which branch of the DENR
+ * table matched ('scale' or 'catch_all'), and CENRO's review grid printed it
+ * as "Denr Reason: catch_all" (tester). `denr_basis` beside it already names
+ * the row in words; the CEC sheet still reads the reason to pick its sentence.
  */
 export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
   'authorized_representative_source',
   'occupancy_shared_source',
+  'denr_reason',
 ]
 
 /**
@@ -280,6 +286,17 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'SANITARY.pest_control': 'Pest Control',
   'SANITARY.pest_control_last_date': 'Last Pest Control Treatment',
   'SANITARY.certified': 'Certification',
+  'SANITARY.workers_requiring_health_certs': 'Workers Requiring Health Certificates',
+
+  /*
+   * CENRO · the DENR answers the API derives (OfficeFormAnswers). Named
+   * since 5 October 2026: humanised they read "Denr Basis" and "Denr Pco".
+   */
+  'CEC.denr_basis': 'DENR Basis',
+  'CEC.denr_certificate': 'DENR Certificate',
+  'CEC.denr_permits': 'DENR Permits',
+  'CEC.denr_pco': 'Pollution Control Officer',
+  'CEC.denr_remarks': 'DENR Remarks',
 }
 
 /**
@@ -1441,9 +1458,14 @@ function ZoningFields({
           ever held `business_location`, so the proprietor's residence has no
           home on the BPLO form. CENRO's sheet asks the same question under a
           different name; if BPLO ever grows the field, both become carried.
+
+          No asterisk since 5 October 2026. It wore one while
+          `officeFormMissing` accepted it blank — the paper (MCG-CPDD-FO-003)
+          does not mark it mandatory, so the gate was right and the mark was
+          the lie (tester).
         */}
         <label className="block">
-          <FieldLabel required>Home Address</FieldLabel>
+          <FieldLabel>Home Address</FieldLabel>
           <input
             value={get(data, 'zoning_home_address')}
             onChange={(e) => set('zoning_home_address', e.target.value)}
@@ -2019,7 +2041,6 @@ function RequirementsChecklist({
   onDeclarationTemplate?: () => void
 }) {
   const ro = useReadOnly()
-  const outstanding = rows.filter((r) => !r.satisfied).length
   /*
    * The rows that stop the submit, named. `blocking` is the server's flag (see
    * the note above the panel), so this reads it rather than deciding it.
@@ -2031,6 +2052,15 @@ function RequirementsChecklist({
    * itself whether it is filled.
    */
   const blocked = rows.filter((r) => r.blocking === true && !r.satisfied).map((r) => r.label)
+  /*
+   * What is "still missing" is what stops the submit — the rule
+   * ClearanceStagePage gates on, `blocking && !satisfied` — and nothing
+   * else. It counted every unsatisfied row until 5 October 2026, so the
+   * optional rows and the sheet's own row (satisfied only BY submitting)
+   * were in it: "5 are still missing" with 3 missing, and "1 is still
+   * missing" after every upload was in (tester).
+   */
+  const outstanding = blocked.length
   const meta = REQUIREMENTS_META[code] ?? {
     title: 'Requirements',
     office: 'This office',
@@ -2057,12 +2087,12 @@ function RequirementsChecklist({
           {ro
             ? `What ${meta.office} received with this application.`
             : outstanding === 0
-              ? `Everything on ${meta.office}’s list is here.`
+              ? `Everything ${meta.office} requires is here.`
               : blocked.length > 0 && blocked.length <= 2
                 ? `${blocked.join(' and ')} ${blocked.length === 1 ? 'is' : 'are'} still missing. ${
                     blocked.length === 1 ? 'It has' : 'They have'
                   } to be uploaded before you can submit this form.`
-                : `${meta.office} asks for all of ${rows.length === 1 ? 'this' : 'these'} with the application. ${outstanding} ${
+                : `${meta.office} asks for the starred documents with the application. ${outstanding} ${
                     outstanding === 1 ? 'is' : 'are'
                   } still missing, and the form cannot be submitted until ${
                     outstanding === 1 ? 'it is' : 'they are'
@@ -3193,16 +3223,6 @@ function OccupancyFields({
             />
             <CarriedTag field="project_location" />
           </label>
-          <DerivedField
-            className="grow basis-[18rem]"
-            label={
-              <>
-                Location of Project
-                <FromApplicationTag />
-              </>
-            }
-            value={business.address}
-          />
           {/*
             This sheet OWNS the occupancy type and the storey count — BFP's
             paper prints them too and carries these answers read-only. See the
@@ -3255,16 +3275,6 @@ function OccupancyFields({
             />
             <CarriedTag field="total_floor_area_sqm" />
           </label>
-          <DerivedField
-            className="shrink-0"
-            label={
-              <>
-                Total Floor Area
-                <FromApplicationTag />
-              </>
-            }
-            value={business.businessAreaSqm}
-          />
           <label className="block shrink-0">
             <FieldLabel required>Date of Completion</FieldLabel>
             <input
@@ -3370,12 +3380,27 @@ export function OfficeFormSheet({
    * refilled under their cursor. Flagged "From your Business Permit
    * application" while it still reads as seeded, so it is visibly not the
    * applicant's own words, and editable like any answer.
+   *
+   * OCCUPANCY's Location of Project and Total Floor Area joined on
+   * 5 October 2026. Both opened empty and were listed as missing while the
+   * same values stood beside them as "(from your application)" (tester) —
+   * the display-only boxes are gone and the value is the answer instead.
+   *
+   * A dash is not a value: `carriedOver` renders an unknown address or
+   * trade as "—", and seeding that would answer a required box with
+   * nothing.
    */
+  const seedable = (value: string) => (value.trim() === '—' ? '' : value)
   const seeds: Record<string, string> =
     code === 'FSIC'
-      ? { occupancy_type: business.lineOfBusiness }
+      ? { occupancy_type: seedable(business.lineOfBusiness) }
       : code === 'OCCUPANCY'
-        ? { project_name: business.name, occupancy_type: business.lineOfBusiness }
+        ? {
+            project_name: business.name,
+            occupancy_type: seedable(business.lineOfBusiness),
+            project_location: seedable(business.address),
+            total_floor_area_sqm: business.businessAreaSqm,
+          }
         : {}
   const seededOnce = useRef<Set<string>>(new Set())
   useEffect(() => {
@@ -3395,7 +3420,7 @@ export function OfficeFormSheet({
     if (Object.keys(fill).length > 0) onChange({ ...data, ...fill })
     // Keyed on the seed values: `seeds` is a fresh object every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly, code, business.name, business.lineOfBusiness, data])
+  }, [readOnly, code, business.name, business.lineOfBusiness, business.address, business.businessAreaSqm, data])
   const carriedShown: Record<string, CarriedSource> = { ...carried }
   for (const [key, value] of Object.entries(seeds)) {
     if (!carriedShown[key] && value.trim() && get(data, key) === value) carriedShown[key] = 'business'
