@@ -156,7 +156,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IV-5-PR-UTS** · Art. IV §5 · p. 25 — **Parks and Utilities zones are wherever such facilities existed** · _Implemented_
   The Parks and Recreation zone and the Utilities zone are every area already used for them before the ordinance; their overlays follow the base zone around them.
   > All area occupied by existing parks & recreation, prior to adoption of the Follow Base Zone to Ordinance where the parks & recreation are located UTILITIES, TRANSPORTATION AND SERVICE ZONE All areas occupied by existing utilities, transportation and service zone , prior to Follow Base Zone to adoption of this Ordinance where the area is located
-  checked at `api/app/Support/ZoningConformance.php:308`; proved by `ZoningOrdinanceRulesTest.php` — “counts parks and utilities zones only where the sheet draws them” Also asked: [C34](../questions-for-malabon.md).
+  checked at `api/app/Support/ZoningConformance.php:275`; proved by `ZoningOrdinanceRulesTest.php` — “counts parks and utilities zones only where the sheet draws them” Also asked: [C34](../questions-for-malabon.md).
 - **IV-6-a** · Art. IV §6 · p. 25 — **Boundaries along streets follow the right-of-way lines** · _Shown_
   A boundary drawn along a street’s centre is read as the street’s right-of-way line.
   > The following rules shall apply in the interpretation of the boundaries indicated on the Official Zoning Map: Where zone boundaries are so indicated that they approximately follow the center of streets or highway, the streets or highways right-of-way lines shall be construed to be the boundaries.
@@ -235,23 +235,23 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.1-USES** · Art. V §2.1 · p. 27 — **Residential-1 allowable uses** · _Implemented_
   The uses allowed in the Residential-1 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for low density residential use. Per the National Building Code, R-1 Zone is characterized mainly by low-rise single-detached and duplex residential buildings for exclusive use as single (nuclear) family dwellings. Allowable Uses • Single-detached dwelling units • Semi-detached family dwelling units, e.g. duplex • Townhouses • Residential Subdivisions approved per P.D. 957 standards • Home occupation for the practice of one’s profession such as offices of physicians, surgeons, dentists, architects, engineers, lawyers, and other professionals or …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.2-USES** · Art. V §2.2 · p. 28 — **Basic R-2 allowable uses** · _Implemented_
   The uses allowed in the Basic R-2 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for medium density residential use, characterized mainly by low-rise single-attached, duplex or multi-level structures residential buildings for exclusive use as multifamily dwellings. Allowable Uses • All allowable uses under R-1 Zone. • Apartments • Boarding houses • Dormitories • Museums • Libraries • High School • Vocational School
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.3-USES** · Art. V §2.3 · p. 29 — **Maximum R-2 allowable uses** · _Implemented_
   The uses allowed in the Maximum R-2 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for a medium density residential use or occupancy, characterized mainly by a low-rise single-attached, duplex or multi-level structures residential buildings for exclusive use as multifamily dwellings with mixed housing type allowing commercial in scale for close proximity to most residents without endangering individuality in terms of privacy and safety. This zone includes semi-exclusive subdivision and semi-exclusive residential communities which are not subdivision. Allowable Uses • All uses allowed in R-1 Zone and Basic R-2 Zone with the …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.4-USES** · Art. V §2.4 · p. 31 — **Basic R-3 allowable uses** · _Implemented_
   The uses allowed in the Basic R-3 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for low to medium density residential. Basic R3 Zone is characterized mainly by low-rise for exclusive use as multi-family dwellings with mixed housing types. Allowable Uses • All uses allowed in R-1 and Basic R-2 • Residential condominiums • Pension houses • Hotel apartments or apartels • Hotels
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.5-USES** · Art. V §2.5 · p. 31 — **Maximum R-3 allowable uses** · _Implemented_
   The uses allowed in the Maximum R-3 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for medium to high density residential. Maximum R3 Zone is characterized mainly by low-rise to high-rise residential buildings for exclusive use as multi-family dwellings with mixed housing types allowing commercial in scale for close proximity to most residents without endangering individuality in terms of privacy and safety and with more than the usual community ancillary uses serving also the needs of the outlying area. Allowable Uses • All uses allowed in R-1, Basic R-2 Zone, Maximum R-2 Zone • Residential Condominiums • Pension House • …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.6-USES** · Art. V §2.6 · p. 32 — **Socialized Housing allowable uses** · _Question for Malabon_
   The uses allowed in the Socialized Housing zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities and municipalities designated to housing programs and projects covering houses and lots or home lots only undertaken by the Government or the private sector for the underprivileged and homeless citizens (UDHA) Allowable Uses • All uses allowed according to the provisions of BP 220.
@@ -259,47 +259,47 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.7-USES** · Art. V §2.7 · p. 32 — **C-1 allowable uses** · _Implemented_
   The uses allowed in the C-1 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > A low density commercial area within a city or municipality intended for neighborhood or community scale trade, service and business activities. Allowable Uses • Retail stores and shops like: • Department stores • Bookstores and office supply shops • Art supplies and novelties • Home appliance stores • Car display and dealer stores • Photo shops • Flower shops • Curio or antique shops • Pet shops and aquarium stores • Jewelry shops • Consumer electronics such as cellular phones, cameras, laptops, home appliances and the like • Drugstores • Food market and shops like: • Bakery, cake, pastry …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.8-USES** · Art. V §2.8 · p. 34 — **C-2 allowable uses** · _Implemented_
   The uses allowed in the C-2 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > A medium to high density commercial area within a city or municipality intended for trade, service and business activities performing complementary/ supplementary functions to the CBD. Allowable Uses • All uses allowed in C1-Zone • Wholesale stores • Wet and dry markets • Shopping centers, malls and supermarkets • Recreational center/establishments like: • Movie house/theater • Stadium, coliseum • Tennis courts and sports complex • Billiard halls, pool rooms and bowling alleys • Sports clubhouses • Other sports and recreational establishments • Bars, sing-along lounges, bistros, pubs, beer …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C32](../questions-for-malabon.md).
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C32](../questions-for-malabon.md).
 - **V-2.9-USES** · Art. V §2.9 · p. 36 — **C-3 allowable uses** · _Implemented_
   The uses allowed in the C-3 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > A high density commercial area within a city or municipality intended for regional shopping centers such as large malls and other commercial and business activities which are regional in scope or where market activities generate traffic and require utilities and services that extend beyond local boundaries and requires metropolitan level development planning and implementation. High rise hotels, sports stadium or sports complexes area also allowed in this zone. Allowable Uses • All uses allowed in C-1 and C-2 Zones • Townhouses, Maximum R-2 and Maximum R-3 • Commercial Condominium ( with …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.10-USES** · Art. V §2.10 · p. 36 — **General Commercial allowable uses** · _Implemented_
   The uses allowed in the General Commercial zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within a city or municipality intended for trading/services/business purposes. Allowable Uses: • Wholesale stores • Wet and dry markets • Shopping center, malls and supermarkets • Retail stores and shops like: • Department store • Bookstores and office supply shops • Art supplies and novelties • Home appliance stores • Car display and dealer stores • Photo shops • Flower shops • Curio or antique shops • Pet shops and aquarium stores • Jewelry shops • Consumer electronics such as cellular phones, cameras, lap tops, home appliances and the like • Drugstores • Food market and shops like: …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.11-USES** · Art. V §2.11 · p. 39 — **Central Business District allowable uses** · _Implemented_
   The uses allowed in the Central Business District zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > A convergence areas for large-scale trading, services, business, commercial and financial purposes and high rise residential and related uses. Allowable Uses • All uses allowed in C-1 , C-2, C-3 Zones and General Commercial Zone • Commercial Condominium ( with residential units in upper floors) • Regional shopping malls/centers • Bus Terminals Must provide adequate area for maneuvering and backing of buses.
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.12-USES** · Art. V §2.12 · p. 39 — **Industrial-1 allowable uses** · _Implemented_
   The uses allowed in the Industrial-1 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within cities or municipalities intended for light manufacturing or production industries that are non-pollutive/non- hazardous; and non-pollutive/hazardous. Allowable Uses Non-Pollutive/Non-Hazardous Industries • Drying fish • Biscuit factory-manufacture of biscuits, cookies, crackers and other similar dried bakery products • Doughnut and hopia factory • Manufacture of macaroni, spaghetti, vermicelli and other noodles • Other bakery production not elsewhere classified (n.e.c.) • Life belts factory • Manufacture of luggage, handbags, wallets and small leather goods • Manufacture of …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C32](../questions-for-malabon.md).
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C32](../questions-for-malabon.md).
 - **V-2.13-USES** · Art. V §2.13 · p. 42 — **Industrial-2 allowable uses** · _Implemented_
   The uses allowed in the Industrial-2 zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > Pollutive/Non-Hazardous Industries • Manufacturing and canning of ham, bacon and native sausage • Poultry processing and canning • Large-scale manufacturing of ice cream • Ice plants and cold storage • Corn mill/rice mill • Chocolate and cocoa factory • Candy factory • Chewing gum factory • Peanuts and other nuts factory • Other chocolate and confectionery products • Manufacturing of flavoring extracts • Manufacture of food products n.e.c. (vinegar, vetsin) • Manufacture of fish meal • Oyster shell grading • Manufacture of medicinal and pharmaceutical preparations • Manufacture of stationery, …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C33](../questions-for-malabon.md).
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list” Also asked: [C33](../questions-for-malabon.md).
 - **V-2.17-USES** · Art. V §2.17 · p. 46 — **Parks and Recreation allowable uses** · _Implemented_
   The uses allowed in the Parks and Recreation zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area designed for diversion/amusements and for the maintenance of ecological balance in the community. Allowable Uses • Parks, playgrounds, pocket parks, parkways, promenades and playlots, gardens • All types of resort complexes such as those providing accommodation, sports, dining and other leisure facilities • Open air or outdoor sports activities and support facilities, including low rise stadia, gyms, amphitheaters and swimming pools • Ball courts, skating rinks and similar uses • Memorial/Shrines monuments, kiosks and other park structures • Sports clubs • Parking …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.18-USES** · Art. V §2.18 · p. 46 — **Cemetery / Memorial Park allowable uses** · _Implemented_
   The uses allowed in the Cemetery / Memorial Park zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area in a city/municipality intended for the interment of the dead. Allowable Uses • Memorial Parks • Cemetery • Columbarium • Crematorium • Ossuary • Customary accessory uses such as crypts, chapels, parks, playgrounds, pocket parks, parkways, promenades, parking, and toilet facilities
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.19-USES** · Art. V §2.19 · p. 47 — **Utilities, Transportation and Services allowable uses** · _Implemented_
   The uses allowed in the Utilities, Transportation and Services zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area in cities/municipalities designated for "a range of utilitarian/functional uses or occupancies, characterized mainly as a low-rise or medium-rise building/ structure for low to high intensity community support functions, e.g. terminals, inter-modals, multi- modals, depots, power and water generation/distribution facilities, telecommunication facilities, drainage/wastewater and sewerage facilities, solid waste handling facilities and the like" (NBC). Allowable Uses • Bus and railway depots and terminals • All other types of transportation complexes • Power plants (thermal, hydro, …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.20-USES** · Art. V §2.20 · p. 47 — **Institutional allowable uses** · _Implemented_
   The uses allowed in the Institutional zone. BizTrack matches the line of business against this list (with the uses it inherits) and quotes the clause it matched.
   > An area within a City occupied by or intended principally for general types of institutional establishments, e.g. government offices, hospitals/clinics, academic/research and convention centers and the like. Shall be characterized by government and protective uses as well as institutional; and social services for the entire City and shall be characterized further by specialized government agencies providing institutional, protective, security and social services for the region or the country as a whole and which are governed by specialized regulations, including mental hospital, …
-  checked at `api/app/Support/ZoningConformance.php:217`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
+  checked at `api/app/Support/ZoningConformance.php:212`; proved by `ZoningOrdinanceRulesTest.php` — “cites the lot’s own zone list on the use finding, for every zone with a list”
 - **V-2.20-RESEARCH** · Art. V §2.20 · p. 47 — **Research facilities in the Institutional zone, except warfare facilities** · _Implemented_
   The Institutional zone allows scientific, cultural and academic centres and research facilities, except nuclear, radioactive, chemical and biological warfare facilities.
   > Scientific, cultural, and academic centers and research facilities except nuclear, radioactive, chemical and biological warfare facilities
@@ -426,7 +426,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.2-INH** · Art. V §2.2 · p. 28 — **Basic R-2 takes in every R-1 use** · _Implemented_
   Every use allowed in R-1 is allowed in Basic R-2.
   > All allowable uses under R-1 Zone.
-  checked at `api/app/Support/Zoning/Ordinance.php:105`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:101`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.3-INH** · Art. V §2.3 · p. 29 — **Maximum R-2 takes in R-1 and Basic R-2 uses, on the Zoning Administrator’s conditions** · _Implemented_
   Every R-1 and Basic R-2 use is allowed in Maximum R-2, with conditions the Zoning Administrator sets.
   > All uses allowed in R-1 Zone and Basic R-2 Zone with the conditions deemed appropriate by the Zoning Administrator and applicable to Maximum R-2 Zoning District.
@@ -462,7 +462,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.4-INH** · Art. V §2.4 · p. 31 — **Basic R-3 takes in R-1 and Basic R-2 uses** · _Implemented_
   Every R-1 and Basic R-2 use is allowed in Basic R-3 (Maximum R-2 is not named).
   > All uses allowed in R-1 and Basic R-2
-  checked at `api/app/Support/Zoning/Ordinance.php:107`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:103`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.4-PARK** · Art. V §2.4 · p. 31 — **Rentable parking in Basic R-3: light vehicles, no backing, no motor pool** · _Implemented_
   A rentable parking lot or building is for light vehicles only, may not bring unusual traffic, must let vehicles turn without backing onto the road, and may not be a motor pool.
   > Rentable parking lots/parking buildings for light vehicles only, provided that no traffic shall be generated by its operation in greater volume than would normally be expected in the area. • Provided that the area shall be adequate to accommodate the vehicle traffic and movement to and from the parking lot without backing of vehicles onto the access road. • Motor pooling is not allowed.
@@ -545,11 +545,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.8-INH** · Art. V §2.8 · p. 35 — **C-2 takes in every C-1 use** · _Implemented_
   Every C-1 use is allowed in C-2, and with it every residential use C-1 inherits.
   > All uses allowed in C1-Zone
-  checked at `api/app/Support/Zoning/Ordinance.php:110`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:106`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.8-INH-R2** · Art. V §2.8 · p. 36 — **C-2 also names "R-1 and R-2 Zones"** · _Implemented_
   C-2 separately names "R-1 and R-2 Zones". No zone is called plain R-2, but the ambiguity changes nothing: C-2 already inherits Basic and Maximum R-2 through C-1.
   > All uses allowed in R-1 and R-2 Zones
-  checked at `api/app/Support/Zoning/Ordinance.php:110`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them” Also asked: [C18](../questions-for-malabon.md).
+  checked at `api/app/Support/Zoning/Ordinance.php:106`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them” Also asked: [C18](../questions-for-malabon.md).
 - **V-2.8-MACH** · Art. V §2.8 · p. 35 — **Machine, welding and furniture shops in C-2** · _Implemented_
   A machine, welding or furniture repair shop in C-2 may not bring unusual traffic, must park off the street and outside the setback, may not use equipment that is a nuisance off the premises, needs a non-makeshift façade with firewalls, operates only at hours agreed with the barangay, and meets any other condition CPDO sets.
   > Machine shop/Welding Shop/Furniture Shops service operation (repairing/rebuilding or custom job orders). • No traffic shall be generated by its operation in greater volume than would be normally be expected in the area and any need for parking generated by the conduct of such operation shall be met off the street and in a place other than the required setback; • Provided that there is adequate parking lot and proper loading and unloading space; adjacent street, roads. Sidewalks shall not be used for parking. • No equipment or process shall be used in such operation, which creates noise, …
@@ -561,11 +561,11 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.9-INH** · Art. V §2.9 · p. 36 — **C-3 takes in C-1, C-2, Maximum R-2 and Maximum R-3 uses** · _Implemented_
   Every C-1 and C-2 use is allowed in C-3, with townhouses and Maximum R-2 and R-3 housing.
   > All uses allowed in C-1 and C-2 Zones • Townhouses, Maximum R-2 and Maximum R-3
-  checked at `api/app/Support/Zoning/Ordinance.php:111`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:107`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.10-INH** · Art. V §2.10 · p. 39 — **General Commercial takes in every residential use** · _Implemented_
   Every use allowed in any residential zone is allowed in the General Commercial zone.
   > All uses allowed in all Residential Zones
-  checked at `api/app/Support/Zoning/Ordinance.php:112`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:108`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.10-HAUL** · Art. V §2.10 · p. 38 — **Hauling in General Commercial: the business must operate in Malabon** · _Implemented_
   Hauling services and truck garages in the General Commercial zone are allowed only for a business operating within Malabon.
   > Hauling services and garage terminals for trucks and tow trucks provided the business activity I within the City of Malabon
@@ -577,7 +577,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **V-2.11-INH** · Art. V §2.11 · p. 39 — **The CBD takes in C-1, C-2, C-3 and General Commercial uses** · _Implemented_
   Every C-1, C-2, C-3 and General Commercial use is allowed in the Central Business District.
   > All uses allowed in C-1 , C-2, C-3 Zones and General Commercial Zone
-  checked at `api/app/Support/Zoning/Ordinance.php:113`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
+  checked at `api/app/Support/Zoning/Ordinance.php:109`; proved by `ZoningOrdinanceRulesTest.php` — “resolves each zone’s inherited uses as the ordinance writes them”
 - **V-2.11-BUS** · Art. V §2.11 · p. 39 — **Bus terminals in the CBD need room to manoeuvre** · _Implemented_
   A bus terminal in the CBD must have enough area for buses to manoeuvre and back inside it.
   > Bus Terminals Must provide adequate area for maneuvering and backing of buses.

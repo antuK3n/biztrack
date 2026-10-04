@@ -823,7 +823,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:308",
+        "check": "api/app/Support/ZoningConformance.php:275",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::counts parks and utilities zones only where the sheet draws them",
         "marker": "in_array($code, ['PARKS', 'UTILITIES'], true)"
       },
@@ -1286,7 +1286,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1312,7 +1312,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1340,7 +1340,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1366,7 +1366,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1392,7 +1392,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1445,7 +1445,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1473,7 +1473,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       },
@@ -1503,7 +1503,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1531,7 +1531,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1557,7 +1557,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1585,7 +1585,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       },
@@ -1617,7 +1617,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       },
@@ -1647,7 +1647,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1673,7 +1673,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1699,7 +1699,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -1727,7 +1727,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/ZoningConformance.php:217",
+        "check": "api/app/Support/ZoningConformance.php:212",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::cites the lot’s own zone list on the use finding, for every zone with a list",
         "marker": "public static function lookup"
       }
@@ -2598,7 +2598,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:105",
+        "check": "api/app/Support/Zoning/Ordinance.php:101",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -2831,7 +2831,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:107",
+        "check": "api/app/Support/Zoning/Ordinance.php:103",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -3374,7 +3374,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:110",
+        "check": "api/app/Support/Zoning/Ordinance.php:106",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -3398,7 +3398,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:110",
+        "check": "api/app/Support/Zoning/Ordinance.php:106",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       },
       "also_question": {
@@ -3486,7 +3486,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:111",
+        "check": "api/app/Support/Zoning/Ordinance.php:107",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -3510,7 +3510,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:112",
+        "check": "api/app/Support/Zoning/Ordinance.php:108",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },
@@ -3587,7 +3587,7 @@
       ],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Support/Zoning/Ordinance.php:113",
+        "check": "api/app/Support/Zoning/Ordinance.php:109",
         "test": "api/tests/Feature/ZoningOrdinanceRulesTest.php::resolves each zone’s inherited uses as the ordinance writes them"
       }
     },

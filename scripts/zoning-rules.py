@@ -15,8 +15,11 @@ stale as code moves, so this script owns them:
     chain, a payment gate in WorkflowService).
   - `status_counts` in the header.
 
-rules.md is generated: never edit it by hand. ZoningRulesCatalogueTest checks
-the claims (tests exist, lines exist, questions exist) on every Pest run.
+rules.md is generated: never edit it by hand. ZoningRulesCatalogueTest checked
+the claims (tests exist, lines exist, questions exist) until the rule-by-rule
+zoning checklist was removed on 5 October 2026; most `implemented.check` lines
+pointed into ZoningCheck.php, which went with it, so refreshing now stops on
+those and the remaining citations were moved by hand to match.
 """
 import json
 import pathlib
