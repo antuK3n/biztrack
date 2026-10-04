@@ -80,8 +80,10 @@ import {
  *
  * ── Revoke ─────────────────────────────────────────────────────────────────
  *
- * On this screen since checklist item 23, for BPLO and the super admin only
- * (`permit.revoke`) — Ken settled question A26's "who". It was held back
+ * On this screen since checklist item 23, for BPLO only (`permit.revoke`), and
+ * on the Mayor's Permit only [client, 4 October 2026: "paki tanggal ang revoke
+ * sa super admin, at bplo, dapat sa bplo ayon lang kaya nyang i revoke"]; the
+ * server refuses the rest (PermitController::revoke). It was held back
  * until then on purpose: a revoked permit means a business is trading
  * unlawfully, and a button with no audit, no notice and no public effect
  * behind it would have documented an act nobody authorised. The server does
@@ -152,7 +154,10 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 
 /** A permit that is in force — the only kind Revoke is offered on. */
 function revocable(permit: PermitRegisterRow): boolean {
-  return permit.status === 'active' || permit.status === 'suspended'
+  return (
+    permit.permit_type?.code === 'BUSINESS' &&
+    (permit.status === 'active' || permit.status === 'suspended')
+  )
 }
 
 /**
