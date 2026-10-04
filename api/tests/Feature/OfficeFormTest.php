@@ -10,6 +10,7 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
 use App\Support\SheetRequirements;
 
@@ -525,4 +526,83 @@ it('offers nothing when the account has no home address', function () {
     )->firstWhere('permit_type_code', 'OCCUPANCY');
 
     expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address');
+});
+
+/*
+ * ── The Sanitary sheet, drawn from the standard PD 856 application ──────────
+ *
+ * Client, 5 October 2026: *"We don't have a paper copy of the sanitary permit
+ * … make the fields yourself … If something needs auto-filling, do so."* and,
+ * on seeing the boxes: *"If fields are auto-filled, show the recorded
+ * information."* The headcount and floor area are the Business & Tax
+ * Profile's and are derived; the classification is suggested from the line of
+ * business on the prefill channel and stays the applicant's to change.
+ */
+it('fills the Sanitary sheet’s headcount and floor area from the fee profile', function () {
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => [
+        'employees' => 2, 'male_employees' => 1, 'female_employees' => 1, 'floor_area_sqm' => 41,
+        'flags' => [],
+    ]]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+            'form_data' => ['sanitary_classification' => 'Food Establishment', 'employees_total' => '99'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.employees_male', '1')
+        ->assertJsonPath('data.form_data.employees_female', '1')
+        // Derived wins over a typed figure: the profile is what the fee was priced on.
+        ->assertJsonPath('data.form_data.employees_total', '2')
+        ->assertJsonPath('data.form_data.total_floor_area_sqm', '41');
+});
+
+it('suggests the sanitary classification from the line of business, as an offer', function () {
+    $bar = PsicCode::where('category', 'bar_nightclub')->firstOrFail();
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => ['lines' => [['psic_code_id' => $bar->id]], 'flags' => []]]);
+
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'SANITARY');
+
+    expect($form['prefill']['sanitary_classification'])->toBe('Food Establishment')
+        ->and($form['prefill_from']['sanitary_classification'])->toBe('application')
+        // Offered, not applied.
+        ->and($form['form_data'])->not->toHaveKey('sanitary_classification');
+
+    // And not once the applicant has chosen.
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'form_data' => ['sanitary_classification' => 'Non-Food Establishment'],
+    ]);
+    $form = collect(
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app->id}/office-forms")
+            ->assertOk()
+            ->json('data')
+    )->firstWhere('permit_type_code', 'SANITARY');
+    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('sanitary_classification');
+});
+
+it('sorts the sanitary classes the way a health officer would', function () {
+    expect(App\Support\SanitaryPrefill::classify(['manufacturer', 'restaurant']))->toBe('Food Establishment')
+        ->and(App\Support\SanitaryPrefill::classify(['manufacturer']))->toBe('Industrial')
+        ->and(App\Support\SanitaryPrefill::classify(['retailer', 'barber_shop']))->toBe('Personal / Public Service')
+        ->and(App\Support\SanitaryPrefill::classify(['retailer']))->toBe('Non-Food Establishment');
+});
+
+it('refuses a future pest-control date and a negative toilet count on the Sanitary sheet', function () {
+    $app = officeFormApp(['SANITARY']);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+            'form_data' => ['pest_control_last_date' => now()->addDay()->toDateString(), 'toilets_count' => '-1'],
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['form_data.pest_control_last_date', 'form_data.toilets_count']);
 });

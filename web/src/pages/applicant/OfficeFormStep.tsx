@@ -261,6 +261,25 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
 
   /* CHO */
   'SANITARY.application_type': 'Nature of Application',
+  'SANITARY.sanitary_classification': 'Sanitary Classification',
+  'SANITARY.employees_male': 'No. of Employees — Male',
+  'SANITARY.employees_female': 'No. of Employees — Female',
+  'SANITARY.employees_total': 'No. of Employees — Total',
+  'SANITARY.total_floor_area_sqm': 'Floor Area (sq. m.)',
+  'SANITARY.operating_hours': 'Operating Hours',
+  'SANITARY.seating_capacity': 'Seating Capacity',
+  'SANITARY.has_kitchen': 'Food Preparation Area',
+  'SANITARY.has_cold_storage': 'Refrigeration / Cold Storage',
+  'SANITARY.water_source': 'Water Source',
+  'SANITARY.toilets_count': 'No. of Toilets',
+  'SANITARY.toilet_type': 'Type of Toilet',
+  'SANITARY.toilets_separate_sexes': 'Separate Toilets for Men and Women',
+  'SANITARY.sewage_disposal': 'Sewage Disposal',
+  'SANITARY.solid_waste_disposal': 'Solid Waste Disposal',
+  'SANITARY.waste_segregation': 'Waste Segregation Practised',
+  'SANITARY.pest_control': 'Pest Control',
+  'SANITARY.pest_control_last_date': 'Last Pest Control Treatment',
+  'SANITARY.certified': 'Certification',
 }
 
 /**
@@ -297,8 +316,25 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'application_date',
     'application_type',
     'sanitary_classification',
+    'employees_male',
+    'employees_female',
+    'employees_total',
     'workers_requiring_health_certs',
+    'total_floor_area_sqm',
+    'operating_hours',
+    'seating_capacity',
+    'has_kitchen',
+    'has_cold_storage',
     'water_source',
+    'toilets_count',
+    'toilet_type',
+    'toilets_separate_sexes',
+    'sewage_disposal',
+    'solid_waste_disposal',
+    'waste_segregation',
+    'pest_control',
+    'pest_control_last_date',
+    'certified',
   ],
   CEC: ['application_date', 'application_type', 'owner_address', 'owner_birthday', 'certified'],
   FSIC: [
@@ -748,7 +784,17 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   // it does ask, the paper marks neither mandatory, and inventing a requirement
   // the counter does not enforce is the same mistake in the other direction.
   if (code === 'SANITARY') {
+    /*
+     * The four facilities PD 856 has the health officer look at on every
+     * establishment, and the applicant's own word. The food-only answers and
+     * the dates are not gated: a sari-sari store has no seating to count.
+     */
     if (!has('sanitary_classification')) missing.push('Sanitary Classification')
+    if (!has('water_source')) missing.push('Water Source')
+    if (!has('toilets_count')) missing.push('No. of Toilets')
+    if (!has('sewage_disposal')) missing.push('Sewage Disposal')
+    if (!has('solid_waste_disposal')) missing.push('Solid Waste Disposal')
+    if (data.certified !== 'yes') missing.push('Certification')
   }
   if (code === 'CEC') {
     if (has('owner_birthday') && (data.owner_birthday as string) >= todayISO()) {
@@ -902,6 +948,17 @@ function correctionControl(key: string): CorrectionControl | undefined {
   const controls: Record<string, CorrectionControl> = {
     'SANITARY.sanitary_classification': { kind: 'chips', options: SANITARY_CLASSIFICATIONS },
     'SANITARY.water_source': { kind: 'select', options: WATER_SOURCES },
+    'SANITARY.seating_capacity': { kind: 'numeric' },
+    'SANITARY.has_kitchen': { kind: 'chips', options: YES_NO },
+    'SANITARY.has_cold_storage': { kind: 'chips', options: YES_NO },
+    'SANITARY.toilets_count': { kind: 'numeric' },
+    'SANITARY.toilet_type': { kind: 'select', options: TOILET_TYPES },
+    'SANITARY.toilets_separate_sexes': { kind: 'chips', options: YES_NO },
+    'SANITARY.sewage_disposal': { kind: 'select', options: SEWAGE_DISPOSALS },
+    'SANITARY.solid_waste_disposal': { kind: 'select', options: SOLID_WASTE_DISPOSALS },
+    'SANITARY.waste_segregation': { kind: 'chips', options: YES_NO },
+    'SANITARY.pest_control': { kind: 'select', options: PEST_CONTROL_MEASURES },
+    'SANITARY.pest_control_last_date': { kind: 'date' },
     'OCCUPANCY.application_type': { kind: 'chips', options: OCCUPANCY_SCOPES },
     'OCCUPANCY.completion_date': { kind: 'date' },
     'OCCUPANCY.building_storeys': { kind: 'numeric' },
@@ -1079,7 +1136,9 @@ function CarriedTag({ field }: { field: string }) {
     <span className="mt-1 block text-xs font-normal text-s-orange-ink">
       {source === 'account'
         ? 'From your account’s home address — check this is still right'
-        : 'From your previous application — check this is still right'}
+        : source === 'application'
+          ? 'Suggested from your line of business — change it if it is wrong'
+          : 'From your previous application — check this is still right'}
     </span>
   )
 }
@@ -1244,6 +1303,27 @@ export const SANITARY_CLASSIFICATIONS = [
   'Personal / Public Service',
   'Industrial',
 ]
+/*
+ * ── The rest of the Sanitary sheet's choices, 5 October 2026 ─────────────────
+ *
+ * The City has no paper for this permit; client: *"Is it good if you make the
+ * fields yourself … base it off from the common sanitary permit fields."* These
+ * are the facilities PD 856 (Code on Sanitation) has the health officer check
+ * on every establishment — water, toilets, sewage, refuse, vermin — in the
+ * wording the standard LGU "Application for Sanitary Permit to Operate" uses.
+ * Each list ends in Other so a true answer the list did not foresee is not
+ * forced into a wrong one.
+ */
+export const TOILET_TYPES = ['Water-sealed flush', 'Pour-flush', 'Other']
+export const SEWAGE_DISPOSALS = ['Public sewer (Maynilad)', 'Septic tank', 'Other']
+export const SOLID_WASTE_DISPOSALS = [
+  'City garbage collection',
+  'Private hauler',
+  'Composting / recycling',
+  'Other',
+]
+export const PEST_CONTROL_MEASURES = ['Contracted pest control service', 'Own measures', 'None']
+export const YES_NO = ['Yes', 'No']
 
 export const OCCUPANCY_SCOPES = ['Full', 'Partial']
 
@@ -1561,14 +1641,68 @@ function ZoningFields({
   )
 }
 
+/**
+ * The Sanitary Permit sheet.
+ *
+ * ── Drawn, not transcribed ───────────────────────────────────────────────────
+ *
+ * The City Health Office gave us no paper for this permit. Client, 5 October
+ * 2026: *"Is it good if you make the fields yourself. You may base it off from
+ * the common sanitary permit fields in the internet. If something needs
+ * auto-filling, do so."* So this is the standard LGU "Application for Sanitary
+ * Permit to Operate" under PD 856: the establishment's class and size, then
+ * the five things the sanitary inspector checks everywhere — water, toilets,
+ * sewage, refuse, vermin — then the food-establishment extras, then the
+ * applicant's word. If the CHO's own form ever turns up, these sections are
+ * reordered to it and nothing else moves.
+ *
+ * ── What is carried and what is asked ────────────────────────────────────────
+ *
+ * Headcount, floor area and the health-certificate count are the Business &
+ * Tax Profile's and are derived server-side (`OfficeFormAnswers`); the
+ * classification is suggested from the line of business (`SanitaryPrefill`)
+ * and editable; everything else is the applicant's to answer, because nothing
+ * on the filing knows how many toilets a shop has.
+ */
 function SanitaryFields({
   data,
   set,
+  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
+  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
+  const isFood = get(data, 'sanitary_classification') === 'Food Establishment'
+  const select = (key: string, options: readonly string[], required = false) => (
+    <label className="block">
+      <FieldLabel required={required}>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <select
+        value={get(data, key)}
+        onChange={(e) => set(key, e.target.value)}
+        disabled={ro}
+        aria-disabled={ro}
+        className={inputCls}
+      >
+        <option value="">Select…</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      <CarriedTag field={key} />
+    </label>
+  )
+  const yesNo = (key: string) => (
+    <div>
+      <FieldLabel>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <ChipRow options={YES_NO} value={get(data, key)} onChange={(v) => set(key, v)} />
+      <CarriedTag field={key} />
+    </div>
+  )
+
   return (
     <div className="space-y-7">
       <section className="space-y-3">
@@ -1598,7 +1732,7 @@ function SanitaryFields({
       </section>
 
       <section className="space-y-3">
-        <SectionMarker letter="B" label="Establishment Sanitation Profile" />
+        <SectionMarker letter="B" label="Establishment Profile" />
         <div>
           <FieldLabel required>Sanitary Classification</FieldLabel>
           <ChipRow
@@ -1607,6 +1741,29 @@ function SanitaryFields({
             onChange={(v) => set('sanitary_classification', v)}
           />
           <CarriedTag field="sanitary_classification" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/*
+            The headcount and the floor area are the Business & Tax Profile's —
+            the figures the sanitary inspection fee is bracketed on — so they
+            are carried, not asked again. See `OfficeFormAnswers`.
+          */}
+          <DerivedField
+            label={<>Employees — Male<FromApplicationTag /></>}
+            value={get(data, 'employees_male')}
+          />
+          <DerivedField
+            label={<>Employees — Female<FromApplicationTag /></>}
+            value={get(data, 'employees_female')}
+          />
+          <DerivedField
+            label={<>Employees — Total<FromApplicationTag /></>}
+            value={get(data, 'employees_total')}
+          />
+          <DerivedField
+            label={<>Floor Area (sq. m.)<FromApplicationTag /></>}
+            value={get(data, 'total_floor_area_sqm')}
+          />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
@@ -1633,37 +1790,117 @@ function SanitaryFields({
             value={get(data, 'workers_requiring_health_certs')}
             hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
           />
-          {/*
-            * A <label>, not a <div>. FieldLabel renders a <span>, so outside a
-            * label element it is text near a control rather than the control's
-            * name — this <select> reached a screen reader as an unnamed combo
-            * box offering four values with nothing to say what they answered.
-            * Every other field on this sheet is already wrapped this way.
-            */}
           <label className="block">
-            <FieldLabel>Water Source</FieldLabel>
-            <select
-              value={get(data, 'water_source')}
-              onChange={(e) => set('water_source', e.target.value)}
+            <FieldLabel>Operating Hours</FieldLabel>
+            <input
+              value={get(data, 'operating_hours')}
+              onChange={(e) => set('operating_hours', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 8:00 AM – 10:00 PM, Mon–Sat"
+              className={inputCls}
+            />
+            <CarriedTag field="operating_hours" />
+          </label>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="Water and Sanitation Facilities" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('water_source', WATER_SOURCES, true)}
+          <label className="block">
+            <FieldLabel required>No. of Toilets</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'toilets_count')}
+              onChange={(e) => set('toilets_count', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum`}
+            />
+            <CarriedTag field="toilets_count" />
+          </label>
+          {select('toilet_type', TOILET_TYPES)}
+        </div>
+        {yesNo('toilets_separate_sexes')}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('sewage_disposal', SEWAGE_DISPOSALS, true)}
+          {select('solid_waste_disposal', SOLID_WASTE_DISPOSALS, true)}
+        </div>
+        {yesNo('waste_segregation')}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {select('pest_control', PEST_CONTROL_MEASURES)}
+          <label className="block">
+            <FieldLabel>Last Pest Control Treatment</FieldLabel>
+            <input
+              type="date"
+              max={todayISO()}
+              value={get(data, 'pest_control_last_date')}
+              onChange={(e) => set('pest_control_last_date', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="pest_control_last_date" />
+          </label>
+        </div>
+      </section>
+
+      {/*
+        Only a food establishment has seating to count or a kitchen to keep
+        clean; shown when the classification says so, and the answers stay on
+        the sheet if the classification is changed back.
+      */}
+      {isFood && (
+        <section className="space-y-3">
+          <SectionMarker letter="D" label="Food Establishment" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="block">
+              <FieldLabel>Seating Capacity</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'seating_capacity')}
+                onChange={(e) => set('seating_capacity', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. 40"
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="seating_capacity" />
+            </label>
+            {yesNo('has_kitchen')}
+            {yesNo('has_cold_storage')}
+          </div>
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <SectionMarker letter={isFood ? 'E' : 'D'} label="Certification" />
+        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={get(data, 'certified') === 'yes'}
+              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
               disabled={ro}
               aria-disabled={ro}
-              className={inputCls}
-            >
-              <option value="">Select…</option>
-              {WATER_SOURCES.map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-            <CarriedTag field="water_source" />
+              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              I certify that the information above is true and correct, and that the
+              establishment will be kept in accordance with the Code on Sanitation of the
+              Philippines (PD 856) and open to inspection by the City Health Office.
+            </span>
           </label>
+          <div className="mt-3 sm:w-2/3">
+            <DerivedField
+              label={<>Printed Name of Owner<FromApplicationTag /></>}
+              value={business.ownerName}
+            />
+          </div>
         </div>
       </section>
     </div>
   )
 }
-
 /**
  * The paper's legend, in the wording the client settled on.
  *
@@ -3294,7 +3531,7 @@ export function OfficeFormSheet({
         */}
         {code !== 'CEC' && code !== 'ZONING' && <CarriedOverSection business={business} />}
         {code === 'ZONING' && <ZoningFields data={data} set={set} business={business} />}
-        {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
+        {code === 'SANITARY' && <SanitaryFields data={data} set={set} business={business} />}
         {code === 'CEC' && <CecFields data={data} set={set} business={business} />}
         {code === 'FSIC' && <FsicFields data={data} set={set} business={business} />}
         {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} business={business} />}
