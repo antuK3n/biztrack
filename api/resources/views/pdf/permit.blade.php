@@ -332,15 +332,85 @@
         .san-sig-line { border-bottom: 1px solid #2b2b2b; }
         .san-sig-role { font-size: 11.5px; margin-top: 2px; }
 
+        /*
+         * ── Malabon's Certificate of Occupancy (NBC Form B-13) ──────────────
+         *
+         * Landscape Letter, two pages side by side in the City's blue riveted
+         * frame [client, 5 October 2026]. Each panel is absolutely placed in
+         * the unbordered sheet; dompdf resolves absolute children against an
+         * absolute parent, which is what lets the rivets sit in the corners.
+         * Caps throughout, as the form sets it.
+         */
+        body.occupancy .sheet { border: none; padding: 0; top: 14px; left: 14px; right: 14px; bottom: 14px; }
+        .occ-panel { position: absolute; top: 0; bottom: 0; width: 48.4%; border: 9px solid #2a5db0; background: #fff; }
+        .occ-left { left: 0; }
+        .occ-right { right: 0; }
+        .occ-inner { position: absolute; top: 5px; left: 5px; right: 5px; bottom: 5px; border: 1.5px solid #1a1a1a; padding: 16px 20px 14px; }
+        .occ-rivet { position: absolute; width: 9px; height: 9px; border-radius: 5px; background: #6b5434; }
+        .occ-tl { top: 5px; left: 5px; } .occ-tr { top: 5px; right: 5px; }
+        .occ-bl { bottom: 5px; left: 5px; } .occ-br { bottom: 5px; right: 5px; }
+        .occ-form-no { font-size: 10px; letter-spacing: 0.5px; margin-left: 14px; }
+        .occ-submitted { text-align: center; font-size: 10.5px; font-weight: bold; letter-spacing: 0.4px; margin-top: 8px; }
+        .occ-date-line { width: 220px; margin: 8px auto 0; border-bottom: 1px solid #2b2b2b; text-align: center; font-size: 10px; font-weight: bold; min-height: 13px; }
+        .occ-caption { text-align: center; font-size: 8px; letter-spacing: 0.4px; margin-top: 1px; }
+        table.occ-checks { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        table.occ-checks td { font-size: 9px; padding: 3px 0; }
+        .occ-box { display: inline-block; width: 8px; height: 8px; border: 1px solid #1a1a1a; margin-right: 5px; }
+        .occ-blank { display: inline-block; border-bottom: 1px solid #2b2b2b; height: 9px; }
+        .occ-para { font-size: 9.2px; line-height: 1.8; text-align: justify; margin-top: 14px; }
+        .occ-indent { text-indent: 26px; }
+        .occ-captioned { position: relative; }
+        .occ-captioned span { position: absolute; top: -8px; left: 0; right: 0; text-align: center; font-size: 7px; font-weight: bold; text-indent: 0; }
+        .occ-verified { text-align: center; font-size: 10.5px; font-weight: bold; letter-spacing: 0; margin-top: 24px; white-space: nowrap; }
+        .occ-para.occ-left-align { text-align: left; }
+        table.occ-reqs { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        table.occ-reqs td { width: 33.33%; padding: 12px 7px 0; vertical-align: top; }
+        .occ-req-line { border-bottom: 1px solid #2b2b2b; text-align: center; font-size: 8.5px; font-weight: bold; min-height: 12px; }
+        .occ-req-label { text-align: center; font-size: 8px; font-weight: bold; margin-top: 2px; line-height: 1.25; }
+        .occ-fill { display: inline-block; min-width: 95px; border-bottom: 1px solid #2b2b2b; text-align: center; font-weight: bold; text-indent: 0; }
+        .occ-recommend { margin-top: 30px; }
+        .occ-seal-cell { width: 76px; vertical-align: middle; }
+        .occ-seal { height: 64px; }
+        .occ-head { text-align: center; padding-right: 50px; }
+        .occ-republic { font-size: 9px; letter-spacing: 0.5px; }
+        .occ-city { font-size: 20px; letter-spacing: 0.5px; margin-top: 1px; }
+        .occ-office { font-size: 11.5px; letter-spacing: 0.5px; margin-top: 2px; }
+        .occ-title { text-align: center; font-size: 22px; font-weight: bold; color: #1b2f6e; letter-spacing: 0.5px; margin-top: 8px; }
+        table.occ-receipt-row { margin-top: 6px; }
+        .occ-receipt-pad { width: 70px; }
+        table.occ-receipt-table { border-collapse: collapse; }
+        table.occ-receipt-table td { font-size: 9px; padding: 1px 6px 1px 0; vertical-align: bottom; }
+        td.occ-receipt-value { border-bottom: 1px solid #2b2b2b; width: 170px; text-align: center; font-weight: bold; }
+        .occ-qr { width: 96px; }
+        .occ-qr img { width: 72px; height: 72px; }
+        .occ-issued { width: 170px; }
+        .occ-issued-line { border-bottom: 1px solid #2b2b2b; text-align: center; font-size: 9.5px; font-weight: bold; min-height: 12px; }
+        .occ-grant { margin-top: 10px; font-size: 9.5px; line-height: 1.4; }
+        table.occ-fields { width: 100%; border-collapse: collapse; margin-top: 2px; }
+        table.occ-fields.occ-first-field { margin-top: 6px; }
+        table.occ-fields td { font-size: 9.5px; padding: 5px 0 0; vertical-align: bottom; }
+        td.occ-f-label { width: 1%; white-space: nowrap; padding-right: 6px !important; }
+        td.occ-f-value { border-bottom: 1px solid #2b2b2b; font-weight: bold; text-align: center; }
+        td.occ-f-area { padding-left: 10px !important; }
+        td.occ-f-area-value { width: 90px; }
+        .occ-small { font-size: 8.1px; line-height: 1.4; text-align: justify; margin-top: 8px; }
+        .occ-sign { position: absolute; right: 26px; bottom: 16px; width: 230px; text-align: center; }
+        .occ-sig-name { font-weight: bold; font-size: 10.5px; }
+        .occ-sig-name.blank { color: transparent; }
+        .occ-sig-line { border-bottom: 1px solid #2b2b2b; }
+        .occ-sig-role { font-size: 8.5px; font-weight: bold; letter-spacing: 0.4px; margin-top: 2px; }
+
         .note { text-align: center; font-size: 8px; line-height: 1.5; color: #777; margin-top: 26px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; letter-spacing: 1px; }
     </style>
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : (($is_sanitary ?? false) ? 'sanitary' : '')))) }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : (($is_sanitary ?? false) ? 'sanitary' : (($is_occupancy ?? false) ? 'occupancy' : ''))))) }}">
 <div class="sheet">
-@if($is_fsic ?? false)
+@if($is_occupancy ?? false)
+    @include('pdf.occupancy')
+@elseif($is_fsic ?? false)
     @include('pdf.fsic')
 @elseif($is_zoning ?? false)
     @include('pdf.zoning')

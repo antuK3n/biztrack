@@ -619,7 +619,7 @@ class PermitController extends Controller
          * fields, and landscape would strand them in the left third.
          */
         // CENRO's certificate is landscape too, as its issued sheet is.
-        if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false)) {
+        if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false) || ($cert['is_occupancy'] ?? false)) {
             $pdf->setPaper('letter', 'landscape');
         } elseif (($cert['is_fsic'] ?? false) || ($cert['is_zoning'] ?? false) || ($cert['is_sanitary'] ?? false)) {
             // The BFP's FSIC and the CPDO's Zoning Clearance are portrait
@@ -801,6 +801,21 @@ class PermitController extends Controller
         $isFsic = $code === 'FSIC';
         $isZoning = $code === 'ZONING';
         $isSanitary = $code === 'SANITARY';
+        $isOccupancy = $code === 'OCCUPANCY';
+
+        /*
+         * ── The Certificate of Occupancy signs as the Building Official ─────
+         *
+         * NBC Form B-13 issues under the Building Official [client, 5 October
+         * 2026, with Malabon's own form]. Name from the OBO's
+         * office_signatories row naming the post; a blank ruled line until it
+         * has one.
+         */
+        if ($isOccupancy) {
+            $official = collect($office)->first(fn (array $s) => str_contains(strtolower($s['role']), 'building official'));
+
+            $signatories = [['role' => 'Building Official', 'name' => $official['name'] ?? null]];
+        }
 
         /*
          * ── The Sanitary Permit signs as the CHO's form does ────────────────
@@ -1028,9 +1043,68 @@ class PermitController extends Controller
             ];
         }
 
+        /*
+         * ── Malabon's Certificate of Occupancy (NBC Form B-13) ──────────────
+         *
+         * The City's own two-page form [client, 5 October 2026]. Left: what
+         * was submitted and when, the verified requirements, and the building
+         * permit it completes. Right: the certificate — No., fee, OR and date
+         * paid, date issued, owner, project, use, area and location.
+         *
+         * All from what the system holds. The building permit number and date
+         * are the OBO's own entries on its sheet; the project, the use and the
+         * completion date are the applicant's. Of the thirteen requirement
+         * lines, two are certificates this system itself issues on the same
+         * filing, so they print the number: Locational/Zoning carries the
+         * Zoning Clearance, Fire Safety the FSIC (or the FSEC the OBO recorded
+         * when no FSIC was issued). The rest are the inspectors' to initial.
+         * Fee Paid is the OBO's share of the bill, as CENRO's and the BFP's are.
+         */
+        if ($isOccupancy) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'OCCUPANCY', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+            $answer = fn (string $key) => ($v = trim((string) ($sheet[$key] ?? ''))) !== '' ? $v : null;
+            $date = fn (?string $v) => $v ? Carbon::parse($v)->format('F j, Y') : null;
+
+            $sibling = fn (string $typeCode) => $application
+                ? Permit::where('application_id', $application->id)
+                    ->whereHas('permitType', fn ($t) => $t->where('code', $typeCode))
+                    ->latest('issued_at')
+                    ->value('permit_number')
+                : null;
+
+            $profile = $application?->fee_profile ?? [];
+            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+                : null;
+
+            $oboShare = collect($application?->feeAssessment?->line_items ?? [])
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'OBO')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'date_submitted' => optional($application?->submitted_at)->format('F j, Y'),
+                'occ_project' => $answer('project_name'),
+                'occ_use' => $answer('occupancy_type'),
+                'occ_area' => $area,
+                'occ_completion' => $date($answer('completion_date')),
+                'occ_building_permit_no' => $answer('building_permit_no'),
+                'occ_building_permit_date' => $date($answer('building_permit_date')),
+                'occ_zoning_no' => $sibling('ZONING'),
+                'occ_fire_no' => $sibling('FSIC') ?? $answer('fsec_no'),
+                'office_amount_paid' => $paid ? '₱'.number_format($oboShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+            ];
+        }
+
         return [
             // Which sheet to draw. The views branch on these rather than on the
             // permit type's name, which is a label and may be reworded.
+            'is_occupancy' => $isOccupancy,
             'is_sanitary' => $isSanitary,
             'is_business_permit' => $isBusinessPermit,
             'is_cenro_certificate' => $isCenroCertificate,
