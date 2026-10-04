@@ -302,17 +302,26 @@ const OFFICE_TAB_CODES: Record<OfficeCode, string> = {
 
 function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: OfficeChoice) => void }) {
   const tabs: { value: OfficeChoice; short: string; sub: string; full: string }[] = [
-    { value: '', short: 'All offices', sub: 'Every permit', full: 'All offices, every permit' },
+    // "ALL", and no "Other offices" tab [client, 4 October 2026]. The OTHER
+    // view still exists behind the choice type — a link can open it — but it
+    // is not one of the tabs.
+    { value: '', short: 'ALL', sub: 'Every permit', full: 'All offices, every permit' },
     ...OFFICES.map((o) => ({ value: o.code as OfficeChoice, short: OFFICE_TAB_CODES[o.code], sub: o.name, full: `${o.office} — ${o.name}` })),
-    { value: OTHER_OFFICES, short: 'Other offices', sub: 'All but the Mayor’s', full: 'Other offices, every permit but the Mayor’s' },
   ]
 
   return (
     // Wraps rather than scrolls: at 1440px a one-line strip cut CENRO in half
     // and hid "Other offices" off the edge, and a tab nobody can see is a
     // filter nobody uses.
-    <div role="group" aria-label="Office" className="mb-4">
-      <div className="flex flex-wrap gap-2">
+    <div role="group" aria-label="Office" className="mb-4 overflow-x-auto pb-1">
+      {/*
+        One straight line [client, 4 October 2026]: seven equal columns. A long
+        certificate name wraps inside its own tab rather than pushing the strip
+        onto a second row, so every tab stays the same width and the row reads
+        as one control. Below `md` it scrolls sideways instead of squeezing
+        seven columns into a phone.
+      */}
+      <div className="grid min-w-[44rem] grid-cols-7 gap-2">
         {tabs.map((t) => {
           const active = t.value === value
           return (
@@ -323,7 +332,7 @@ function OfficeTabs({ value, onChange }: { value: OfficeChoice; onChange: (v: Of
               aria-label={t.full}
               title={t.full}
               onClick={() => onChange(t.value)}
-              className={`flex flex-col items-start rounded-lg border px-3.5 py-1.5 text-left transition-colors ${
+              className={`flex min-w-0 flex-col items-start justify-center rounded-lg border px-3 py-2 text-left transition-colors ${
                 active
                   ? 'border-royal bg-royal text-white shadow-card'
                   : 'border-line bg-white text-ink hover:border-royal'
