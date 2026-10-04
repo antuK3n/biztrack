@@ -316,7 +316,7 @@ it('reads the renewal stage as at the observation, not as it stands today', func
         'business_id' => $business,
         'applicant_user_id' => DB::table('users')->value('id'),
         'application_type' => ApplicationType::Renewal->value,
-        'status' => ApplicationStatus::AwaitingOtherPermits->value,
+        'status' => ApplicationStatus::Approved->value,
         'prior_permit_id' => $prior,
         'created_at' => '2023-12-20 09:00:00',
         'submitted_at' => '2023-12-26 09:00:00',

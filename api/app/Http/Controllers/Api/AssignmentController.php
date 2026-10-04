@@ -62,6 +62,21 @@ class AssignmentController extends Controller
             // Repeatable or comma-separated: ?application_status=for_approval,returned
             'application_status' => ['sometimes'],
             /*
+             * ?application_decided=0 — open filings only; =1 — finished ones.
+             *
+             * Added 4 October 2026 with the removal of `awaiting_other_permits`.
+             * `application_status` alone used to separate a filing still
+             * gathering its other permits from one the city had finished with,
+             * because the two wore different statuses. They wear the same one
+             * now — `approved`, reached at payment — and what tells them apart
+             * is `decided_at`. The officer's gathering tab is exactly
+             * `application_status=approved` plus this set to 0.
+             *
+             * A tri-state on purpose: absent means "both", which is what every
+             * caller written before this wanted and still gets.
+             */
+            'application_decided' => ['sometimes', 'boolean'],
+            /*
              * Repeatable or comma-separated: ?application_type=renewal
              *
              * New, renewal or amendment. `/applications` has taken a `type`
@@ -140,6 +155,17 @@ class AssignmentController extends Controller
         $applicationStatuses = $this->applicationStatuses($request);
         if ($applicationStatuses !== []) {
             $query->whereHas('application', fn ($a) => $a->whereIn('status', $applicationStatuses));
+        }
+
+        /*
+         * Open or finished, asked of the ROW and not the status — see
+         * `Application::isDecided()` for why those stopped being the same
+         * question. Its own `whereHas`, like the type filter below, so a
+         * caller sending one of the three does not inherit the others.
+         */
+        if ($request->has('application_decided')) {
+            $decided = $request->boolean('application_decided');
+            $query->whereHas('application', fn ($a) => $decided ? $a->decided() : $a->notDecided());
         }
 
         /*
@@ -904,17 +930,15 @@ class AssignmentController extends Controller
          * and the conflict is with the STATE of this one. The same reasoning
          * the claim endpoint uses for its 409.
          *
-         * `Caseload::decidedStatuses()` rather than a list written here, so
-         * this and every screen that counts open work classify a state the
-         * same way — and a status added later is classified by `isTerminal()`
-         * instead of silently becoming reassignable.
+         * `Application::isDecided()` rather than a list written here, so this
+         * and every screen that counts open work classify a filing the same
+         * way. It asks the ROW and not the status: since 4 October 2026 a
+         * filing reaches `approved` at payment with its other permits still to
+         * come, and reading the status alone would have made every live
+         * gathering filing unreassignable the moment its fees cleared.
          */
         abort_if(
-            in_array(
-                $assignment->application?->status?->value,
-                Caseload::decidedStatuses(),
-                true,
-            ),
+            $assignment->application?->isDecided() ?? false,
             422,
             'This filing has been decided, so its officer in charge can no longer be changed. The record of who handled it stays as it is.',
         );

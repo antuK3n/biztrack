@@ -131,7 +131,7 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
         classifyAsOfficer($app);
         $workflow->approveMainForm($app->fresh());
         $app->refresh();
-        $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+        $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
     }
 
     foreach ($codes as $code) {
@@ -294,7 +294,7 @@ it('leaves a new application’s permits dated from today', function () {
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     foreach (PermitType::REQUIRED_CLEARANCE_CODES as $code) {
         $type = PermitType::where('code', $code)->firstOrFail();

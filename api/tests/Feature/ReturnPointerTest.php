@@ -42,7 +42,7 @@ use Illuminate\Validation\ValidationException;
  *
  * A permit cannot be RETURNED from Not Yet Submitted — `ClearanceStatus`
  * allows `NotStarted → ForApproval` and nothing else — and the seeded
- * awaiting_other_permits filing has its clearances at `not_started`, because
+ * approved filing has its clearances at `not_started`, because
  * nobody has applied for them. So the fixture has to apply and hand in the
  * sheet before there is anything an office could send back. Returning from
  * not_started was the first draft of these tests and the enum was right to
@@ -53,7 +53,7 @@ function clearanceAwaitingItsOffice(string $code): array
     /*
      * BUILT, not found. Two earlier drafts hunted the register for a filing in
      * the right state and failed twice for different reasons: the first
-     * awaiting_other_permits filing belongs to another owner, so reading it
+     * approved filing belongs to another owner, so reading it
      * back as the applicant answered 403 (the boundary working, not a fixture
      * to widen), and the seed has no such filing for THIS owner at all.
      *
@@ -326,7 +326,7 @@ it('lets BPLO send back one clearance by name, and not the whole filing', functi
      * a permit stops qualifying is its own mechanism, and this is the only
      * test that exercises it.
      */
-    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 
     // And Approve is shut until it is replaced.
     expect(fn () => $workflow->approveOverall($app->fresh(), 'Trying anyway.'))

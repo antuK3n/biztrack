@@ -658,10 +658,15 @@ it('narrows the register to still-open work', function () {
 
     expect($open['meta']['total'])->toBe($all['meta']['open']);
 
-    // Every row it returned is on a filing that has not been decided.
+    /*
+     * Every row it returned is on a filing that has not been decided — asked
+     * of the ROW, because `approved` stopped meaning finished on 4 October
+     * 2026 and a gathering filing wears it while five offices are still at
+     * work. See `Application::isDecided()`.
+     */
     foreach ($open['data'] as $row) {
-        $status = Application::findOrFail($row['application_id'])->status;
-        expect($status?->isTerminal())->toBeFalse("{$row['tracking_id']} is decided and should not be here");
+        $application = Application::findOrFail($row['application_id']);
+        expect($application->isDecided())->toBeFalse("{$row['tracking_id']} is decided and should not be here");
     }
 });
 
@@ -730,7 +735,7 @@ it('refuses to reassign an assignment whose filing has been decided', function (
     $assignment = ApplicationAssignment::firstOrFail();
     $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
 
-    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value, 'decided_at' => now()])->save();
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/assignments/{$assignment->id}/assign", [
@@ -749,7 +754,7 @@ it('refuses to release a decided filing back to the queue', function () {
     $assignment = ApplicationAssignment::firstOrFail();
     $officer = User::where('department_id', $assignment->department_id)->firstOrFail();
     $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
-    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value, 'decided_at' => now()])->save();
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/assignments/{$assignment->id}/assign", ['officer_user_id' => null])

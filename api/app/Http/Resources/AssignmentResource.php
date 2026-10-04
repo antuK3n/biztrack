@@ -138,6 +138,9 @@ class AssignmentResource extends JsonResource
                 ] : null,
                 'application_type' => $this->application->application_type?->value,
                 'status' => $this->application->status?->value,
+                // See the note on ApplicationResource's own `decided`.
+                'status_label' => $this->application->statusLabel(),
+                'decided' => $this->application->isDecided(),
             ]),
         ];
     }

@@ -544,7 +544,7 @@ it('leaves finished work alone', function () {
      * filing; treating that as finished froze the OIC of live work. See the
      * note on Caseload::reviews.
      */
-    $done->application->update(['status' => ApplicationStatus::Approved]);
+    $done->application->update(['status' => ApplicationStatus::Approved, 'decided_at' => now()]);
 
     $closedInspection = Inspection::create([
         'application_id' => $open->application_id,
@@ -634,7 +634,7 @@ it('reports the finished work an officer is named on, beside what is still open'
 
     $open = assignmentHeldBy($held, 'DTI-91021');
     $done = assignmentHeldBy($held, 'DTI-91022');
-    $done->application->update(['status' => ApplicationStatus::Approved]);
+    $done->application->update(['status' => ApplicationStatus::Approved, 'decided_at' => now()]);
 
     $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
@@ -721,7 +721,7 @@ it('leaves finished work off the list, as it leaves it out of the count', functi
     $held = officerIn('CHO', 'sanitary_officer', 'cho.donelist@biztrack.local');
     $open = assignmentHeldBy($held, 'DTI-91033');
     $done = assignmentHeldBy($held, 'DTI-91034');
-    $done->application->update(['status' => ApplicationStatus::Approved]);
+    $done->application->update(['status' => ApplicationStatus::Approved, 'decided_at' => now()]);
 
     $cases = collect(test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data.cases'));
@@ -797,7 +797,7 @@ it('refuses to move a case that is already finished', function () {
     $colleague = officerIn('CHO', 'sanitary_officer', 'cho.closedtaker@biztrack.local');
 
     $done = assignmentHeldBy($held, 'DTI-91044');
-    $done->application->update(['status' => ApplicationStatus::Approved]);
+    $done->application->update(['status' => ApplicationStatus::Approved, 'decided_at' => now()]);
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
@@ -842,7 +842,7 @@ it('refuses a request that names neither a scope nor a list', function () {
  * completed the moment the main form is approved — which is the START of the
  * filing, not the end: the applicant then pays, five offices work their
  * clearances, inspections are booked, and the filing sits at
- * `awaiting_other_permits` for weeks with BPLO's assignment already marked
+ * `approved` for weeks with BPLO's assignment already marked
  * done. On the tester register every BPLO assignment is in exactly that state.
  *
  * The consequences were both visible on screen. The officer's "My assigned"
@@ -899,7 +899,7 @@ it('leaves a decided filing’s reviewer named on it for good', function () {
     $colleague = officerIn('CHO', 'sanitary_officer', 'cho.latecomer@biztrack.local');
 
     $assignment = assignmentHeldBy($held, 'DTI-91052');
-    $assignment->application->update(['status' => ApplicationStatus::Approved]);
+    $assignment->application->update(['status' => ApplicationStatus::Approved, 'decided_at' => now()]);
 
     $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
@@ -1228,7 +1228,7 @@ it('counts held work only, never a finished review', function () {
 
     // Decide the filing: the assignment keeps the name, the work is over.
     $application = $assignment->application;
-    $application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+    $application->forceFill(['status' => ApplicationStatus::Approved->value, 'decided_at' => now()])->save();
 
     $row = collect(
         test()->withHeaders(authAs('admin@biztrack.local'))
@@ -1401,7 +1401,7 @@ it('drops the row from the caseload once the filing itself is decided', function
 
     $assignment = ApplicationAssignment::where('department_id', $officer->department_id)->firstOrFail();
     $assignment->forceFill(['officer_user_id' => $officer->id, 'assigned_at' => now()])->save();
-    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value])->save();
+    $assignment->application->forceFill(['status' => ApplicationStatus::Approved->value, 'decided_at' => now()])->save();
 
     $data = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$officer->id}/caseload")

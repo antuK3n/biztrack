@@ -73,7 +73,7 @@ function paidFilingForScoping(): Application
 
     // Straight to the paid state. The payment itself is exercised elsewhere;
     // what this file is about is what each office can read afterwards.
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     return $app->fresh();
 }

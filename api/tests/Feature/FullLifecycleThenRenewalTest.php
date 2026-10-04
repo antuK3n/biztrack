@@ -229,7 +229,7 @@ it('walks a new application from filing to every permit issued', function () {
     // ── 3. Payment opens the clearance stage ─────────────────────────────
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
-    expect(Application::find($appId)->status->value)->toBe('awaiting_other_permits');
+    expect(Application::find($appId)->status->value)->toBe('approved');
 
     // ── 4. All five clearances, each with its own office ─────────────────
     foreach (array_keys(OFFICER_FOR) as $code) {

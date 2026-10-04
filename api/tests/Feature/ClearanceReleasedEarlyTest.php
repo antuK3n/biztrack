@@ -57,7 +57,7 @@ function filingAwaitingItsPermits(): Application
     classifyAsOfficer($app);
     $workflow->approveMainForm($app->fresh());
     $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     return $app->fresh();
 }
@@ -95,7 +95,7 @@ it('issues a clearance’s certificate as soon as its own office is done', funct
     $app->refresh()->load('permits.permitType', 'permitTypes');
 
     // The filing itself has NOT finished — four clearances are untouched.
-    expect($app->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+    expect($app->status)->toBe(ApplicationStatus::Approved);
     $outstanding = $app->permitTypes
         ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
         ->filter(fn (PermitType $pt) => $pt->pivot->status !== ClearanceStatus::Approved);

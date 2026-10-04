@@ -211,7 +211,7 @@ it('ignores issuance dates sent by the applicant', function () {
 });
 
 it('lets a reviewing officer record the issuance dates', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -232,7 +232,7 @@ it('lets a reviewing officer record the issuance dates', function () {
 });
 
 it('does not let an officer overwrite the applicant answers', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -249,7 +249,7 @@ it('does not let an officer overwrite the applicant answers', function () {
 });
 
 it('rejects an issuance date in the future', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
 
     $this->withHeaders(authAs('bplo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
@@ -311,7 +311,7 @@ it('refuses an office-form write from a guest', function () {
  * It said a submitted APPLICATION closed the office sheets — and if that were
  * true no applicant could ever fill one in. The five clearances are reached
  * after the filing has been submitted, accepted by BPLO and paid for
- * (docs/clearances-after-payment.md), so `awaiting_other_permits` is precisely
+ * (docs/clearances-after-payment.md), so `approved` is precisely
  * the state these sheets are written in. The old case only passed because
  * `ownerMayEdit` looked for an assignment on the issuing office and this
  * hand-built fixture never had one; it was asserting the absence of a routing
@@ -327,7 +327,7 @@ it('refuses an office-form write from a guest', function () {
  * independently.
  */
 it('stops the applicant editing an office form once its own clearance has been submitted', function () {
-    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now());
+    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::Approved, now());
     $fsicId = PermitType::where('code', 'FSIC')->value('id');
 
     // The permit's status is the only thing moving here. Driving it through the

@@ -6,7 +6,13 @@ import { PageTitle, SortFilter, type SortFilterOption } from '../../components/u
 import { toApiError } from '../../lib/api'
 import { applications, assignments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
-import { TONE_CLASSES, applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
+import {
+  GATHERING_META,
+  TONE_CLASSES,
+  applicationStatusMeta,
+  clearanceStatusMeta,
+  filingStatusMeta,
+} from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import type {
@@ -120,7 +126,7 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
    * waits for permits. Hardcoding the replacement would have set up the same
    * drift again, so it does not.
    */
-  { value: 'gathering', label: applicationStatusMeta('awaiting_other_permits').label },
+  { value: 'gathering', label: GATHERING_META.label },
   { value: 'inspection', label: 'For Inspection' },
   /*
    * "With BPLO" since 3 October 2026, matching the chip and the API
@@ -208,7 +214,7 @@ const PAYMENT_STATUSES = ['pending_payment'] as const
  *
  *  - `for_approval` / `returned` — BPLO, reading the main form. Its assignment
  *    is `pending` from submission and stays open until it approves.
- *  - `awaiting_other_permits` — one of the five other offices, reading the
+ *  - a paid, undecided `approved` — one of the five other offices, reading the
  *    clearance the applicant has just applied for. `startClearance()` routes to
  *    that office at that moment, so its assignment opens then and not before.
  *
@@ -239,7 +245,14 @@ const PAYMENT_STATUSES = ['pending_payment'] as const
  * that would drop BPLO: its Business Permit pivot is `not_started` for exactly
  * as long as BPLO's own first review is open.
  */
-const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits'] as const
+/*
+ * `approved` was `awaiting_other_permits` until 4 October 2026, when the
+ * client had that status removed. A paid filing stands at `approved` while
+ * its other permits come in, so this tab asks for it and the request pairs it
+ * with `application_decided=0` — see `decidedFilter` below, without which the
+ * word would also match every filing the city has ever finished with.
+ */
+const APPROVAL_STATUSES = ['for_approval', 'returned', 'approved'] as const
 
 /**
  * This office's permit is out for a site visit.
@@ -254,7 +267,7 @@ const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits']
  *
  * So this tab asks the second machine instead — `clearance_status`, which the
  * assignment feed now takes, matched against the reader's OWN office. Every
- * filing here is `awaiting_other_permits`; what varies is whose permit is where,
+ * filing here is a paid, undecided `approved`; what varies is whose permit is where,
  * and that is exactly what the filter answers.
  *
  * No assignment-status filter, and that is the important part rather than an
@@ -281,8 +294,8 @@ const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits']
 /*
  * ── `for_approval` belongs here too, and its absence hid a whole filing type ─
  *
- * A clearance-only renewal never reaches `awaiting_other_permits`. That status
- * is the BUSINESS PERMIT path — paid, waiting on the five offices. A renewal of
+ * A clearance-only renewal never reaches the gathering stage. That stage is
+ * the BUSINESS PERMIT path — paid, waiting on the five offices. A renewal of
  * one clearance sits at `for_approval` from submission until it closes, so its
  * permit could be accepted, move to `for_inspection`, and vanish: the clearance
  * filter matched and the application filter did not.
@@ -299,7 +312,7 @@ const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits']
  * It does not double up with For Approval either: that tab asks for an OPEN
  * assignment, and accepting the paperwork completes it.
  */
-const INSPECTION_STATUSES = ['awaiting_other_permits', 'for_approval'] as const
+const INSPECTION_STATUSES = ['approved', 'for_approval'] as const
 
 /** The clearance statuses that put a row in the For Inspection tab. */
 const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
@@ -323,9 +336,9 @@ const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
  * Its final approval is work with no open work item behind it. Filtering on an
  * open assignment would empty this tab permanently.
  *
- * ── Why `awaiting_other_permits` is here too ────────────────────────────────
+ * ── Why a paid-but-unfinished filing is here too ───────────────────────────
  *
- * A paid filing lands on `awaiting_other_permits` and stays there while the
+ * A paid filing lands on `approved` and stays there, undecided, while the
  * clearance offices work and while any Other Requirement is open. BPLO's own
  * part is finished at that point, so the filing appeared in NO tab BPLO could
  * see: it left For Approval when BPLO approved the form, it is not Pending
@@ -337,7 +350,7 @@ const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
  * which is what the client describes: after payment it goes to Final Approval,
  * and everything else has to be complete before it can be signed. The two are
  * told apart on the row and on the sheet — `for_final_approval` can be
- * approved, `awaiting_other_permits` says what it is still waiting for — and
+ * approved, an undecided `approved` says what it is still waiting for — and
  * the API refuses the early approval either way.
  */
 const FINAL_STATUSES = ['for_final_approval'] as const
@@ -346,11 +359,11 @@ const FINAL_STATUSES = ['for_final_approval'] as const
  * The stage BPLO waits through, and the one it could not see.
  *
  * The same filing status the For Inspection tab reads, from the other seat:
- * an office at `awaiting_other_permits` is doing the work, and BPLO is
+ * an office at an undecided `approved` is doing the work, and BPLO is
  * waiting for it. That is why the two tabs share a position in TABS and why
  * no account is offered both.
  */
-const GATHERING_STATUSES = ['awaiting_other_permits'] as const
+const GATHERING_STATUSES = ['approved'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   approval: APPROVAL_STATUSES,
@@ -383,11 +396,13 @@ function tabLabel(tab: Tab, ownPermit: boolean): string {
  * knows nothing about which office is reading. Two of them need saying
  * differently from this seat.
  *
- * Both are `awaiting_other_permits`. To an applicant that status means "the
- * other permits are being worked"; an office reading its own queue is one of the
- * workers, and the row is there because the work is theirs. The bare label would
- * read as an explanation of why the row is NOT actionable, which is the opposite
- * of true.
+ * Both are `approved`. To an applicant that word means their Business Permit is
+ * out and the rest are being worked; an office reading its own queue is one of
+ * the workers, and the row is there because the work is theirs. The bare label
+ * would read as an explanation of why the row is NOT actionable, which is the
+ * opposite of true — and worse here than it was when this status was called
+ * `awaiting_other_permits`, because "Approved" alone invites an officer to
+ * think the filing is finished.
  *
  * Deliberately only where the two readings diverge. Everywhere else the shared
  * filing label is right, and renaming a status that was already unambiguous
@@ -395,14 +410,14 @@ function tabLabel(tab: Tab, ownPermit: boolean): string {
  */
 const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
   approval: {
-    awaiting_other_permits: 'Your permit · waiting on your review',
+    approved: 'Your permit · waiting on your review',
   },
   payment: {},
   // BPLO's own tab for the stage, so the status and the tab say the same
   // thing and there is nothing to relabel.
   gathering: {},
   inspection: {
-    awaiting_other_permits: 'Your permit · site visit outstanding',
+    approved: 'Your permit · site visit outstanding',
   },
   final: {},
 }
@@ -625,6 +640,13 @@ interface QueueItem {
   at: string | null
   /** `at` in milliseconds, for the browser-side sorts. Missing sorts as brand new. */
   atMs: number
+  /**
+   * Has the city finished with this filing? Carried because the row badge
+   * needs it: `approved` is "Completed" as a status and "Approved" on one
+   * still gathering its other permits, and the status alone stopped telling
+   * them apart on 4 October 2026. See `Application::isDecided()`.
+   */
+  decided?: boolean
   unpaid: boolean
   /**
    * The filing's own status, which `unpaid` was being computed FROM and
@@ -721,6 +743,7 @@ function fromAssignment(item: Assignment): QueueItem {
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
     status: app.status,
+    decided: app.decided,
     type: app.application_type,
     clearance: item.clearance,
     assignmentId: item.id,
@@ -765,6 +788,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     atMs: app.submitted_at ? new Date(app.submitted_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
     status: app.status,
+    decided: app.decided,
     /*
      * Set even though this tab narrows by type on the server, so that one row
      * shape means one thing on every tab. A field that is only populated where
@@ -818,6 +842,18 @@ async function loadPage(args: {
 
   const res = await assignments.page({
     application_status: args.statuses,
+    /*
+     * Open filings only, on every tab this screen has.
+     *
+     * Not a per-tab choice: a queue is work outstanding, and none of the
+     * four assignment tabs is a record of finished filings. It has to be
+     * SAID since 4 October 2026, though. Three of them ask for `approved`
+     * — the status a paid filing wears while its other permits come in,
+     * which used to be `awaiting_other_permits` — and `approved` is also
+     * where every closed filing ends up. Without this the register's
+     * ~1,400 finished filings would land in three of the four tabs.
+     */
+    application_decided: 0,
     ...(args.assignmentStatuses ? { status: args.assignmentStatuses } : {}),
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
@@ -948,8 +984,14 @@ function QueueRow({
         label: own.status_label ?? clearanceStatusMeta(own.status!).label,
       }
     : {
-        tone: applicationStatusMeta(item.status).tone,
-        label: applicationStatusMeta(item.status).label,
+        /*
+         * The FILING's badge, so it has to know whether the filing is
+         * finished: `approved` is "Completed" as a status and "Approved" on
+         * one still gathering, and an officer told a live filing was
+         * Completed would stop looking at it.
+         */
+        tone: filingStatusMeta(item).tone,
+        label: filingStatusMeta(item).label,
       }
 
   const body = (

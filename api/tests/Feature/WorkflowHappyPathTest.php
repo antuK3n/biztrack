@@ -93,10 +93,10 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     bploApprovesForm($appId);
     expect(Application::find($appId)->status->value)->toBe('pending_payment');
 
-    // 5. Pay -> awaiting_other_permits. One bill, raised at submission, covering
+    // 5. Pay -> approved. One bill, raised at submission, covering
     // the business permit and all five clearances (spec rule 4).
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
-    expect(Application::find($appId)->status->value)->toBe('awaiting_other_permits');
+    expect(Application::find($appId)->status->value)->toBe('approved');
 
     /*
      * 6. The other permits are open now, and the applicant applies for each one

@@ -7,6 +7,7 @@ import {
   applicationStatusMeta,
   clearanceStatusMeta,
   genericStatusTone,
+  filingStatusMeta,
   otherPermitProgress,
 } from '../lib/status'
 import type { StatusTone } from '../lib/status'
@@ -64,8 +65,9 @@ type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
  * `application_permit_types` row — and five of them run at once. A single node
  * saying "For Inspection" across the whole filing cannot be true when CHO is
  * inspecting, BFP is still reading and CPDO has already issued. That stage of
- * the rail is therefore `awaiting_other_permits`, one node, with the per-permit
- * tally written underneath it.
+ * the rail is therefore one node — `approved` since 4 October 2026, and
+ * `awaiting_other_permits` before it — with the per-permit tally written
+ * underneath it.
  *
  * The rail is drawn from this filing's own facts, never from the shape of a
  * typical one. Three ways a real filing departs from the straight line, all
@@ -139,11 +141,19 @@ interface RailStep {
  * per-permit stage now and every one of the five required clearances is
  * inspected, so there is nothing left for the rail to omit. Whether a
  * particular permit is at its inspection shows on that permit, not here.
+ *
+ * Four nodes since 4 October 2026, not five. `awaiting_other_permits` sat
+ * between Pending Payment and For Final Approval and the client had the
+ * status removed — *"we no longer need that status"*. It drew a WAIT that
+ * does not exist: the Mayor's Permit goes out at payment, so the node after
+ * it was already holding a released permit. What the node really carried was
+ * the per-permit tally, and that moved to `approved`, which is where the
+ * filing now stands while its other permits come in. See
+ * `isGatheringOtherPermits`.
  */
 const RAIL: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
-  'awaiting_other_permits',
   'for_final_approval',
   'approved',
 ]
@@ -169,7 +179,6 @@ function positionOf(status: ApplicationStatus, rail: ApplicationStatus[]): numbe
     for_approval: 'for_approval',
     returned: 'for_approval',
     pending_payment: 'pending_payment',
-    awaiting_other_permits: 'awaiting_other_permits',
     for_final_approval: 'for_final_approval',
     approved: 'approved',
     issued: 'approved',
@@ -185,6 +194,13 @@ function positionOf(status: ApplicationStatus, rail: ApplicationStatus[]): numbe
  * The rail has one node for a stage in which five permits are each moving
  * independently, so without this the longest part of the process reads as a
  * single undifferentiated box.
+ *
+ * That node is `approved` since 4 October 2026. It was `awaiting_other_permits`
+ * until the client had the status removed, and the tally is the whole of what
+ * that node was for — so it followed the filing to where the filing now waits
+ * rather than being deleted with the status. An approved filing with nothing
+ * outstanding reads "All 5 other permits approved", which is the finished
+ * case and still true.
  *
  * The counting rule is `otherPermitProgress`, shared with the applicant's own
  * status card, and it mirrors `WorkflowService::refreshReadiness` — see the
@@ -230,7 +246,7 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
  *
  * `for_final_approval` left the new-application path on 18 September 2026: the
  * fifth clearance now issues the Mayor's Permit outright, so a new filing goes
- * `awaiting_other_permits → approved`. Drawn against the fixed five-node RAIL
+ * straight to `approved` at payment. Drawn against the fixed five-node RAIL
  * such a filing lit the Final Approval node as DONE, claiming a stage that
  * never happened to the one audience — an officer auditing a late filing — most
  * likely to be counting stages.
@@ -296,7 +312,7 @@ function buildSteps(app: Application): { steps: RailStep[]; terminal: Applicatio
         note:
           s === 'for_approval'
             ? returnNote
-            : s === 'awaiting_other_permits'
+            : s === 'approved'
               ? otherPermitsNote(app, state)
               : undefined,
         noteTone: (s === 'for_approval' ? 'warning' : 'muted') as RailStep['noteTone'],
@@ -741,7 +757,7 @@ export function ApplicationProgress({
   const meta =
     clearance && ownPermit
       ? clearanceStatusMeta(ownPermit.status ?? 'not_started')
-      : applicationStatusMeta(app.status)
+      : filingStatusMeta(app)
 
   const notStarted = clearance
     ? false

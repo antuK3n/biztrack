@@ -25,6 +25,10 @@ import {
   applicationStatusMeta,
   clearanceStatusMeta,
   statusDetoursFor,
+  GATHERING_META,
+  GUIDE_BY_FLOW,
+  filingStatusMeta,
+  isGatheringOtherPermits,
   statusFlowFor,
   type GuideFlow,
   type StatusTone,
@@ -109,9 +113,10 @@ const SORTS: SortFilterOption[] = [
  *
  * `submitted`, `under_review` and `for_inspection` were here and are gone with
  * the enum. Their replacements are not a rename: `for_approval` and
- * `for_final_approval` are BPLO's two separate acts, and `awaiting_other_permits`
- * is the stage that used to be described — wrongly, once five permits could be
- * at five different points — as one filing-wide "For Inspection".
+ * `for_final_approval` are BPLO's two separate acts, and the gathering stage
+ * (`awaiting_other_permits` then, an undecided `approved` now) is what used to
+ * be described — wrongly, once five permits could be at five different points
+ * — as one filing-wide "For Inspection".
  *
  * `approved`/`issued` stay out (those filings have moved to Profile — see
  * FINISHED) and so does `draft` (drafts have their own page): offering a status
@@ -130,7 +135,6 @@ const SORTS: SortFilterOption[] = [
 const FILTERABLE_STATUSES: ApplicationStatus[] = [
   'for_approval',
   'pending_payment',
-  'awaiting_other_permits',
   'returned',
   'rejected',
   'cancelled',
@@ -386,16 +390,22 @@ function permitChip(
   if (
     permitCode === 'BUSINESS' &&
     permitStatus === 'for_approval' &&
-    appStatus === 'awaiting_other_permits'
+    appStatus === 'approved'
   ) {
     /*
-     * The FILING's tone, because that is whose situation this is: the permit is
-     * waiting on `awaiting_other_permits`, and the badge saying so is on the
-     * row header directly above. `tint-gray` made the one row that explains
-     * the wait the only row not coloured like it.
+     * The FILING's tone, because that is whose situation this is: the permit
+     * is waiting on the other five, and the badge saying so is on the row
+     * header directly above. `tint-gray` made the one row that explains the
+     * wait the only row not coloured like it.
+     *
+     * `GATHERING_META` rather than a status lookup. It read
+     * `applicationStatusMeta('awaiting_other_permits').tone` until that
+     * status was removed on 4 October 2026 — after which the lookup missed,
+     * fell through to the neutral default and turned this row grey, which is
+     * the exact complaint the comment above records.
      */
     return {
-      tone: applicationStatusMeta('awaiting_other_permits').tone,
+      tone: GATHERING_META.tone,
       label: 'Waiting for your other permits',
     }
   }
@@ -816,7 +826,7 @@ function StatusGuide() {
             Approved on purpose: that is the thing the applicant is waiting
             for, and it is what lets the main flow continue to step 5.
           */}
-          {withSubFlow && status === 'awaiting_other_permits' && (
+          {withSubFlow && status === 'approved' && (
             <div className="mt-2.5 rounded-lg border border-line bg-shell px-3.5 py-2.5">
               <p className="text-xs font-semibold text-ink-secondary">Each permit, on its own:</p>
               <ol className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
@@ -960,7 +970,22 @@ function StatusGuide() {
 
         <ol className="mt-3">
           {rail.map((status, index) => (
-            <Step key={status} status={status} index={index} last={index === rail.length - 1} />
+            <Step
+              key={status}
+              status={status}
+              index={index}
+              last={index === rail.length - 1}
+              description={GUIDE_BY_FLOW[flow]?.[status]}
+              /*
+               * The five-clearance sub-flow hangs off `approved` since
+               * 4 October 2026, and `approved` is on every rail — so it has to
+               * be said here which rail it belongs to. It was `awaiting_other_permits`,
+               * which only the new rail carried, and the restriction came for
+               * free. A renewal gathers nothing; nesting five clearances under
+               * its last step would claim the opposite of what that rail says.
+               */
+              withSubFlow={flow === 'new'}
+            />
           ))}
         </ol>
 
@@ -1149,7 +1174,10 @@ function ApplicationRow({
    *     `isPaidStatus` is still exported and used elsewhere; it simply has no
    *     business deciding what a status badge says.
    */
-  const meta = applicationStatusMeta(app.status)
+  // `filingStatusMeta` and not `applicationStatusMeta`: `approved` reads
+  // "Completed" as a status and "Approved" on a filing whose other permits
+  // are still coming in, and this row is about a particular filing.
+  const meta = filingStatusMeta(app)
   /*
    * Layout only. The colour — background, text AND border — comes from
    * TONE_CLASSES at each use, so `text-white` cannot live here: two
@@ -1269,7 +1297,7 @@ function ApplicationRow({
    * gathering permits and at least one office has already conducted its visit.
    */
   const someOfficeFinished =
-    app.status === 'awaiting_other_permits' &&
+    isGatheringOtherPermits(app) &&
     detail !== undefined &&
     rows.some((pt) => officeProgressFor(pt.code).inspection !== undefined)
 
@@ -1490,7 +1518,7 @@ function ApplicationRow({
                * from a link further inside the application.
                */
               const canStart =
-                pt.status === 'not_started' && app.status === 'awaiting_other_permits'
+                pt.status === 'not_started' && isGatheringOtherPermits(app)
 
               /*
                * ── An office has asked for something, and the row says so ──────

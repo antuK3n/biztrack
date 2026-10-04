@@ -25,7 +25,6 @@ enum ApplicationStatus: string
     case Draft = 'draft';
     case ForApproval = 'for_approval';
     case PendingPayment = 'pending_payment';
-    case AwaitingOtherPermits = 'awaiting_other_permits';
     case ForFinalApproval = 'for_final_approval';
     case Approved = 'approved';
     case Rejected = 'rejected';
@@ -78,32 +77,6 @@ enum ApplicationStatus: string
              */
             self::ForApproval => 'For Approval',
             self::PendingPayment => 'Pending Payment',
-            /*
-             * "Approved" — the third name this stage has carried, and the one
-             * that finally agrees with the rest of the product.
-             *
-             * "Awaiting Other Permits" until 24 September 2026, when the LGU
-             * moved the release (*"after payment, business permit is already
-             * released"*) and a status headed "Awaiting" started contradicting
-             * a certificate the applicant had already downloaded. Then "Permit
-             * Released", which was true and was the only place in the product
-             * using those words — so the progress rail said "Permit Released"
-             * while the Mayor's Permit row eight lines below said "Approved",
-             * one event under two names.
-             *
-             * Client's decision, 26 September 2026: *"Approved does not mean it
-             * is Completed, and it is similar to the other permits where
-             * Approved means the permit was released already."* Exactly — the
-             * five clearances have always used "Approved" for GRANTED, and this
-             * stage is the Mayor's Permit being granted. The word was already
-             * in the product meaning this; only the filing was spelling it
-             * differently.
-             *
-             * It does not collide with `Approved` below, which is "Completed":
-             * granted and finished are different facts and now have different
-             * words, rather than one word doing both jobs badly.
-             */
-            self::AwaitingOtherPermits => 'Approved',
             /*
              * "With BPLO", renamed 3 October 2026.
              *
@@ -249,68 +222,71 @@ enum ApplicationStatus: string
             ],
             self::Returned => [self::ForApproval, self::Cancelled, self::Rejected],
             /*
-             * ── Two ways out of the bill, and which one depends on the type ──
+             * ── One way out of the bill, since 4 October 2026 ────────────────
              *
-             * A NEW filing goes to AwaitingOtherPermits: the five clearances do
-             * not exist yet and the applicant has to obtain each one.
+             * Payment releases the Mayor's Permit, so the filing is Approved
+             * the moment the money clears — whether or not it still has other
+             * permits to gather. There were two ways out of here until the
+             * client had `awaiting_other_permits` removed (*"we no longer need
+             * that status"*), and it could go because it never gated anything:
+             * it named the period AFTER the certificate was handed over, not a
+             * wait before it.
              *
-             * A RENEWAL goes straight to ForFinalApproval, because there is
-             * nothing to gather. The client's decision of 17 September 2026:
-             * *"there should no longer be Awaiting Other Permits status because
-             * the applicant may already have valid other permit that he/she can
-             * submit in the Upload/Submit button."* The copies are uploaded
-             * before the filing is ever paid for, so by the time the money
-             * clears the evidence is already in — and a stage named for waiting
-             * would be a stage that waits for nothing.
+             * What that status used to say — that the filing is still open —
+             * is now `decided_at`, null until the last permit is granted. See
+             * `Application::isDecided()`.
              *
-             * Both are listed here rather than branched, because this table is
-             * the LEGALITY of a move and not the choice of one.
-             * `onPaymentCompleted` makes the choice, and it is the only caller.
+             * `ForFinalApproval` stays reachable. A filing that becomes ready
+             * with no confirmed RA 11032 category falls back to BPLO rather
+             * than issuing against a deadline nobody set; that is the only
+             * route left to it, and it is not about other permits at all.
              */
             self::PendingPayment => [
-                self::AwaitingOtherPermits,
                 self::ForFinalApproval,
                 /*
-                 * ── Straight to Approved, for a filing with nothing left ──
-                 *
-                 * Added 3 October 2026, with the removal of For Final
-                 * Approval from renewals. A renewal carries only the permits
-                 * it is renewing, so the common January filing — the Mayor's
-                 * Permit by itself — has nothing outstanding the moment the
-                 * money lands. The certificate is released in that same
-                 * request and there is no office left to hear from.
-                 *
-                 * The alternative was a stop at AwaitingOtherPermits closed
-                 * a millisecond later, which is a wait in the history for a
-                 * wait that never happened, and a status an officer's queue
-                 * could have caught the filing in.
+                 * Every paid filing lands here now, gathering or not. It was
+                 * added on 3 October 2026 for the one case that had nothing
+                 * left to wait for — the common January renewal, the Mayor's
+                 * Permit by itself — and on 4 October it became the only
+                 * destination, when the status that covered the other case
+                 * was removed.
                  */
                 self::Approved,
                 self::Cancelled,
                 self::Rejected,
             ],
             /*
-             * ── A new filing issues straight from here ───────────────────────
+             * ── Nothing leads back to a gathering stage, because there is none ──
              *
-             * `Approved` was added on 18 September 2026. Client's question, and
-             * it answered itself once asked: *"what is the purpose of the BPLO
-             * checking if all other permits are legit, when those permits are
-             * APPLIED DIRECTLY in BizTrack itself?"*
-             *
-             * On a NEW filing there is nothing to check. All five clearances
-             * were applied for in this system, each office approved its own in
-             * this system, and each inspection is a row against the pivot. BPLO
-             * reading them was the system checking its own records against
-             * itself, and the RA 11032 clock ran the whole time it waited.
-             *
-             * `ForFinalApproval` stays in this list and stays reachable, because
-             * a RENEWAL still stops there — on that path BPLO reads certificate
-             * copies the applicant uploaded, which is a real reading of real
-             * evidence. The stage was hollow on one path, not both.
+             * `ForFinalApproval` could return to `AwaitingOtherPermits` until
+             * 4 October 2026. With the status gone there is nowhere to return
+             * to, and nothing ever took the route: no caller moved a filing
+             * backwards out of Final Approval. The gathering it named is a
+             * property of the permit rows now, which this table has no say
+             * over.
              */
-            self::AwaitingOtherPermits => [self::Approved, self::ForFinalApproval, self::Rejected],
-            self::ForFinalApproval => [self::Approved, self::AwaitingOtherPermits, self::Rejected],
-            self::Approved, self::Rejected, self::Cancelled => [],
+            self::ForFinalApproval => [self::Approved, self::Rejected],
+            /*
+             * ── Approved is not the end any more, not on its own ────────────
+             *
+             * It became the status a paid filing WAITS at on 4 October 2026,
+             * when `awaiting_other_permits` was removed. So the two moves that
+             * status allowed have to be allowed from here, or the removal
+             * would have taken them with it:
+             *
+             *  - Rejected. An office can still refuse a clearance while the
+             *    filing gathers, and BPLO can still refuse the filing.
+             *  - ForFinalApproval, which `refreshReadiness` uses for a filing
+             *    that becomes ready with no confirmed RA 11032 category.
+             *
+             * What stops a FINISHED filing taking either is not this table —
+             * it reads the status and the two wear the same one — but
+             * `Application::isDecided()`, which the callers check first. The
+             * claim "terminal is terminal" above now rests on that guard
+             * rather than on this row.
+             */
+            self::Approved => [self::ForFinalApproval, self::Rejected],
+            self::Rejected, self::Cancelled => [],
         };
     }
 
@@ -336,11 +312,13 @@ enum ApplicationStatus: string
      * is also the one case RA 11032 puts a clock on, and the clock runs
      * against the city.
      *
-     * `AwaitingOtherPermits` — mixed. The applicant applies for each
-     * clearance, but the offices then hold them for days at a time, and
-     * from the outside a filing sitting there may be waiting on either.
-     * Sweeping it would eventually delete a filing whose last five days
-     * were CENRO's.
+     * `Approved` with permits still outstanding — mixed, and that is why
+     * it is not here. The applicant applies for each clearance, but the
+     * offices then hold them for days at a time, and from the outside such
+     * a filing may be waiting on either. Sweeping it would eventually
+     * delete a filing whose last five days were CENRO's. (This was the
+     * `AwaitingOtherPermits` status until 4 October 2026; the state it
+     * named is now `Application::isDecided()` answering false.)
      *
      * `ForFinalApproval` — BPLO's, by definition.
      *
@@ -369,7 +347,6 @@ enum ApplicationStatus: string
     public function isPaid(): bool
     {
         return in_array($this, [
-            self::AwaitingOtherPermits,
             self::ForFinalApproval,
             self::Approved,
         ], true);

@@ -61,7 +61,7 @@ it('leaves the applicant’s time out of the whole register’s processing time'
     anaHistory($filing, [
         ['for_approval', '2031-03-03 01:00:00'],
         ['pending_payment', '2031-03-04 01:00:00'],        // BPLO took one day
-        ['awaiting_other_permits', '2031-03-17 01:00:00'], // the applicant took nine to pay
+        ['approved', '2031-03-17 01:00:00'], // the applicant took nine to pay
         ['approved', '2031-03-19 01:00:00'],               // the offices took two
     ]);
 
@@ -86,7 +86,7 @@ it('times BPLO by the days at its own desk, not by its re-stamped review', funct
     anaHistory($filing, [
         ['for_approval', '2031-03-03 01:00:00'],
         ['pending_payment', '2031-03-05 01:00:00'],        // two days at BPLO's desk
-        ['awaiting_other_permits', '2031-03-07 01:00:00'],
+        ['approved', '2031-03-07 01:00:00'],
         ['for_final_approval', '2031-03-10 01:00:00'],
         ['approved', '2031-03-11 01:00:00'],               // and one more
     ]);
@@ -106,7 +106,7 @@ it('does not count an office’s review of a dead filing as pending', function (
     $office = anaOffice();
     $business = anaBusiness();
 
-    $live = anaFiling($business, ['status' => 'awaiting_other_permits', 'submitted_at' => '2031-03-03 01:00:00']);
+    $live = anaFiling($business, ['status' => 'approved', 'submitted_at' => '2031-03-03 01:00:00']);
     $rejected = anaFiling($business, [
         'status' => 'rejected', 'submitted_at' => '2031-03-03 01:00:00', 'decided_at' => '2031-03-20 01:00:00',
     ]);
@@ -132,13 +132,13 @@ it('leaves a filing waiting on its applicant out of what is pending, and out of 
 
     // Submitted 3 March and still with the offices on 31 March: twenty working
     // days on the wall, but fifteen of them were spent returned to the applicant.
-    $waited = anaFiling($business, ['status' => 'awaiting_other_permits', 'submitted_at' => '2031-03-03 01:00:00']);
+    $waited = anaFiling($business, ['status' => 'approved', 'submitted_at' => '2031-03-03 01:00:00']);
     anaHistory($waited, [
         ['for_approval', '2031-03-03 01:00:00'],
         ['returned', '2031-03-04 01:00:00'],
         ['for_approval', '2031-03-25 01:00:00'],
         ['pending_payment', '2031-03-26 01:00:00'],
-        ['awaiting_other_permits', '2031-03-26 02:00:00'],
+        ['approved', '2031-03-26 02:00:00'],
     ]);
 
     $after = whoseTimeReport('pending-processing', null)['sections'][1]['total'];
@@ -155,7 +155,7 @@ it('counts a filing waiting for BPLO’s final approval as BPLO’s pending work
     anaHistory($filing, [
         ['for_approval', '2031-03-03 01:00:00'],
         ['pending_payment', '2031-03-04 01:00:00'],
-        ['awaiting_other_permits', '2031-03-05 01:00:00'],
+        ['approved', '2031-03-05 01:00:00'],
         ['for_final_approval', '2031-03-27 01:00:00'],
     ]);
     // BPLO's review row was completed at intake, so an assignment-based count missed it.

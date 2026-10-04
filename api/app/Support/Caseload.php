@@ -58,6 +58,11 @@ class Caseload
      * `awaiting_other_permits` for weeks with BPLO's assignment already marked
      * done. On the tester register EVERY BPLO assignment is in that state.
      *
+     * (That stage was `awaiting_other_permits` until 4 October 2026, when the
+     * client had the status removed. The filing now sits at `approved` for
+     * those same weeks, with `decided_at` still null — see
+     * `Application::isDecided()`, which is what `scopeNotDecided` below asks.)
+     *
      * Both consequences were visible on screen. An officer's "My assigned"
      * section was empty while they held three live filings, and the super
      * admin's Reassign dialog refused to move any of them — with the OIC
@@ -75,22 +80,6 @@ class Caseload
             ->tap(fn ($q) => self::scopeOpen($q));
     }
 
-    /**
-     * The application states that end a case.
-     *
-     * Read off the enum rather than listed here, so a state added later is
-     * classified by `isTerminal()` — the one place that already answers this
-     * question — instead of silently counting as live.
-     *
-     * @return array<int, string>
-     */
-    public static function decidedStatuses(): array
-    {
-        return array_values(array_map(
-            fn (ApplicationStatus $s) => $s->value,
-            array_filter(ApplicationStatus::cases(), fn (ApplicationStatus $s) => $s->isTerminal()),
-        ));
-    }
 
     /**
      * Narrow a query of ASSIGNMENTS to the ones still open.
@@ -109,7 +98,7 @@ class Caseload
      */
     public static function scopeOpen($query): void
     {
-        $query->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses()));
+        $query->whereHas('application', fn ($a) => $a->notDecided());
     }
 
     /** Site visits this officer still holds. */
@@ -135,7 +124,7 @@ class Caseload
     {
         return ApplicationAssignment::query()
             ->where('officer_user_id', $officer->id)
-            ->whereHas('application', fn ($a) => $a->whereIn('status', self::decidedStatuses()));
+            ->whereHas('application', fn ($a) => $a->decided());
     }
 
     /**
@@ -241,7 +230,7 @@ class Caseload
             ApplicationAssignment::query()
                 ->where('department_id', $officer->department_id)
                 ->whereNull('officer_user_id')
-                ->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses())),
+                ->whereHas('application', fn ($a) => $a->notDecided()),
             $limit,
         );
     }

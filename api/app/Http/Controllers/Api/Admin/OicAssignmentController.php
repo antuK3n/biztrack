@@ -104,7 +104,7 @@ class OicAssignmentController extends Controller
         if (($data['state'] ?? null) === 'open') {
             Caseload::scopeOpen($query);
         } elseif (($data['state'] ?? null) === 'finished') {
-            $query->whereHas('application', fn ($a) => $a->whereIn('status', Caseload::decidedStatuses()));
+            $query->whereHas('application', fn ($a) => $a->decided());
         }
 
         if ($needle = trim($data['q'] ?? '')) {

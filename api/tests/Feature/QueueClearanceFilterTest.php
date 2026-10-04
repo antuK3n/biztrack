@@ -61,7 +61,7 @@ function paidFilingForQueue(): Application
 
     // The payment itself is PaymentTimingTest's subject; this file needs the
     // state after it, which is where the other permits open.
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 
     return $app->fresh();
 }
@@ -142,7 +142,7 @@ it('does not give an office a filing because another office’s permit is inspec
      * that has nothing to do with the boundary being tested.
      */
     $open = $this->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson('/api/v1/assignments?status=pending,in_progress,returned&application_status=awaiting_other_permits');
+        ->getJson('/api/v1/assignments?status=pending,in_progress,returned&application_status=approved');
     $open->assertOk();
 
     $row = collect($open->json('data'))->firstWhere('application.tracking_id', $app->tracking_id);

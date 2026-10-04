@@ -43,7 +43,7 @@ import {
   officeFormMeta,
 } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
-import { otherPermitProgress } from '../../lib/status'
+import { isGatheringOtherPermits, otherPermitProgress } from '../../lib/status'
 import {
   admin,
   applications,
@@ -3293,7 +3293,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * there is no Approve button.
    */
   const notReadyToSign = (() => {
-    if (app.status !== 'awaiting_other_permits') return null
+    if (! isGatheringOtherPermits(app)) return null
     // An office's sheet folds the filed application away; BPLO's does not.
     // That is the nearest thing this screen has to "am I BPLO", and it is
     // already the flag the rest of the sheet branches on.
@@ -3742,7 +3742,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * finished its review was handed the whole application form back, which is
    * the exact thing the client twice asked to have removed.
    *
-   * The stage it was describing is now `awaiting_other_permits`, and the shape
+   * The stage it was describing is now an undecided `approved`, and the shape
    * is unchanged underneath. `approveClearance` completes an office's
    * assignment at the moment it accepts the paperwork and leaves the permit at
    * `for_inspection`, so an office in the old "reviewed, now waiting on the
@@ -3773,7 +3773,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * It was keyed on `for_final_approval` alone, which left BPLO a hole exactly
    * one stage wide. `approveMainForm` completes BPLO's assignment at initial
    * approval, so from the moment BPLO approves until the last clearance lands,
-   * the filing sits at `awaiting_other_permits` with `owesReview` false — and
+   * the filing sits at an undecided `approved` with `owesReview` false — and
    * BPLO, the office that signed the form and is fielding the applicant's
    * questions about it, could not open the form it had signed. That is
    * checklist item 8 as the office admin experiences it, "the application
@@ -3781,14 +3781,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * missing rather than the half that was working.
    *
    * Nothing is handed back except the READING. `decided` is still true for BPLO
-   * at `awaiting_other_permits`, so the sheet opens in view mode with its
+   * while the filing gathers, so the sheet opens in view mode with its
    * decision already recorded and no Approve — the controls are settled by
    * `decided` and `canAct`, which have not moved, and the API is unchanged
    * either way.
    */
   const bploCoordinatesThroughout = data.department.code === 'BPLO'
   const nothingLeftForThisOffice =
-    (app.status === 'awaiting_other_permits' || app.status === 'for_final_approval') &&
+    (isGatheringOtherPermits(app) || app.status === 'for_final_approval') &&
     !owesReview &&
     !bploCoordinatesThroughout
 
@@ -4951,7 +4951,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       {/*
         * ── Why this one cannot be signed yet ────────────────────────────────
         *
-        * A paid filing sits at `awaiting_other_permits` until every clearance
+        * A paid filing sits at an undecided `approved` until every clearance
         * is approved AND every Other Requirement is closed, and it now appears
         * in BPLO's Final Approval tab for that whole stretch — which is the
         * point: somebody has to be able to notice a filing that has stopped

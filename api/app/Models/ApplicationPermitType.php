@@ -129,11 +129,12 @@ class ApplicationPermitType extends Model
             return false;
         }
 
-        // A decided filing — approved, rejected or cancelled — has no permit
-        // awaiting anything. `isTerminal()` is the flow's own word for it and
-        // is what `ApplicationStatus::allowedNext()` already enforces on the
-        // filing's own status; this carries the same guard down to the permit.
-        return ! ($this->application?->status?->isTerminal() ?? false);
+        // A decided filing has no permit awaiting anything. `isDecided()` is
+        // the flow's own word for it, and it asks the ROW rather than the
+        // status: a filing reaches `approved` at payment with its other
+        // permits still to come, and those permits are very much awaiting
+        // something. See the note on `Application::isDecided()`.
+        return ! ($this->application?->isDecided() ?? false);
     }
 
     /** The applicant filled this office's form. */

@@ -33,7 +33,7 @@ use App\Models\User;
 function firstOpenApplication(): Application
 {
     return Application::whereIn('status', [
-        'for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'returned',
+        'for_approval', 'pending_payment', 'approved', 'for_final_approval', 'returned',
     ])->firstOrFail();
 }
 
@@ -138,7 +138,7 @@ it('refuses a return with no remarks', function () {
     $assignment = ApplicationAssignment::where('department_id', $bploDepartmentId)
         ->whereHas(
             'application',
-            fn ($a) => $a->whereIn('status', ['for_approval', 'pending_payment', 'awaiting_other_permits'])
+            fn ($a) => $a->whereIn('status', ['for_approval', 'pending_payment', 'approved'])
         )->firstOrFail();
 
     $this->withHeaders(authAs('bplo@biztrack.local'))

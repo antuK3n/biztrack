@@ -1063,10 +1063,20 @@ export interface AssignmentFilters extends PageParams {
   status?: string
   /**
    * The *application's* status, which is what most of the queue tabs split on.
-   * Comma-separated, e.g. 'for_approval,returned,awaiting_other_permits'.
+   * Comma-separated, e.g. 'for_approval,returned,approved'.
    * Filter here rather than in the browser — see AssignmentPageMeta.
    */
   application_status?: string
+  /**
+   * 0 = open filings only, 1 = finished ones, absent = both.
+   *
+   * Added with the removal of `awaiting_other_permits` on 4 October 2026.
+   * A filing reaches `approved` at payment and stays there while its other
+   * permits come in, so `application_status` alone stopped telling a live
+   * filing from one the city has finished with. `decided_at` is what does,
+   * and this is how to ask for it.
+   */
+  application_decided?: 0 | 1
   /**
    * The state of THIS OFFICE'S own permit on the filing — the second machine.
    * Comma-separated, e.g. 'for_inspection'.
@@ -1074,7 +1084,7 @@ export interface AssignmentFilters extends PageParams {
    * Needed because neither status above can answer "what is waiting on me" once
    * a permit reaches its site visit: `approveClearance()` completes the
    * assignment when the paperwork is accepted, and the filing stays
-   * `awaiting_other_permits` throughout. The server matches this against the
+   * `approved` and undecided throughout. The server matches this against the
    * permit whose issuing office IS the assignment's department, so an office is
    * never selected on a clearance beside its own.
    */
