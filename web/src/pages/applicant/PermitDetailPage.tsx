@@ -242,7 +242,30 @@ export function PermitDetailPage() {
   const signatories = cert?.signatories ?? []
 
   return (
-    <div className="mx-auto max-w-3xl">
+    /*
+      ── The Mayor's Permit is a LANDSCAPE sheet ──────────────────────────────
+
+      The City's pad is wider than it is tall, and the fields are set for that
+      width: three ruled boxes across for the date, area and headcount, and the
+      fee line running the sheet in one row. At `max-w-3xl` those were being
+      squeezed into a portrait column and read nothing like the paper.
+
+      The clearances keep the narrower sheet. They are portrait documents with
+      a single column of fields, and widening them would only stretch ten rows
+      of label-and-value across a screen.
+    */
+    <div className={`mx-auto ${cert?.is_business_permit ? 'max-w-5xl' : 'max-w-3xl'}`}>
+      {/*
+        Print the same paper the download is on: US Letter, landscape.
+
+        Without this the Print button sends whatever the browser last used —
+        usually portrait A4 — so the two routes off this screen produced
+        differently shaped certificates of the same permit. `@page` cannot be
+        set from a class, which is why it is a tag rather than a utility.
+      */}
+      {cert?.is_business_permit && (
+        <style>{'@media print { @page { size: letter landscape; margin: 0.4in; } }'}</style>
+      )}
       {/* Modal-like sheet: royal bar with white X (p59) */}
       <div className="overflow-hidden rounded-md bg-white shadow-overlay print:rounded-none print:shadow-none">
         {/*
@@ -596,13 +619,37 @@ export function PermitDetailPage() {
               </div>
             )}
 
-            <p className="mt-8 text-center text-[10px] leading-relaxed text-ink-muted">
-              Subject to revocation for non-compliance with existing laws, ordinances, rules and
-              regulations. Verify authenticity at
-            </p>
-            <p className="mt-1 break-all text-center text-[10px] leading-relaxed text-ink-muted underline">
-              {permit.verify_url}
-            </p>
+            {/*
+              ── Not on the Mayor's Permit ────────────────────────────────────
+
+              The revocation sentence and the printed verify URL came off on
+              the client's instruction [4 October 2026]. Two reasons they are
+              no loss here: the City's own form already carries its enforcement
+              terms three lines above — subject for inspection, display it, void
+              without the receipt — so the sentence was a second, softer version
+              of the same warning in our words rather than the City's; and the
+              URL was a 60-character localhost string across the foot of a
+              document that has a QR code for exactly that purpose.
+
+              Verification is untouched. The QR encodes the same address and is
+              captioned "Scan to verify", which is the route an inspector
+              actually uses — nobody types a verify URL off a permit.
+
+              The clearances keep both lines: they have no enforcement block of
+              their own, so removing them would leave those certificates saying
+              nothing about how to check one.
+            */}
+            {!cert?.is_business_permit && (
+              <>
+                <p className="mt-8 text-center text-[10px] leading-relaxed text-ink-muted">
+                  Subject to revocation for non-compliance with existing laws, ordinances, rules and
+                  regulations. Verify authenticity at
+                </p>
+                <p className="mt-1 break-all text-center text-[10px] leading-relaxed text-ink-muted underline">
+                  {permit.verify_url}
+                </p>
+              </>
+            )}
           </div>
         </article>
       </div>

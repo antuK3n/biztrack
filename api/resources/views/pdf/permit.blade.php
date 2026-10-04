@@ -269,10 +269,18 @@
         <div class="expires">(THIS PERMIT WILL EXPIRE ON {{ strtoupper($valid_until ?: '') }})</div>
     @endif
 
-    <div class="note">
-        Subject to revocation for non-compliance with existing laws, ordinances, rules and regulations.<br>
-        Verify authenticity with code <span class="verify-code">{{ $permit_number }}</span> at {{ $verify_url }}
-    </div>
+    {{-- Off the Mayor's Permit on the client's instruction [4 October 2026].
+         That sheet already carries the City's own enforcement terms above, and
+         the QR beside the seal is how a permit is checked; a printed verify URL
+         across the foot was a second warning in our words and an address nobody
+         types. The clearances keep it - they have no enforcement block, so
+         without this they would say nothing about verifying at all. --}}
+    @if(! $mayors)
+        <div class="note">
+            Subject to revocation for non-compliance with existing laws, ordinances, rules and regulations.<br>
+            Verify authenticity with code <span class="verify-code">{{ $permit_number }}</span> at {{ $verify_url }}
+        </div>
+    @endif
 </div>
 </body>
 </html>
