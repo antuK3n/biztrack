@@ -153,9 +153,15 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 ]
 
 /** A permit that is in force — the only kind Revoke is offered on. */
-function revocable(permit: PermitRegisterRow): boolean {
+/**
+ * Revocable by THIS reader: in force, and issued by the reader's own office —
+ * BPLO the Mayor's Permit, CHO its Sanitary Permits, and so on [client, 4
+ * October 2026]. The server applies the same rule (PermitController::revoke).
+ */
+function revocable(permit: PermitRegisterRow, ownOffice: OfficeCode | null): boolean {
   return (
-    permit.permit_type?.code === 'BUSINESS' &&
+    ownOffice !== null &&
+    permit.permit_type?.code === ownOffice &&
     (permit.status === 'active' || permit.status === 'suspended')
   )
 }
@@ -754,7 +760,7 @@ export function PermitsPage() {
       <PageTitle
         right={
           /* The table's controls; the map carries its own, so none of these would act on it. */
-          mode === 'map' && readsEveryOffice ? undefined : (
+          mode === 'map' ? undefined : (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
             {/*
               A placeholder is not an accessible name — it disappears on the
@@ -850,32 +856,31 @@ export function PermitsPage() {
         style the Analytics screens use, with the selected view marked by
         `aria-pressed` as well as fill, so the choice is not colour alone.
       */}
-      {readsEveryOffice && (
-        <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
-          {(
-            [
-              { value: 'table', label: 'Table' },
-              { value: 'map', label: 'Map' },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              aria-pressed={mode === tab.value}
-              onClick={() => setMode(tab.value)}
-              className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
-                mode === tab.value
-                  ? 'border-royal bg-royal text-white'
-                  : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Every office gets the map now, on its own certificate [client, 4 October 2026]. */}
+      <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
+        {(
+          [
+            { value: 'table', label: 'Table' },
+            { value: 'map', label: 'Map' },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            aria-pressed={mode === tab.value}
+            onClick={() => setMode(tab.value)}
+            className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
+              mode === tab.value
+                ? 'border-royal bg-royal text-white'
+                : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {mode === 'map' && readsEveryOffice ? (
+      {mode === 'map' ? (
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
       ) : (
       <>
@@ -1135,7 +1140,7 @@ export function PermitsPage() {
                         destructive act on this row (DESIGN.md, Red Means
                         Stop); the dialog behind it is the confirmation.
                       */}
-                      {canRevoke && revocable(permit) && (
+                      {canRevoke && revocable(permit, ownOffice) && (
                         <button
                           type="button"
                           onClick={() => setRevoking(permit)}

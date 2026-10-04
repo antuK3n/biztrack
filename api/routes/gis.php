@@ -18,5 +18,11 @@ use Illuminate\Support\Facades\Route;
  * class comment on BusinessMapController for why `permit.view_all`, which every
  * office holds, is still the wrong gate.
  */
-Route::middleware(['auth:sanctum', 'permission:application.view_any_office'])
+/*
+ * Opened to every office on `permit.view_all` [client, 4 October 2026: "maglagay
+ * din ng maps tulad sa bplo"]. The controller scopes it: an office maps the
+ * businesses holding ITS certificate, coloured by that certificate; BPLO and
+ * the super admin keep the whole city on the Mayor's Permit.
+ */
+Route::middleware(['auth:sanctum', 'permission:permit.view_all'])
     ->get('admin/business-map', [BusinessMapController::class, 'index']);

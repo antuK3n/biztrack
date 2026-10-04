@@ -7,8 +7,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\Permit;
 use App\Models\PermitType;
+use App\Support\ApplicationVisibility;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * Every business in the register, at its pin, with the state of its Mayor's
@@ -59,6 +61,16 @@ use Illuminate\Http\JsonResponse;
  * the whole register one row at a time. The five clearance offices do not hold
  * it, so the map stays off their screens — `permit.view_all`, which all seven
  * roles hold, remains the wrong gate for the reason it always was.
+ *
+ * ── Since 4 October 2026: every office, on its own certificate ────────────
+ *
+ * [Client: "maglagay din ng maps tulad sa bplo".] The route is now on
+ * `permit.view_all`, and the argument above is kept by scoping here instead
+ * of refusing: a clearance office maps only the businesses holding ITS
+ * certificate, coloured by the state of that certificate — the same rows its
+ * Permits table already shows it, drawn on the city. BPLO and the super admin
+ * keep the whole register on the Mayor's Permit. `meta.permit_type` names
+ * which certificate the colours describe, so the legend can say so.
  */
 class BusinessMapController extends Controller
 {
@@ -89,11 +101,21 @@ class BusinessMapController extends Controller
             && $permit->valid_until->greaterThanOrEqualTo($today);
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $today = CarbonImmutable::today();
+        $user = $request->user();
+        $wholeCity = ApplicationVisibility::readsEveryOffice($user);
 
-        $businessPermitTypeId = PermitType::where('code', 'BUSINESS')->value('id');
+        // The certificate the colours describe: the Mayor's Permit for the
+        // whole-city readers, the office's own certificate for an office.
+        $permitType = $wholeCity
+            ? PermitType::where('code', PermitType::OUTCOME_CODE)->first(['id', 'code', 'name'])
+            : PermitType::where('issuing_department_id', $user->department_id)->first(['id', 'code', 'name']);
+
+        abort_if(! $wholeCity && $permitType === null, 403, 'This account belongs to no office that issues a certificate.');
+
+        $businessPermitTypeId = $permitType?->id;
 
         /*
          * Addresses and barangay eager-loaded; `businesses` itself is a Model
@@ -103,6 +125,8 @@ class BusinessMapController extends Controller
          * every other count of the register in the product.
          */
         $businesses = Business::query()
+            // An office maps the businesses holding its certificate, and no others.
+            ->when(! $wholeCity, fn ($q) => $q->whereHas('permits', fn ($p) => $p->where('permit_type_id', $businessPermitTypeId)))
             ->with(['address.barangay:id,name'])
             ->orderBy('id')
             ->get(['id', 'name', 'trade_name', 'status']);
@@ -242,6 +266,7 @@ class BusinessMapController extends Controller
                 'truncated' => $truncated,
                 'max_points' => self::MAX_POINTS,
                 'as_of' => $today->toDateString(),
+                'permit_type' => $permitType ? ['code' => $permitType->code, 'name' => $permitType->name] : null,
             ],
         ]);
     }
