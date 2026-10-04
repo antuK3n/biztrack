@@ -268,6 +268,18 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
  * So: anything that has ever BEEN there keeps it. Everything else draws four.
  */
 function railFor(app: Application): ApplicationStatus[] {
+  /*
+   * ── An amendment is two nodes ────────────────────────────────────────
+   *
+   * It drew For Approval → Pending Payment → Completed, and an amendment
+   * has no payment stage: its fee joins the next renewal and BPLO's approval
+   * applies the changes and closes it (docs/amendment-2026-09-19.md §3,
+   * `FLOW_BY_TYPE.amendment` in lib/status.ts). Tester, 5 October 2026. A
+   * Zoning Clearance it carries moves on its own permit rail, and the
+   * `approved` node's note counts it the way it counts any other permit.
+   */
+  if (app.application_type === 'amendment') return ['for_approval', 'approved']
+
   const beenThere =
     app.status === 'for_final_approval' ||
     (app.status_history ?? []).some((h) => h.to_status === 'for_final_approval')
