@@ -71,9 +71,9 @@ class ChatbotController extends Controller
         ]);
 
         $user = $request->user();
-        $replyBody = $this->responder->reply($user, $data['message']);
+        $answer = $this->responder->reply($user, $data['message']);
 
-        [$asked, $reply] = DB::transaction(function () use ($user, $data, $replyBody) {
+        [$asked, $reply] = DB::transaction(function () use ($user, $data, $answer) {
             $conversation = $this->conversationFor($user->id);
 
             return [
@@ -82,10 +82,15 @@ class ChatbotController extends Controller
                     'sender' => 'user',
                     'body' => $data['message'],
                 ]),
+                // What the question was taken to be, logged beside the answer
+                // (UCR-07 step 3.1); the user's own turn carries none of it.
                 ChatbotMessage::create([
                     'conversation_id' => $conversation->id,
                     'sender' => 'bot',
-                    'body' => $replyBody,
+                    'body' => $answer->body,
+                    'intent' => $answer->intent,
+                    'confidence' => $answer->confidence,
+                    'source' => $answer->source,
                 ]),
             ];
         });

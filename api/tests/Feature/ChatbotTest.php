@@ -2,6 +2,7 @@
 
 use App\Models\Application;
 use App\Models\ChatbotConversation;
+use App\Models\ChatbotMessage;
 use App\Models\User;
 use App\Support\PaymentMode;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -514,6 +515,33 @@ it('keeps permit questions out of the field layer', function () {
     expect(ask('what documents do I need for a sanitary permit'))
         ->toContain('Sanitary Requirements')
         ->not->toContain('do not have a note on that field');
+});
+
+it('logs the intent, a confidence and the source beside every bot answer', function () {
+    // UCR-07 step 3.1: each exchange is recorded with the detected intent and
+    // a confidence score. The owner's own turn is not classified.
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $last = fn (string $sender) => ChatbotMessage::whereHas('conversation', fn ($q) => $q->where('user_id', $owner->id))
+        ->where('sender', $sender)->latest('id')->firstOrFail();
+    $logged = function (string $question) use ($last) {
+        ask($question);
+        $bot = $last('bot');
+
+        return [$bot->intent, $bot->confidence, $bot->source];
+    };
+
+    expect($logged('requirements for a sanitary permit'))->toBe(['requirements', 0.9, 'rules']);
+    expect($logged(ownedTrackingId('owner@biztrack.local')))->toBe(['status', 1.0, 'rules']);
+    expect($logged('what is the water source for?'))->toBe(['field', 0.9, 'rules']);
+    expect($logged('sanitary permit'))->toBe(['permit', 0.6, 'rules']);
+    expect($logged('asdfgh lorem ipsum'))->toBe(['fallback', 0.0, 'rules']);
+
+    // A single short keyword is a weaker match than a phrase naming a permit.
+    [, $weak] = $logged('magkano?');
+    expect($weak)->toBeLessThan(0.9)->toBeGreaterThan(0.0);
+
+    $asked = $last('user');
+    expect([$asked->intent, $asked->confidence, $asked->source])->toBe([null, null, null]);
 });
 
 it('persists the exchange and returns it on GET', function () {

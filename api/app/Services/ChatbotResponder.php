@@ -8,6 +8,7 @@ use App\Models\Department;
 use App\Models\FeeRule;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\ChatbotReply;
 use App\Support\PaymentMode;
 use App\Support\Ra11032;
 use Illuminate\Support\Collection;
@@ -304,23 +305,27 @@ class ChatbotResponder
         'field', 'box', 'blank', 'form', 'sheet', 'section', 'item', 'question', 'kahon', 'sagutan',
     ];
 
-    public function reply(User $user, string $message): string
+    /**
+     * The rule-based answer, with the intent it was taken as and a confidence
+     * derived from the keyword scoring.
+     */
+    public function reply(User $user, string $message): ChatbotReply
     {
         $text = mb_strtolower(trim($message));
 
         // Nothing to work with (blank, emoji-only, "???"): ask for a question.
         if (! preg_match('/[\p{L}\p{N}]/u', $text)) {
-            return $this->emptyPrompt();
+            return new ChatbotReply($this->emptyPrompt(), 'fallback', 0.0);
         }
 
         // A tracking id anywhere in the message means "where is this one?"
         if (preg_match(self::TRACKING_PATTERN, $message, $m)) {
-            return $this->trackingStatus($user, strtoupper($m[0]));
+            return new ChatbotReply($this->trackingStatus($user, strtoupper($m[0])), 'status', 1.0);
         }
 
         // A half-typed tracking id gets the format, never a guessed lookup.
         if (preg_match(self::NEAR_MISS_TRACKING_PATTERN, $message)) {
-            return $this->trackingFormat();
+            return new ChatbotReply($this->trackingFormat(), 'status', 0.9);
         }
 
         $permitType = $this->permitType($text);
@@ -328,19 +333,20 @@ class ChatbotResponder
         // Zoning is the one office people ask about that issues no permit here.
         $office = $permitType ? null : $this->office($text);
         if ($office) {
-            return $this->zoning($office);
+            return new ChatbotReply($this->zoning($office), 'offices', 0.9);
         }
 
         // "What is the water source for?" names a permit but asks about a box on
         // its form, so the field layer gets first refusal on the answer.
         $field = $this->fieldAnswer($text, $permitType);
         if ($field !== null) {
-            return $field;
+            return new ChatbotReply($field[0], 'field', $field[1]);
         }
 
         $broad = ! $permitType && $this->mentionsAny($text, self::BROAD_TERMS);
+        $score = $this->score($text);
 
-        return match ($this->intent($text)) {
+        $body = match ($score['intent']) {
             'requirements' => $this->requirements($permitType, $broad),
             'renewal' => $this->renewal($permitType),
             'payment' => $this->payment($text, $permitType),
@@ -351,6 +357,17 @@ class ChatbotResponder
             'greeting' => $this->greeting($user),
             default => $permitType ? $this->permitMenu($permitType) : $this->fallback(),
         };
+
+        // A permit named and nothing asked about it: the menu, and a middling guess.
+        if ($score['intent'] === 'fallback' && $permitType) {
+            return new ChatbotReply($body, 'permit', 0.6);
+        }
+
+        return new ChatbotReply(
+            $body,
+            $score['intent'],
+            $this->confidence($score, $permitType !== null),
+        );
     }
 
     // --- intent + entity matching --------------------------------------------
@@ -358,31 +375,65 @@ class ChatbotResponder
     /** Highest-scoring intent wins: longest keyword first, then most hits. */
     private function intent(string $text): string
     {
-        $best = 'fallback';
-        $bestLength = 0;
-        $bestHits = 0;
+        return $this->score($text)['intent'];
+    }
+
+    /**
+     * The winning intent and how it won: the length of its longest keyword,
+     * whether that keyword is a phrase, and how many of its keywords hit.
+     *
+     * @return array{intent: string, length: int, phrase: bool, hits: int}
+     */
+    private function score(string $text): array
+    {
+        $best = ['intent' => 'fallback', 'length' => 0, 'phrase' => false, 'hits' => 0];
 
         foreach (self::INTENT_RULES as $intent => $keywords) {
             $length = 0;
+            $phrase = false;
             $hits = 0;
             foreach ($keywords as $keyword) {
                 if ($this->mentions($text, $keyword)) {
                     $hits++;
-                    $length = max($length, mb_strlen($keyword));
+                    if (mb_strlen($keyword) > $length) {
+                        $length = mb_strlen($keyword);
+                        $phrase = str_contains($keyword, ' ');
+                    }
                 }
             }
 
             if ($hits === 0) {
                 continue;
             }
-            if ($length > $bestLength || ($length === $bestLength && $hits > $bestHits)) {
-                $best = $intent;
-                $bestLength = $length;
-                $bestHits = $hits;
+            if ($length > $best['length'] || ($length === $best['length'] && $hits > $best['hits'])) {
+                $best = ['intent' => $intent, 'length' => $length, 'phrase' => $phrase, 'hits' => $hits];
             }
         }
 
         return $best;
+    }
+
+    /**
+     * How sure the keyword match is, 0 to 1, read off the same score that
+     * picked the intent: a phrase ("how much", "where is my") is surer than a
+     * long word, a long word than a short one ("pay", "hi"), more hits add a
+     * little, and a named permit adds the most, because the answer is then
+     * scoped to it. Capped below 1, which only an exact tracking id earns.
+     *
+     * Logged with the answer (UCR-07 step 3.1).
+     *
+     * @param  array{intent: string, length: int, phrase: bool, hits: int}  $score
+     */
+    private function confidence(array $score, bool $permitNamed): float
+    {
+        if ($score['intent'] === 'fallback') {
+            return 0.0;
+        }
+
+        $base = $score['phrase'] ? 0.8 : ($score['length'] >= 5 ? 0.7 : 0.55);
+        $more = 0.05 * min(2, $score['hits'] - 1);
+
+        return round(min(0.95, $base + $more + ($permitNamed ? 0.15 : 0.0)), 2);
     }
 
     /**
@@ -433,7 +484,10 @@ class ChatbotResponder
      * Returns null when the message is not about a form field at all, so the
      * permit intents below carry on untouched.
      */
-    private function fieldAnswer(string $text, ?PermitType $type): ?string
+    /**
+     * @return array{0: string, 1: float}|null the answer and how sure the match is
+     */
+    private function fieldAnswer(string $text, ?PermitType $type): ?array
     {
         $asking = $this->mentionsAny($text, self::FIELD_QUESTION_TERMS);
         $field = $this->field($text, $type?->code);
@@ -441,12 +495,16 @@ class ChatbotResponder
         if ($field) {
             // A bare "water source" is still a field question: nothing else in
             // the message claims it, so answer the field instead of the menu.
-            return $asking || $this->intent($text) === 'fallback' ? $field['answer'] : null;
+            if ($asking) {
+                return [$field['answer'], 0.9];
+            }
+
+            return $this->intent($text) === 'fallback' ? [$field['answer'], 0.75] : null;
         }
 
         // Names no field I know, but is plainly asking about one.
         if ($asking && $this->mentionsAny($text, self::FORM_CONTEXT_TERMS)) {
-            return $this->fieldFallback($type);
+            return [$this->fieldFallback($type), 0.6];
         }
 
         return null;
