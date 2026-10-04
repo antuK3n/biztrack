@@ -45,22 +45,32 @@ class AuthController extends Controller
      * can never land on an officer dashboard by accident.
      */
     /*
-     * `market_admin` was on this list and is gone [client, 2026-09-06], with the
-     * Market Clearance and the CMO Market Office it belonged to. Nothing could
-     * hold the role — the 2026_09_06 migration deleted the row — so the entry
-     * admitted nobody. Removed anyway: a name left in a door list outlives the
-     * reason it was harmless, and the next role created under it would have been
-     * waved through the staff sign-in without anyone deciding that it should be.
+     * ── Staff is everyone who is not an owner, not a list of six names ─────
+     *
+     * The staff door used to admit a fixed list — `bplo_staff`,
+     * `sanitary_officer`, `fire_inspector`, `zoning_officer`, `obo_staff`,
+     * `cenro_officer` — and that stopped being the set of officers on
+     * 27 September 2026, when the super admin was allowed to type a role the
+     * list did not have (Admin\UserController::roleFromTypedTitle). A
+     * "Sanitary Inspector II" got an office and an officer's permissions and
+     * was then refused at /staff/login as an invalid credential, counted
+     * towards the lockout, while the owners' sign-in let them in and issued
+     * a token (owner-sign-in row 14).
+     *
+     * The old note here argued the other way: a name left in a door list
+     * would wave the next role created under it through without anyone
+     * deciding it should be. Roles are no longer created by accident. The
+     * only writer is the super admin's officer directory, which makes every
+     * role but the super admin's belong to an office, and refuses to type
+     * one onto the owners' role — so creating the role IS the decision. The
+     * officer directory's own "staff" filter draws the same line.
      */
-    private const STAFF_ROLES = [
-        'bplo_staff', 'sanitary_officer', 'fire_inspector', 'zoning_officer',
-        'obo_staff', 'cenro_officer',
-    ];
+    private const OWNER_ROLES = ['business_owner'];
 
     /*
      * `admin` has its own door now [checklist item #107].
      *
-     * It used to sit in STAFF_ROLES above, so the super admin signed in at
+     * It used to sit in the staff list above, so the super admin signed in at
      * /staff/login alongside all six offices. The two are not the same job: an
      * office reviews filings within its own department, and the super admin
      * creates the accounts that do the reviewing, reassigns cases, and reads
@@ -95,7 +105,7 @@ class AuthController extends Controller
             return 'admin';
         }
 
-        if ($roles->intersect(self::STAFF_ROLES)->isNotEmpty()) {
+        if ($roles->diff(self::OWNER_ROLES)->isNotEmpty()) {
             return 'staff';
         }
 

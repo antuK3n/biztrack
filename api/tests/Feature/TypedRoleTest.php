@@ -69,6 +69,32 @@ it('creates the role a title was typed for, with an officer’s permissions', fu
     expect($officer->roleNames())->toContain('sanitary_inspector_ii');
 });
 
+/*
+ * The door is part of being an officer (owner-sign-in row 14).
+ *
+ * The staff sign-in admitted a fixed list of six role names, so an officer
+ * whose title was typed in had the permissions and the office and still got
+ * "Invalid credentials" at /staff/login — counted towards the lockout — while
+ * the owners' sign-in let them in and issued a token. The door now follows
+ * the account: anything that is not the super admin's or an owner's is staff.
+ */
+it('admits an officer with a typed role at the staff door and nowhere else', function () {
+    addOfficer()->assertCreated();
+    app('auth')->forgetGuards();
+
+    $login = fn (string $portal) => $this->postJson('/api/v1/auth/login', [
+        'email' => 'typed.role@biztrack.local',
+        'password' => 'Malabon-City-2026!',
+        'portal' => $portal,
+    ]);
+
+    $login('staff')->assertOk()->assertJsonPath('data.user.email', 'typed.role@biztrack.local');
+
+    // The citizen door answers as it does a wrong password, and issues nothing.
+    $login('public')->assertStatus(422)->assertJsonMissingPath('data.token');
+    $login('admin')->assertStatus(409);
+});
+
 it('lands two admins typing the same title on one role', function () {
     /*
      * A week apart, and a space out. Two roles differing by whitespace is how
