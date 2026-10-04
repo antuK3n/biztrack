@@ -88,11 +88,17 @@ function PaperField({
   value: string | null | undefined
   stacked?: boolean
 }) {
+  /*
+   * Sized to the City's pad, not to the clearance sheet. On the photographed
+   * form the captions are about a tenth taller than the values and the rows
+   * sit nearly touching; at the clearance sizes the same fields read as a
+   * form shrunk to fit — "ang liliit ng font, ang lalaki ng spacing".
+   */
   if (stacked) {
     return (
       <div className="min-w-0">
-        <p className="text-[9px] font-bold uppercase tracking-wide text-ink sm:text-[10px]">{label}</p>
-        <p className="mt-1 min-h-[1.6rem] truncate border border-ink/70 px-2 py-1 text-[11px] font-semibold text-ink sm:text-sm">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-ink sm:text-xs">{label}</p>
+        <p className="mt-1 min-h-[2rem] truncate border border-ink/70 px-2.5 py-1.5 text-sm font-bold text-ink sm:text-base">
           {value || ' '}
         </p>
       </div>
@@ -101,10 +107,10 @@ function PaperField({
 
   return (
     <div className="flex items-center gap-3">
-      <p className="w-28 shrink-0 text-[9px] font-bold uppercase tracking-wide text-ink sm:w-40 sm:text-[11px]">
+      <p className="w-32 shrink-0 text-[11px] font-bold uppercase tracking-wide text-ink sm:w-44 sm:text-[13px]">
         {label}
       </p>
-      <p className="min-h-[1.7rem] min-w-0 flex-1 truncate border border-ink/70 px-2.5 py-1 text-[11px] font-semibold text-ink sm:text-sm">
+      <p className="min-h-[2.1rem] min-w-0 flex-1 truncate border border-ink/70 px-3 py-1.5 text-sm font-bold text-ink sm:text-base">
         {value || ' '}
       </p>
     </div>
@@ -360,20 +366,20 @@ export function PermitDetailPage() {
                   list below.
                 */}
                 {cert?.is_business_permit && (
-                  <div className="hidden w-44 shrink-0 space-y-2 sm:block">
+                  <div className="hidden w-52 shrink-0 space-y-2 sm:block">
                     <div>
-                      <p className="text-[8px] font-bold uppercase tracking-wide text-ink">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-ink">
                         Business Account Number
                       </p>
-                      <p className="tnum mt-0.5 min-h-[1.5rem] truncate border border-ink/70 px-2 py-0.5 text-[11px] font-semibold text-ink">
+                      <p className="tnum mt-0.5 min-h-[1.75rem] truncate border border-ink/70 px-2.5 py-1 text-[13px] font-bold text-ink">
                         {cert.ban || ' '}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[8px] font-bold uppercase tracking-wide text-ink">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-ink">
                         Mayor&rsquo;s Permit Number
                       </p>
-                      <p className="tnum mt-0.5 min-h-[1.5rem] truncate border border-ink/70 px-2 py-0.5 text-[11px] font-semibold text-ink">
+                      <p className="tnum mt-0.5 min-h-[1.75rem] truncate border border-ink/70 px-2.5 py-1 text-[13px] font-bold text-ink">
                         {permit.permit_number}
                       </p>
                     </div>
@@ -472,7 +478,7 @@ export function PermitDetailPage() {
                 asset for would print as a gap.
               */
               <>
-                <div className="mt-6 grid gap-3">
+                <div className="mt-6 grid gap-2">
                   <PaperField label="Name of Owner" value={ownerName} />
                   <PaperField
                     label="Business Name"
@@ -481,7 +487,7 @@ export function PermitDetailPage() {
                   <PaperField label="Address" value={address} />
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-3">
+                <div className="mt-2.5 grid grid-cols-3 gap-3">
                   <PaperField stacked label="Date of Issue" value={formatDate(permit.valid_from)} />
                   <PaperField stacked label="Area" value={cert.area_sqm} />
                   <PaperField stacked label="Employees" value={cert.employees} />
@@ -491,13 +497,13 @@ export function PermitDetailPage() {
                 <div className="mt-5 h-1.5 rounded-sm bg-gradient-to-r from-royal to-royal/40" />
 
                 <div className="mt-4 space-y-2.5">
-                  <p className="flex flex-wrap items-baseline gap-2 text-[11px] font-bold uppercase tracking-wide text-ink">
+                  <p className="flex flex-wrap items-baseline gap-2 text-[13px] font-bold uppercase tracking-wide text-ink">
                     Line of Business:
-                    <span className="font-semibold normal-case tracking-normal text-ink-secondary">
+                    <span className="text-sm font-semibold normal-case tracking-normal text-ink-secondary">
                       {cert.line_of_business || ' '}
                     </span>
                   </p>
-                  <div className="flex flex-wrap gap-x-8 gap-y-2 text-[11px] font-bold uppercase tracking-wide text-ink">
+                  <div className="flex flex-wrap gap-x-8 gap-y-2 text-[13px] font-bold uppercase tracking-wide text-ink">
                     <p className="flex items-baseline gap-2">
                       Amount Paid:
                       <span className="tnum font-semibold normal-case tracking-normal text-ink-secondary">
@@ -526,10 +532,10 @@ export function PermitDetailPage() {
                   reader comparing the two would miss it.
                 */}
                 <div className="mt-4 flex items-start gap-3">
-                  <p className="w-20 shrink-0 pt-1 text-[9px] font-bold uppercase tracking-wide text-ink sm:w-24 sm:text-[11px]">
+                  <p className="w-32 shrink-0 pt-1 text-[11px] font-bold uppercase tracking-wide text-ink sm:w-44 sm:text-[13px]">
                     Remarks:
                   </p>
-                  <div className="h-16 flex-1 border border-ink/70" />
+                  <div className="h-[4.5rem] flex-1 border border-ink/70" />
                 </div>
               </>
             ) : (
@@ -608,12 +614,12 @@ export function PermitDetailPage() {
             */}
             {cert?.is_business_permit && (
               <div className="mt-8 space-y-1 text-center">
-                <p className="text-[10px] font-bold leading-relaxed">
+                <p className="text-xs font-bold leading-relaxed">
                   <span className="text-s-red">Subject for inspection.</span>
                   <span className="text-ink"> Display in a conspicuous place at business establishment. </span>
                   <span className="text-s-red">Not valid without official receipt.</span>
                 </p>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-ink">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink">
                   (This permit will expire on {formatDate(permit.valid_until) || ' '})
                 </p>
               </div>
