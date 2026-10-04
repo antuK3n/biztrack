@@ -1686,7 +1686,8 @@ function ApplicationRow({
                         to={`/applications/${app.id}/clearances`}
                         className="pointer-events-auto relative z-20 shrink-0 rounded-md border border-royal/40 bg-white px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal hover:text-white"
                       >
-                        Apply or upload a copy
+                        {/* "Apply or upload a copy" until 4 October 2026, when held copies went. */}
+                        Apply
                       </Link>
                     )}
                     {/*

@@ -748,12 +748,12 @@ export function ApplicationDetailPage() {
             </div>
             <p className="mt-2 text-sm italic text-ink-secondary">
               {otherPermits.outstanding.length === 0
-                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. BPLO is closing your application.`
+                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. Your application is complete.`
                 : `Your Business Permit is issued — download it from your profile. ` +
                   `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
                   ` · still to come: ${otherPermits.outstanding.join(', ')}.` +
-                  ' Apply for each one, or upload the permit you already hold.' +
-                  ' If one is rejected, your Business Permit is suspended until it is settled.'}
+                  ' Apply for each one.' +
+                  ' If one is rejected or fails its inspection, your Business Permit is suspended until it is settled.'}
             </p>
             {inspection?.scheduled_at && (
               <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
