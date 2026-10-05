@@ -80,7 +80,7 @@ function clearanceApproved(Application $app, string $code): ApplicationPermitTyp
         ->firstOrFail();
 
     $workflow->approveClearance($row, 'Paperwork accepted.');
-    $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now()->addDay());
+    $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now());
     $workflow->recordInspection($inspection, InspectionResult::Passed, 'Premises in order.');
 
     return $row->fresh();

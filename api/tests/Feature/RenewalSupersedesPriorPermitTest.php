@@ -152,7 +152,7 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
 
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');
-        $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now()->addDay());
+        $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now());
         $workflow->recordInspection($inspection, InspectionResult::Passed, 'Compliant.');
     }
 
@@ -351,7 +351,7 @@ it('leaves a new application’s permits dated from today', function () {
         $workflow->submitClearanceForm($app->fresh(), $type);
         $row = $workflow->pivotFor($app->fresh(), $code);
         $workflow->approveClearance($row, 'Accepted.');
-        $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now()->addDay());
+        $inspection = $workflow->scheduleClearanceInspection($row->fresh(), now());
         $workflow->recordInspection($inspection, InspectionResult::Passed, 'Compliant.');
     }
     $workflow->approveOverall($app->fresh(), 'Approved.');
