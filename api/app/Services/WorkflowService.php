@@ -4114,6 +4114,18 @@ class WorkflowService
     public function recordInspection(Inspection $inspection, InspectionResult $result, ?string $findings, array $photos = []): void
     {
         /*
+         * ── A visit with a result is final ──────────────────────────────────
+         *
+         * Ken, 5 October 2026 (scenario run, inspection rows 1 and 2): a second
+         * conduct overwrote the first result, findings and date, and a FAILED
+         * visit recorded again as passed erased the failure and issued the
+         * permit — the one record the client asked never to lose. A result is
+         * what the inspector found on that visit; another finding is another
+         * visit, which after a failure is the re-inspection.
+         */
+        $this->refuseIfConducted($inspection);
+
+        /*
          * ── A decided filing takes no more visits ────────────────────────────
          *
          * This was the worst of the three unguarded doors, and the only one that
@@ -4228,6 +4240,19 @@ class WorkflowService
         }
 
         $this->grantClearance($row, 'Inspection passed.');
+    }
+
+    /**
+     * Refuse any change to a visit that already has a result — a second
+     * result (recordInspection) or a new date (rescheduleInspection).
+     */
+    private function refuseIfConducted(Inspection $inspection): void
+    {
+        if ($inspection->status === InspectionStatus::Completed || $inspection->result !== null) {
+            throw ValidationException::withMessages([
+                'status' => ['This visit already has a result.'],
+            ]);
+        }
     }
 
     /**

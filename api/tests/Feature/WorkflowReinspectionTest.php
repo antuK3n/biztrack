@@ -678,3 +678,57 @@ it('keeps the Mayor’s Permit suspended while another office passes and the fai
     expect(clearanceStatusOf($appId, 'SANITARY'))->toBe('approved')
         ->and(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 });
+
+/*
+ * ── A visit with a result is final ──────────────────────────────────────────
+ *
+ * Ken, 5 October 2026, from the scenario run (inspection rows 1, 2 and 4): a
+ * conducted visit took a second result over the first, a failed visit could
+ * be recorded again as passed — erasing the failure and issuing the permit —
+ * and a failed visit could be "moved", which hid the failure behind
+ * Rescheduled and let another office's pass lift the suspension it caused.
+ * The way on from a failure is the re-inspection, a new visit.
+ */
+it('refuses a second result on a visit that already has one', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Written Twice');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'First write-up.'])
+        ->assertOk();
+    $first = Inspection::findOrFail($fire->id);
+
+    test()->travel(2)->hours();
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Second write-up.'])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This visit already has a result.');
+
+    $after = Inspection::findOrFail($fire->id);
+    expect($after->findings)->toBe('First write-up.')
+        ->and($after->conducted_at->equalTo($first->conducted_at))->toBeTrue()
+        ->and(Permit::where('application_id', $appId)
+            ->where('permit_type_id', PermitType::where('code', 'FSIC')->value('id'))->count())->toBe(1);
+});
+
+it('keeps a failed visit failed: it cannot be recorded again as passed', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Failed Stays Failed');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Fine now.'])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This visit already has a result.');
+
+    $visit = Inspection::findOrFail($fire->id);
+    expect($visit->result->value)->toBe('failed')
+        ->and($visit->findings)->toBe('no extinguisher')
+        ->and(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection')
+        ->and(mayorsPermitOf($appId)->status->value)->toBe('suspended');
+});
