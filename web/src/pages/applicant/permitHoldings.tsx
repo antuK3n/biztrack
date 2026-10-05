@@ -4,11 +4,14 @@ import {
   AlertCircleIcon,
   DownloadIcon,
   EyeIcon,
+  MailIcon,
 } from '../../components/icons'
 import { type SortFilterOption } from '../../components/ui/Proto'
 import { businessName, formatDate } from '../../lib/format'
 import { permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
+import { toApiError } from '../../lib/api'
+import { DocumentActions } from '../../components/DocumentActions'
 import type { PageMeta, Permit } from '../../lib/types'
 
 /*
@@ -274,13 +277,13 @@ function PermitRow({
    * (DESIGN.md, Never Color Alone) — the fill is what makes it
    * findable while scrolling a long profile.
    */
-  const sanctioned = permit.status === 'suspended' || permit.status === 'revoked'
+  const sanctioned =
+    permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected'
 
   return (
-    <li
-      className={`flex items-center gap-3 rounded-lg px-4 py-3 sm:gap-4 sm:px-5 ${
-        past ? 'border border-line bg-shell' : 'bg-royal shadow-card'
-      }`}
+    <li className={`overflow-hidden rounded-lg ${past ? 'border border-line' : 'shadow-card'}`}>
+    <div
+      className={`flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5 ${past ? 'bg-shell' : 'bg-royal'}`}
     >
       <span
         className={`min-w-0 flex-1 truncate text-base font-bold ${past ? 'text-ink-secondary' : 'text-white'}`}
@@ -318,6 +321,8 @@ function PermitRow({
         <EyeIcon size={22} />
       </Link>
       <PermitDownloadButton permit={permit} label={label} muted={past} />
+    </div>
+    <PermitExtras permit={permit} />
     </li>
   )
 }
@@ -391,6 +396,102 @@ function PastPermits({ permits, business }: { permits: Permit[]; business: strin
  * assistive tech can be told what the triangle opens. The triangle itself is
  * decorative — the button's own text is the business name.
  */
+/**
+ * Under each permit: what was submitted for it, and — when an office rejected
+ * it — the way to that office.
+ *
+ * [Client, 5 October 2026.] Requirements Submitted is the same list the
+ * office's Permits table shows (GET /permits/{id}/requirements): the uploads
+ * that office reads and the Other Requirements it asked for, once approved.
+ * Fetched when opened, so a page of permits is not a page of requests.
+ *
+ * A rejected permit says which office rejected it and offers "Message" that
+ * office, opening Messages on this filing with that office already chosen —
+ * the conversation the owner needs, without hunting for it.
+ */
+function PermitExtras({ permit }: { permit: Permit }) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  const [docs, setDocs] = useState<Awaited<ReturnType<typeof permitsApi.requirements>> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const office = permit.permit_type?.office ?? 'the issuing office'
+  const rejected = permit.status === 'rejected'
+  const messageTo =
+    permit.application && permit.permit_type?.department_id
+      ? `/messages?application=${permit.application.id}&office=${permit.permit_type.department_id}`
+      : '/messages'
+
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    if (next && docs === null) {
+      permitsApi
+        .requirements(permit.id)
+        .then(setDocs)
+        .catch((err) => setError(toApiError(err).message))
+    }
+  }
+
+  return (
+    <div className="space-y-2.5 border-t border-royal/20 bg-white px-4 py-2.5 sm:px-5">
+      {rejected && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-s-red/40 bg-s-red-tint px-3 py-2">
+          <p className="text-xs leading-relaxed text-ink">
+            <b className="text-s-red">Rejected by the {office}.</b> Message them to find out what is needed to have it
+            approved again.
+          </p>
+          <Link
+            to={messageTo}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+          >
+            <MailIcon size={14} aria-hidden="true" /> Message the {office}
+          </Link>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-royal hover:underline"
+      >
+        <span aria-hidden="true" className="text-[10px]">{open ? '▾' : '▸'}</span>
+        Requirements submitted{docs ? ` (${docs.length})` : ''}
+      </button>
+      <div id={panelId} hidden={!open}>
+        {error ? (
+          <p role="alert" className="text-xs font-medium text-s-red">{error}</p>
+        ) : docs === null ? (
+          <p className="text-xs text-ink-muted">Loading…</p>
+        ) : docs.length === 0 ? (
+          <p className="text-xs text-ink-muted">No requirements on record for this permit.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {docs.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-2">
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+                    {d.name}
+                    {d.from_request && (
+                      <span className="rounded bg-s-orange-tint px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-s-orange-ink">
+                        Other Requirements
+                      </span>
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-ink-muted" title={d.filename}>
+                    {d.filename}
+                  </p>
+                </div>
+                <DocumentActions id={d.id} filename={d.filename} label={d.name} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGroup; defaultOpen?: boolean }) {
   /*
    * ---- Open, because the page exists to show these -------------------------
@@ -630,7 +731,8 @@ export function useHoldings(enabled: boolean) {
        * already carries it, and a lapsed permit is a date passing rather
        * than a decision anybody took.
        */
-      if (permit.status === 'suspended' || permit.status === 'revoked') group.flagged = true
+      if (permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected')
+        group.flagged = true
     }
 
     /*

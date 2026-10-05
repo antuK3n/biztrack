@@ -6,6 +6,7 @@ use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
+use App\Models\AuditLog;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
@@ -30,7 +31,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PermitController extends Controller
 {
-    private array $eager = ['permitType', 'business:id,name', 'application:id,tracking_id'];
+    // The issuing office comes down too, so the owner's screen can name it
+    // and open a conversation with it [client, 5 October 2026].
+    private array $eager = ['permitType.department:id,name', 'business:id,name', 'application:id,tracking_id'];
 
     public function __construct(private WorkflowService $workflow) {}
 
@@ -523,6 +526,217 @@ class PermitController extends Controller
         return response()->json([
             'data' => new PermitRegisterResource($permit->fresh()->load($this->registerEager())),
         ]);
+    }
+
+    /**
+     * May this reader change this certificate's status?
+     *
+     * The issuing office, and nobody else [client, 4–5 October 2026]: BPLO
+     * changes the Mayor's Permit, CHO its Sanitary Permits, and so on. The
+     * super admin belongs to no office and changes none — it reads the
+     * history. `permit.revoke` is the permission every office holds for it.
+     */
+    private function mayChangeStatus(Request $request, Permit $permit): bool
+    {
+        $user = $request->user();
+        $issuer = $permit->permitType?->issuing_department_id;
+
+        /*
+         * And the super admin, on every office's certificates [client, 5
+         * October 2026: "sa super admin, permits page, sa actions may Change
+         * status … kung ano ano ang mga nasa bplo at other offices"] — with
+         * the issuing office's choices, less Revoked (see isSuperAdmin()).
+         */
+        if ($this->isSuperAdmin($request)) {
+            return true;
+        }
+
+        return $user->hasPermission('permit.revoke')
+            && $issuer !== null
+            && (int) $issuer === (int) $user->department_id;
+    }
+
+    /**
+     * The super admin: `user.manage`, and no office of its own.
+     *
+     * It changes any certificate's status with the choices the issuing office
+     * has, EXCEPT Revoked — taken off the super admin on the client's
+     * instruction of 4 October 2026 ("paki tanggal ang revoke sa super
+     * admin"). Revoking stays the issuing office's act.
+     */
+    private function isSuperAdmin(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user->hasPermission('user.manage') && $user->department_id === null;
+    }
+
+    /**
+     * What the Change status dialog may offer for this certificate.
+     *
+     * Asked when the dialog opens rather than carried on every register row,
+     * so the lock check (which reads the filing's refusals) runs for the one
+     * permit being changed, not for twenty-five.
+     *
+     *   options  the statuses it may be set to, without the current one
+     *   final    true when it can no longer move (expired, superseded,
+     *            revoked, retired)
+     *   locked   for a Mayor's Permit: what holds it suspended — the dialog
+     *            shows these in a modal instead of the choices
+     */
+    public function statusOptions(Request $request, Permit $permit): JsonResponse
+    {
+        $this->authorizeView($request, $permit);
+        $permit->loadMissing('permitType');
+
+        $canChange = $this->mayChangeStatus($request, $permit);
+        $final = ! $this->workflow->statusCanMove($permit);
+
+        $options = collect($this->workflow->statusOptionsFor($permit))
+            ->except($permit->status->value)
+            // Revoking is the issuing office's, never the super admin's.
+            ->when($this->isSuperAdmin($request), fn ($o) => $o->except(PermitStatus::Revoked->value))
+            ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
+            ->values()
+            ->all();
+
+        return response()->json(['data' => [
+            'current' => $permit->status->value,
+            'current_label' => $permit->status->label(),
+            'can_change' => $canChange,
+            'final' => $final,
+            'options' => $canChange && ! $final ? $options : [],
+            'locked' => $canChange ? $this->workflow->statusLockFor($permit) : [],
+        ]]);
+    }
+
+    /**
+     * Change status (checklist, 5 October 2026). See
+     * WorkflowService::changePermitStatus for the rules; this checks who.
+     */
+    public function status(Request $request, Permit $permit): JsonResponse
+    {
+        $data = $request->validate([
+            'status' => ['required', Rule::enum(PermitStatus::class)],
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why the status is changing. The owner is told, and it is audited.',
+        ]);
+
+        $this->authorizeView($request, $permit);
+        $permit->loadMissing('permitType');
+        abort_unless(
+            $this->mayChangeStatus($request, $permit),
+            403,
+            'Only the office that issued this permit can change its status.',
+        );
+
+        abort_if(
+            $data['status'] === PermitStatus::Revoked->value && $this->isSuperAdmin($request),
+            403,
+            'The super admin does not revoke permits. The office that issued it does.',
+        );
+
+        $this->workflow->changePermitStatus($permit, PermitStatus::from($data['status']), $data['reason']);
+
+        return response()->json([
+            'data' => new PermitRegisterResource($permit->fresh()->load($this->registerEager())),
+        ]);
+    }
+
+    /**
+     * View status history: every status this certificate has held, newest
+     * first, with who changed it and why.
+     *
+     * Read off the audit log, which already records each change with its
+     * officer, its reason and its time — a second history table would be a
+     * copy that could disagree with it. The issuance itself is the first
+     * entry, taken from the permit.
+     */
+    public function history(Request $request, Permit $permit): JsonResponse
+    {
+        $this->authorizeView($request, $permit);
+        $permit->loadMissing('issuedBy.department', 'permitType');
+
+        $actions = [
+            'permit.status_changed', 'permit.revoked', 'permit.suspended', 'permit.suspended_on_rejection',
+            'permit.reinstated', 'permit.suspension_lifted', 'permit.expired', 'permit.superseded',
+            'permit.revocation_undone',
+        ];
+
+        $entries = AuditLog::query()
+            ->where('auditable_type', Permit::class)
+            ->where('auditable_id', $permit->id)
+            ->whereIn('action', $actions)
+            ->with('user.department')
+            ->orderByDesc('id')
+            ->get()
+            ->map(function (AuditLog $log) {
+                $c = $log->changes ?? [];
+                [$to, $label] = match ($log->action) {
+                    'permit.status_changed' => [$c['to'] ?? null, 'Status changed'],
+                    'permit.revoked' => ['revoked', 'Revoked'],
+                    'permit.suspended' => ['suspended', isset($c['because_permit_type'])
+                        ? "Suspended automatically — {$c['because_permit_type']} was rejected"
+                        : (($c['cause'] ?? null) === 'business_status' ? 'Suspended — the business was sanctioned' : 'Suspended')],
+                    'permit.suspended_on_rejection' => ['suspended', 'Suspended — the application was rejected'],
+                    'permit.reinstated' => ['active', 'Restored automatically — nothing is rejected any more'],
+                    'permit.suspension_lifted' => ['active', 'Suspension lifted'],
+                    'permit.expired' => ['expired', 'Expired — its term ran out'],
+                    'permit.superseded' => ['superseded', 'Superseded by a renewal'],
+                    'permit.revocation_undone' => ['active', 'Revocation undone'],
+                    default => [null, $log->action],
+                };
+
+                return [
+                    'at' => $log->created_at?->toIso8601String(),
+                    'action' => $log->action,
+                    'label' => $label,
+                    'from' => $c['from'] ?? null,
+                    'to' => $to,
+                    'to_label' => $to ? PermitStatus::tryFrom($to)?->label() : null,
+                    'reason' => $c['reason'] ?? $c['note'] ?? null,
+                    'by' => $log->user?->fullName(),
+                    'by_office' => $log->user?->department?->name,
+                ];
+            });
+
+        $entries->push([
+            'at' => $permit->issued_at?->toIso8601String(),
+            'action' => 'permit.issued',
+            'label' => 'Issued',
+            'from' => null,
+            'to' => 'active',
+            'to_label' => PermitStatus::Active->label(),
+            'reason' => null,
+            'by' => $permit->issuedBy?->fullName(),
+            'by_office' => $permit->issuedBy?->department?->name ?? $permit->permitType?->department?->name,
+        ]);
+
+        return response()->json(['data' => $entries->values()->all()]);
+    }
+
+    /**
+     * The requirements submitted for this permit: the uploads its office
+     * reads, and the Other Requirements it asked for once approved.
+     *
+     * [Client, 5 October 2026: "sa my permits, sa business owner side … make
+     * it andon na rin ang Requirements Submitted".] The SAME list the Permits
+     * table's Requirements Submitted column shows an office, built by the
+     * same code (PermitRegisterResource::requirementsFor), so the owner and
+     * the office cannot see two different answers.
+     */
+    public function requirements(Request $request, Permit $permit): JsonResponse
+    {
+        $this->authorizeView($request, $permit);
+
+        $permit->load([
+            'permitType.documentTypes',
+            'application.documents.documentType.permitTypes',
+            'application.documents.requestResponses.officerRequest:id,department_id,title',
+        ]);
+
+        return response()->json(['data' => (new PermitRegisterResource($permit))->requirementsFor() ?? []]);
     }
 
     public function pdf(Request $request, Permit $permit): Response
@@ -1060,6 +1274,14 @@ class PermitController extends Controller
              */
             ...$face,
             'tracking_id' => $permit->application?->tracking_id,
+            /*
+             * The Business Account Number on EVERY certificate, where the
+             * tracking ID used to print [client, 5 October 2026: "Business
+             * Account Number BP-2026-000X na ang ilalagay wag ang tracking id
+             * na may biz"]. The BAN names the business; a BIZ- number names one
+             * filing of it, and a renewal takes a new one.
+             */
+            'ban' => $permit->business?->ban,
             'valid_from' => optional($permit->valid_from)->format('F j, Y'),
             'valid_until' => optional($permit->valid_until)->format('F j, Y'),
             'signatories' => $signatories,

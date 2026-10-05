@@ -58,7 +58,11 @@ import type {
   PaymentMethod,
   PaymentOptions,
   Permit,
+  AdminOwner,
+  OwnerHistoryEntry,
+  PermitHistoryEntry,
   PermitRegisterRow,
+  PermitStatusOptions,
   PermitType,
   PrefillResult,
   ProcessingTimeReport,
@@ -1498,6 +1502,21 @@ export const permits = {
    */
   revoke: (id: number, reason: string) =>
     unwrap<PermitRegisterRow>(api.post(`/permits/${id}/revoke`, { reason })),
+  /** What the Change status dialog may offer, and what (if anything) locks it. */
+  statusOptions: (id: number) => unwrap<PermitStatusOptions>(api.get(`/permits/${id}/status-options`)),
+  /** Change status — the issuing office only; the server says no to anyone else. */
+  changeStatus: (id: number, status: string, reason: string) =>
+    unwrap<PermitRegisterRow>(api.post(`/permits/${id}/status`, { status, reason })),
+  /**
+   * The requirements submitted for a permit — the same list the Permits
+   * table's Requirements Submitted column shows its office.
+   */
+  requirements: (id: number) =>
+    unwrap<
+      { id: number; name: string; filename: string; status: string | null; download_url: string; from_request?: boolean }[]
+    >(api.get(`/permits/${id}/requirements`)),
+  /** Every status the permit has held, newest first. */
+  history: (id: number) => unwrap<PermitHistoryEntry[]>(api.get(`/permits/${id}/history`)),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */
@@ -1764,6 +1783,19 @@ export const admin = {
       status_label: string
       businesses_moved: number
     }>(api.post(`/admin/owners/${ownerId}/lift-blacklist`, { status, reason })),
+
+  /*
+   * Business Owner Status, one row per owner [client, 5 October 2026]: the
+   * roster of people, their status (Active or Blacklisted), and its history.
+   */
+  owners: (params: { q?: string; status?: 'active' | 'blacklisted'; page?: number; per_page?: number } = {}) =>
+    unwrapPaged<AdminOwner>(api.get('/admin/owners', { params })),
+  setOwnerStatus: (ownerId: number, status: 'active' | 'blacklisted', reason: string) =>
+    unwrap<{ id: number; status: string; status_label: string; businesses_moved: number }>(
+      api.post(`/admin/owners/${ownerId}/status`, { status, reason }),
+    ),
+  ownerHistory: (ownerId: number) =>
+    unwrap<OwnerHistoryEntry[]>(api.get(`/admin/owners/${ownerId}/history`)),
 
   businessesPage: (filters: AdminBusinessFilters = {}) =>
     unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),

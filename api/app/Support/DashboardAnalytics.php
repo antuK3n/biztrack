@@ -1517,7 +1517,23 @@ final class DashboardAnalytics
             ->whereNotNull('status_changed_at')
             ->where('status_changed_at', '>=', $windowStart)
             ->where('status_changed_at', '<=', $now)
-            ->pluck('status_changed_at');
+            ->pluck('status_changed_at', 'businesses.id');
+
+        /*
+         * Since 5 October 2026 a blacklisting is of the OWNER and suspends the
+         * businesses rather than relabelling them, so the businesses of an
+         * owner blacklisted in the window close on the owner's date. Keyed by
+         * business, so a row labelled under the old rule is not counted twice.
+         */
+        $ownerBarred = self::officeBusinesses(DB::table('businesses'), $scope, 'businesses.id')
+            ->join('users', 'users.id', '=', 'businesses.owner_user_id')
+            ->whereNull('businesses.deleted_at')
+            ->whereNotNull('users.blacklisted_at')
+            ->where('users.blacklisted_at', '>=', $windowStart)
+            ->where('users.blacklisted_at', '<=', $now)
+            ->pluck('users.blacklisted_at', 'businesses.id');
+
+        $blacklisted = $ownerBarred->union($blacklisted)->values();
 
         foreach ($registered as $at) {
             $month = ManilaCalendar::monthOf($at);

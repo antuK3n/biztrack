@@ -196,8 +196,11 @@ it('lets the filing through again once the business is restored', function () {
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertForbidden();
 
+    // Reinstated from the owner's row: a blacklisted owner's business is locked
+    // [client, 5 October 2026].
+    $ownerId = User::where('email', 'owner@biztrack.local')->value('id');
     test()->withHeaders(authAs('admin@biztrack.local'))
-        ->postJson("/api/v1/admin/businesses/{$businessId}/status", [
+        ->postJson("/api/v1/admin/owners/{$ownerId}/status", [
             'status' => 'active', 'reason' => 'Documents verified on appeal.',
         ])->assertOk();
 
@@ -260,7 +263,8 @@ it('answers the whole history of one business, not the newest page of everything
      */
     expect($history)->toHaveCount(4)
         ->and($history->pluck('changes.to')->sort()->values()->all())
-        ->toBe(['active', 'blacklisted', 'flagged', 'suspended'])
+        // The blacklisting reaches it as a SUSPENSION now [client, 5 October 2026].
+        ->toBe(['active', 'flagged', 'suspended', 'suspended'])
         // Strictly this business. The other one's own blacklisting row is
         // newer and would have been the first thing an unfiltered scan
         // returned.
@@ -272,11 +276,12 @@ it('answers the whole history of one business, not the newest page of everything
      * the finding it followed from, and the entry carries the business that
      * caused it.
      */
-    $cascaded = $history->firstWhere('changes.to', 'blacklisted');
+    $cascaded = $history->first(fn ($row) => isset($row['changes']['by_owner_blacklist']));
 
+    // The blacklisting is of the owner, so the row names the owner it came from.
     expect($cascaded['changes']['reason'])->toStartWith('Owner blacklisted:')
         ->and($cascaded['changes']['reason'])->toContain('A different business entirely.')
-        ->and($cascaded['changes']['cascaded_from_business_id'])->toBe($otherId);
+        ->and($cascaded['changes']['by_owner_blacklist'])->toBe(Business::findOrFail($otherId)->owner_user_id);
 });
 
 it('does not let the type filter reach outside the model namespace', function () {

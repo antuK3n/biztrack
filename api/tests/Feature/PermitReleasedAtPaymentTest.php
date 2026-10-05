@@ -512,7 +512,14 @@ it('keeps the permit suspended while a SECOND refusal still stands', function ()
         );
 });
 
-it('lets BPLO lift a suspension, and records why', function () {
+it('refuses BPLO lifting a suspension a rejected permit holds', function () {
+    /*
+     * This test said BPLO could lift it, on the client's choice of 24
+     * September 2026. The client reversed that on 5 October 2026: "once na na
+     * reject ang permit sa other offices … di na to pwede mabago once na may
+     * rejected na other permits". The office that refused releases it, by
+     * approving or setting its permit back to Active — BPLO cannot.
+     */
     $app = paidNewFiling();
     $permit = businessPermitOf($app);
 
@@ -529,14 +536,9 @@ it('lets BPLO lift a suspension, and records why', function () {
         ->postJson("/api/v1/permits/{$permit->id}/lift-suspension", [
             'reason' => 'CHO confirmed the refusal was filed against the wrong business.',
         ])
-        ->assertOk()
-        ->assertJsonPath('data.status', 'active');
+        ->assertUnprocessable();
 
-    /*
-     * The refusal STANDS. BPLO lifting a suspension is not BPLO granting
-     * another office's permit — the sanitary row is still Rejected, and what
-     * has been decided is that the business may trade while it is unsettled.
-     */
+    expect($permit->fresh()->status)->toBe(PermitStatus::Suspended);
     $row = $app->fresh()->permitTypes->firstWhere('code', 'SANITARY');
     expect($row->pivot->status)->toBe(ClearanceStatus::Rejected);
 });

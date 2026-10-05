@@ -787,16 +787,20 @@ test.describe('the permit register table', () => {
     page,
   }) => {
     await openFilter(page)
-    for (const label of ['Active', 'Expired', 'Suspended', 'Revoked', 'Superseded']) {
+    for (const label of ['Active', 'Expired', 'Suspended', 'Revoked', 'Retired', 'Rejected', 'Superseded']) {
       await expect(page.getByRole('option', { name: label, exact: true })).toBeVisible()
     }
     await page.getByRole('option', { name: 'Revoked', exact: true }).click()
     await expect.poll(() => asked.at(-1)).toContain('status=revoked')
   })
 
-  test('the super admin is offered Revoke on permits in force', async ({ page }) => {
-    // Ken, 5 October 2026: the super admin revokes any permit.
-    await expect(page.getByRole('button', { name: /^Revoke / }).first()).toBeVisible()
+  test('the super admin can change any office’s permit status, and read its history', async ({ page }) => {
+    // Client, 5 October 2026: Change status for the super admin on every row,
+    // with the issuing office’s choices (Revoked stays the office’s — the server
+    // leaves it out of the super admin’s options).
+    await expect(page.getByRole('button', { name: 'Change status of MCB-2026-000001' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Status history of MCB-2026-000001' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible()
   })
 
   test('every View button names the permit it opens', async ({ page }) => {
@@ -846,15 +850,34 @@ test.describe('the permit register table', () => {
       }
     })
 
-    test('Revoke is offered only on a permit in force, and asks before it acts', async ({ page }) => {
+    test('Change status offers BPLO the Mayor’s Permit statuses, and asks why before it acts', async ({ page }) => {
       /*
-       * Checklist item 23, and BPLO's own Mayor's Permit only. Active and suspended rows only — an expired or
-       * superseded certificate has already stopped being valid, and the server
-       * refuses to revoke one. The dialog names the permit AND the business, and
-       * will not send without a reason.
+       * [Client, 5 October 2026.] BPLO's choices on a Mayor's Permit are
+       * Active, Suspended, Retired and Revoked; the dialog names the permit
+       * and the business, and will not send without a reason.
        */
+      await page.route('**/api/v1/permits/*/status-options', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              current: 'active',
+              current_label: 'Active',
+              can_change: true,
+              final: false,
+              locked: [],
+              options: [
+                { value: 'suspended', label: 'Suspended' },
+                { value: 'retired', label: 'Retired' },
+                { value: 'revoked', label: 'Revoked' },
+              ],
+            },
+          }),
+        }),
+      )
       let sent: { url: string; body: unknown } | null = null
-      await page.route('**/api/v1/permits/*/revoke', async (route) => {
+      await page.route('**/api/v1/permits/*/status', async (route) => {
         sent = { url: route.request().url(), body: route.request().postDataJSON() }
         await route.fulfill({
           status: 200,
@@ -863,28 +886,24 @@ test.describe('the permit register table', () => {
         })
       })
 
-      await expect(page.getByRole('button', { name: 'Revoke MCB-2026-000001' })).toBeVisible()
-      await expect(page.getByRole('button', { name: /^Revoke MCS-2025-000770/ })).toHaveCount(0) // expired
-      await expect(page.getByRole('button', { name: /^Revoke MCZ-2026-000014/ })).toHaveCount(0) // superseded
-
-      await page.getByRole('button', { name: 'Revoke MCB-2026-000001' }).click()
-      const dialog = page.getByRole('dialog', { name: 'Revoke MCB-2026-000001?' })
+      await page.getByRole('button', { name: 'Change status of MCB-2026-000001' }).click()
+      const dialog = page.getByRole('dialog', { name: 'Change status — MCB-2026-000001' })
       await expect(dialog).toBeVisible()
       await expect(dialog).toContainText('Aling Nena Sari-Sari Store')
-      await expect(dialog).toContainText('notified')
+      for (const label of ['Suspended', 'Retired', 'Revoked']) await expect(dialog).toContainText(label)
 
-      // No reason, no request.
-      const confirm = dialog.getByRole('button', { name: 'Revoke permit' })
-      await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-
-      await dialog.getByRole('textbox', { name: 'Reason for revoking' }).fill('Closure order from the Mayor.')
-      await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
-      await confirm.click()
+      // No choice and no reason, no request.
+      const save = dialog.getByRole('button', { name: 'Save status' })
+      await expect(save).toHaveAttribute('aria-disabled', 'true')
+      await dialog.getByRole('radio', { name: /Revoked/ }).check()
+      await dialog.getByRole('textbox', { name: 'Reason' }).fill('Closure order from the Mayor.')
+      await expect(save).not.toHaveAttribute('aria-disabled', 'true')
+      await save.click()
 
       await expect(dialog).toHaveCount(0)
       expect(sent).not.toBeNull()
-      expect(sent!.url).toContain('/permits/901/revoke')
-      expect(sent!.body).toEqual({ reason: 'Closure order from the Mayor.' })
+      expect(sent!.url).toContain('/permits/901/status')
+      expect(sent!.body).toEqual({ status: 'revoked', reason: 'Closure order from the Mayor.' })
     })
 
     test('its own tab keeps every field and the uploads', async ({ page }) => {

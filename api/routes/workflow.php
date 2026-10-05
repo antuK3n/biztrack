@@ -474,6 +474,19 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::middleware('permission:permit.revoke')
         ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);
 
+    /*
+     * Change status and its history [client, 5 October 2026]. The options and
+     * the history are reads any permit reader may make of a permit it can see
+     * (the controller checks that); changing is the issuing office's, behind
+     * the same permission as revoking.
+     */
+    Route::get('permits/{permit}/status-options', [PermitController::class, 'statusOptions']);
+    Route::get('permits/{permit}/history', [PermitController::class, 'history']);
+    // The requirements submitted for a permit, for its owner and its readers.
+    Route::get('permits/{permit}/requirements', [PermitController::class, 'requirements']);
+    // Who may is the controller's: the issuing office (permit.revoke), or the super admin.
+    Route::post('permits/{permit}/status', [PermitController::class, 'status']);
+
     // Chatbot (Gemini in front of the rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
     Route::post('chatbot/messages', [ChatbotController::class, 'store']);
@@ -674,6 +687,14 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
              */
             Route::post('owners/{owner}/lift-blacklist', [BusinessStatusController::class, 'liftOwnerBlacklist']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
+            /*
+             * Business Owner Status, one row per owner [client, 5 October 2026]:
+             * the roster of people, their status (Active or Blacklisted), and
+             * its history.
+             */
+            Route::get('owners', [BusinessStatusController::class, 'owners']);
+            Route::post('owners/{owner}/status', [BusinessStatusController::class, 'ownerStatus']);
+            Route::get('owners/{owner}/history', [BusinessStatusController::class, 'ownerHistory']);
             /*
              * The other half of FO-003's section II. Same permission as the
              * status change: both are the register's own facts about a

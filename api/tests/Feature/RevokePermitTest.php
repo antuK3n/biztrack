@@ -239,7 +239,11 @@ it('tells the owner in-app, with the permit number and the reason', function () 
     $notice = AppNotification::where('user_id', $owner->id)->latest('id')->firstOrFail();
 
     expect($notice->title)->toContain('revoked')
+        // Its own type, so the owner's screen can raise the modal for it.
+        ->and($notice->type)->toBe('permit_revoked')
         ->and($notice->body)->toContain($permit->permit_number)
+        // Names the office that revoked it — BPLO, for the Mayor's Permit.
+        ->and($notice->body)->toContain($permit->permitType->department->name)
         ->and($notice->body)->toContain('Fraudulent documents.')
         ->and($notice->link)->toBe('/permits');
 });

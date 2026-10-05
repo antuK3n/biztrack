@@ -1216,7 +1216,8 @@ export interface Permit {
   valid_from: string | null
   valid_until: string | null
   days_until_expiry: number | null
-  permit_type: { code: string; name: string }
+  /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
+  permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
   business: { id: number; name: string }
   application: { id: number; tracking_id: string }
   verify_url: string
@@ -1647,6 +1648,32 @@ export interface TimelineEntry {
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */
+
+/** GET /permits/{id}/status-options — what Change status may offer. */
+export interface PermitStatusOptions {
+  current: string
+  current_label: string
+  /** True only for the office that issued the permit. */
+  can_change: boolean
+  /** Expired, superseded, revoked or retired: nothing can change it now. */
+  final: boolean
+  options: { value: string; label: string }[]
+  /** A Mayor's Permit held suspended by rejected permits: why, one line each. */
+  locked: string[]
+}
+
+/** One entry of GET /permits/{id}/history, newest first. */
+export interface PermitHistoryEntry {
+  at: string | null
+  action: string
+  label: string
+  from: string | null
+  to: string | null
+  to_label: string | null
+  reason: string | null
+  by: string | null
+  by_office: string | null
+}
 
 export interface Notification {
   id: number
@@ -3011,6 +3038,36 @@ export interface UploadedDocument extends AppDocument {
 /* ── Admin businesses (Owner Status page; v2 CONTRACT) ────────────────── */
 
 export type BusinessStatus = 'active' | 'flagged' | 'suspended' | 'blacklisted'
+
+/** GET /admin/owners — one row per business owner [client, 5 October 2026]. */
+export interface AdminOwner {
+  id: number
+  name: string
+  email: string
+  status: 'active' | 'blacklisted'
+  status_label: string
+  blacklisted_at: string | null
+  reason: string | null
+  blacklisted_by: string | null
+  businesses: {
+    id: number
+    name: string
+    ban: string | null
+    status: BusinessStatus
+    status_label: string
+    tracking_id: string | null
+    created_at: string | null
+  }[]
+}
+
+/** One entry of GET /admin/owners/{id}/history, newest first. */
+export interface OwnerHistoryEntry {
+  at: string | null
+  to: 'active' | 'blacklisted'
+  label: string
+  reason: string | null
+  by: string | null
+}
 
 export interface AdminBusiness {
   id: number

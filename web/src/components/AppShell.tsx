@@ -15,6 +15,7 @@ import { ChatBubble } from './ChatBubble'
 import { AccountRestrictedModal } from './ui/Proto'
 import { BellIcon } from './icons'
 import { OfficeHoursNotice } from './OfficeHoursNotice'
+import { PermitRevokedModal } from './PermitRevokedModal'
 import { PretendDateBanner } from './PretendDateBanner'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -466,6 +467,8 @@ export function AppShell() {
       <Bell count={unreadNotifications} />
       {/* Everything fixed to the viewport is furniture, and a printed
           certificate should carry none of it. */}
+      {/* A revoked permit is told in a modal on whichever screen opens next [client, 5 October 2026]. */}
+      {isOwner && !restriction && <PermitRevokedModal />}
       {isOwner && (
         <div className="print:hidden">
           <ChatBubble />

@@ -64,6 +64,7 @@ interface PermitCertificate {
    * fee was assessed against the filing, not against it.
    */
   is_business_permit?: boolean
+  /** The Business Account Number — on every certificate, not only the Mayor's Permit. */
   ban?: string | null
   area_sqm?: string | null
   employees?: string | null
@@ -575,9 +576,10 @@ export function PermitDetailPage() {
                 )}
               </div>
             )}
-            {revoked && (
+            {/* Revoked, and the two statuses added on 5 October 2026: each is a decision, said on the face. */}
+            {(revoked || permit.status === 'retired' || permit.status === 'rejected') && (
               <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
-                Revoked
+                {cert?.status_label ?? permit.status}
               </p>
             )}
             {superseded && (
@@ -739,12 +741,8 @@ export function PermitDetailPage() {
                   <CertField label="Permit Type" value={permit.permit_type.name} />
                   <CertField label="Date of Issue" value={formatDate(permit.valid_from)} />
                   <CertField label="Valid Until" value={formatDate(permit.valid_until)} />
-                  {/* Approved filings leave the tracking list; this walks back to one. */}
-                  <CertField
-                    label="Tracking ID"
-                    value={permit.application?.tracking_id ?? null}
-                    to={permit.application ? `/applications/${permit.application.id}` : undefined}
-                  />
+                  {/* The Business Account Number, not the filing's tracking ID [client, 5 October 2026]. */}
+                  <CertField label="Business Account No." value={cert?.ban ?? null} />
                 </div>
 
                 <div className="mt-5 h-1 bg-royal/70" />
@@ -844,7 +842,7 @@ export function PermitDetailPage() {
                   ['Official Receipt', cert.or_number],
                   ['Amount Paid', cert.office_amount_paid],
                   ['Date Paid', cert.date_paid],
-                  ['Application Control No.', permit.application?.tracking_id],
+                  ['Business Account No.', cert.ban],
                 ].map(([label, value]) => (
                   <div key={label} className="flex gap-1.5">
                     <dt className="font-bold">{label}:</dt>

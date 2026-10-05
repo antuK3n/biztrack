@@ -1888,7 +1888,7 @@ class WorkflowService
              */
             $permit = $this->outcomePermitFor($app);
             if ($permit !== null && $permit->status === PermitStatus::Active) {
-                $permit->update(['status' => PermitStatus::Suspended]);
+                $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'filing']);
 
                 /*
                  * Its own audit action, not `permit.suspended`. That one records
@@ -3078,7 +3078,7 @@ class WorkflowService
         if ($permit->status === PermitStatus::Active) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended]);
+            $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
 
             Audit::log('permit.suspended', $permit, [
                 'application_id' => $app->id,
@@ -3135,12 +3135,11 @@ class WorkflowService
             return;
         }
 
-        $app->load('permitTypes');
-        $stillRefused = $app->permitTypes->contains(
-            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected,
-        );
-
-        if ($stillRefused) {
+        /*
+         * "Still refused" now also counts an ISSUED certificate its office set
+         * to Rejected [client, 5 October 2026] — see refusalsHolding().
+         */
+        if ($this->refusalsHolding($app) !== []) {
             return;
         }
 
@@ -3160,6 +3159,12 @@ class WorkflowService
          */
         $suspended = $app->permits()
             ->where('status', PermitStatus::Suspended->value)
+            /*
+             * Never BPLO's own suspension. That one is a decision, not a
+             * condition, and an office approving a clearance is not a review of
+             * it — only BPLO's Change status lifts it.
+             */
+            ->where(fn ($q) => $q->whereNull('suspended_cause')->orWhere('suspended_cause', '!=', 'manual'))
             ->with('permitType')
             ->get();
 
@@ -3211,7 +3216,7 @@ class WorkflowService
     /** Put a suspended certificate back in force, and tell its owner. */
     private function reinstate(Application $app, Permit $permit): void
     {
-        $permit->update(['status' => PermitStatus::Active]);
+        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null]);
 
         Audit::log('permit.reinstated', $permit, [
             'application_id' => $app->id,
@@ -3313,7 +3318,7 @@ class WorkflowService
         foreach ($permits as $permit) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended]);
+            $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'business']);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
@@ -3482,7 +3487,9 @@ class WorkflowService
          */
         $this->refuseWhileOnHold($permit->business);
 
-        $permit->update(['status' => PermitStatus::Active]);
+        $this->assertNotHeldByRefusal($permit);
+
+        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null]);
 
         Audit::log('permit.suspension_lifted', $permit, [
             'application_id' => $app?->id,
@@ -3559,6 +3566,7 @@ class WorkflowService
 
             $permit->update([
                 'status' => PermitStatus::Revoked,
+                'suspended_cause' => null,
                 'revoked_at' => now(),
                 'revoked_reason' => $reason,
             ]);
@@ -3603,6 +3611,292 @@ class WorkflowService
         });
 
         return $permit;
+    }
+
+    /*
+     * ── Change status: one control, two vocabularies ─────────────────────────
+     *
+     * [Client, 5 October 2026.] Every office gets a Change status action on its
+     * own certificates, and the choices depend on which certificate it is:
+     *
+     *   Mayor's Permit (BPLO)   Active · Suspended · Retired · Revoked
+     *   A clearance (its office) Active · Rejected
+     *
+     * Who may act is settled before this runs — PermitController::status lets
+     * only the issuing office through — so this decides WHAT may happen:
+     *
+     *   - Only a certificate in force can move. Expired and superseded ones
+     *     ended on their own; Revoked and Retired are final. A clearance moves
+     *     between Active and Rejected only.
+     *   - A Mayor's Permit cannot be changed at all while any of the business's
+     *     clearances is refused or Rejected: it is held suspended for that, and
+     *     only the office that refused can release it (statusLockFor).
+     *   - Setting a clearance to Rejected suspends the Mayor's Permit at once;
+     *     setting it back to Active restores it when nothing else is refused.
+     *
+     * Every change writes `permit.status_changed` (Revoked keeps its own
+     * `permit.revoked`), which is what View status history reads, and tells the
+     * owner — a notice the owner's screen raises as a modal.
+     */
+
+    /**
+     * The statuses this certificate may be set to, as [value => label].
+     *
+     * @return array<string, string>
+     */
+    public function statusOptionsFor(Permit $permit): array
+    {
+        $permit->loadMissing('permitType');
+
+        $targets = $permit->permitType?->code === PermitType::OUTCOME_CODE
+            ? [PermitStatus::Active, PermitStatus::Suspended, PermitStatus::Retired, PermitStatus::Revoked]
+            : [PermitStatus::Active, PermitStatus::Rejected];
+
+        return collect($targets)->mapWithKeys(fn (PermitStatus $s) => [$s->value => $s->label()])->all();
+    }
+
+    /** Can this certificate's status still be changed at all? */
+    public function statusCanMove(Permit $permit): bool
+    {
+        $permit->loadMissing('permitType');
+
+        return in_array($permit->status, $this->movableFrom($permit), true);
+    }
+
+    /**
+     * The statuses this certificate may currently be moved FROM.
+     *
+     * @return list<PermitStatus>
+     */
+    private function movableFrom(Permit $permit): array
+    {
+        return $permit->permitType?->code === PermitType::OUTCOME_CODE
+            ? [PermitStatus::Active, PermitStatus::Suspended]
+            : [PermitStatus::Active, PermitStatus::Rejected];
+    }
+
+    /**
+     * What on this filing (or this business) is refused right now.
+     *
+     * Two kinds, and both hold the Mayor's Permit suspended: a clearance an
+     * office refused while the filing was in review (the pivot), and an issued
+     * clearance its office has since set to Rejected. Returned as sentences
+     * the screen can show as they are.
+     *
+     * @return list<string>
+     */
+    public function refusalsHolding(Application $app): array
+    {
+        $app->load('permitTypes');
+
+        $refused = $app->permitTypes
+            ->filter(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected)
+            ->map(fn (PermitType $pt) => "{$pt->name} — rejected by its office on {$app->tracking_id}")
+            ->values()
+            ->all();
+
+        $rejected = Permit::query()
+            ->where('status', PermitStatus::Rejected->value)
+            ->where(fn ($q) => $q->where('application_id', $app->id)->orWhere('business_id', $app->business_id))
+            ->with('permitType')
+            ->get()
+            ->map(fn (Permit $p) => "{$p->permitType?->name} {$p->permit_number} — set to Rejected by its office")
+            ->all();
+
+        return array_values(array_unique([...$refused, ...$rejected]));
+    }
+
+    /**
+     * Why BPLO may not change this Mayor's Permit, or [] when it may.
+     *
+     * @return list<string>
+     */
+    public function statusLockFor(Permit $permit): array
+    {
+        $permit->loadMissing('permitType', 'application', 'business.owner');
+
+        /*
+         * Any certificate, not only the Mayor's Permit: a business the super
+         * admin has suspended — or whose owner is blacklisted — holds every
+         * one of its permits suspended [client, 5 October 2026]. Only
+         * reinstating the business or the owner releases them.
+         */
+        $held = [];
+        $business = $permit->business;
+        if ($business?->owner?->isBlacklisted()) {
+            $held[] = "The owner, {$business->owner->name}, is blacklisted — the super admin has to reinstate the owner first";
+        } elseif (in_array($business?->status, ['suspended', Business::STATUS_BLACKLISTED], true)) {
+            $held[] = "{$business->name} is suspended by the super admin — the business has to be reinstated first";
+        }
+
+        if ($permit->permitType?->code !== PermitType::OUTCOME_CODE) {
+            return $held;
+        }
+
+        if ($permit->application !== null) {
+            return [...$held, ...$this->refusalsHolding($permit->application)];
+        }
+
+        // A permit whose filing was deleted: only its business's Rejected certificates can hold it.
+        return [...$held, ...Permit::query()
+            ->where('business_id', $permit->business_id)
+            ->where('status', PermitStatus::Rejected->value)
+            ->with('permitType')
+            ->get()
+            ->map(fn (Permit $p) => "{$p->permitType?->name} {$p->permit_number} — set to Rejected by its office")
+            ->all()];
+    }
+
+    private function assertNotHeldByRefusal(Permit $permit): void
+    {
+        $lock = $this->statusLockFor($permit);
+
+        if ($lock !== []) {
+            throw ValidationException::withMessages([
+                'status' => [
+                    'This permit is held suspended and cannot be changed until this is settled: '
+                    .implode('; ', $lock).'.',
+                ],
+            ]);
+        }
+    }
+
+    public function changePermitStatus(Permit $permit, PermitStatus $to, string $reason): Permit
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Say why the status is changing. The owner is told, and it is audited.'],
+            ]);
+        }
+
+        $permit->loadMissing('permitType', 'application');
+        $from = $permit->status;
+        $isOutcome = $permit->permitType?->code === PermitType::OUTCOME_CODE;
+
+        if (! array_key_exists($to->value, $this->statusOptionsFor($permit))) {
+            throw ValidationException::withMessages([
+                'status' => ["{$to->label()} is not a status this permit can be set to."],
+            ]);
+        }
+
+        if (! in_array($from, $this->movableFrom($permit), true)) {
+            throw ValidationException::withMessages([
+                'status' => ["Permit {$permit->permit_number} is {$from->label()}, and a {$from->label()} permit can no longer be changed."],
+            ]);
+        }
+
+        if ($from === $to) {
+            throw ValidationException::withMessages([
+                'status' => ["Permit {$permit->permit_number} is already {$to->label()}."],
+            ]);
+        }
+
+        $this->assertNotHeldByRefusal($permit);
+
+        // Revoking keeps its own path: its columns, its audit action, its notice.
+        if ($to === PermitStatus::Revoked) {
+            return $this->revokePermit($permit, $reason);
+        }
+
+        DB::transaction(function () use ($permit, $from, $to, $reason, $isOutcome) {
+            $snapshot = Audit::snapshot($permit);
+
+            $permit->update([
+                'status' => $to,
+                // BPLO's own suspension is marked so no condition lifts it.
+                'suspended_cause' => $to === PermitStatus::Suspended ? 'manual' : null,
+            ]);
+
+            Audit::log('permit.status_changed', $permit, [
+                'permit_number' => $permit->permit_number,
+                'business_id' => $permit->business_id,
+                'application_id' => $permit->application_id,
+                'from' => $from->value,
+                'to' => $to->value,
+                'reason' => $reason,
+            ], $snapshot);
+
+            $this->notify->permitStatusChanged($permit, $to, $reason);
+
+            if (! $isOutcome && $to === PermitStatus::Rejected) {
+                $this->suspendOutcomeForRejected($permit, $reason);
+            }
+        });
+
+        // Back to Active: the Mayor's Permit returns when nothing else is refused.
+        if (! $isOutcome && $to === PermitStatus::Active) {
+            foreach ($this->outcomeApplicationsFor($permit) as $app) {
+                $this->reconsiderSuspension($app);
+            }
+        }
+
+        return $permit->fresh();
+    }
+
+    /**
+     * A clearance was set to Rejected: suspend the Mayor's Permit it feeds.
+     *
+     * The same suspension a refusal in review causes (suspendOutcomePermit),
+     * with the same cause, so the same reinstatement undoes it. The permit is
+     * the one on the clearance's own filing, or else the business's Mayor's
+     * Permit in force today.
+     */
+    private function suspendOutcomeForRejected(Permit $rejected, string $reason): void
+    {
+        $outcome = $rejected->application ? $this->outcomePermitFor($rejected->application) : null;
+        $outcome ??= Permit::query()
+            ->where('business_id', $rejected->business_id)
+            ->where('status', PermitStatus::Active->value)
+            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->latest('id')
+            ->first();
+
+        if ($outcome === null) {
+            return;
+        }
+
+        if ($outcome->status === PermitStatus::Active) {
+            $snapshot = Audit::snapshot($outcome);
+            $outcome->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
+
+            Audit::log('permit.suspended', $outcome, [
+                'application_id' => $outcome->application_id,
+                'business_id' => $outcome->business_id,
+                'because_permit_type_id' => $rejected->permit_type_id,
+                'because_permit_type' => $rejected->permitType?->name,
+                'because_permit_number' => $rejected->permit_number,
+                'reason' => $reason,
+            ], $snapshot);
+        }
+
+        $app = $outcome->application ?? $rejected->application;
+        if ($app !== null && $rejected->permitType !== null) {
+            $this->notify->outcomePermitSuspended($app, $outcome, $rejected->permitType, $reason);
+        }
+    }
+
+    /**
+     * The filings whose Mayor's Permit a clearance's status can bear on.
+     *
+     * @return list<Application>
+     */
+    private function outcomeApplicationsFor(Permit $clearance): array
+    {
+        $apps = Permit::query()
+            ->where('business_id', $clearance->business_id)
+            ->where('status', PermitStatus::Suspended->value)
+            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->with('application')
+            ->get()
+            ->pluck('application')
+            ->filter();
+
+        if ($clearance->application) {
+            $apps->push($clearance->application);
+        }
+
+        return $apps->unique('id')->values()->all();
     }
 
     /**

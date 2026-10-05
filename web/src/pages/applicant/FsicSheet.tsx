@@ -24,6 +24,7 @@ export interface FsicCertificate {
   barangay: string | null
   city: string | null
   tracking_id: string | null
+  ban?: string | null
   signatories: { role: string; name: string | null; action?: string }[]
   fsic_purpose?: 'occupancy' | 'business' | 'other'
   fsic_others?: string | null
@@ -194,7 +195,7 @@ export function FsicSheet({
             ))}
           </dl>
           <p className="mt-3 text-xs">
-            Tracking ID: <b className="tnum">{cert.tracking_id || '—'}</b>
+            Business Account No.: <b className="tnum">{cert.ban || '—'}</b>
           </p>
         </div>
 

@@ -81,8 +81,8 @@
     <tr>
         <td class="san-label">Date of Expiration</td>
         <td class="san-half"><div class="san-fill san-nowrap">{{ strtoupper($valid_until ?: ' ') }}</div></td>
-        <td class="san-label san-label-right">Tracking ID</td>
-        <td><div class="san-fill san-nowrap">{{ $tracking_id ?: ' ' }}</div></td>
+        <td class="san-label san-label-right">Business Account No.</td>
+        <td><div class="san-fill san-nowrap">{{ $ban ?: ' ' }}</div></td>
     </tr>
 </table>
 

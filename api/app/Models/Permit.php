@@ -15,6 +15,8 @@ class Permit extends Model
         'issued_details',
         'prior_permit_id',
         'status', 'valid_from', 'valid_until', 'pdf_path', 'issued_at',
+        // Why a Suspended permit is suspended — see the migration that added it.
+        'suspended_cause',
         'issued_by_user_id',
         // Written by WorkflowService::revokePermit and nothing else.
         'revoked_at', 'revoked_reason',

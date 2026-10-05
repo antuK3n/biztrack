@@ -22,6 +22,9 @@ class PermitResource extends JsonResource
             'permit_type' => $this->relationLoaded('permitType') && $this->permitType ? [
                 'code' => $this->permitType->code,
                 'name' => $this->permitType->name,
+                // The office that issued it — the one an owner writes to about it.
+                'department_id' => $this->permitType->issuing_department_id,
+                'office' => $this->permitType->relationLoaded('department') ? $this->permitType->department?->name : null,
             ] : null,
             'business' => $this->relationLoaded('business') && $this->business ? [
                 'id' => $this->business->id,

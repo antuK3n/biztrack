@@ -119,24 +119,32 @@ const SUPER_ADMIN = {
  */
 const ROSTER = [...OFFICERS, SUPER_ADMIN]
 
-const BUSINESSES = [
+const OWNERS = [
   {
-    id: 21,
-    name: 'Aling Nena Sari-Sari Store',
-    tracking_id: 'BIZ-2026-00001',
-    applications_count: 2,
+    id: 31,
+    name: 'Ana Cruz',
+    email: 'ana.cruz@example.com',
     status: 'active',
     status_label: 'Active',
-    owner: { id: 31, name: 'Nena Makiling', email: 'owner@biztrack.local' },
+    blacklisted_at: null,
+    reason: null,
+    blacklisted_by: null,
+    businesses: [
+      { id: 21, name: 'RxCare Pharmacy', ban: null, status: 'active', status_label: 'Active', tracking_id: 'BIZ-2026-00002', created_at: '2026-08-01T00:00:00Z' },
+    ],
   },
   {
-    id: 22,
-    name: 'RxCare Pharmacy',
-    tracking_id: 'BIZ-2026-00002',
-    applications_count: 1,
-    status: 'suspended',
-    status_label: 'Suspended',
-    owner: { id: 32, name: 'Juan Ramos', email: 'juan@biztrack.local' },
+    id: 32,
+    name: 'Three Shops Reyes',
+    email: 'three.shops@example.com',
+    status: 'blacklisted',
+    status_label: 'Blacklisted',
+    blacklisted_at: '2026-10-01T00:00:00Z',
+    reason: 'Falsified sanitary clearance.',
+    blacklisted_by: 'Ramon Santos',
+    businesses: ['Reyes Sari-Sari', 'Reyes Hardware', 'Reyes Canteen'].map((name, i) => ({
+      id: 40 + i, name, ban: null, status: 'suspended', status_label: 'Suspended', tracking_id: null, created_at: '2026-07-01T00:00:00Z',
+    })),
   },
 ]
 
@@ -426,202 +434,62 @@ test.describe('Officer Assignment', () => {
   })
 })
 
-test.describe('Owner Status', () => {
-  let asked: string[]
-
+test.describe('Business Owner Status', () => {
+  /*
+   * One row per OWNER [client, 5 October 2026]: their businesses (a dropdown
+   * when there are several), the owner's status, Change status (Active or
+   * Blacklisted) and View status history.
+   */
   test.beforeEach(async ({ page }) => {
-    asked = []
-    await page.route('**/api/v1/admin/businesses*', async (route) => {
-      const url = new URL(route.request().url())
-      asked.push(url.search)
-      const q = (url.searchParams.get('q') ?? '').toLowerCase()
-      const rows = q
-        ? BUSINESSES.filter((b) => `${b.name} ${b.owner.name}`.toLowerCase().includes(q))
-        : BUSINESSES
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(page1(rows)) })
-    })
-
-    await page.goto('/staff/admin/owners')
-    await expect(page.getByRole('heading', { name: /Owner Status/i, level: 1 })).toBeVisible()
-    await expect(page.locator('tbody tr')).toHaveCount(BUSINESSES.length)
-  })
-
-  test('each business is named with its owner and its status in words', async ({ page }) => {
-    const suspended = page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
-    await expect(suspended).toContainText('Juan Ramos')
-    await expect(suspended).toContainText('Suspended')
-  })
-
-  test('each row carries the business’s filing number, under its name', async ({ page }) => {
-    /*
-     * This is the screen where an admin suspends somebody's livelihood, and
-     * "which of these is the one the complaint is about" must not be answered
-     * by a name alone — six rows, two owners, names that share a word.
-     *
-     * `BIZ-2026-…` is a FILING's number, minted at submit and taken afresh by
-     * every renewal, so a business that has filed twice holds two. The row
-     * shows the LATEST, which is a claim about ORDER — see the API test that
-     * pins it to `submitted_at` rather than to insertion order.
-     */
-    const store = page.locator('tbody tr', { hasText: 'Aling Nena Sari-Sari Store' })
-    await expect(store).toContainText('BIZ-2026-00001')
-
-    const pharmacy = page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
-    await expect(pharmacy).toContainText('BIZ-2026-00002')
-
-    // Name and number, and nothing else: the label and the count came off at
-    // the client's request once they knew a renewal takes a new number.
-    await expect(store).not.toContainText(/latest filing|in total|filings/i)
-  })
-
-  test('says so in words when a business has not filed yet', async ({ page }) => {
-    // Not a blank. A business exists in the register from the moment it is
-    // created, and an empty line under its name reads as a value that failed
-    // to load.
-    await page.route('**/api/v1/admin/businesses?*', (route) =>
+    await page.route('**/api/v1/admin/owners?*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          data: [{ ...BUSINESSES[0], tracking_id: null, applications_count: 0 }],
-          meta: { current_page: 1, last_page: 1, per_page: 20, total: 1 },
-        }),
+        body: JSON.stringify({ data: OWNERS, meta: { current_page: 1, last_page: 1, per_page: 25, total: OWNERS.length } }),
       }),
     )
-    await page.reload()
-    await expect(page.locator('tbody tr').first()).toContainText('No filing yet')
+    await page.goto('/admin/owners')
+    await expect(page.getByRole('heading', { name: 'Business Owner Status' })).toBeVisible()
   })
 
-  test('both numbers are named', async ({ page }) => {
-    // "2 businesses" reads as the whole register; "2 of 2" says it is.
-    await expect(page.getByText(/Showing \d+ of \d+ businesses/)).toBeVisible()
+  test('lists owners, with their businesses behind a dropdown when there are several', async ({ page }) => {
+    for (const label of ['Owner', 'Businesses', 'Status', 'Actions']) {
+      await expect(page.getByRole('columnheader', { name: label })).toBeVisible()
+    }
+    const many = page.locator('tbody tr', { hasText: 'Three Shops Reyes' })
+    await expect(many).not.toContainText('Reyes Hardware')
+    await many.getByRole('button', { name: /3 businesses/ }).click()
+    await expect(many).toContainText('Reyes Hardware')
+
+    // One business shows itself without a dropdown.
+    await expect(page.locator('tbody tr', { hasText: 'Ana Cruz' })).toContainText('RxCare Pharmacy')
   })
 
-  test('search narrows on the server', async ({ page }) => {
-    await page.getByRole('searchbox', { name: 'Search businesses or owners' }).fill('rxcare')
-    await expect(page.locator('tbody tr')).toHaveCount(1)
-    await expect.poll(() => asked.at(-1)).toContain('q=rxcare')
-  })
-
-  test('retired businesses are listed only when asked for, and offer no actions', async ({ page }) => {
-    /*
-     * Checklist item 21. "All" is every business still on the register; a
-     * retired one — removed from it — is listed only under Retired, says so in
-     * words, and carries no buttons, because every action binds a business
-     * the server no longer finds.
-     */
-    expect(asked[0] ?? '').not.toContain('status=')
-
-    await page.route('**/api/v1/admin/businesses?*', async (route) => {
-      const url = new URL(route.request().url())
-      asked.push(url.search)
-      const retired = url.searchParams.get('status') === 'retired'
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(
-          page1(retired ? [{ ...BUSINESSES[0], retired_at: '2026-08-01T00:00:00.000Z' }] : BUSINESSES),
-        ),
-      })
+  test('offers the owner only Active or Blacklisted, with a reason', async ({ page }) => {
+    let sent: unknown = null
+    await page.route('**/api/v1/admin/owners/*/status', async (route) => {
+      sent = route.request().postDataJSON()
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 31, status: 'blacklisted', status_label: 'Blacklisted', businesses_moved: 1 } }) })
     })
 
-    await page.getByRole('button', { name: 'Retired', exact: true }).click()
-    await expect.poll(() => asked.at(-1)).toContain('status=retired')
-
-    const row = page.locator('tbody tr')
-    await expect(row).toHaveCount(1)
-    await expect(row).toContainText('Retired')
-    await expect(row).toContainText('Removed from the register on')
-    await expect(row.getByRole('button', { name: 'Change Status' })).toHaveCount(0)
-    await expect(row.getByRole('button', { name: 'Transfer Ownership' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Change the status of Ana Cruz' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toContainText('Blacklisted')
+    await expect(dialog).toContainText('suspended at once')
+    const save = dialog.getByRole('button', { name: 'Save status' })
+    await expect(save).toHaveAttribute('aria-disabled', 'true')
+    await dialog.getByRole('textbox', { name: 'Reason' }).fill('Falsified documents.')
+    await save.click()
+    await expect(dialog).toHaveCount(0)
+    expect(sent).toEqual({ status: 'blacklisted', reason: 'Falsified documents.' })
   })
 
-  test('a status change must state a reason before it can be confirmed', async ({ page }) => {
-    /*
-     * The reason is not decoration: it is what the owner is shown and what the
-     * history keeps. Confirm therefore waits for it — and stays reachable while
-     * it waits, so the reader can find out why it will not go (§6.2).
-     */
-    /*
-     * By the ACCESSIBLE name, which now carries the business: twenty rows of
-     * identical "Change Status" is twenty identical stops for a screen-reader
-     * reader, so each button names what it acts on.
-     */
-    await page
-      .locator('tbody tr', { hasText: 'RxCare Pharmacy' })
-      .getByRole('button', { name: /^Change the status of/ })
-      .click()
-    await expect(page.getByRole('heading', { name: 'Changing Status' })).toBeVisible()
-
-    /*
-     * "Review this change", not "Confirm". The dialog gained a review step —
-     * suspending a business stops it trading and blacklisting bars its owner
-     * everywhere, so neither happens on one press any more.
-     */
-    const confirm = page.getByRole('button', { name: 'Review this change' })
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-    expect(await confirm.evaluate((el) => el.hasAttribute('disabled'))).toBe(false)
-
-    const modal = page.locator('div.fixed.inset-0')
-    await expect(modal.locator('select').first().locator('option')).toHaveText([
-      'Active',
-      'Flagged',
-      'Suspended',
-      'Blacklisted',
-    ])
-
-    /*
-     * A different status AND a reason. RxCare is already suspended in the stub,
-     * so the change has to be to something else: the dialog refuses a change that
-     * is not one — the status select opens on what the business already is, so
-     * Review used to be pressable the moment it appeared and pressing it wrote
-     * an audit row recording a change to the same value.
-     */
-    await modal.locator('select').first().selectOption('flagged')
-    await modal.locator('select').nth(1).selectOption({ index: 1 })
-    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
-  })
-
-  test('the status history is readable and says who changed what', async ({ page }) => {
-    /*
-     * The history is audit-fed, and reads `changes.{from,to,reason}` — the keys
-     * BusinessStatusController actually writes. It once read `changes.status`,
-     * which is never there, so a blacklisting rendered as "Active" in green
-     * with the reason dropped. Stubbed in the real shape so this test would
-     * catch that again.
-     */
-    await page.route('**/api/v1/admin/audit-logs*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: [
-            {
-              id: 1,
-              action: 'business.status_changed',
-              auditable_type: 'Business',
-              auditable_id: 22,
-              user: { id: 1, name: 'Ramon Santos' },
-              changes: {
-                from: 'active',
-                to: 'suspended',
-                reason: 'Falsified / misrepresented documents · Driven by the check.',
-              },
-              created_at: '2026-09-01T02:00:00.000000Z',
-            },
-          ],
-          meta: { current_page: 1, last_page: 1, per_page: 100, total: 1 },
-        }),
-      }),
-    )
-
-    await page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
-      .getByRole('button', { name: /^Status history for/ })
-      .click()
-
-    const history = page.getByRole('dialog').filter({ hasText: 'Status History' })
-    await expect(history).toBeVisible()
-    await expect(history).toContainText('Ramon Santos')
-    await expect(history).toContainText('Falsified / misrepresented documents')
+  test('locks a blacklisted owner’s businesses behind a modal', async ({ page }) => {
+    const row = page.locator('tbody tr', { hasText: 'Three Shops Reyes' })
+    await row.getByRole('button', { name: /3 businesses/ }).click()
+    await row.getByRole('button', { name: 'Change the status of Reyes Hardware' }).click()
+    const dialog = page.getByRole('dialog', { name: 'The owner is blacklisted' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).not.toContainText('Save status')
   })
 })
