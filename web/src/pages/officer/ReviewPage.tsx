@@ -13,7 +13,6 @@ import { DocumentActions } from '../../components/DocumentActions'
 import { InspectionDecisionPanel } from '../../components/InspectionDecision'
 import { MapPicker } from '../../components/MapPicker'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
-import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
@@ -4052,8 +4051,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           <div className="mt-6">
             <ApplicationProgress app={app} ownPermit={ownPermit} />
           </div>
-
-          <MessagesPanel applicationId={app.id} />
         </div>
       </div>
     )
@@ -7609,8 +7606,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * is how it came to be missed in the first place.
            */}
 
-          {/* Messages thread (v2) */}
-          <MessagesPanel applicationId={app.id} />
+          {/*
+           * The Messages thread that closed this sheet is gone (Ken, 6 October
+           * 2026), here and on the inspection view above. The conversation is
+           * the Messages page's, which every office still has in the rail;
+           * mounting <MessagesPanel applicationId={app.id} /> here again is
+           * all it would take to bring it back.
+           */}
         </div>
 
         {/* ── Floating remarks column (p56/p70) ── */}
