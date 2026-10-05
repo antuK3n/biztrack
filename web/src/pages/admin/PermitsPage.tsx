@@ -187,9 +187,8 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 /**
  * May THIS reader change this permit's status? The issuing office — BPLO the
  * Mayor's Permit, CHO its Sanitary Permits, and so on — and the super admin on
- * every office's, with that office's choices and Revoked [client and Ken, 5
- * October 2026]. The server applies the same rule (PermitController::status)
- * and sends the choices (`/status-options`).
+ * every office's, with that office's choices — Revoked included on a Mayor's
+ * Permit, as BPLO has it [client, 5 October 2026]. The server applies the same rule (PermitController::status).
  */
 function mayChangeStatus(
   permit: PermitRegisterRow,

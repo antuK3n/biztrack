@@ -623,7 +623,7 @@ class PermitController extends Controller
          * And the super admin, on every office's certificates [client, 5
          * October 2026: "sa super admin, permits page, sa actions may Change
          * status … kung ano ano ang mga nasa bplo at other offices"] — with
-         * the issuing office's choices, and Revoked (see isSuperAdmin()).
+         * the issuing office's choices (see isSuperAdmin()).
          */
         if ($this->isSuperAdmin($request)) {
             return true;
@@ -638,11 +638,10 @@ class PermitController extends Controller
      * The super admin: `user.manage`, and no office of its own.
      *
      * It changes any certificate's status with the choices the issuing office
-     * has, AND may revoke any of them. The client asked on 4 October 2026 for
-     * Revoke to be taken off the super admin ("paki tanggal ang revoke sa
-     * super admin"); Ken overrode that on 5 October 2026 — the super admin
-     * revokes any permit, as `revoke()` already lets it. Offices change only
-     * their own, and of them only BPLO revokes (the Mayor's Permit).
+     * has — Revoked included on a Mayor's Permit, as BPLO has it [client,
+     * 5 October 2026: "gawing ganto rin sa side ng super admin … na pwede
+     * rin mag revoke tulad sa nagagawa ng bplo admin"]. This reverses the
+     * instruction of 4 October 2026 that took revoking off the super admin.
      */
     private function isSuperAdmin(Request $request): bool
     {
@@ -709,12 +708,7 @@ class PermitController extends Controller
             'Only the office that issued this permit can change its status.',
         );
 
-        $this->workflow->changePermitStatus(
-            $permit,
-            PermitStatus::from($data['status']),
-            $data['reason'],
-            $this->isSuperAdmin($request),
-        );
+        $this->workflow->changePermitStatus($permit, PermitStatus::from($data['status']), $data['reason']);
 
         return response()->json([
             'data' => new PermitRegisterResource($permit->fresh()->load($this->registerEager())),

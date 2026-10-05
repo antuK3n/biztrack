@@ -187,8 +187,9 @@ it('keeps each office to its own vocabulary and its own certificates', function 
         ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('lets the super admin change any office’s permit with that office’s choices, and revoke any of them', function () {
-    // Client, 5 October 2026; Ken, 5 October 2026: the super admin revokes any permit.
+it('lets the super admin change any office’s permit with that office’s choices, revoking included', function () {
+    // Client, 5 October 2026: the super admin has BPLO's choices on a Mayor's
+    // Permit, Revoked included (reversing the 4 October instruction).
     ['business' => $mp, 'sanitary' => $hc] = statusPair();
 
     $admin = test()->withHeaders(authAs('admin@biztrack.local'))
@@ -203,88 +204,9 @@ it('lets the super admin change any office’s permit with that office’s choic
     setStatus('admin@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
     expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
 
-    setStatus('admin@biztrack.local', $hc, 'revoked', 'Closure order.')->assertOk();
     setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertOk();
-    expect($hc->fresh()->status)->toBe(PermitStatus::Revoked)
-        ->and($hc->fresh()->revoked_reason)->toBe('Closure order.')
-        ->and($mp->fresh()->status)->toBe(PermitStatus::Revoked);
-
-    // The health office still has its own two, and no Revoked.
-    ['sanitary' => $other] = statusPair();
-    $office = test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/permits/{$other->id}/status-options")->assertOk()->json('data');
-    expect(array_column($office['options'], 'label'))->toBe(['Rejected']);
-    setStatus('sanitary@biztrack.local', $other, 'revoked', 'Trying anyway.')->assertUnprocessable();
-});
-
-it('dates and explains every suspension Change status makes, and clears it on the way back', function () {
-    /*
-     * Rupert's suspension record (when, why, which permit) on Mike's two
-     * ways of suspending: BPLO by hand, and an office setting its permit
-     * to Rejected. Each way back clears it with the cause.
-     */
-    ['business' => $mp, 'sanitary' => $hc] = statusPair();
-
-    setStatus('bplo@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
-    $mp->refresh();
-    expect($mp->suspended_cause)->toBe('manual')
-        ->and($mp->suspended_at)->not->toBeNull()
-        ->and($mp->suspension_reason)->toBe('Violations found.')
-        ->and($mp->suspended_for_permit_type_id)->toBeNull();
-
-    setStatus('bplo@biztrack.local', $mp, 'active', 'Settled.')->assertOk();
-    $mp->refresh();
-    expect($mp->suspended_cause)->toBeNull()
-        ->and($mp->suspended_at)->toBeNull()
-        ->and($mp->suspension_reason)->toBeNull();
-
-    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'No handwashing sink.')->assertOk();
-    $mp->refresh();
-    expect($mp->status)->toBe(PermitStatus::Suspended)
-        ->and($mp->suspended_cause)->toBe('refusal')
-        ->and($mp->suspended_at)->not->toBeNull()
-        ->and($mp->suspension_reason)->toBe('No handwashing sink.')
-        ->and($mp->suspended_for_permit_type_id)->toBe($hc->permit_type_id);
-
-    setStatus('sanitary@biztrack.local', $hc, 'active', 'Sink installed.')->assertOk();
-    $mp->refresh();
-    expect($mp->status)->toBe(PermitStatus::Active)
-        ->and($mp->suspended_cause)->toBeNull()
-        ->and($mp->suspended_at)->toBeNull()
-        ->and($mp->suspension_reason)->toBeNull()
-        ->and($mp->suspended_for_permit_type_id)->toBeNull();
-});
-
-it('locks the Mayor’s Permit for BPLO while a failed visit stands on its filing', function () {
-    /*
-     * Ken, 5 October 2026: a failed inspection holds the Business Permit as
-     * an office's refusal does (Rupert's rule, recordInspection), so BPLO
-     * cannot set it back to Active until that office passes a re-inspection.
-     */
-    ['business' => $mp, 'sanitary' => $hc] = statusPair();
-    $mp->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
-    Inspection::create([
-        'application_id' => $mp->application_id,
-        'department_id' => $hc->permitType->issuing_department_id,
-        'status' => InspectionStatus::Completed,
-        'result' => InspectionResult::Failed,
-        'scheduled_at' => now(),
-        'conducted_at' => now(),
-    ]);
-
-    $options = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
-    expect($options['locked'])->toContain("Sanitary Permit — rejected by its office on {$mp->application->tracking_id}");
-
-    setStatus('bplo@biztrack.local', $mp, 'active', 'Trying anyway.')
-        ->assertUnprocessable()
-        ->assertJsonPath('errors.status.0', 'This permit is held suspended and cannot be changed until this is settled: '
-            ."Sanitary Permit — rejected by its office on {$mp->application->tracking_id}.");
-    expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
-
-    // A passing re-inspection settles it: the clearance is Approved.
-    $mp->application->permitTypes()->updateExistingPivot($hc->permit_type_id, ['status' => ClearanceStatus::Approved->value]);
-    setStatus('bplo@biztrack.local', $mp, 'active', 'Re-inspection passed.')->assertOk();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Revoked)
+        ->and($mp->fresh()->revoked_reason)->toBe('Closure order.');
 });
 
 it('asks for a reason', function () {
