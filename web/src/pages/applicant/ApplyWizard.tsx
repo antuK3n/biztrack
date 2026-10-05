@@ -5053,7 +5053,8 @@ export function ApplyWizard() {
    * asked: it has no Location & Zoning step and changes neither.
    *
    * Held while the question is in flight, too, so a quick press cannot slip
-   * past a refusal that has not landed yet. A failed lookup holds nothing.
+   * past a refusal that has not landed yet. A failed lookup holds only what
+   * the box under the map already shows red (see `zoneRefusal`, below).
    */
   const amendZonePlace = useMemo(() => {
     if (applicationType !== 'amendment') return null
@@ -5095,15 +5096,40 @@ export function ApplyWizard() {
       : null
   }, [amendZonePlace, applicationType, sequence, form.latitude, form.longitude, form.barangay_id, form.lines])
   const zoneAtPin = useZoneAtPin(zoneAtPinQuery)
-  const zoneHeldHere = applicationType === 'amendment'
-    ? phase === 'amendments' || phase === 'review'
-    : phase === 'address' || phase === 'review'
-  const zoneRefusal = zoneHeldHere ? (zoneAtPin.data?.refusal ?? null) : null
-  const zoneHolds = zoneHeldHere && (zoneRefusal !== null || zoneAtPin.pending)
   // The amendment's box under its own map, read for its new pin.
   const amendInsights = useLocationInsights(
     amendZonePlace === null ? null : { ...amendZonePlace, businessId },
   )
+  /*
+   * ── Held past the step, not only on it ────────────────────────────────────
+   *
+   * Ken, 6 October 2026: "Non-conformance in the zoning should not allow the
+   * user to go to the next pages (even when the pin was changed in the middle
+   * of the application)." Only Next was held, and only while standing on the
+   * step: the section map still jumped to any section already opened, and a
+   * reopened draft landed on the first unfinished section after a red pin.
+   *
+   * So the refusal belongs to the filing now, wherever the owner stands. The
+   * step that holds the pin counts as unfinished while it is refused (see
+   * `stepComplete`), which shuts the section map past it and lands a reopened
+   * draft on it; Next is held on it and on every step after it. Back is never
+   * held — the pin and the line are fixed on that step.
+   *
+   * Red is red when either answer says so. The box under the map reads the
+   * location insights; Next reads `zone-at-pin`. A failed `zone-at-pin` used
+   * to open Next under a box already red, so the box's own verdict holds too.
+   * An unknown zone still refuses nothing (PinZone).
+   */
+  const zoneStep: Phase = applicationType === 'amendment' ? 'amendments' : 'address'
+  // A returned filing that is not asked for the step is held on Review, as before.
+  const zoneStepIndex = sequence.includes(zoneStep) ? sequence.indexOf(zoneStep) : sequence.length - 1
+  const zoneBox = applicationType === 'amendment'
+    ? (amendInsights.loading ? null : (amendInsights.data?.zoning ?? null))
+    : (livePin === null || insights.loading || insightsStale ? null : (insights.data?.zoning ?? null))
+  const zoneRefusal = zoneAtPinQuery === null
+    ? null
+    : (zoneAtPin.data?.refusal ?? (zoneBox?.verdict === 'refused' ? zoneBox.reason : null))
+  const zoneHolds = stepIndex >= zoneStepIndex && (zoneRefusal !== null || zoneAtPin.pending)
 
   /*
    * ── What this filing is FOR ─────────────────────────────────────────────
@@ -6663,10 +6689,12 @@ export function ApplyWizard() {
    */
   const stepComplete: boolean[] = useMemo(() => {
     const flags = sequence.map((n) => missingFor(n).length === 0)
+    // A pin the zone refuses leaves its step unfinished (`zoneHolds`, above).
+    if (zoneRefusal !== null && zoneStepIndex < flags.length - 1) flags[zoneStepIndex] = false
     const last = flags.length - 1
     if (last >= 0) flags[last] = flags.slice(0, last).every(Boolean)
     return flags
-  }, [missingFor, sequence])
+  }, [missingFor, sequence, zoneRefusal, zoneStepIndex])
 
   /**
    * Where a reopened draft opens: the first section still wanting an answer.
@@ -6784,6 +6812,8 @@ export function ApplyWizard() {
      * comment above describes for reference data.
      */
     if (resumeParam !== null && !restoreSettled) return
+    // And for the zone at the pin, so a red one lands on its own step.
+    if (zoneAtPin.pending) return
 
     landedRef.current = true
     const firstUnfinished = stepComplete.findIndex((done) => !done)
@@ -6795,6 +6825,7 @@ export function ApplyWizard() {
     hydrating,
     hydrateFailed,
     refs.loading,
+    zoneAtPin.pending,
     stepComplete,
     sequence.length,
   ])
@@ -6809,7 +6840,8 @@ export function ApplyWizard() {
   function jumpBlocked(index: number): boolean {
     if (index <= stepIndex) return false
     for (let i = stepIndex; i < index; i++) if (!stepComplete[i]) return true
-    return false
+    // Not over the pin's step while its zone is still being asked.
+    return zoneAtPin.pending && zoneStepIndex >= stepIndex && zoneStepIndex < index
   }
 
   /*
@@ -13597,6 +13629,20 @@ export function ApplyWizard() {
              * "Changes requested" block above the fee line.
              */}
           </div>
+        </div>
+      )}
+
+      {/*
+        The red box on Review too, for a filing that reaches it with a pin
+        its zone refuses (`zoneHolds` keeps Submit held). Not while Location
+        & Zoning is open for editing above, which draws its own.
+      */}
+      {reviewAll && zoneRefusal !== null && !(sectionEditing.address && sectionOpen.address && zoneStep === 'address') && (
+        <div className="mt-6">
+          <ZoningConformanceNote
+            zoning={{ verdict: 'refused', reason: zoneRefusal, trade: null, zones: [] }}
+            barangayName={null}
+          />
         </div>
       )}
 

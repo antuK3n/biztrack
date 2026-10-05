@@ -138,7 +138,14 @@ test('an edit made on Review and submitted at once reaches the filing', async ({
   await expect(
     sections.getByRole('button', { name: /documentary requirements.*complete/i }),
   ).toBeVisible({ timeout: WIZARD_PAINT_MS })
-  await sections.getByRole('button', { name: /review & submit/i }).click()
+  // A finished draft opens on Review, the first section wanting nothing. It
+  // landed sooner, and short of Review, before it waited for the zone at the
+  // pin (zoning-red-holds); this pressed Review to get there.
+  await expect(sections.getByRole('button', { name: /review & submit/i })).toHaveAttribute(
+    'aria-current',
+    'step',
+    { timeout: 20_000 },
+  )
   await expect(page.getByText(/all changes saved/i).first()).toBeVisible({ timeout: 20_000 })
 
   await page.getByRole('button', { name: /^change .*business area/i }).first().click()
