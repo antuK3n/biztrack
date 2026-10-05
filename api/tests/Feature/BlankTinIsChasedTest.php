@@ -100,7 +100,14 @@ it('does not stack a second copy if the approval ever runs twice', function () {
         ->and(tinRequirementOn($app->fresh())->id)->toBe($first->id);
 });
 
-it('writes the answer onto the business when BPLO accepts it', function () {
+it('writes a free-text reply onto the business when BPLO accepts it', function () {
+    /*
+     * The reply box, which is how this requirement was answered until 5
+     * October 2026. The applicant now types into the requirement's own TIN
+     * field, which stores it at once (SystemRequirementFieldsTest); a reply
+     * sent the old way — from a tab opened before, or another client — still
+     * reaches the business when BPLO accepts it, and is pinned here.
+     */
     $app = filingWithoutTin();
     bploApprovesForm($app);
     $req = tinRequirementOn($app->fresh());
@@ -110,7 +117,7 @@ it('writes the answer onto the business when BPLO accepts it', function () {
         ->postJson("/api/v1/requests/{$req->id}/respond", ['body' => '123-456-789-000'])
         ->assertOk();
 
-    // Still not on the business: an unreviewed reply is not an answer.
+    // Still not on the business: an unreviewed free-text reply is not an answer.
     expect($app->fresh()->business->tin)->toBeNull();
 
     $this->withHeaders(authAs('bplo@biztrack.local'))

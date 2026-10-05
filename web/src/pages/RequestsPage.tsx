@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { SVGProps } from 'react'
-import { ArrowLeftIcon, DownloadIcon } from '../components/icons'
+import { ArrowLeftIcon, CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../components/icons'
+import { TinInput } from '../components/TinInput'
+import { TIN_ERROR, tinValid } from '../lib/fieldRules'
+import { ACCEPT_ATTR, fileRejection } from './applicant/uploads'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import {
   FieldLabel,
@@ -154,6 +157,143 @@ function ShareIcon({ size = 22, ...props }: SVGProps<SVGSVGElement> & { size?: n
       <path d="M12 14V3.5M8 7l4-3.5L16 7" />
       <path d="M5 11v8.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V11" />
     </svg>
+  )
+}
+
+/*
+ * ── The field a system requirement asks for ───────────────────────────────
+ *
+ * Client, 5 October 2026: *"Remember the sending of TIN and DENR in Other
+ * Requirements? Can you make them show a field instead of a 'Response'
+ * thingy? So that submitting them will transport them directly to the
+ * database (just like a field in the Return function)."*
+ *
+ * So these two get the Returned function's shape — one labelled control of
+ * the right kind and a single Submit — in place of the message box and
+ * paperclip, which let an applicant send a sentence where a TIN was wanted
+ * and a file under no name where a DENR permit was. The API decides which
+ * field (`answer_field`); every other requirement keeps the free reply.
+ *
+ * No confirm dialog, unlike the free reply: that one exists to show back a
+ * file picked blind among several. Here the TIN is on screen in its boxes
+ * and the one file is named in its slot, and either can be sent again until
+ * the office approves it.
+ */
+function SystemAnswer({
+  request,
+  field,
+  onUpdated,
+}: {
+  request: OfficerRequest
+  field: NonNullable<OfficerRequest['answer_field']>
+  onUpdated: (updated: OfficerRequest) => void
+}) {
+  // A TIN sent back is put in the boxes to correct, not retyped from nothing.
+  const [tin, setTin] = useState(field.kind === 'tin' ? (request.response_body ?? '') : '')
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const errorId = `answer-error-${request.id}`
+
+  async function submit() {
+    if (busy) return
+    const problem =
+      field.kind === 'tin'
+        ? tinValid(tin)
+          ? null
+          : TIN_ERROR
+        : file
+          ? fileRejection(file)
+          : 'Choose a file to upload.'
+    setError(problem)
+    if (problem) return
+
+    setBusy(true)
+    try {
+      onUpdated(
+        field.kind === 'tin'
+          ? await requests.answerTin(request.id, tin)
+          : await requests.answerDocument(request.id, file!),
+      )
+      setFile(null)
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {field.kind === 'tin' ? (
+        <TinInput
+          value={tin}
+          onChange={(v) => {
+            setTin(v)
+            if (error) setError(null)
+          }}
+          error={error ?? undefined}
+          errorId={errorId}
+        />
+      ) : (
+        /* The documentary-requirement dropzone, as on the office checklists. */
+        <label
+          className={`flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
+            busy ? 'pointer-events-none opacity-60' : ''
+          }`}
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+            <UploadIcon size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold text-ink">
+              Upload your {field.label}
+              <span className="ml-1 text-s-red" aria-hidden="true">*</span>
+            </span>
+            <span className="mt-0.5 block truncate text-xs text-ink-muted">
+              {file ? file.name : 'PDF, JPG or PNG, up to 10 MB'}
+            </span>
+          </span>
+          {file && (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+              <CheckCircleFilledIcon size={16} /> Chosen
+            </span>
+          )}
+          <input
+            type="file"
+            accept={ACCEPT_ATTR}
+            className="sr-only"
+            aria-invalid={Boolean(error) || undefined}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null)
+              setError(null)
+              // Let the same file be picked again after a refusal.
+              e.target.value = ''
+            }}
+          />
+        </label>
+      )}
+
+      {error && (
+        <p id={errorId} role="alert" className="text-xs font-medium text-s-red">
+          {error}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <PillButton
+          aria-disabled={busy || undefined}
+          onClick={() => void submit()}
+          className="px-9 aria-disabled:opacity-60"
+        >
+          {busy ? 'Submitting…' : 'Submit'}
+        </PillButton>
+        {request.awaits_office && (
+          <p className="text-sm text-ink-secondary">Sent. You can correct it until it is approved.</p>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -325,16 +465,16 @@ function LetterView({
                 "who do I talk to" is the office named above, through Messages.
 
                 Only the DENR rows are raised when a certificate is issued
-                (WorkflowService::raiseDenrRequirements, titled "DENR …"). The
-                Other Requirement rules (`rule.*`) are raised at submission and
-                the TIN question when BPLO accepts the form, so on those the
-                certificate line was simply untrue (tester, 5 October 2026).
-                The title is what tells them apart: the resource does not emit
-                `system_key`, and the DENR rows carry none.
+                (WorkflowService::raiseDenrRequirements). The Other Requirement
+                rules (`rule.*`) are raised at submission and the TIN question
+                when BPLO accepts the form, so on those the certificate line
+                was simply untrue (tester, 5 October 2026). Told apart by
+                `system_key` since the DENR rows were given one the same day;
+                it was the title before, which an officer can type by hand.
               */}
               {!hasNamedAuthor(request) && (
                 <span className="block text-xs italic text-ink-muted">
-                  {request.subject.startsWith('DENR ')
+                  {request.system_key?.startsWith('denr.')
                     ? 'Requested automatically when your certificate was issued'
                     : 'Raised automatically from your application'}
                 </span>
@@ -516,7 +656,11 @@ function LetterView({
           so, and the indent is dropped because the panel is not prose.
         */}
         <div className="mt-8 border-t border-line pt-6">
-          {canRespond && !replying && (
+          {canRespond && request.answer_field && (
+            <SystemAnswer request={request} field={request.answer_field} onUpdated={onUpdated} />
+          )}
+
+          {canRespond && !request.answer_field && !replying && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
               <PillButton onClick={() => setReplying(true)} className="px-9">
                 {thread.length > 0 ? 'Add another response' : 'Respond'}

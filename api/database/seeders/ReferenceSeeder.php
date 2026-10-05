@@ -8,6 +8,7 @@ use App\Models\DocumentType;
 use App\Models\OfficeSignatory;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Support\DenrRequirements;
 use App\Support\SheetRequirements;
 use App\Support\TaxClassification;
 use Illuminate\Database\Seeder;
@@ -352,6 +353,12 @@ class ReferenceSeeder extends Seeder
             foreach ($slots as $slot) {
                 SheetRequirements::documentType($permitCode, $slot);
             }
+        }
+        // The DENR permits a CEC holder uploads under Other Requirements
+        // (client, 5 October 2026), for the same reason: declared here, not
+        // left to appear on the first upload.
+        foreach (array_keys(DenrRequirements::DOCUMENT_NAMES) as $code) {
+            DenrRequirements::documentType($code);
         }
 
         // --- Permit types (7, prototype LGU Section p37; validity 365) -------

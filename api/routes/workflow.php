@@ -279,6 +279,9 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     });
     Route::middleware('permission:request.respond')
         ->post('requests/{officerRequest}/respond', [OfficerRequestController::class, 'respond']);
+    // The TIN / DENR requirement's own field (client, 5 October 2026).
+    Route::middleware('permission:request.respond')
+        ->post('requests/{officerRequest}/answer', [OfficerRequestController::class, 'answer']);
 
     // Payments (owner: payment.make)
     Route::middleware('permission:payment.make')->group(function () {
