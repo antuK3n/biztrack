@@ -366,7 +366,7 @@ class AnalyticsController extends Controller
             fputcsv($out, ['Avg processing days', $s['avg_processing_days']]);
             fputcsv($out, ['Active permits', $s['active_permits']]);
             fputcsv($out, ['Expiring permits', $s['expiring_permits']]);
-            fputcsv($out, ['Simulated revenue', $s['simulated_revenue']]);
+            fputcsv($out, ['Revenue', $s['simulated_revenue']]);
 
             fclose($out);
         }, 'analytics-summary.csv', ['Content-Type' => 'text/csv']);

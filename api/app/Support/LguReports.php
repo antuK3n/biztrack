@@ -418,7 +418,7 @@ final class LguReports
                 ['key' => 'label', 'label' => 'Month', 'format' => 'text'],
                 ['key' => 'payments', 'label' => 'Payments', 'format' => 'count'],
                 ['key' => 'amount', 'label' => 'Amount (PHP)', 'format' => 'money'],
-            ], $monthRows, 'Dated by when the payment cleared. Where a filing was paid in two instalments, each instalment is spread across its fee lines in proportion. Payments in BizTrack are simulated until a real payment channel is connected.', [
+            ], $monthRows, 'Dated by when the payment cleared. Where a filing was paid in two instalments, each instalment is spread across its fee lines in proportion.', [
                 'label' => 'Total', 'payments' => array_sum(array_column($monthRows, 'payments')), 'amount' => $amountTotal,
             ]),
         ];

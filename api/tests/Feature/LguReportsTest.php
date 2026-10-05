@@ -200,6 +200,23 @@ it('prints no signature lines', function () {
         ->and($report)->not->toHaveKey('noted_by');
 });
 
+/*
+ * The By month note ended "Payments in BizTrack are simulated until a real
+ * payment channel is connected." Gone on Ken's instruction of 5 October 2026:
+ * nothing on a report calls BizTrack's payments simulated.
+ */
+it('says nothing on the collections report about payments being simulated', function () {
+    $report = reportAs('admin@biztrack.local', 'collections');
+    $csv = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->get('/api/v1/analytics/reports/collections/csv'.REPORT_PERIOD)
+        ->assertOk()
+        ->streamedContent();
+
+    expect($report['sections'][2]['note'])->toBe('Dated by when the payment cleared. Where a filing was paid in two instalments, each instalment is spread across its fee lines in proportion.')
+        ->and(strtolower(json_encode($report)))->not->toContain('simulated')
+        ->and(strtolower($csv))->not->toContain('simulated');
+});
+
 it('exports the same figures as CSV, headed with the office and period', function () {
     $response = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->get('/api/v1/analytics/reports/permits-issued/csv?from=2026-01-01&to=2026-09-30')

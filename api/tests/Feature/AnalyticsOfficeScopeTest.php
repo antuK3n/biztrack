@@ -205,6 +205,17 @@ it('keeps the unscoped summary and CSV export to the two cross-office readers', 
     }
 });
 
+// The KPI row read "Simulated revenue" (Ken, 5 October 2026: no simulated wording).
+it('labels the summary CSV’s collected total as revenue, not simulated revenue', function () {
+    $csv = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->get('/api/v1/analytics/export')
+        ->assertOk()
+        ->streamedContent();
+
+    expect($csv)->toMatch('/^Revenue,/m')
+        ->and(strtolower($csv))->not->toContain('simulated');
+});
+
 it('counts the summary’s filings by calendar month on whichever database is connected', function () {
     // Two filings moved into a known month, one out of the twelve-month window.
     $month = now()->subMonths(2)->startOfMonth()->addDays(3);
