@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertCircleIcon,
@@ -432,14 +432,12 @@ function PermitExtras({ permit }: { permit: Permit }) {
   return (
     <div className="mt-2.5 space-y-2.5">
       {rejected && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-s-red/40 bg-s-red-tint px-3 py-2">
-          <p className="text-xs leading-relaxed text-ink">
-            <b className="text-s-red">Rejected by the {office}.</b> Message them to find out what is needed to have it
-            approved again.
-          </p>
+        // One line: who rejected it, and the way to them [client, 5 October 2026].
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-s-red/40 bg-s-red-tint px-3 py-1.5">
+          <p className="text-xs font-semibold text-s-red">Rejected by the {office}.</p>
           <Link
             to={messageTo}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-3.5 py-1 text-xs font-semibold text-white hover:bg-royal-hover"
           >
             <MailIcon size={14} aria-hidden="true" /> Message the {office}
           </Link>
@@ -516,8 +514,24 @@ function PermitExtras({ permit }: { permit: Permit }) {
  * The disclosure is a real `<button aria-expanded>` controlling a panel that
  * stays in the DOM and toggles `hidden`, so `aria-controls` always resolves.
  */
-export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGroup; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+export function BusinessRow({
+  group,
+  defaultOpen = true,
+  open: openProp,
+  onToggle,
+}: {
+  group: BusinessGroup
+  defaultOpen?: boolean
+  /**
+   * Controlled from the page, so only one business is open at a time [client,
+   * 5 October 2026: "wag na muna iopen lahat ng business isa isa na lang"].
+   * Without it the card keeps its own state, as the Profile page uses it.
+   */
+  open?: boolean
+  onToggle?: () => void
+}) {
+  const [ownOpen, setOwnOpen] = useState(defaultOpen)
+  const open = openProp ?? ownOpen
   const panelId = useId()
   /*
    * Split once, here, rather than filtered twice in the markup below — the
@@ -527,11 +541,35 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
   const current = group.permits.filter((permit) => !isPastPermit(permit))
   const past = group.permits.filter(isPastPermit)
   const headingId = useId()
+  const cardRef = useRef<HTMLLIElement>(null)
+
+  function toggle() {
+    const opening = !open
+    if (onToggle) onToggle()
+    else setOwnOpen(opening)
+    /*
+     * Opening this one closes the one above it, and the page jumps by that
+     * card's height — so bring the opened card's heading back into view rather
+     * than leave the reader looking at a different business.
+     */
+    if (opening) requestAnimationFrame(() => cardRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+  }
 
   const noPermits = group.permits.length === 0
+  /*
+   * A decision against a permit outranks every date [client, 5 October 2026]:
+   * with the cards closed, this pill is all an owner sees, and "Valid until"
+   * on a business whose Mayor's Permit was revoked would tell them all is well.
+   */
+  const sanctioned = group.permits.filter((p) => ['suspended', 'revoked', 'rejected'].includes(p.status)).length
   const pill = noPermits
     ? { text: 'No permit issued yet', className: 'bg-canvas text-ink-secondary' }
-    : group.expired
+    : sanctioned > 0
+      ? {
+          text: `${sanctioned} permit${sanctioned === 1 ? '' : 's'} need${sanctioned === 1 ? 's' : ''} attention`,
+          className: 'bg-s-red text-white',
+        }
+      : group.expired
       ? { text: `Permit expired · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-red-tint text-s-red' }
       : group.nearing
         ? { text: `Expires soon · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-yellow-tint text-amber-800' }
@@ -544,12 +582,12 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
   ].filter(Boolean)
 
   return (
-    <li className="overflow-hidden rounded-xl bg-white shadow-card">
+    <li ref={cardRef} className="scroll-mt-4 overflow-hidden rounded-xl bg-white shadow-card">
       <h3>
         <button
           type="button"
           id={headingId}
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggle}
           aria-expanded={open}
           aria-controls={panelId}
           className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-royal sm:px-6"

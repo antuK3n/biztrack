@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ShieldCheckIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
@@ -27,6 +28,12 @@ import { BusinessRow, FILTERS, SORTS, useHoldings } from './permitHoldings'
  */
 export function PermitsPage() {
   const user = useAuth((s) => s.user)
+  /*
+   * The one business card that is open. `undefined` until the reader chooses:
+   * the first business is open by default, the rest closed [client, 5 October
+   * 2026]. `null` means they closed it and nothing is open.
+   */
+  const [openId, setOpenId] = useState<number | null | undefined>(undefined)
 
   /*
    * Only applicants. An officer reaching this URL would otherwise be shown the
@@ -128,9 +135,22 @@ export function PermitsPage() {
         />
       ) : (
         <ul className="space-y-4">
-          {visible.map((group) => (
-            <BusinessRow key={group.id} group={group} />
-          ))}
+          {/*
+            One business open at a time — the first one to begin with, the rest
+            closed — so the page reads as a summary of every business rather
+            than a wall of permits [client, 5 October 2026].
+          */}
+          {visible.map((group) => {
+            const current = openId === undefined ? visible[0]?.id : openId
+            return (
+              <BusinessRow
+                key={group.id}
+                group={group}
+                open={current === group.id}
+                onToggle={() => setOpenId(current === group.id ? null : group.id)}
+              />
+            )
+          })}
         </ul>
       )}
 
