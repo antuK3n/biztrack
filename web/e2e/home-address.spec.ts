@@ -88,6 +88,10 @@ test('a new owner gives their home address at sign-up, and it is on their Profil
   const email = uniqueEmail('signup')
   await page.goto('/register')
 
+  // Notification consent is the owner's to give: the box starts unticked
+  // (checklist, Register 4).
+  await expect(page.getByRole('checkbox', { name: /I consent to receive email\/SMS notifications/ })).not.toBeChecked()
+
   await page.getByLabel('First Name').fill('Rosa')
   await page.getByLabel('Last Name').fill('Manalo')
   await page.getByLabel('Gender').selectOption('F')

@@ -227,8 +227,12 @@ export function RegisterPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
-  /* Prototype's second checkbox row — notification consent (visual, not part of the API payload). */
-  const [notifyConsent, setNotifyConsent] = useState(true)
+  /*
+   * Prototype's second checkbox row — notification consent (visual, not part of
+   * the API payload). It starts unticked: consent is something the owner gives,
+   * not something the form gives for them (client checklist, Register item 4).
+   */
+  const [notifyConsent, setNotifyConsent] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   const barangays = useHomeBarangays()
 
