@@ -1197,17 +1197,16 @@ function NumberField({
    * fields on the office sheets use it.
    */
   locked?: boolean
-  /** Classes for the CELL, so a caller can size it inside a wrapping row. */
+  /** Classes for the CELL, so a caller can place it on a grid. */
   className?: string
   /**
    * A ceiling for the BOX, where the cell's own is wrong.
    *
-   * The default 9rem suits a count standing alone in the page. Inside one of
-   * the bordered groups below the cell is sized by the group, and the group
-   * stretches to fill the row — so a capped box leaves a band of empty border
-   * beside it and an uncapped one grows to thirty rem for three characters.
-   * Neither is right, and the caller is the only thing that knows which
-   * ceiling its group wants.
+   * The default 9rem suits a count standing alone in the page. Section B's
+   * figures pass `w-full` instead: they sit on a column grid, where the cell
+   * is already the width the row allows, and a capped box ended short of the
+   * column line that every other box on that grid reaches — the "tiny boxes
+   * in wide empty panels" Ken pointed at on 6 October 2026.
    */
   box?: string
   /**
@@ -1775,16 +1774,34 @@ export function FeeProfileStep({
             these values are printed away from this grouping.
           */}
           {/*
-            One wrapping row for the section, the shape Business Information's
-            section A already uses. The two bordered groups are cells of it
-            rather than bands across the page, and they are the only things
-            here that `grow`: everything else is a count, and stretching a
-            three-character box across a row is the fault being fixed, not
-            the fix.
+            ── One grid, 6 October 2026 ─────────────────────────────────────
+
+            The same twelve columns as Business Information's section A, and
+            for the same complaint — Ken: the section looked uneven and messy.
+            It was one wrapping flex row in which each figure was as wide as
+            its answer and each group grew to whatever was left, so item 3
+            floated at the right edge with a short box, item 4 was a grey band
+            across the page with two small boxes far apart in it, and nothing
+            in one row lined up with the row below.
+
+            Quarters from 48rem of SHEET width (`@container`), halves from
+            36rem, one column below. The quarters start lower than section A's
+            56rem because nothing here is wider than a count: A waits for room
+            for the mobile number's four boxes, and these labels fit a quarter
+            at 48rem. In quarters item 2's three counts sit on the same column
+            lines as item 4's two below them; every box fills its column.
+
+            `items-end` keeps a row's boxes level whatever its labels wrap to,
+            as in section A. The groups are framed the way section A frames
+            items 15-17 — a border drawn out in the gutters, no fill — so the
+            boxes inside stay on the section's column lines. `gap-y-7` rather
+            than A's `gap-y-4` because the two frames sit one above the other
+            here: each reaches 8px into the gap, so at 16px their borders met.
           */}
-          <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div className="@container grid grid-cols-12 items-end gap-x-5 gap-y-7">
             <NumberField
-              className="shrink-0"
+              className="col-span-12 @xl:col-span-6 @3xl:col-span-3"
+              box="w-full"
               label="1. Business Area (sq. m.)"
               required
               kind="area"
@@ -1816,9 +1833,13 @@ export function FeeProfileStep({
               The legend still has to exist, because a <fieldset> without one
               conveys no grouping to a screen reader at all.
             */}
-            <fieldset className="grow basis-[21rem] rounded-lg border border-line bg-canvas px-3 py-2">
+            <fieldset className="relative col-span-12 min-w-0 @3xl:col-span-9">
               <legend className="sr-only">Total number of employees</legend>
-              <p aria-hidden className="mb-1.5 text-[13px] font-semibold text-ink">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
+              />
+              <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
                 2. Total No. of Employees
               </p>
 
@@ -1827,7 +1848,13 @@ export function FeeProfileStep({
               ___", so the two halves ARE the total — which is why they must add
               up to it below rather than merely not exceed it.
             */}
-              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+              {/*
+                Thirds of the frame, which in quarters are the section's own
+                quarter lines: the frame spans nine columns, and three equal
+                tracks with the section's gap come out exactly three columns
+                wide each.
+              */}
+              <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-3">
                 {/*
                   Read-only and derived. `locked` is NumberField's own word for
                   it and uses `readOnly`, never `disabled` — a disabled box
@@ -1841,8 +1868,7 @@ export function FeeProfileStep({
                   actually act on.
                 */}
                 <NumberField
-                  className="grow basis-[5rem]"
-                  box="max-w-[8rem]"
+                  box="w-full"
                   label="Total No. of Employees"
                   required
                   kind="count"
@@ -1854,8 +1880,7 @@ export function FeeProfileStep({
                   placeholder="—"
                 />
                 <NumberField
-                  className="grow basis-[5rem]"
-                  box="max-w-[8rem]"
+                  box="w-full"
                   label="No. of Male Employees"
                   required
                   kind="count"
@@ -1865,8 +1890,7 @@ export function FeeProfileStep({
                   error={errorFor('male_employees', value.male_employees)}
                 />
                 <NumberField
-                  className="grow basis-[5rem]"
-                  box="max-w-[8rem]"
+                  box="w-full"
                   label="No. of Female Employees"
                   required
                   kind="count"
@@ -1889,7 +1913,8 @@ export function FeeProfileStep({
 
             {/* Item 3 is its own box on the paper, so it is its own field here. */}
             <NumberField
-              className="shrink-0"
+              className="col-span-12 @xl:col-span-6"
+              box="w-full"
               label="3. No. of Employees Residing within Malabon"
               required
               kind="count"
@@ -1915,15 +1940,19 @@ export function FeeProfileStep({
               Grouped under one number, with the rates stated, so the split reads
               as the ordinance's doing rather than as the form asking twice.
             */}
-            <fieldset className="grow basis-[21rem] rounded-lg border border-line bg-canvas px-3 py-2">
+            <fieldset className="relative col-span-12 min-w-0 @xl:col-span-6">
               <legend className="sr-only">Number of delivery units</legend>
-              <p aria-hidden className="mb-1.5 text-[13px] font-semibold text-ink">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
+              />
+              <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
                 4. No. of Delivery Units
               </p>
-              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+              {/* Halves of six columns: in quarters, under item 2's male and female counts. */}
+              <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-2">
                 <NumberField
-                  className="grow basis-[7rem]"
-                  box="max-w-[8rem]"
+                  box="w-full"
                   label="No. of Motorized Delivery Units"
                   hint="truck, van, motor vehicle"
                   kind="count"
@@ -1934,8 +1963,7 @@ export function FeeProfileStep({
                   placeholder="0"
                 />
                 <NumberField
-                  className="grow basis-[7rem]"
-                  box="max-w-[8rem]"
+                  box="w-full"
                   label="No. of Other Delivery Units"
                   hint="pedicab, cart"
                   kind="count"

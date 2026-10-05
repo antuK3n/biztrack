@@ -11867,7 +11867,12 @@ export function ApplyWizard() {
             9. Anybody reconciling the two needs to know that, which is why it
             is written down here rather than left to be worked out.
           */}
-          <div className="mt-3 space-y-4">
+          {/*
+            `@container` so items 5 to 8 lay out by the sheet's width, on the
+            same column lines as items 1 to 4 inside FeeProfileStep, which is
+            its own container of the same width.
+          */}
+          <div className="@container mt-3 space-y-4">
             {/* Items 1-4 — business area, the employee counts, delivery units. */}
             {/*
             Section B items 1-4: business area, employees and their split, how
@@ -11909,7 +11914,12 @@ export function ApplyWizard() {
               <div
                 role="radiogroup"
                 aria-label="Economic Organization"
-                className="grid gap-2.5 sm:grid-cols-2"
+                /*
+                  `gap-x-5`, the section grid's gutter, so the second column
+                  of cards starts on its middle line — under item 4's frame,
+                  and over item 7.
+                */
+                className="grid gap-x-5 gap-y-2.5 @xl:grid-cols-2"
               >
                 {ECONOMIC_ORGANIZATIONS.map((eo) => {
                   const selected = form.economic_organization === eo.value
@@ -11988,13 +11998,30 @@ export function ApplyWizard() {
               four Yes/No pills had three bands of page to themselves because
               each sat in its own block-level div — nothing about the controls
               needed the height.
+
+              On the section's twelve columns since 6 October 2026: item 6
+              takes the left half, under the first column of cards, and 7 and
+              8 a quarter each, under items 2's and 4's counts. In halves 6 has
+              the row and 7 and 8 share the next.
+
+              Each item is three rows of this grid — label, control, note —
+              taken as a SUBGRID (`row-span-3 grid-rows-subgrid`). In a quarter
+              items 7 and 8's labels wrap to two lines and item 6's does not,
+              and a Yes answer puts a note under one control and not the
+              others; with the rows shared, labels sit on the control's edge,
+              the controls share a line, and a note only lengthens the row
+              below them. `gap-y-0` because those rows are a label and its own
+              box — FieldLabel's margin is the space between them — and `pb-4`
+              on each item is the gap to the next row of items.
             */}
-            <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-              <div className="grow basis-[13rem] max-w-full">
-                <label className="block">
-                  <FieldLabel required={applicationType === 'new'}>
-                    6. Capital Investment (₱)
-                  </FieldLabel>
+            <div className="grid grid-cols-12 gap-x-5">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @3xl:col-span-6">
+                <label className="row-span-2 grid grid-rows-subgrid">
+                  <span className="self-end">
+                    <FieldLabel required={applicationType === 'new'}>
+                      6. Capital Investment (₱)
+                    </FieldLabel>
+                  </span>
                   <input
                     inputMode="decimal"
                     value={form.capital_investment}
@@ -12045,8 +12072,10 @@ export function ApplyWizard() {
                * answer the officer needs to see given, not an unticked box that
                * could equally mean the applicant skipped the question.
                */}
-              <div className="shrink-0">
-                <FieldLabel>7. Tax incentives from a Government Entity?</FieldLabel>
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
+                <span className="self-end">
+                  <FieldLabel>7. Tax incentives from a Government Entity?</FieldLabel>
+                </span>
                 <div
                   role="radiogroup"
                   aria-label="Tax incentives from a Government Entity?"
@@ -12071,7 +12100,7 @@ export function ApplyWizard() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => update('has_tax_incentives', opt.value)}
-                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                           selected
                             ? 'border-royal bg-input text-ink'
                             : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -12126,8 +12155,10 @@ export function ApplyWizard() {
                * lessor, so the block stays closed until they say so rather
                * than showing four fields most applicants must leave blank.
                */}
-              <div className="shrink-0">
-                <FieldLabel>8. Do you pay rent for the premises?</FieldLabel>
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
+                <span className="self-end">
+                  <FieldLabel>8. Do you pay rent for the premises?</FieldLabel>
+                </span>
                 {/*
                     ── "Yes" and "No", in the paper's order ────────────────────
 
@@ -12162,7 +12193,7 @@ export function ApplyWizard() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => update('is_rented', opt.rented)}
-                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                           selected
                             ? 'border-royal bg-input text-ink'
                             : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
