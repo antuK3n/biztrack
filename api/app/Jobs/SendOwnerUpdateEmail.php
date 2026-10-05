@@ -25,9 +25,8 @@ use Throwable;
  *
  * The earlier disapproval-only version (branch ken/feedback-2026-09-23, commit
  * 41ec2e5, SendDisapprovalNotice) is where the queue, retry and failure
- * isolation below come from. Its SMS half was deliberately not brought over:
- * SMS is out of scope for now, and the log SMS driver in NotificationService's
- * fan-out is left as it was.
+ * isolation below come from. SMS is App\Jobs\SendSms, queued the same way
+ * from NotificationService::fanOut() for key moments only.
  *
  * ── Why queued ──────────────────────────────────────────────────────────────
  *

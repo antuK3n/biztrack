@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ApplicationStatus;
 use App\Enums\PermitStatus;
 use App\Jobs\SendOwnerUpdateEmail;
+use App\Jobs\SendSms;
 use App\Models\Application;
 use App\Models\AppNotification;
 use App\Models\Business;
@@ -12,7 +13,7 @@ use App\Models\OfficerRequest;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
-use App\Services\Sms\SmsChannel;
+use App\Support\PhMobile;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -52,8 +53,6 @@ use Throwable;
  */
 class NotificationService
 {
-    public function __construct(private SmsChannel $sms) {}
-
     /**
      * Write one in-app notice, and e-mail it too when the reader is an owner.
      *
@@ -217,7 +216,7 @@ class NotificationService
             "/applications/{$app->id}",
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: an inspection for {$app->tracking_id} did not pass.");
+        $this->fanOut($app->applicant, "BizTrack: an inspection for {$app->tracking_id} did not pass.", __FUNCTION__);
     }
 
     /**
@@ -274,7 +273,7 @@ class NotificationService
             '/permits',
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is approved. Your permit is ready under Permits.");
+        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is approved. Your permit is ready under Permits.", __FUNCTION__);
     }
 
     /** End state: BPLO or the super admin ended the application. */
@@ -294,7 +293,7 @@ class NotificationService
             $app,
             disapproval: true,
         );
-        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} was rejected. Open BizTrack for the reason.");
+        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} was rejected. Open BizTrack for the reason.", __FUNCTION__);
     }
 
     public function permitsIssued(Application $app): void
@@ -311,7 +310,7 @@ class NotificationService
             '/permits',
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: permit(s) for {$app->tracking_id} issued.");
+        $this->fanOut($app->applicant, "BizTrack: permit(s) for {$app->tracking_id} issued.", __FUNCTION__);
     }
 
     // --- A refused permit, and the suspension it causes ----------------------
@@ -345,6 +344,7 @@ class NotificationService
         $this->fanOut(
             $app->applicant,
             "BizTrack: your {$type->name} on {$app->tracking_id} was rejected. Open BizTrack for the reason.",
+            __FUNCTION__,
         );
     }
 
@@ -382,6 +382,7 @@ class NotificationService
         $this->fanOut(
             $app->applicant,
             "BizTrack: Business Permit {$permit->permit_number} suspended — your {$refused->name} was rejected.",
+            __FUNCTION__,
         );
     }
 
@@ -490,7 +491,7 @@ class NotificationService
             $permit,
             disapproval: true,
         );
-        $this->fanOut($owner, "BizTrack: {$name} {$permit->permit_number} has been revoked.");
+        $this->fanOut($owner, "BizTrack: {$name} {$permit->permit_number} has been revoked.", __FUNCTION__);
     }
 
     /**
@@ -533,7 +534,7 @@ class NotificationService
             disapproval: $to !== PermitStatus::Active,
         );
         if ($to === PermitStatus::Suspended || $to === PermitStatus::Revoked) {
-            $this->fanOut($owner, "BizTrack: {$title} — {$permit->permit_number}.");
+            $this->fanOut($owner, "BizTrack: {$title} — {$permit->permit_number}.", __FUNCTION__);
         }
     }
 
@@ -724,7 +725,7 @@ class NotificationService
             '/permits',
             $permit,
         );
-        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).');
+        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).', __FUNCTION__);
     }
 
     /**
@@ -778,7 +779,7 @@ class NotificationService
             '/permits',
             $permit,
         );
-        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} has expired.");
+        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} has expired.", __FUNCTION__);
     }
 
     public function renewalDue(Permit $permit): void
@@ -795,7 +796,7 @@ class NotificationService
             '/permits',
             $permit,
         );
-        $this->fanOut($owner, "BizTrack: renewal due for permit {$permit->permit_number}.");
+        $this->fanOut($owner, "BizTrack: renewal due for permit {$permit->permit_number}.", __FUNCTION__);
     }
 
     /**
@@ -893,7 +894,7 @@ class NotificationService
          */
         $this->push($business->owner, 'account_status', $title, $body, '/dashboard', $business);
         if ($to === 'suspended') {
-            $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
+            $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}", __FUNCTION__);
         }
     }
 
@@ -917,11 +918,48 @@ class NotificationService
      * which could text an owner about their own message when no officer held
      * the filing. To make another notice text again, call fanOut() from it.
      */
-    private function fanOut(User $user, string $message): void
+    /*
+     * ── Queued, after commit, never in the way ───────────────────────────────
+     *
+     * This called the SMS driver directly, inside the officer's request. With
+     * a phone on the other end that would hold every decision on a mobile
+     * network and turn an offline phone into a failed approval, so it queues
+     * App\Jobs\SendSms instead, the way push() queues the e-mail and for the
+     * same reasons: after commit, so a rolled-back action texts nobody, and
+     * inside a try, so a queue that refuses the job (or, under `sync`, a send
+     * that fails) is logged and the action stands.
+     *
+     * The number goes out as +639XXXXXXXXX (PhMobile). One that is not a
+     * Philippine mobile is skipped with a warning naming the account, not the
+     * number. `$kind` is the notice's method name, for that log line.
+     */
+    private function fanOut(User $user, string $message, string $kind): void
     {
-        if ($user->mobile_number) {
-            $this->sms->send($user->mobile_number, $message);
+        if (! $user->mobile_number) {
+            return;
         }
+
+        $to = PhMobile::e164($user->mobile_number);
+        if ($to === null) {
+            Log::warning('SMS skipped: the mobile number is not a Philippine mobile', [
+                'user_id' => $user->id,
+                'kind' => $kind,
+            ]);
+
+            return;
+        }
+
+        DB::afterCommit(function () use ($user, $to, $message, $kind) {
+            try {
+                Bus::dispatch(new SendSms($to, $message, $kind, $user->id));
+            } catch (Throwable $e) {
+                Log::warning('SMS was not queued', [
+                    'user_id' => $user->id,
+                    'kind' => $kind,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
     }
 
     /**
