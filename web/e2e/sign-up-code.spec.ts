@@ -95,13 +95,15 @@ test('with mail on, sign-up asks for the e-mailed code next, and the code signs 
   await expect(page.getByText('We sent a 6-digit code to s••••@example.test. It works for 30 minutes.')).toBeVisible()
   await expect(page.getByRole('button', { name: /send a new code in \d+s/i })).toHaveAttribute('aria-disabled', 'true')
 
-  const code = page.getByRole('textbox', { name: /sign-in code/i })
+  // Labelled as the confirmation it is, not as a sign-in [Ken, 6 October 2026].
+  await expect(page.getByRole('textbox', { name: /sign-in code/i })).toHaveCount(0)
+  const code = page.getByRole('textbox', { name: /confirmation code/i })
   await code.fill('000000')
-  await page.getByRole('button', { name: /^sign in$/i }).click()
+  await page.getByRole('button', { name: /^confirm$/i }).click()
   await expect(page.getByText('That code is not right. You have 4 tries left.')).toBeVisible()
 
   await code.fill('246810')
-  await page.getByRole('button', { name: /^sign in$/i }).click()
+  await page.getByRole('button', { name: /^confirm$/i }).click()
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 })
 })
 
@@ -139,7 +141,7 @@ test('with a real mailer, the code from the confirmation e-mail finishes the sig
   const found = message.match(/Confirm your email address[\s\S]*?^\s+(\d{6})\s*$/m)
   expect(found, 'the confirmation e-mail in the log').not.toBeNull()
 
-  await page.getByRole('textbox', { name: /sign-in code/i }).fill((found as RegExpMatchArray)[1])
-  await page.getByRole('button', { name: /^sign in$/i }).click()
+  await page.getByRole('textbox', { name: /confirmation code/i }).fill((found as RegExpMatchArray)[1])
+  await page.getByRole('button', { name: /^confirm$/i }).click()
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 20_000 })
 })

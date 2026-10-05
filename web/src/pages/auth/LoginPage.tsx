@@ -87,6 +87,14 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const [challenge, setChallenge] = useState<SignInCodeChallenge | null>(
     () => (location.state as { signUpCode?: SignInCodeChallenge } | null)?.signUpCode ?? null,
   )
+  /*
+   * The sign-up code, while it is the one on screen: the field and button then
+   * read "Confirmation code" and "Confirm" [Ken, 6 October 2026], as on the
+   * Profile box this code also answers. Kept by identity, so a challenge from
+   * a later password step here (a fresh object) reads as a sign-in again.
+   */
+  const signUpCode = useRef(challenge)
+  const confirming = challenge !== null && challenge === signUpCode.current
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState<string | undefined>()
   const [codeNote, setCodeNote] = useState<string | null>(null)
@@ -409,9 +417,15 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             </p>
           </div>
           {codeNote && <Alert variant="success">{codeNote}</Alert>}
-          <CodeField id="login-code" label="Sign-in code" value={code} onChange={setCode} error={codeError} />
+          <CodeField
+            id="login-code"
+            label={confirming ? 'Confirmation code' : 'Sign-in code'}
+            value={code}
+            onChange={setCode}
+            error={codeError}
+          />
           <PillButton type="submit" aria-disabled={loading} className="w-full">
-            {loading ? 'Checking…' : 'Sign In'}
+            {confirming ? (loading ? 'Confirming…' : 'Confirm') : loading ? 'Checking…' : 'Sign In'}
           </PillButton>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
             <button
