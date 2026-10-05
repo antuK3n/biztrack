@@ -31,7 +31,8 @@ use App\Support\ZoningConformance;
  * Only when all of these hold:
  *
  *  - it is not one of the small neighbourhood shops Ken named, which pass in
- *    every zone but the Mangrove Zone (NEIGHBOURHOOD);
+ *    every zone but the two where nothing may be built (NEIGHBOURHOOD,
+ *    NO_BUILDING);
  *  - the zone at the pin is known, and its list (with every list it takes in,
  *    Ordinance::closure) names at least one use;
  *  - the trade has a row in TradeUses naming at least one line, `is` or
@@ -94,8 +95,9 @@ final class PinZone
     /**
      * The small neighbourhood shops Ken said pass ANYWHERE, in every zone
      * (5 October 2026), as the register files them — except the Mangrove
-     * Zone, where every business is refused (see MANGROVE). Each code is
-     * wider than the shop he named, and the rest of it passes too:
+     * and Easement zones, where every business is refused (see NO_BUILDING).
+     * Each code is wider than the shop he named, and the rest of it passes
+     * too:
      *
      *  - 47111 sari-sari store; 47112 grocery or mini-mart
      *  - 56101 restaurants and carinderia; 56103 refreshment stands, kiosks
@@ -108,15 +110,24 @@ final class PinZone
      */
     public const NEIGHBOURHOOD = ['47111', '47112', '56101', '56103', '96110', '96120', '96200', '14100', '10711', '93290'];
 
-    /**
-     * The zone where every business is refused, the neighbourhood shops too.
-     *
-     * Ken, 5 October 2026 (zoning-check 7): the ordinance allows a mangrove
-     * plantation there and no building, so a sari-sari store pinned in it was
-     * passing on the neighbourhood rule under a green note. The Easement
-     * strip is not included; Ken named the Mangrove Zone alone.
-     */
     public const MANGROVE = 'MANGROVE';
+
+    public const EASEMENT = 'EASEMENT';
+
+    /**
+     * The zones where every business is refused, the neighbourhood shops too.
+     *
+     * Ken, 5 October 2026 (zoning-check 7). The ordinance allows no building
+     * in either: a mangrove plantation in the Mangrove Zone (Art. V §2.15),
+     * "no building or any structure" on the riverbank Easement strip (§2.14).
+     * A sari-sari store pinned in Dampalit's Mangrove Zone was passing on the
+     * neighbourhood rule under a green note.
+     *
+     * The Easement strip is on no traced sheet today (see Ordinance::
+     * SECTION_FOR_CODE), so no pin reads it yet; the rule is here for when
+     * a traced file names it.
+     */
+    public const NO_BUILDING = [self::MANGROVE, self::EASEMENT];
 
     /** @var array<string, list<array{codes: list<string>, name: string, polygons: list<list<list<array{0: float, 1: float}>>>}>> */
     private static array $files = [];
@@ -164,7 +175,7 @@ final class PinZone
     /** Is `$psic` clearly not allowed in the zone made of `$codes`? See the class note. */
     public static function refuses(array $codes, PsicCode $psic): bool
     {
-        if (in_array(self::MANGROVE, $codes, true)) {
+        if (array_intersect($codes, self::NO_BUILDING) !== []) {
             return true;
         }
         if (in_array((string) $psic->code, self::NEIGHBOURHOOD, true)) {

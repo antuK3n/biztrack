@@ -139,6 +139,14 @@ it('refuses every business in the Mangrove Zone, the neighbourhood shops too', f
     expect($sentence)->toBe(pzPsic('47111')->title." isn't allowed in the Mangroves".PZ_SENTENCE);
 });
 
+it('refuses every business on the riverbank Easement strip too', function () {
+    // Ken, 5 October 2026: same as the Mangrove Zone — no building there.
+    $unread = PsicCode::firstOrCreate(['code' => '99031'], ['title' => 'Manufacture of something new']);
+    foreach ([...array_map('pzPsic', PinZone::NEIGHBOURHOOD), pzPsic('47721'), pzPsic('00000'), $unread] as $psic) {
+        expect(PinZone::refuses([PinZone::EASEMENT], $psic))->toBeTrue($psic->code);
+    }
+});
+
 it('lets the home businesses through a residential zone, and stops a warehouse', function () {
     $r1 = ['R-1'];
     $r2 = ['R-2-BASIC', 'R-2-MAX'];
