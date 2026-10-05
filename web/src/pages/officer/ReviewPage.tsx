@@ -567,7 +567,8 @@ const OFFICE_FORM_DERIVED_KEYS: Record<OfficeFormCode, readonly string[]> = {
     'denr_remarks',
   ],
   FSIC: ['application_date', 'certificate_applied_for'],
-  OCCUPANCY: ['application_date'],
+  // Date of Completion is set by derive() since 6 October 2026, never typed.
+  OCCUPANCY: ['application_date', 'completion_date'],
 }
 
 /** Does the API write this answer itself, so nobody may correct it? */
