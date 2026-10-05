@@ -428,8 +428,8 @@ export const applications = {
       prior_permit_ids?: number[]
       /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
       fee_profile?: FeeProfile
-      /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
-      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
+      /** Annual only (checklist 2026-09-27, renew item 3); the server refuses the rest. */
+      payment_mode?: 'annual'
       /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
       data_privacy_consent?: boolean
     } & AmendmentAnswers,
@@ -441,7 +441,7 @@ export const applications = {
       title?: string
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
-      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
+      payment_mode?: 'annual'
       data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),

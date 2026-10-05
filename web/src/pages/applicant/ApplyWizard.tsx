@@ -328,24 +328,6 @@ const BASE_PHASES: BasePhase[] = [
  * CPDD's sheet becomes a step between the changes and the documents; one that
  * only corrects how an address is written does not, and never sees it.
  */
-/**
- * Mode of Payment, as MCG-BPLO-FO-002 prints it.
- *
- * Three boxes on the paper. Revenue Code Sec. 2N provides for two — annual,
- * in the first twenty days of January, and quarterly, in the first twenty of
- * January, April, July and October. There is no semi-annual instalment in the
- * Code, and it is offered here because the form the city hands out at the
- * counter offers it: an applicant who ticked it on paper has to be able to
- * file the same answer online.
- */
-const PAYMENT_MODES = [
-  { value: 'annual', label: 'Annually' },
-  { value: 'semi_annual', label: 'Semi-Annually' },
-  { value: 'quarterly', label: 'Quarterly' },
-] as const
-
-type PaymentMode = (typeof PAYMENT_MODES)[number]['value']
-
 const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 'review']
 
 /**
@@ -3745,13 +3727,6 @@ export function ApplyWizard() {
   }
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
-  /*
-   * Defaults to annual, which is both the Code's ordinary case and what the
-   * server has always written when the key is absent. A renewal that never
-   * reaches the picker therefore records what it would have recorded before
-   * this existed.
-   */
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('annual')
 
   /*
    * ── All five at once, not one after another ────────────────────
@@ -5149,19 +5124,6 @@ export function ApplyWizard() {
               : `${files.length} files attached`,
       }
     })
-
-    /*
-     * Renewal only, because the picker is — MCG-BPLO-FO-002 prints the box and
-     * MCG-BPLO-FO-001 does not. Appended after the uploads so it reads in the
-     * order the paper does: the requirements list, then the payment line at
-     * the foot of it.
-     */
-    if (applicationType === 'renewal') {
-      documents.push({
-        label: 'Mode of Payment',
-        value: PAYMENT_MODES.find((m) => m.value === paymentMode)?.label ?? '',
-      })
-    }
 
     return {
       address: [
@@ -7264,7 +7226,6 @@ export function ApplyWizard() {
       application_type: applicationType,
       title: title.trim() || undefined,
       data_privacy_consent: consent,
-      payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitIds.length > 0 ? { prior_permit_ids: priorPermitIds } : {}),
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
@@ -8248,12 +8209,6 @@ export function ApplyWizard() {
            * otherwise be created with `false` and never corrected.
            */
           data_privacy_consent: consent,
-          /*
-           * On every autosave, for the reason the consent tick is: the picker
-           * is on the documents step, and a draft created before the applicant
-           * reaches it would otherwise keep the default for good.
-           */
-          payment_mode: paymentMode,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -9286,13 +9241,6 @@ export function ApplyWizard() {
         // as the applicant's own words and stop generating over it, even if the
         // text happens to match what we would have produced.
         setTitleEdited(Boolean(app.title?.trim()))
-        /*
-         * Reopened as it was left. Without this the picker resets to annual and
-         * the next autosave writes that over a quarterly election the applicant
-         * made — the draft losing an answer silently, which is the failure the
-         * amendment ticks above were restored to avoid.
-         */
-        if (app.payment_mode) setPaymentMode(app.payment_mode)
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
         /*
@@ -12400,66 +12348,13 @@ export function ApplyWizard() {
           )}
 
           {/*
-            ── Mode of Payment (MCG-BPLO-FO-002, foot of page 1) ─────────────
-
-            Renewal only, because only the renewal paper asks it. FO-001 has no
-            such box, and putting one on a new application would be BizTrack
-            inventing a question.
-
-            ── The sentence under it is the whole point of the design ────────
-
-            This picker existed before and the client had it removed on
-            16 September 2026, because nothing read the answer: the fee engine,
-            the Tax Order of Payment and the payment stage all bill the full
-            year regardless. An applicant could elect quarterly and be handed
-            an annual bill with no explanation.
-
-            None of that has been built since, so the honest way to put the
-            field back is to record the answer AND say what it does. The client
-            chose that over a silent field when asked, 24 September 2026.
+            Mode of Payment (Annually / Semi-Annually / Quarterly, after
+            MCG-BPLO-FO-002) was asked here until checklist 2026-09-27, renew
+            item 3: a filing is annual, which is all the Tax Order of Payment
+            ever billed, and Revenue Code Sec. 2N has no semi-annual instalment.
+            The server files annual and refuses the others. Bringing quarterly
+            back needs a bill that is actually split, not only a recorded answer.
           */}
-          {applicationType === 'renewal' && (
-            <div className="mt-8 border-t border-line pt-6">
-              <FieldLabel>Mode of Payment</FieldLabel>
-              <div
-                role="radiogroup"
-                aria-label="Mode of Payment"
-                aria-describedby="payment-mode-note"
-                className="flex flex-wrap gap-2"
-              >
-                {PAYMENT_MODES.map((opt) => {
-                  const selected = paymentMode === opt.value
-
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setPaymentMode(opt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {opt.label}
-                    </button>
-                  )
-                })}
-              </div>
-              <p id="payment-mode-note" className="mt-2 max-w-prose text-xs text-ink-secondary">
-                Recorded on your filing for BPLO. Your Tax Order of Payment is issued for the
-                full year either way — arrange an instalment with the City Treasurer when you
-                pay.
-              </p>
-            </div>
-          )}
         </div>
       </WizardSection>
 

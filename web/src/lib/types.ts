@@ -1483,7 +1483,9 @@ export interface Application extends ApplicationListItem {
    * applicants tick it.
    *
    * Recorded, never acted on: the Tax Order of Payment bills the full year
-   * whatever this says, and the form tells the applicant so.
+   * whatever this says. The owner no longer chooses it (checklist 2026-09-27,
+   * renew item 3) and new filings are annual; the other two survive on filings
+   * made before that, which the staff screens still print.
    */
   payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
   /**

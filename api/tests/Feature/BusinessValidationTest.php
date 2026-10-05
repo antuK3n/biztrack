@@ -402,22 +402,16 @@ it('stores and returns the lessor and emergency contact block', function () {
 });
 
 /*
- * ── Semi-annual was refused here until 24 September 2026 ─────────────────
+ * ── Annual only (checklist 2026-09-27, renew item 3) ──────────────────────
  *
- * The reason was sound: Revenue Code Sec. 2N grants annual and quarterly
- * instalments and nothing else, so accepting a third was BizTrack inventing a
- * payment schedule the ordinance does not provide for.
- *
- * MCG-BPLO-FO-002 prints three boxes — Annually, Semi-Annually, Quarterly —
- * and that is the form the city hands over the counter. An applicant who ticks
- * Semi-Annually on paper must be able to file the same answer here, so the
- * field records what the paper asks and the ordinance mismatch is BPLO's to
- * reconcile at the Treasurer's window. Client's instruction, same date.
- *
- * Nothing acts on the answer either way — see the picker's own note — so this
- * accepts a wider set rather than promising a different bill.
+ * This accepted the three boxes MCG-BPLO-FO-002 prints - Annually,
+ * Semi-Annually, Quarterly - from 24 September 2026, recorded and never acted
+ * on: the Tax Order of Payment bills the full year either way, and Revenue
+ * Code Sec. 2N has no semi-annual instalment. The choice is off the form now,
+ * a new filing is annual, and the other two are refused. A filing that already
+ * holds another mode keeps it.
  */
-it('accepts the three payment modes the renewal paper prints, and nothing else', function () {
+it('files every new application as annual, and refuses semi-annual and quarterly', function () {
     $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
     $base = [
         'business_id' => $business->id,
@@ -425,22 +419,29 @@ it('accepts the three payment modes the renewal paper prints, and nothing else',
         'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ];
 
-    foreach (['annual', 'semi_annual', 'quarterly'] as $mode) {
+    $id = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'annual'])
+        ->assertCreated()
+        ->assertJsonPath('data.payment_mode', 'annual')
+        ->json('data.id');
+
+    foreach (['semi_annual', 'quarterly', 'monthly'] as $mode) {
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->postJson('/api/v1/applications', $base + ['payment_mode' => $mode])
-            ->assertCreated()
-            ->assertJsonPath('data.payment_mode', $mode);
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['payment_mode']);
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->putJson("/api/v1/applications/{$id}", ['payment_mode' => $mode])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['payment_mode']);
     }
 
-    /*
-     * And the list is still a list. Widening it by one is not the same as
-     * opening it, and `payment_mode` reaches a column with no enum behind it —
-     * whatever passes validation is what BPLO reads off the filing.
-     */
+    // A filing made under the old form keeps the mode it was filed with.
+    Application::whereKey($id)->update(['payment_mode' => 'quarterly']);
     $this->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'monthly'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['payment_mode']);
+        ->putJson("/api/v1/applications/{$id}", ['title' => 'Still quarterly'])
+        ->assertOk();
+    expect(Application::findOrFail($id)->payment_mode)->toBe('quarterly');
 });
 
 it('defaults the payment mode to annual', function () {

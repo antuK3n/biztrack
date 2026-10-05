@@ -187,21 +187,16 @@ class ApplicationController extends Controller
             // business name everywhere it is displayed.
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             /*
-             * The three MCG-BPLO-FO-002 prints, which is one more than the
-             * ordinance provides for.
-             *
-             * Revenue Code Sec. 2N allows annual (first 20 days of January) and
-             * quarterly (first 20 days of January, April, July and October).
-             * There is no semi-annual instalment in the Code — but the renewal
-             * form the city hands out at the counter prints one, so an
-             * applicant can and does tick it, and refusing the answer here
-             * would make BizTrack unable to record a paper filing faithfully.
-             *
-             * Recorded, not acted on. Nothing downstream splits a bill — see
-             * the note on the picker in ApplyWizard for why that is stated on
-             * the form rather than left for the applicant to discover.
+             * Annual only (checklist 2026-09-27, renew item 3). The renewal form
+             * offered Annually / Semi-Annually / Quarterly, after the paper
+             * MCG-BPLO-FO-002, and nothing ever acted on the answer: the Tax
+             * Order of Payment bills the full year either way, and the Revenue
+             * Code (Sec. 2N) has no semi-annual instalment at all. The choice
+             * is gone from the form; a new filing is annual and any other value
+             * is refused. Filings that already hold another mode keep it, and
+             * the staff screens still print it.
              */
-            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
+            'payment_mode' => ['sometimes', 'in:annual'],
             /*
              * RA 10173 consent, kept with the FILING it was given for.
              *
@@ -359,7 +354,7 @@ class ApplicationController extends Controller
              * the day; dropping the column would erase it. Nothing writes it
              * from here on, so it defaults false and reads as history.
              */
-            'payment_mode' => $data['payment_mode'] ?? 'annual',
+            'payment_mode' => 'annual',
             'data_privacy_consent' => (bool) ($data['data_privacy_consent'] ?? false),
             // Classified on the way in, so the filing RECORDS the basis it was
             // assessed on rather than having it re-derived later against a
@@ -459,7 +454,8 @@ class ApplicationController extends Controller
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
-            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
+            // Annual only - see the note on the same key in store().
+            'payment_mode' => ['sometimes', 'in:annual'],
             // See the note on the same key in store(): `boolean`, not
             // `accepted`, because a draft may legitimately be saved before the
             // applicant has ticked it. submit() is the gate.
