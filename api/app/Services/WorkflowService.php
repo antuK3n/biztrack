@@ -438,16 +438,13 @@ class WorkflowService
              * mistake again in miniature. The zoning checklist tells CPDO and
              * BPLO it could not compare, so the call is a person's.
              *
-             * ── And only when the PREMISES actually move ─────────────────────
+             * ── And whenever the ADDRESS changes ──────────────────────────────
              *
-             * Not when the barangay changes, which was the rule until
-             * 21 September 2026 and tested the wrong thing — zoning belongs to
-             * a location, and two streets in one barangay can be zoned
-             * differently. See `amendmentMovesPremises` for why the pin is the
-             * signal and why BizTrack cannot judge the map itself.
-             *
-             * So: a pin dropped somewhere new sends the filing to CPDO;
-             * correcting the spelling of a street does not.
+             * Any part of it — house / building no., street, barangay or the
+             * pin — since 6 October 2026. Between 21 September and then only a
+             * moved pin counted, which let a new street and barangay typed in
+             * without one reach BPLO and move the business on the register
+             * without CPDO. See `amendmentMovesPremises`.
              */
             $codes = [PermitType::OUTCOME_CODE];
 
@@ -467,39 +464,48 @@ class WorkflowService
     /**
      * Whether this amendment MOVES THE PREMISES, and so needs CPDO to look.
      *
-     * ── Why the pin and not the barangay ─────────────────────────────────
+     * ── Any part of the address, not the pin alone ───────────────────────
      *
-     * This asked whether the barangay changed, which is the wrong question.
-     * Zoning is a property of a LOCATION, not of a barangay: a residential
-     * street and a commercial street sit inside the same barangay all the
-     * time, so a business could move to a street that forbids its trade and
-     * never trip a barangay test. Client, 21 September 2026: *"what if you
-     * changed your street and that street now prohibits this type of
-     * business, but also what if you are just correcting any typo."*
+     * This asked whether the barangay changed until 21 September 2026, which
+     * is the wrong question: zoning is a property of a LOCATION, and a
+     * residential street and a commercial street sit inside the same barangay
+     * all the time. Client, that day: *"what if you changed your street and
+     * that street now prohibits this type of business, but also what if you
+     * are just correcting any typo."*
      *
-     * The honest answer to "does the new street allow this?" is that BizTrack
-     * cannot know. `ZoningClassification` says so in as many words — the
-     * barangay sheets are raster images with no geometry, so no conformity
-     * verdict is computable for any point and none is offered. Only a CPDO
-     * officer reading the map can tell.
+     * It then asked whether the PIN moved, so that a typo corrected in the
+     * street would not cost a clearance. That let a real move through without
+     * CPDO: the wizard demands a new pin only for a new barangay, so an owner
+     * who typed a new street and left the pin alone filed no Zoning Clearance
+     * — and through the API a new barangay and street with no pin reached
+     * BPLO, who could approve it and move the business on the register to a
+     * barangay nobody had zoned (owner-amend row 16). Ken, 6 October 2026: a
+     * Change of Address brings in the Zoning Clearance.
      *
-     * So this does not judge zoning. It decides whether to ASK, and the one
-     * signal the register genuinely holds is the pin. Correcting how an
-     * address is WRITTEN does not move the premises and leaves the pin alone;
-     * moving to another street moves it. A barangay change is covered by the
-     * same rule, because the old pin cannot survive `checkPin` against a new
-     * barangay and a new one has to be dropped.
+     * So any of FO-003 box I's fields — house / building no., street,
+     * barangay, the pin — counts. Not the box's "AMENDMENT OF ADDRESS
+     * DETAILS" note, which is words to BPLO and changes nothing on the
+     * register. BizTrack still cannot tell a respelled street from a new one
+     * (the zoning sheets are raster images, see `ZoningClassification`), so
+     * it asks CPDO either way rather than guessing. If the client wants typo
+     * corrections exempted again, it needs a question the applicant answers
+     * ("has the business moved?"), not the pin.
      *
      * Static and public because two callers need the same answer and must not
      * be allowed to differ about it: `permitTypeIdsAtSubmission` decides
      * whether the filing carries a ZONING clearance, and the applicant's step
-     * warns before they commit to one. A rule wired into one of two callers is
-     * the defect this codebase keeps meeting.
+     * (`amendMovesPremises` in ApplyWizard) adds the Zoning Clearance step on
+     * the same fields. A rule wired into one of two callers is the defect this
+     * codebase keeps meeting.
      */
     public static function amendmentMovesPremises(Application $app): bool
     {
+        $address = collect(AmendableFields::kinds())
+            ->filter(fn (array $kind) => $kind['group'] === 'address' && $kind['type'] !== 'note')
+            ->keys();
+
         return $app->requestedChanges()
-            ->where('field', 'address_pin')
+            ->whereIn('field', $address)
             ->whereNotNull('new_value')
             ->exists();
     }
@@ -507,8 +513,9 @@ class WorkflowService
     /**
      * Why this amendment needs a new locational clearance, if it does.
      *
-     * A move (the pin), a change of activity (the line of business) or an
-     * expansion of the area (a floor area larger than the register's) — City
+     * A move (any part of the address), a change of activity (the line of
+     * business) or an expansion of the area (a floor area larger than the
+     * register's) — City
      * Ordinance No. 24-2018, Art. IX §§8-9. Empty when none applies. See the
      * note in `permitTypeIdsAtSubmission` for what is deliberately left out.
      *
@@ -518,7 +525,7 @@ class WorkflowService
     {
         $requested = $app->requestedChanges()->whereNotNull('new_value')->pluck('new_value', 'field');
         $why = [];
-        if ($requested->has('address_pin')) {
+        if (self::amendmentMovesPremises($app)) {
             $why[] = 'moves';
         }
         if ($requested->has('line_of_business')) {

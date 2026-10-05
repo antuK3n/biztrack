@@ -1047,7 +1047,7 @@ export function ApplicationDetailPage() {
           The card told every amendment its clearances open "once BPLO
           approves … and you have paid … covers all five". An amendment pays
           nothing and carries no clearance — except a new Zoning Clearance
-          when the premises move or the trade or area grows, which opens the
+          when the address changes or the trade or area grows, which opens the
           moment it is submitted (tester, 5 October 2026). So that case gets
           one sentence and the link, and every other amendment no card.
         */}
@@ -1055,7 +1055,15 @@ export function ApplicationDetailPage() {
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             <p className="mt-1 text-sm text-ink-secondary">
-              {(app.requested_changes ?? []).some((c) => c.field === 'address_pin')
+              {/*
+                Any part of the address, as the rule that attached ZONING
+                reads it (`WorkflowService::amendmentMovesPremises`) — not
+                the pin alone, since 6 October 2026. The box's note
+                (`address_details`) changes nothing on the register.
+              */}
+              {(app.requested_changes ?? []).some(
+                (c) => c.field.startsWith('address_') && c.field !== 'address_details' && c.new_value !== null,
+              )
                 ? 'A new Zoning Clearance is needed for the new address.'
                 : 'A new Zoning Clearance is needed for this change.'}{' '}
               <Link

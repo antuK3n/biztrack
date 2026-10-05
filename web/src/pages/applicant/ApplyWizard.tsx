@@ -147,8 +147,9 @@ type BasePhase =
    * added section here"* — pointing at the step bar.
    *
    * Conditional, and the only conditional step in the wizard: `sequence`
-   * includes it exactly when the pin has moved, which is exactly when the
-   * filing starts carrying a ZONING clearance.
+   * includes it exactly when `amendNeedsZoning` holds (any change of address,
+   * a new trade or a larger floor area), which is exactly when the filing
+   * starts carrying a ZONING clearance.
    */
   | 'zoning'
   | 'address'
@@ -323,9 +324,9 @@ const BASE_PHASES: BasePhase[] = [
  *  - `review` — before and after, then file.
  *
  * `zoning` is NOT in this array and joins it conditionally — see `sequence`.
- * An amendment that moves the pin applies for a fresh Zoning Clearance, so
- * CPDD's sheet becomes a step between the changes and the documents; one that
- * only corrects how an address is written does not, and never sees it.
+ * An amendment that changes the address applies for a fresh Zoning Clearance,
+ * so CPDD's sheet becomes a step between the changes and the documents; one
+ * that changes nothing CPDO assessed does not, and never sees it.
  */
 /*
  * ── No Mode of Payment question, since 5 October 2026 ───────────────────
@@ -4243,16 +4244,16 @@ export function ApplyWizard() {
    * will. Two callers, one rule — a warning that disagrees with the billing is
    * worse than no warning.
    *
-   * The PIN, not the barangay. Zoning belongs to a location and two streets in
-   * one barangay can be zoned differently, so a barangay test would let a
-   * business move to a street that forbids its trade without anyone looking.
-   * BizTrack cannot read the maps — they are images — so it cannot judge that
-   * itself; it can only decide whether to ask CPDO, and a moved pin is the one
-   * honest sign that there is something new to look at. Correcting how an
-   * address is spelled leaves the pin alone.
+   * Any field in box I — house / building no., street, barangay or the pin —
+   * but not its "Amendment of address details" note. Only the pin counted
+   * from 21 September 2026, so a typo fix would not cost a clearance; an owner
+   * who typed a new street and left the pin alone then filed a move with no
+   * Zoning Clearance section at all. Ken, 6 October 2026: a Change of Address
+   * brings in the Zoning Clearance. BizTrack cannot tell a respelled street
+   * from a new one, so it asks CPDO either way.
    */
   const amendMovesPremises = useMemo(
-    () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
+    () => amendRows.some((r) => r.group === 'address' && r.type !== 'note' && r.requested),
     [amendRows],
   )
   /**
@@ -5056,8 +5057,8 @@ export function ApplyWizard() {
        * application form for zoning clearance, so it means it is there where
        * you should upload that too."* This is what makes that possible.
        *
-       * It leaves again if the pin is withdrawn, because the filing would no
-       * longer carry the clearance at submission and a pivot row nothing
+       * It leaves again if the change is withdrawn, because the filing would
+       * no longer carry the clearance at submission and a pivot row nothing
        * submits is a clearance CPDO would be routed for no reason.
        */
       const zoningTypeId =
@@ -6391,8 +6392,9 @@ export function ApplyWizard() {
              * from whether the premises moved (see `amendMovesPremises`, and
              * the zoning trigger it drives): this one is simply that a pin
              * cannot stay where it was if the barangay under it is being
-             * changed. Correcting how a street is spelled demands no new pin,
-             * and demanding one would drag a typo into a re-clearance.
+             * changed. Correcting how a street is spelled demands no new pin
+             * (it still carries the Zoning Clearance since 6 October 2026 —
+             * any change of address does, pin or no pin).
              */
             const missingMove: string[] = []
 
@@ -12874,15 +12876,20 @@ export function ApplyWizard() {
                       </p>
                     )}
 
+                    {/*
+                      "You have moved the pin, so this counts as a move." led
+                      this, and "Correcting how your address is written —
+                      without moving the pin — does not need one." closed it,
+                      until 6 October 2026: any change of address carries the
+                      clearance now (`amendMovesPremises`), so both were cut.
+                    */}
                     {group.key === 'address' && amendMovesPremises && (
                       <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
                         <span className="font-semibold text-ink">
-                          You have moved the pin, so this counts as a move.
+                          Your Zoning Clearance is re-applied for as part of this amendment:
                         </span>{' '}
-                        Your Zoning Clearance is re-applied for as part of this amendment: the City
-                        Planning Office checks the new location against the zoning map, and only
-                        they can say whether your trade is allowed there. Correcting how your
-                        address is written — without moving the pin — does not need one.
+                        the City Planning Office checks the new location against the zoning map,
+                        and only they can say whether your trade is allowed there.
                       </p>
                     )}
 
@@ -13078,10 +13085,10 @@ export function ApplyWizard() {
         ── The Zoning Clearance this amendment applies for ──────────────────
 
         Its own step, and the only conditional one in the wizard. It joins
-        `sequence` exactly when the pin has moved, which is exactly when the
-        filing starts carrying a ZONING clearance — the same value the server
-        reads (`WorkflowService::amendmentMovesPremises`), so a step cannot
-        appear for a clearance the filing will not carry.
+        `sequence` exactly when `amendNeedsZoning` holds, which is exactly when
+        the filing starts carrying a ZONING clearance — the same rule the
+        server reads (`WorkflowService::amendmentNeedsLocationalClearance`), so
+        a step cannot appear for a clearance the filing will not carry.
 
         It was a section at the foot of the amendment form, under the last
         address field. That made a second office's form with its own reference
@@ -13111,8 +13118,13 @@ export function ApplyWizard() {
             above it printed the office's name twice, three centimetres
             apart.
           */}
+          {/*
+            "You have moved the pin, so this amendment …" until 6 October
+            2026. The step also follows a new street, barangay or trade, or a
+            larger floor area, where that opening was untrue.
+          */}
           <p className="mb-4 max-w-3xl text-xs leading-relaxed text-ink-secondary">
-            You have moved the pin, so this amendment also applies for a fresh Zoning Clearance.
+            This amendment also applies for a fresh Zoning Clearance.
             Most of it is filled in from the details you gave on the last step — what it needs
             from you is at the bottom:{' '}
             <span className="font-semibold text-ink">

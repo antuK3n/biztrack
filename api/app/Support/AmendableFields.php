@@ -326,11 +326,11 @@ class AmendableFields
              * A pin has to sit inside the barangay named beside it, so
              * changing this always means dropping the pin again.
              *
-             * It is NOT what decides the zoning clearance. That was the rule
-             * until 21 September 2026 and tested the wrong thing: zoning
+             * It is not the only thing that decides the zoning clearance. It
+             * was until 21 September 2026, and that tested too little: zoning
              * belongs to a location, and two streets in one barangay can be
-             * zoned differently. `WorkflowService::amendmentMovesPremises`
-             * reads the PIN instead — see the long note there.
+             * zoned differently. Any field in this box carries it now —
+             * `WorkflowService::amendmentMovesPremises`, see the note there.
              */
             'address_barangay_id' => [
                 'group' => 'address',
@@ -353,9 +353,13 @@ class AmendableFields
             'address_pin' => [
                 'group' => 'address',
                 'label' => 'Map location',
-                'help' => 'Move the pin only if the business has actually moved — that is what '
-                    .'re-applies for your Zoning Clearance. Fixing how the address is spelled '
-                    .'does not need a new pin.',
+                /*
+                 * "— that is what re-applies for your Zoning Clearance" was
+                 * cut on 6 October 2026: any change in this box re-applies for
+                 * it now, not the pin alone (`amendmentMovesPremises`).
+                 */
+                'help' => 'Move the pin only if the business has actually moved. Fixing how the '
+                    .'address is spelled does not need a new pin.',
                 'type' => 'pin',
                 'writes' => 'pin',
                 'column' => null,

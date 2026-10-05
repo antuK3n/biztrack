@@ -735,7 +735,7 @@ it('defers a move’s Zoning Clearance fee to the next Business Permit renewal',
         ->toContain($zoningType->name);
 });
 
-it('carries the zoning clearance when the premises move, not when an address is respelled', function () {
+it('carries the zoning clearance for any change of the business address', function () {
     /*
      * Client's decision, 19 September 2026: a move must not be approved until
      * CPDO has cleared the new address, and CPDO must get a real filing.
@@ -747,61 +747,38 @@ it('carries the zoning clearance when the premises move, not when an address is 
      * so the proposed value has to be on the filing CPDO is looking at.
      */
     /*
-     * ── The PIN is the trigger, not the barangay ─────────────────────────
+     * ── Any part of the address, not the pin alone ──────────────────────
      *
-     * Until 21 September 2026 this keyed on the barangay changing, which
-     * tests the wrong thing: zoning belongs to a LOCATION, and a residential
-     * street and a commercial street sit in one barangay all the time. A
-     * business could move to a street that forbids its trade and never trip
-     * a barangay test. Client: *"what if you changed your street and that
-     * street now prohibits this type of business, but also what if you are
-     * just correcting any typo."*
-     *
-     * BizTrack cannot answer the first question — the zoning sheets are
-     * raster images with no geometry (see `ZoningClassification`) — so it
-     * decides only whether to ASK CPDO, off the one signal it holds.
+     * From 21 September 2026 until 6 October 2026 only a moved PIN carried
+     * the clearance, so that correcting a typo in the street would not cost
+     * one. It let a move through without CPDO: an owner who typed a new
+     * street and barangay and left the pin alone filed an amendment BPLO
+     * could approve, and the register moved the business to another
+     * barangay that nobody had zoned (owner-amend row 16). Ken, 6 October
+     * 2026: a Change of Address brings in the Zoning Clearance.
      */
-    [$moveId] = amendmentFiling([
-        'address_street' => 'Rizal Avenue',
-        'address_pin' => '14.6600,120.9500',
-    ]);
-    attachRequiredDocuments($moveId);
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$moveId}/submit")->assertOk();
-
-    expect(Application::findOrFail($moveId)->permitTypes()->pluck('code')->sort()->values()->all())
-        ->toBe(['BUSINESS', 'ZONING']);
-
-    /*
-     * And correcting how the address is WRITTEN does not. The premises have
-     * not moved, the pin is untouched, and there is nothing new for CPDO to
-     * look at — charging a fresh clearance for a misspelt street name bills
-     * somebody for fixing a typo.
-     */
-    [$streetId] = amendmentFiling(['address_street' => 'Moved Avenue']);
-    attachRequiredDocuments($streetId);
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$streetId}/submit")->assertOk();
-
-    expect(Application::findOrFail($streetId)->permitTypes()->pluck('code')->all())
-        ->toBe([PermitType::OUTCOME_CODE]);
-
-    /*
-     * A barangay change on its own does not either — not because it is
-     * harmless, but because the applicant's step will not let one through
-     * without a pin inside the new barangay, so in practice it always
-     * arrives WITH a moved pin. Asserted so that the two rules are visibly
-     * separate: the barangay decides where the pin must land, the pin
-     * decides whether CPDO is asked.
-     */
+    $owner = authAs('owner@biztrack.local');
+    $codes = fn (int $id) => Application::findOrFail($id)->permitTypes()->pluck('code')->sort()->values()->all();
     $elsewhere = Barangay::where('id', '!=', Barangay::first()->id)->firstOrFail();
-    [$brgyOnlyId] = amendmentFiling(['address_barangay_id' => (string) $elsewhere->id]);
-    attachRequiredDocuments($brgyOnlyId);
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$brgyOnlyId}/submit")->assertOk();
 
-    expect(Application::findOrFail($brgyOnlyId)->permitTypes()->pluck('code')->all())
-        ->toBe([PermitType::OUTCOME_CODE]);
+    foreach ([
+        'a moved pin' => ['address_street' => 'Rizal Avenue', 'address_pin' => '14.6600,120.9500'],
+        'a street' => ['address_street' => 'Moved Avenue'],
+        'a house number' => ['address_house_bldg_no' => '12-B'],
+        'a barangay' => ['address_barangay_id' => (string) $elsewhere->id],
+        'a barangay and street, no pin' => [
+            'address_barangay_id' => (string) $elsewhere->id,
+            'address_street' => 'Far Away Street',
+        ],
+    ] as $what => $changes) {
+        [$id] = amendmentFiling($changes);
+        attachRequiredDocuments($id);
+        test()->withHeaders($owner)->postJson("/api/v1/applications/{$id}/submit")->assertOk();
+
+        expect($codes($id))->toBe(['BUSINESS', 'ZONING'], "{$what} carried no Zoning Clearance")
+            ->and(WorkflowService::amendmentNeedsLocationalClearance(Application::findOrFail($id)))
+            ->toBe(['moves']);
+    }
 
     /*
      * A floor area with no earlier figure on the register is not a move and
@@ -870,10 +847,12 @@ it('refuses to approve a move until the new address is cleared', function () {
     // assessed — and the refusal names what is missing rather than just
     // saying no, because BPLO cannot clear it themselves.
     $elsewhere = Barangay::where('id', '!=', Barangay::first()->id)->firstOrFail();
-    // WITH a pin, because that is what carries the zoning clearance now.
+    // WITHOUT a pin: a new barangay and street typed in is a move too, and
+    // the API is not the wizard, so nothing makes the owner drop one
+    // (owner-amend row 16).
     [$appId, $businessId] = amendmentFiling([
         'address_barangay_id' => (string) $elsewhere->id,
-        'address_pin' => '14.6600,120.9500',
+        'address_street' => 'Far Away Street',
     ]);
     $owner = authAs('owner@biztrack.local');
     $before = Business::findOrFail($businessId)->address->barangay_id;
@@ -1183,6 +1162,12 @@ it('recomposes line1, so a later business edit cannot undo the move', function (
     attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // A change of address carries the Zoning Clearance; CPDO's review is not
+    // this test's subject, so it is cleared on the pivot.
+    Application::findOrFail($appId)->permitTypes()->updateExistingPivot(
+        PermitType::where('code', 'ZONING')->value('id'),
+        ['status' => 'approved'],
+    );
     bploApprovesForm($appId);
 
     $address = Business::findOrFail($businessId)->address;
