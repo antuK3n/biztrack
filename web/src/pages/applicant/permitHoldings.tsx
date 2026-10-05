@@ -6,7 +6,8 @@ import {
   EyeIcon,
   MailIcon,
 } from '../../components/icons'
-import { type SortFilterOption } from '../../components/ui/Proto'
+import { StatusChip, type SortFilterOption } from '../../components/ui/Proto'
+import { STATUS_TONES } from '../admin/permitStatusTones'
 import { businessName, formatDate } from '../../lib/format'
 import { permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -97,6 +98,8 @@ export async function loadHoldings(): Promise<ProfileHoldings> {
 export interface BusinessGroup {
   id: number
   name: string
+  /** The Business Account Number, shown under the name [client, 5 October 2026]. */
+  ban: string | null
   permits: Permit[]
   /**
    * Clearances the applicant submitted a copy of, on any filing for this
@@ -162,7 +165,7 @@ function Triangle({ open }: { open: boolean }) {
 function PermitDownloadButton({
   permit,
   label,
-  /* Muted on a past permit, so the history reads as paper rather than cover. */
+  /* Outlined on a past permit, so the history reads as paper rather than cover. */
   muted = false,
 }: {
   permit: Permit
@@ -197,13 +200,16 @@ function PermitDownloadButton({
       // stopped by the guard at the top of `download` instead.
       aria-disabled={busy}
       aria-label={failed ? `Download failed for ${label}. Try again` : `Download ${label} as PDF`}
-      className={`shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
-        muted ? 'text-ink-secondary focus-visible:outline-royal' : 'text-white focus-visible:outline-white'
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal ${
+        muted
+          ? 'border border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
+          : 'bg-royal text-white hover:bg-royal-hover'
       } ${
         busy ? 'opacity-50' : ''
       }`}
     >
-      {failed ? <AlertCircleIcon size={22} /> : <DownloadIcon size={22} />}
+      {failed ? <AlertCircleIcon size={15} aria-hidden="true" /> : <DownloadIcon size={15} aria-hidden="true" />}
+      {failed ? 'Retry' : busy ? 'Preparing…' : 'PDF'}
     </button>
   )
 }
@@ -226,22 +232,26 @@ function isPastPermit(permit: Permit): boolean {
 }
 
 /**
- * One certificate on a business card.
+ * One issued permit, on the card's grid.
+ *
+ * The status is a tinted, worded chip (Never Color Alone): an expired permit
+ * whose status still reads `active` says "Expired", because a date passing is
+ * not written down anywhere and a certificate that looks current is the one
+ * mistake a download makes permanent.
  *
  * ── Why `past` changes more than a colour ────────────────────────────────
  *
- * Lifted out of the list on 4 October 2026 so the current permits and the
- * historical ones can be drawn as two lists. They were one, and a replaced
- * certificate sat at the bottom of it in the same royal blue as the live ones,
- * told apart only by a small chip. The client opened last year's Sanitary
- * Permit from that list, read its VALID UNTIL, and reported the renewal as
- * broken — *"I just renewed that sanitary form and the expiration date should
- * be Oct. 4, 2027"* — while the permit they had just been issued sat four rows
- * above with the right dates on it.
+ * The current permits and the historical ones are drawn as two lists (4
+ * October 2026). They were one, and a replaced certificate sat at the bottom
+ * of it looking like the live ones, told apart only by a small chip. The
+ * client opened last year's Sanitary Permit from that list, read its VALID
+ * UNTIL, and reported the renewal as broken — *"I just renewed that sanitary
+ * form and the expiration date should be Oct. 4, 2027"* — while the permit
+ * they had just been issued sat four rows above with the right dates on it.
  *
- * So a past row is muted rather than merely chipped: the live permits are the
- * blue block, and the history reads as paper in a drawer. Both stay openable
- * and downloadable, which is the whole reason they are still on the page.
+ * So a past row is muted rather than merely chipped, and sits behind its own
+ * disclosure. It stays openable and downloadable, which is the whole reason
+ * it is still on the page.
  */
 function PermitRow({
   permit,
@@ -253,85 +263,52 @@ function PermitRow({
   past?: boolean
 }) {
   const typeName = permit.permit_type?.name ?? 'Permit'
-  /* "Sanitary Permit for CedarBloom Café (MCB-2026-000406)" — the
-     eye and the arrow are the only labels a sighted user gets, and
-     neither says which of the five rows it belongs to. The number is
-     on the end because a renewal leaves two permits of the SAME type
-     on the same business, and then the type and the business name
-     together still do not tell them apart. */
+  /* "Sanitary Permit for CedarBloom Café (MCB-2026-000406)" — the View and
+     PDF buttons are the same two words on every row, and neither says which
+     of the five rows it belongs to. The number is on the end because a
+     renewal leaves two permits of the SAME type on the same business, and
+     then the type and the business name together still do not tell them
+     apart. */
   const label = `${typeName} for ${business} (${permit.permit_number})`
-  const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
-  const note = permit.status !== 'active' ? permit.status_label : expired ? 'Expired' : null
-  /*
-   * ── Two kinds of badge, because they are two kinds of news ──
-   *
-   * Every note rendered in the same outlined white, so
-   * "Superseded" — the ordinary result of renewing — looked
-   * exactly like "Suspended", which means the business may not
-   * trade on this permit today. One is bookkeeping and the other
-   * is the heaviest thing the system does to an owner.
-   *
-   * Filled red for the two an officer DECIDED, outline for the
-   * two that are just what happened to a date. The word is still
-   * there in both, so the distinction never rests on the colour
-   * (DESIGN.md, Never Color Alone) — the fill is what makes it
-   * findable while scrolling a long profile.
-   */
-  const sanctioned =
-    permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected'
+  const lapsed = permit.status === 'active' && permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  const statusKey = lapsed ? 'expired' : permit.status
+  const statusText = lapsed ? 'Expired' : permit.status_label
 
   return (
-    <li className={`overflow-hidden rounded-lg ${past ? 'border border-line' : 'shadow-card'}`}>
-    <div
-      className={`flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5 ${past ? 'bg-shell' : 'bg-royal'}`}
-    >
-      <div className="min-w-0 flex-1">
-        <span
-          className={`block truncate text-base font-bold ${past ? 'text-ink-secondary' : 'text-white'}`}
-        >
-          {typeName}
-        </span>
-        {/* What a suspension waits on, the Track row's line (5 October 2026). */}
-        {permit.status === 'suspended' && permit.suspended_for && (
-          <span className={`block truncate text-xs ${past ? 'text-ink-muted' : 'text-white/85'}`}>
-            Waiting on your {permit.suspended_for.name}
-            {permit.suspended_for.office ? ` with ${permit.suspended_for.office}` : ''}
-          </span>
-        )}
+    <li className={`px-5 py-3.5 sm:px-6 ${past ? 'bg-shell/60' : ''}`}>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 sm:grid-cols-[minmax(0,1fr)_7.5rem_10rem_10.5rem]">
+        <div className="min-w-0">
+          <p className={`break-words font-semibold leading-snug ${past ? 'text-ink-secondary' : 'text-ink'}`}>
+            {typeName}
+          </p>
+          <p className="tnum text-xs text-ink-muted">{permit.permit_number}</p>
+          {/* What a suspension waits on, the Track row's line (5 October 2026). */}
+          {permit.status === 'suspended' && permit.suspended_for && (
+            <p className="text-xs text-ink-secondary">
+              Waiting on your {permit.suspended_for.name}
+              {permit.suspended_for.office ? ` with ${permit.suspended_for.office}` : ''}
+            </p>
+          )}
+        </div>
+        <div className="justify-self-end sm:justify-self-start">
+          <StatusChip tone={STATUS_TONES[statusKey] ?? 'tint-gray'}>{statusText}</StatusChip>
+        </div>
+        <p className="col-span-2 text-sm text-ink-secondary sm:col-span-1">
+          <span className="text-xs text-ink-muted sm:hidden">Valid until </span>
+          {formatDate(permit.valid_until) || '—'}
+        </p>
+        <div className="col-span-2 flex items-center gap-2 sm:col-span-1 sm:justify-end">
+          <Link
+            to={`/permits/${permit.id}`}
+            aria-label={`View ${label}`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3.5 py-1.5 text-xs font-semibold text-ink hover:border-royal hover:text-royal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+          >
+            <EyeIcon size={15} aria-hidden="true" /> View
+          </Link>
+          <PermitDownloadButton permit={permit} label={label} muted={past} />
+        </div>
       </div>
-      {note && (
-        <span
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
-            sanctioned
-              ? 'border border-s-red bg-s-red text-white'
-              : past
-                ? 'border border-line text-ink-muted'
-                : 'border border-white/70 text-white'
-          }`}
-        >
-          {note}
-        </span>
-      )}
-      {/* The permit number is what an owner quotes at a counter, so
-          it survives the redesign — dropped only where there is no
-          width for it rather than dropped outright. */}
-      <span
-        className={`hidden shrink-0 text-xs font-semibold md:inline ${past ? 'text-ink-muted' : 'text-white/75'}`}
-      >
-        {permit.permit_number}
-      </span>
-      <Link
-        to={`/permits/${permit.id}`}
-        aria-label={`View ${label}`}
-        className={`shrink-0 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
-          past ? 'text-ink-secondary focus-visible:outline-royal' : 'text-white focus-visible:outline-white'
-        }`}
-      >
-        <EyeIcon size={22} />
-      </Link>
-      <PermitDownloadButton permit={permit} label={label} muted={past} />
-    </div>
-    <PermitExtras permit={permit} />
+      <PermitExtras permit={permit} />
     </li>
   )
 }
@@ -349,7 +326,8 @@ function PermitRow({
  * So it borrows the business row's shape exactly: a real `<button
  * aria-expanded>` over a panel that stays in the DOM and toggles `hidden`, the
  * triangle decorative, the button's own text naming what it opens. A reader
- * who has met one of these has met both.
+ * who has met one of these has met both. Its rows sit on the card's grid, so
+ * the columns line up with the current permits above.
  *
  * ── Closed, where the business above it is open ─────────────────────────────
  *
@@ -366,7 +344,7 @@ function PastPermits({ permits, business }: { permits: Permit[]; business: strin
   const headingId = useId()
 
   return (
-    <div className="pt-1">
+    <div className="border-t border-line">
       <h4>
         <button
           type="button"
@@ -374,7 +352,7 @@ function PastPermits({ permits, business }: { permits: Permit[]; business: strin
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls={panelId}
-          className="flex w-full items-center gap-3 rounded-lg border border-line bg-white px-4 py-2.5 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal sm:px-5"
+          className="flex w-full items-center gap-3 bg-canvas/40 px-5 py-2.5 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-royal sm:px-6"
         >
           <Triangle open={open} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -387,8 +365,8 @@ function PastPermits({ permits, business }: { permits: Permit[]; business: strin
           </span>
         </button>
       </h4>
-      <div id={panelId} role="group" aria-labelledby={headingId} hidden={!open} className="pt-2">
-        <ul className="space-y-2">
+      <div id={panelId} role="group" aria-labelledby={headingId} hidden={!open}>
+        <ul className="divide-y divide-line border-t border-line">
           {permits.map((permit) => (
             <PermitRow key={permit.id} permit={permit} business={business} past />
           ))}
@@ -397,6 +375,7 @@ function PastPermits({ permits, business }: { permits: Permit[]; business: strin
     </div>
   )
 }
+
 /**
  * One business, collapsed to a heading row that opens into its permits (p25–26).
  *
@@ -451,7 +430,7 @@ function PermitExtras({ permit }: { permit: Permit }) {
   if (!rejected && count === 0) return null
 
   return (
-    <div className="space-y-2.5 border-t border-royal/20 bg-white px-4 py-2.5 sm:px-5">
+    <div className="mt-2.5 space-y-2.5">
       {rejected && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-s-red/40 bg-s-red-tint px-3 py-2">
           <p className="text-xs leading-relaxed text-ink">
@@ -515,23 +494,29 @@ function PermitExtras({ permit }: { permit: Permit }) {
   )
 }
 
+/**
+ * One business: a card whose heading opens onto its permits.
+ *
+ * ── Laid out to be read, not decoded [client, 5 October 2026] ─────────────
+ *
+ * "Paki ayos ui … alignments ng permit kasi jumbled pa eh, tas sa name ng
+ * business iinclude na rin BAN." The permits used to be a stack of royal bars
+ * with the badge, the number and the icons floating wherever the name left
+ * room, so no two rows lined up. Now:
+ *
+ *   - the heading names the business, its Business Account Number and how
+ *     many permits it holds, with ONE status pill on the right saying the
+ *     thing that matters most (expired, expiring soon, or valid until);
+ *   - each permit is a row on the same grid — certificate and number |
+ *     status | valid until | actions — so the eye runs straight down each
+ *     column, and on a phone the row stacks in that same order;
+ *   - requirements and a rejection sit under their own permit, indented to
+ *     it, rather than as a band across the card.
+ *
+ * The disclosure is a real `<button aria-expanded>` controlling a panel that
+ * stays in the DOM and toggles `hidden`, so `aria-controls` always resolves.
+ */
 export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGroup; defaultOpen?: boolean }) {
-  /*
-   * ---- Open, because the page exists to show these -------------------------
-   *
-   * Every section started collapsed, so a screen built "for more visibility and
-   * accessibility" of approved permits [client brief] opened showing none of
-   * them: four business names and a count, and a click needed before a single
-   * permit was on screen.
-   *
-   * Collapsed-by-default is right for a disclosure that hides detail nobody
-   * asked for. Here the detail IS what was asked for, and the heading rows are
-   * the navigation through it rather than the content.
-   *
-   * It stays a real disclosure, so a reader with a dozen businesses can shut
-   * the ones they are not working on — and `defaultOpen` is a prop rather than
-   * a constant so a caller with a long list can start them closed.
-   */
   const [open, setOpen] = useState(defaultOpen)
   const panelId = useId()
   /*
@@ -543,35 +528,23 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
   const past = group.permits.filter(isPastPermit)
   const headingId = useId()
 
-  /*
-   * Three different things the date line can be saying, and the row has to say
-   * which. `status` covers revoked and suspended, which an officer sets. Expiry
-   * is only ever a date passing, so nothing writes it down — a permit whose
-   * validity ran out last week still reads `active` in the register. Both are
-   * spelled out rather than colour-coded: an expired permit that looks current
-   * is the one mistake a download makes permanent.
-   */
-  const alarming = group.expired || group.nearing
-  /*
-   * A group can now hold nothing but copies the applicant submitted, because a
-   * business whose filing is still in flight has no issued permit yet and this
-   * list no longer waits for one. "Permit Expiration: —" on such a row would be
-   * a date the register has and is declining to print; the truth is that no
-   * permit exists to expire, and saying so is also the one sentence that tells
-   * the applicant these rows are not the permits they are waiting for.
-   */
   const noPermits = group.permits.length === 0
-  const expiryLabel = noPermits
-    ? 'No permit issued yet'
+  const pill = noPermits
+    ? { text: 'No permit issued yet', className: 'bg-canvas text-ink-secondary' }
     : group.expired
-      ? 'Permit expired: '
+      ? { text: `Permit expired · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-red-tint text-s-red' }
       : group.nearing
-        ? 'Nearing Permit Expiration: '
-        : 'Permit Expiration: '
-  const expiryDate = noPermits ? '' : formatDate(alarming ? group.soonestExpiry : group.latestExpiry)
+        ? { text: `Expires soon · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-yellow-tint text-amber-800' }
+        : { text: `Valid until ${formatDate(group.latestExpiry)}`, className: 'bg-s-green-tint text-s-green' }
+
+  const count = group.permits.length
+  const meta = [
+    group.ban ? null : 'No Business Account No. yet',
+    count > 0 ? `${count} permit${count === 1 ? '' : 's'}` : null,
+  ].filter(Boolean)
 
   return (
-    <li className="space-y-2.5">
+    <li className="overflow-hidden rounded-xl bg-white shadow-card">
       <h3>
         <button
           type="button"
@@ -579,50 +552,51 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls={panelId}
-          className="flex w-full items-center gap-4 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal sm:gap-5 sm:px-6 sm:py-5"
+          className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-royal sm:px-6"
         >
           <Triangle open={open} />
-          {/* Side by side from `sm` up as designed; stacked below it, because a
-              phone-width row put the business name and the expiry in the same
-              line and truncated the name to three characters. */}
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
-            <span className="truncate text-lg font-bold text-ink">{group.name}</span>
-            <span className={`shrink-0 text-sm italic ${alarming ? 'font-semibold text-s-red' : 'text-ink-muted'}`}>
-              {expiryLabel}
-              {expiryDate}
+          <span className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <span className="min-w-0">
+              <span className="block truncate text-lg font-bold text-ink">{group.name}</span>
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-muted">
+                {group.ban && (
+                  <span className="basis-full sm:basis-auto">
+                    Business Account No. <b className="tnum font-semibold text-ink-secondary">{group.ban}</b>
+                  </span>
+                )}
+                {meta.map((m) => (
+                  <span key={m} className="sm:before:mr-2 sm:before:content-['·'] sm:first:before:hidden">
+                    {m}
+                  </span>
+                ))}
+              </span>
+            </span>
+            <span className={`shrink-0 self-start rounded-full px-3 py-1 text-xs font-semibold sm:self-auto ${pill.className}`}>
+              {pill.text}
             </span>
           </span>
         </button>
       </h3>
-      {/*
-        * Two lists in one panel, not one list of two kinds of thing.
-        *
-        * The issued permits and the submitted copies each get their own `<ul>`
-        * under their own heading. Interleaving them would put a document the
-        * City issued and a document the applicant uploaded on consecutive rows
-        * of one list, where the only thing separating them is styling — and
-        * styling is not a distinction a screen reader passes on.
-        *
-        * `role="group"` on the wrapper, because the wrapper is now a plain div
-        * and `aria-labelledby` on a div with no role names nothing. It is a
-        * group rather than a `<section>`: a landmark per business would put a
-        * dozen regions on one page for no navigational gain.
-        */}
-      <div
-        id={panelId}
-        role="group"
-        aria-labelledby={headingId}
-        hidden={!open}
-        className="space-y-2"
-      >
+
+      <div id={panelId} role="group" aria-labelledby={headingId} hidden={!open} className="border-t border-line">
+        {group.permits.length > 0 && (
+          /* Column headings for the grid below, from `sm` up — on a phone each
+             row labels its own date instead. */
+          <div className="hidden grid-cols-[minmax(0,1fr)_7.5rem_10rem_10.5rem] gap-x-4 bg-canvas/60 px-6 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted sm:grid">
+            <span>Permit</span>
+            <span>Status</span>
+            <span>Valid until</span>
+            <span className="text-right">Actions</span>
+          </div>
+        )}
         {/*
           ── Cover, then history ───────────────────────────────────────────
 
           One list until 4 October 2026, with the replaced certificates at the
-          bottom of it in the same royal blue as the live ones. The client
-          opened last year's Sanitary Permit from that list and reported the
-          renewal as broken, which is the list doing its job badly rather than
-          the reader doing theirs: nothing about the row said it was history.
+          bottom of it looking like the live ones. The client opened last
+          year's Sanitary Permit from that list and reported the renewal as
+          broken, which is the list doing its job badly rather than the reader
+          doing theirs: nothing about the row said it was history.
 
           Asked whether renewing should stop superseding at all, so that past
           permits stay visible — they already were. `superseded` is what keeps
@@ -632,7 +606,7 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
           missing was not the records; it was the line between them.
         */}
         {current.length > 0 && (
-          <ul className="space-y-2">
+          <ul className="divide-y divide-line">
             {current.map((permit) => (
               <PermitRow key={permit.id} permit={permit} business={group.name} />
             ))}
@@ -640,7 +614,6 @@ export function BusinessRow({ group, defaultOpen = true }: { group: BusinessGrou
         )}
 
         {past.length > 0 && <PastPermits permits={past} business={group.name} />}
-
       </div>
     </li>
   )
@@ -674,7 +647,7 @@ export function useHoldings(enabled: boolean) {
      * the copy the applicant submitted is invisible — which is the whole of the
      * client's second request.
      */
-    const groupFor = (business: { id: number; name: string } | null): BusinessGroup => {
+    const groupFor = (business: { id: number; name: string; ban?: string | null } | null): BusinessGroup => {
       /*
        * `business` is typed non-nullable on Permit and is not. A soft-deleted
        * business leaves its issued permits on the register, and the default
@@ -690,10 +663,14 @@ export function useHoldings(enabled: boolean) {
        */
       const key = business?.id ?? 0
       const existing = map.get(key)
-      if (existing) return existing
+      if (existing) {
+        existing.ban ??= business?.ban ?? null
+        return existing
+      }
       const created: BusinessGroup = {
         id: key,
         name: businessName(business),
+        ban: business?.ban ?? null,
         permits: [],
         latestExpiry: null,
         soonestExpiry: null,

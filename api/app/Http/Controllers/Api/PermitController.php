@@ -36,8 +36,10 @@ class PermitController extends Controller
 {
     private array $eager = [
         // The issuing office comes down too, so the owner's screen can name it
-        // and open a conversation with it [client, 5 October 2026].
-        'permitType.department:id,name', 'business:id,name', 'application:id,tracking_id',
+        // and open a conversation with it [client, 5 October 2026]. The
+        // Business Account No. rides with the name, for the heading of each
+        // business on My Permits.
+        'permitType.department:id,name', 'business:id,name,ban', 'application:id,tracking_id',
         // What a suspended row names as its cause (5 October 2026). Two
         // constant queries; empty on a page with nothing suspended.
         'suspendedFor.department:id,name',
@@ -55,7 +57,7 @@ class PermitController extends Controller
      *
      * `business` is re-listed (in registerEager(), as a closure) WITHOUT the
      * column restriction that `$eager` puts on it and WITH retired businesses:
-     * `$eager` selects id and name only, and loads null for a soft-deleted one.
+     * `$eager` selects id, name and ban only, and loads null for a soft-deleted one.
      *
      * Two entries for one relation do NOT merge, and the FIRST wins — proved
      * by a test that read `ban: null` off a row whose business has one. So
