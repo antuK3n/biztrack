@@ -548,9 +548,10 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             className="flex items-start gap-2 rounded-md border border-line px-3 py-2 text-sm text-ink-secondary"
           >
             <InfoCircleIcon size={16} className="mt-0.5 shrink-0" />
+            {/* It opened "Demo mode. The API is simulated." until 5 October 2026
+                (Ken: no "demo" or "simulated" on screen). */}
             <p>
-              <span className="font-semibold">Demo mode</span>. The API is simulated. Sign in with{' '}
-              <span className="font-semibold">owner@biztrack.local</span> and password{' '}
+              Sign in with <span className="font-semibold">owner@biztrack.local</span> and password{' '}
               <span className="font-semibold">biztrack1</span>.
             </p>
           </div>
