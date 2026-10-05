@@ -162,6 +162,15 @@ class PaymentController extends Controller
         $this->authorizeOwner($request, $application);
 
         /*
+         * Not for a business the super admin has suspended: its filings are on
+         * hold, so a payment taken now could not move it (Ken, 5 October 2026).
+         * A suspension no longer bars the owner's account, which is what used
+         * to keep them off this endpoint. Refused before anything is assessed,
+         * recorded or sent to KwikPay, the same as BPLO's counter payment.
+         */
+        $this->workflow->refuseWhileOnHold($application->business);
+
+        /*
          * The methods on offer are the current mode's. Card exists only while
          * payments are simulated; QR Ph and GoTyme only through KwikPay.
          */

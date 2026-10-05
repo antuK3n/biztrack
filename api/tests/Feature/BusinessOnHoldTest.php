@@ -220,6 +220,30 @@ it('refuses BPLO marking a held filing paid at the counter, with the sentence fo
     'blacklisted' => ['blacklisted', HOLD_BLACKLISTED],
 ]);
 
+it('refuses the owner starting a payment on a held filing, online or simulated, and takes nothing', function (string $mode, string $method) {
+    /*
+     * Ken, 5 October 2026: a suspended business no longer bars its owner's
+     * account, so the owner reaches Pay again — and a payment taken on a
+     * filing that is on hold could not move it. Refused before anything is
+     * recorded or sent to KwikPay, with the hold's own sentence.
+     */
+    PaymentMode::set($mode === 'kwikpay' ? PaymentMode::KWIKPAY : PaymentMode::SIMULATED);
+    $app = holdFiling();
+    holdSetStatus($app->business_id, 'suspended')->assertOk();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/pay", ['method' => $method])
+        ->assertStatus(422)
+        ->assertJsonPath('message', HOLD_SUSPENDED);
+
+    expect(Payment::where('application_id', $app->id)->count())->toBe(0)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+    Http::assertNothingSent();
+})->with([
+    'simulated' => ['simulated', 'gcash'],
+    'kwikpay' => ['kwikpay', 'gcash'],
+]);
+
 it('refuses BPLO accepting the form of a held filing', function () {
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $app = Application::create([
