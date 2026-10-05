@@ -339,3 +339,13 @@ it('shows an owner their home address, and keeps it out of the super admin user 
     }
 
 });
+
+it('refuses a sign-up whose contact number is not an 11-digit 09 mobile number', function (string $mobile) {
+    // Sign-up only checked the length (max 20), so any text was stored.
+    $this->postJson('/api/v1/auth/register', ownerRegistration(['mobile_number' => $mobile]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['mobile_number'])
+        ->assertJsonPath('errors.mobile_number.0', 'A mobile number is 11 digits and starts with 09, as in 09171234567.');
+
+    expect(User::where('email', 'rosa.manalo@example.test')->exists())->toBeFalse();
+})->with(['abcdefghijk', '0917123456', '091712345678', '19171234567', '0917-123-4567', '99999999999999999999']);

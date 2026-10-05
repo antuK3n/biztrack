@@ -302,7 +302,9 @@ class AuthController extends Controller
             'suffix' => ['nullable', 'string', 'max:20'],
             'gender' => ['required', 'in:M,F'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'mobile_number' => ['required', 'string', 'max:20'],
+            // The same rule Edit Profile applies (updateProfile); it only checked
+            // the length here, so sign-up stored whatever was typed.
+            'mobile_number' => ['required', 'string', 'regex:/^09\d{9}$/'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
             'data_privacy_consent' => ['accepted'],
             /*
@@ -321,6 +323,7 @@ class AuthController extends Controller
             ...$this->homeAddressRules(),
         ], [
             'email.unique' => 'This email is already registered. Try signing in instead.',
+            'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
             'data_privacy_consent.accepted' => 'You must agree to the data privacy notice to continue.',
             ...$this->homeAddressMessages(),
         ]);

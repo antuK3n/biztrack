@@ -25,6 +25,7 @@ import type { User } from '../../lib/types'
 import {
   normalizeMobile,
   validateEmail,
+  MOBILE_DIGITS,
   validateMobile,
   validatePassword,
   validatePasswordConfirmation,
@@ -247,6 +248,25 @@ export function RegisterPage() {
     })
   }
 
+  /*
+   * The contact number takes digits only and stops at eleven, so it cannot be
+   * typed or pasted past what a mobile number is; a pasted +63 917… becomes
+   * 0917…. It is checked as it is typed: a wrong start is said at once, and
+   * the full rule as soon as eleven digits are in, rather than only on Sign Up.
+   */
+  function setMobile(raw: string) {
+    let digits = raw.replace(/\D/g, '')
+    if (digits.startsWith('63') && digits.length > MOBILE_DIGITS - 1) digits = `0${digits.slice(2)}`
+    digits = digits.slice(0, MOBILE_DIGITS)
+    setValues((prev) => ({ ...prev, mobile_number: digits }))
+    const wrongStart = digits.length >= 2 && !digits.startsWith('09')
+    setErrors((prev) =>
+      wrongStart || digits.length === MOBILE_DIGITS || prev.mobile_number
+        ? { ...prev, mobile_number: validateMobile(digits) }
+        : prev,
+    )
+  }
+
   function blurValidate(name: FieldName) {
     // Don't scold users for tabbing through an empty field they haven't used;
     // required-field errors surface on submit instead.
@@ -445,10 +465,10 @@ export function RegisterPage() {
               id="reg-mobile"
               type="tel"
               autoComplete="tel-national"
-              inputMode="tel"
+              inputMode="numeric"
               placeholder="Contact Number"
               value={values.mobile_number}
-              onChange={(e) => setValue('mobile_number', e.target.value)}
+              onChange={(e) => setMobile(e.target.value)}
               onBlur={() => blurValidate('mobile_number')}
               aria-invalid={errors.mobile_number ? true : undefined}
               aria-describedby={errors.mobile_number ? 'reg-mobile-error' : undefined}
