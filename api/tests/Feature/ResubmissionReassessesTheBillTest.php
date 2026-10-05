@@ -85,10 +85,12 @@ it('re-bills a returned renewal whose gross sales were corrected', function () {
 
     // What a renewal declaring ₱5,000,000 is billed when filed that way.
     $control = $renewal($profile(5_000_000));
+    attachRequiredDocuments($control);
     $this->postJson("/api/v1/applications/{$control}/submit")->assertOk();
     $expected = (float) Application::find($control)->feeAssessment->total_amount;
 
     $appId = $renewal($profile(200_000));
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     $first = (float) Application::find($appId)->feeAssessment->total_amount;
     expect($first)->not->toBe($expected);

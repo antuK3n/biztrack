@@ -215,6 +215,7 @@ it('answers the wizard for the pin and line on screen', function () {
 
 it('refuses to submit a new filing whose pin is in a zone that clearly does not allow its line', function () {
     $refused = pzDraft('Longos', [14.659117, 120.957631], '52101');
+    attachRequiredDocuments($refused);
     $this->postJson("/api/v1/applications/{$refused}/submit")
         ->assertUnprocessable()
         ->assertJsonPath('message', 'Warehousing and storage isn\'t allowed in the Homes and apartments, some small shops'.PZ_SENTENCE)
@@ -224,6 +225,7 @@ it('refuses to submit a new filing whose pin is in a zone that clearly does not 
     // Allowed, unclear, or with no pin at all: submitted as before.
     foreach ([['Longos', [14.659117, 120.957631], '47111'], ['Catmon', [14.669393, 120.959980], '52101'], ['Longos', null, '52101']] as [$barangay, $pin, $code]) {
         $id = pzDraft($barangay, $pin, $code);
+        attachRequiredDocuments($id);
         $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
     }
 });
@@ -232,18 +234,22 @@ it('refuses an amendment that moves the business, or changes its line, to where 
     $acacia = (string) pzBarangay('Acacia')->id;
 
     $move = pzAmendment(['address_barangay_id' => $acacia, 'address_pin' => '14.667975,120.969217']);
+    attachRequiredDocuments($move);
     $this->postJson("/api/v1/applications/{$move}/submit")->assertUnprocessable()
         ->assertJsonPath('errors.zoning.0', 'Retail sale of pharmaceutical goods (pharmacy) isn\'t allowed in the Industry'.PZ_SENTENCE);
 
     $trade = pzAmendment(['line_of_business' => (string) pzPsic('52101')->id]);
+    attachRequiredDocuments($trade);
     $this->postJson("/api/v1/applications/{$trade}/submit")->assertUnprocessable()
         ->assertJsonPath('errors.zoning.0', 'Warehousing and storage isn\'t allowed in the Homes and apartments, some small shops'.PZ_SENTENCE);
 
     // Moving within what the zone allows, or changing nothing about place
     // or trade, is not judged.
     $fine = pzAmendment(['address_pin' => '14.6572,120.9573']);
+    attachRequiredDocuments($fine);
     $this->postJson("/api/v1/applications/{$fine}/submit")->assertOk();
     $street = pzAmendment(['address_street' => 'Rizal Avenue']);
+    attachRequiredDocuments($street);
     $this->postJson("/api/v1/applications/{$street}/submit")->assertOk();
 });
 
@@ -280,6 +286,7 @@ it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is un
     // Read as CPDO reads it, through its assignment: the application
     // endpoint does not load the office sheets at all.
     $sheets = function (int $id): array {
+        attachRequiredDocuments($id);
         $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
         $department = assignOffice($id, 'CPDO');
         $assignment = ApplicationAssignment::where('application_id', $id)->where('department_id', $department)->value('id');

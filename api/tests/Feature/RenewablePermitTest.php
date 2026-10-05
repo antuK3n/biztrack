@@ -75,6 +75,7 @@ function rnpRenew(int $businessId, Permit $permit)
 function rnpSubmit(int $appId)
 {
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
 
     return test()->postJson("/api/v1/applications/{$appId}/submit");
 }

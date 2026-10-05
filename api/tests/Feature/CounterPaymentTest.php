@@ -41,6 +41,7 @@ function filingAwaitingCounterPayment(): Application
         ->assertCreated()
         ->json('data');
 
+    attachRequiredDocuments($draft['id']);
     test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$draft['id']}/submit")
         ->assertOk()
@@ -140,6 +141,7 @@ it('refuses a filing BPLO has not approved yet, with a plain sentence', function
 
     // Submitted, but BPLO has not approved the main form — ForApproval, not
     // PendingPayment, so there is nothing yet to pay.
+    attachRequiredDocuments($draft['id']);
     test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$draft['id']}/submit")
         ->assertOk();

@@ -849,6 +849,7 @@ it('refuses to approve a move until the new address is cleared', function () {
 it('carries the zoning clearance for a move added after BPLO returns the amendment', function () {
     [$appId, $businessId] = amendmentFiling(['trade_name' => 'Before Return']);
     $owner = authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     expect(Application::findOrFail($appId)->permitTypes()->pluck('code')->all())
         ->toBe([PermitType::OUTCOME_CODE]);

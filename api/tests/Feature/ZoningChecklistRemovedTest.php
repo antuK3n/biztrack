@@ -57,6 +57,7 @@ it('keeps no zoning answers with a draft, and sends no checklist with the filing
     $this->putJson("/api/v1/applications/{$id}", ['zoning_facts' => ['persons_engaged' => 3]])->assertOk();
     expect(DB::table('applications')->where('id', $id)->value('zoning_facts'))->toBeNull();
 
+    attachRequiredDocuments($id);
     $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
     $payload = json_encode($this->getJson("/api/v1/applications/{$id}")->assertOk()->json('data'));
     expect($payload)->not->toContain('"zoning_facts"')

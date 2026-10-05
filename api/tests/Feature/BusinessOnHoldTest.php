@@ -286,7 +286,7 @@ it('refuses a passing visit on a held filing and issues nothing, but still recor
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
     $visit = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
 
     holdSetStatus($app->business_id, 'suspended')->assertOk();
@@ -312,7 +312,7 @@ it('refuses booking, moving or re-booking a visit on a held filing', function ()
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
     $visit = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
 
     holdSetStatus($app->business_id, 'suspended')->assertOk();

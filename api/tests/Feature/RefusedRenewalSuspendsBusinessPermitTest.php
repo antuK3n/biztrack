@@ -106,7 +106,7 @@ function rrsReapplyAndPass(Application $app): void
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$cho}/approve")->assertOk();
     $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
     test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
 }

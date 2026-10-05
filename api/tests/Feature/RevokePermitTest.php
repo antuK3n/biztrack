@@ -314,6 +314,7 @@ function revokedMidRenewal(): array
         'application_type' => 'renewal',
         'prior_permit_ids' => [$permit->id],
     ])->assertCreated()->json('data.id');
+    attachRequiredDocuments($renewalId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$renewalId}/submit")->assertOk();
 
     return [$permit, $renewalId];
@@ -384,6 +385,7 @@ it('leaves a renewal draft alone, which then cannot be submitted', function () {
         ->assertOk();
 
     expect(Application::find($draftId)->status)->toBe(ApplicationStatus::Draft);
+    attachRequiredDocuments($draftId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$draftId}/submit")
         ->assertStatus(422)
