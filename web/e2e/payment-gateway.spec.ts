@@ -227,7 +227,8 @@ test.describe('paying a different way', () => {
     await page.getByRole('button', { name: 'Pay a different way' }).click()
     await dialog.getByRole('button', { name: "I haven't paid — choose another way" }).click()
     await expect(page.getByRole('heading', { name: 'Tax Order of Payment' })).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText(/is set aside\. If it goes through after all, BPLO will contact you/)).toBeVisible()
+    // No set-aside notice any more (Ken, 6 October 2026); the choice simply comes back.
+    await expect(page.getByText(/is set aside/)).toHaveCount(0)
     await shot(page, 'online-set-aside')
 
     // Pay with GCash, a new order, and it goes through.

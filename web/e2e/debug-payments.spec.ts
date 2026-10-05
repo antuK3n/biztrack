@@ -10,15 +10,14 @@ import { gateway, makeBilledApplication, type GatewayState } from './payments'
  * see the real amount, the super admin flips the charge to the full bill from
  * /admin/debug and flips it back after [Ken, 2026-10-04]. These prove the
  * flip happens on screen and on the server, and that the owner's pay screen
- * says "₱1.00" before paying while — and only while — that is what will be
- * collected.
+ * says nothing about it: it behaves as in production (Ken, 6 October 2026).
  *
  * ── What the stack needs ──────────────────────────────────────────────────
  *
  * The flip itself needs nothing. The owner's half needs KwikPay CONFIGURED on
  * the stack (KWIKPAY_KEY and friends; see payment-gateway.spec.ts), because
- * the note only shows while payments are online, and the last test needs the
- * practice KwikPay as well. Without them those tests skip with the reason.
+ * the test charge only applies while payments are online, and the last test
+ * needs the practice KwikPay as well. Without them those tests skip with the reason.
  *
  * Both switches are put back to how this spec found them, whatever happens,
  * so a failure here cannot leave the rest of the suite paying online or at
@@ -130,26 +129,26 @@ test.describe('the owner', () => {
     await expect(page.getByRole('link', { name: 'Debug' })).toHaveCount(0)
   })
 
-  test('is told about the ₱1 test charge before paying, and only while it applies', async ({ page, browser }) => {
+  test('is not told about the test charge, whichever way the switches are', async ({ page, browser }) => {
     const online = await gateway(browser, { mode: 'kwikpay', charge: 'test' })
     test.skip(!online.ok, `KwikPay cannot be turned on on this stack: ${online.text}`)
-    const amount = `₱${online.data?.test_amount}`
 
     const appId = await makeBilledApplication(page)
     await page.setViewportSize({ width: 1280, height: 900 })
     await openPayPage(page, appId)
 
-    const note = page.getByRole('status').filter({ hasText: 'You will be charged' })
-    await expect(note).toContainText(`You will be charged ${amount} for this bill instead of ₱`)
-    await expect(note).toContainText('The bill and your receipt keep the full amount.')
-    // No "Test charge" title over it (Ken, 5 October 2026).
+    // The owner is not told the charge differs from the bill (Ken, 6 October 2026).
+    const note = page.getByText(/you will be charged|keep the full amount/i)
+    await expect(page.getByRole('button', { name: 'Pay Online' })).toBeVisible()
+    await expect(note).toHaveCount(0)
+    // Nor the words "test charge" (Ken, 5 October 2026).
     await expect(page.getByText(/test charge/i)).toHaveCount(0)
     await shot(page, 'pay-test-charge-1280')
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(note).toBeVisible()
+    await expect(note).toHaveCount(0)
     await shot(page, 'pay-test-charge-390')
 
-    // The full bill: no note.
+    // The full bill: still no note.
     expect((await gateway(browser, { charge: 'full' })).ok).toBe(true)
     await openPayPage(page, appId)
     await expect(note).toHaveCount(0)
@@ -181,7 +180,7 @@ test.describe('the owner', () => {
 
     const qr = page.getByRole('img', { name: `QR code to pay ${amount}` })
     await expect(qr).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText(/^Your bill of ₱[\d,.]+ is recorded in full\.$/)).toBeVisible()
+    await expect(page.getByText(/is recorded in full/)).toHaveCount(0)
     await shot(page, 'pay-test-charge-waiting-1280')
 
     // The super admin moves to the full bill while this one is waiting.

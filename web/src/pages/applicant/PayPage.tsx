@@ -39,20 +39,14 @@ import type { FeeAssessment, Payment, PaymentMethod, PaymentOptions } from '../.
  *
  * While the super admin's charge switch says `test`, the payment service
  * collects ₱1.00 however large the bill (docs/payment-gateway.md). The page
- * says so before the owner pays (`options.test_charge`), so a panelist
- * watching a ₱1 payment settle a ₱2,000 bill sees that it is deliberate. Once
- * a payment is open, the waiting screen shows what that payment asks for
+ * does not say so: it behaves as in production (Ken, 6 October 2026). Once a
+ * payment is open, the waiting screen shows what that payment asks for
  * (`gateway_amount`), which a later switch does not change.
  */
 
 /** What the payment service was asked to collect, falling back to the bill. */
 function collected(payment: Payment): string {
   return payment.gateway_amount ?? payment.amount
-}
-
-/** True when this payment collects a test amount rather than its bill. */
-function isTestCharge(payment: Payment): boolean {
-  return payment.gateway_amount != null && Number(payment.gateway_amount) !== Number(payment.amount)
 }
 
 const POLL_MS = 5000
@@ -91,8 +85,6 @@ export function PayPage() {
   const [checking, setChecking] = useState(false)
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
   const [checkNote, setCheckNote] = useState<string | null>(null)
-  /** Said on the choose screen after "Pay a different way" set a payment aside. */
-  const [setAsideNote, setSetAsideNote] = useState<string | null>(null)
   const [abandoning, setAbandoning] = useState(false)
 
   /* ── Resume: back from the payment app, or a payment already in flight ── */
@@ -182,7 +174,6 @@ export function PayPage() {
     setAttempt(null)
     setPayError(null)
     setCheckNote(null)
-    setSetAsideNote(null)
     setParams({}, { replace: true })
     reloadOptions()
   }
@@ -193,7 +184,7 @@ export function PayPage() {
    * because an open order may have been paid a moment ago:
    *   completed → it was; show Paid, and there is nothing more to pay
    *   failed    → back to the choice
-   *   set aside → back to the choice, saying what happens if it was paid
+   *   set aside → back to the choice
    */
   async function payDifferently() {
     if (!attempt || abandoning) return
@@ -205,12 +196,7 @@ export function PayPage() {
         setAttempt(p)
         return
       }
-      const note =
-        p.status === 'pending'
-          ? `Your ${paymentMethodLabel(p.method)} payment (${p.reference_number}) is set aside. If it goes through after all, BPLO will contact you about refunding the extra payment.`
-          : null
       tryAgain()
-      setSetAsideNote(note)
     } catch (err) {
       setCheckNote(toApiError(err).message)
     } finally {
@@ -390,11 +376,6 @@ export function PayPage() {
           <Alert variant="error">{payError}</Alert>
         </div>
       )}
-      {setAsideNote && !payError && (
-        <div className="mb-4">
-          <Alert variant="info">{setAsideNote}</Alert>
-        </div>
-      )}
 
       {/* ── Tax Order of Payment card (p51) ────────────────────────────── */}
       <ProtoCard className="px-8 py-7 sm:px-10">
@@ -478,23 +459,6 @@ export function PayPage() {
         )}
       </fieldset>
 
-      {/*
-        Before the button, not after it: this is what the owner is about to
-        be charged, and it is not the Total Amount on the card above. Info,
-        not a warning — nothing is wrong. No title: it was "Test charge"
-        until Ken asked for every "test" and "simulated" on screen to go
-        [2026-10-05], and the sentence says all of it.
-      */}
-      {online && options?.test_charge && !overCounter && (
-        <div className="mt-6">
-          <Alert variant="info">
-            You will be charged {formatMoney(options.test_charge)} for this bill
-            {assessment ? ` instead of ${formatMoney(assessment.total_amount)}` : ''}. The bill and your
-            receipt keep the full amount.
-          </Alert>
-        </div>
-      )}
-
       {overCounter ? (
         <p className="mt-7 text-center text-sm text-ink">
           Pay at the BPLO counter, Malabon City Hall. BPLO records your payment.
@@ -576,12 +540,6 @@ function WaitingCard({
           Finish paying <span className="tnum font-semibold text-ink">{amount}</span> in your{' '}
           {paymentMethodLabel(payment.method)} app. If you have already paid, this page updates by
           itself once the payment is confirmed — usually within a minute.
-        </p>
-      )}
-
-      {isTestCharge(payment) && (
-        <p className="max-w-md text-center text-xs text-ink-muted">
-          Your bill of {formatMoney(payment.amount)} is recorded in full.
         </p>
       )}
 
