@@ -58,9 +58,10 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     /*
      * 2. A DRAFT application. Only the business permit is named, and that is
      * the point: which permits a filing must obtain is not the applicant's to
-     * choose any more. `attachRequiredPermitTypes()` runs at submission and
-     * attaches BUSINESS plus all five required clearances, so asking for a
-     * short list here and getting the full six back is the rule, not a leak.
+     * choose. Since 5 October 2026 it is BPLO's (client: "BPLO decides, no
+     * rules") — the filing is submitted carrying the business permit alone
+     * and BPLO's form approval attaches the clearances it ticks; here, all
+     * five (`bploApprovesForm`'s default for a filing carrying none).
      */
     $appRes = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
@@ -83,7 +84,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     expect(Application::find($appId)->status->value)->toBe('for_approval');
-    expect(Application::find($appId)->permitTypes()->count())->toBe(6);
+    expect(Application::find($appId)->permitTypes()->count())->toBe(1);
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1);
 
     /*
@@ -96,9 +97,10 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
      */
     bploApprovesForm($appId);
     expect(Application::find($appId)->status->value)->toBe('pending_payment');
+    expect(Application::find($appId)->permitTypes()->count())->toBe(6);
 
-    // 5. Pay -> approved. One bill, raised at submission, covering
-    // the business permit and all five clearances (spec rule 4).
+    // 5. Pay -> approved. One bill, re-assessed at BPLO's approval, covering
+    // the business permit and the five clearances it ticked (spec rule 4).
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
     expect(Application::find($appId)->status->value)->toBe('approved');
 

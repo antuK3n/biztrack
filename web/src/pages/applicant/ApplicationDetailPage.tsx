@@ -702,9 +702,15 @@ export function ApplicationDetailPage() {
               sentence promised a bill that never comes (tester, 5 October 2026).
             */}
             <p className="mt-2 text-sm italic text-ink-secondary">
+              {/*
+                A new filing's other permits are BPLO's to list at this
+                stage since 5 October 2026 (client: "BPLO decides, no rules").
+              */}
               {isAmendment
                 ? 'BPLO is reading your amendment.'
-                : 'BPLO is reading your form. Your fees are assessed once it is approved.'}
+                : app.application_type === 'new'
+                  ? 'BPLO is reading your form and will list the other permits you need. Your fees are assessed once it is approved.'
+                  : 'BPLO is reading your form. Your fees are assessed once it is approved.'}
             </p>
             {app.deadline_at && (
               <p className="mt-3 text-base italic text-ink-secondary">
@@ -1081,10 +1087,16 @@ export function ApplicationDetailPage() {
               "Released on payment." The clearance screen carried the same
               claim and the client caught it there on 29 September 2026.
             */}
+            {/*
+              "Covers all five" until 5 October 2026: BPLO now lists a new
+              business's other permits when it approves the form, so before
+              that there is no set to name, and after it the bill covers
+              exactly the ones listed.
+            */}
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once BPLO approves this application and you have paid. Each is a
-              separate certificate from its own city office, and your payment already covers
-              all five.
+              {app.application_type === 'new' && (status === 'for_approval' || status === 'returned')
+                ? 'BPLO lists the ones this business needs when it approves your form. They open once you have paid, and your payment covers them.'
+                : 'These open once BPLO approves this application and you have paid. Each is a separate certificate from its own city office, and your payment covers them.'}
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}

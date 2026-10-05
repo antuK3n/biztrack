@@ -942,7 +942,8 @@ export function statusFlowFor(flow: GuideFlow): ApplicationStatus[] {
  */
 export const GUIDE_BY_FLOW: Partial<Record<GuideFlow, Partial<Record<ApplicationStatus, string>>>> = {
   new: {
-    approved: 'Your Business Permit is released. Now apply for your other permits.',
+    // "BPLO listed": since 5 October 2026 BPLO picks a new business's other permits.
+    approved: 'Your Business Permit is released. Now apply for the other permits BPLO listed.',
   },
 }
 

@@ -136,7 +136,12 @@ it('does not force the Mayor’s Permit onto a renewal that left it out', functi
         ->and(codesOn($app))->not->toContain('BUSINESS');
 });
 
-it('still attaches all six to a new application', function () {
+/*
+ * Renamed from "still attaches all six to a new application" on 5 October
+ * 2026: a new filing is now submitted with the business permit alone and BPLO
+ * ticks its other permits at approval (client: "BPLO decides, no rules").
+ */
+it('attaches nothing beyond the business permit to a new application at submission', function () {
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $business = Business::where('owner_user_id', $owner->id)->firstOrFail();
 
@@ -150,8 +155,7 @@ it('still attaches all six to a new application', function () {
 
     app(WorkflowService::class)->submit($app->fresh());
 
-    expect(codesOn($app->fresh()))
-        ->toBe(['BUSINESS', 'CEC', 'FSIC', 'OCCUPANCY', 'SANITARY', 'ZONING']);
+    expect(codesOn($app->fresh()))->toBe(['BUSINESS']);
 });
 
 it('attaches a ticked permit’s type even when the caller forgot to', function () {

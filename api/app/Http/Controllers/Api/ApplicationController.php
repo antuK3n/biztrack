@@ -187,14 +187,27 @@ class ApplicationController extends Controller
             // business name everywhere it is displayed.
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             /*
-             * Annual only (checklist 2026-09-27, renew item 3). The renewal form
-             * offered Annually / Semi-Annually / Quarterly, after the paper
-             * MCG-BPLO-FO-002, and nothing ever acted on the answer: the Tax
-             * Order of Payment bills the full year either way, and the Revenue
-             * Code (Sec. 2N) has no semi-annual instalment at all. The choice
-             * is gone from the form; a new filing is annual and any other value
-             * is refused. Filings that already hold another mode keep it, and
-             * the staff screens still print it.
+             * The three MCG-BPLO-FO-002 prints, which is one more than the
+             * ordinance provides for.
+             *
+             * Revenue Code Sec. 2N allows annual (first 20 days of January) and
+             * quarterly (first 20 days of January, April, July and October).
+             * There is no semi-annual instalment in the Code — but the renewal
+             * form the city hands out at the counter prints one, so an
+             * applicant can and does tick it, and refusing the answer here
+             * would make BizTrack unable to record a paper filing faithfully.
+             *
+             * Recorded, not acted on. Nothing downstream splits a bill.
+             *
+             * ── Annual only, since 5 October 2026 ─────────────────────────
+             *
+             * Client: *"remove the Annually, Semi-annually, and Quarterly
+             * options in the renewal … every payment is annually so that the
+             * business owner only pays one time"* — and asked whether to keep
+             * a one-option box: *"Remove the question entirely."* The wizard
+             * no longer asks, so only `annual` is accepted. The column, its
+             * `annual` default and the resource field stay: filings recorded
+             * before this date hold the other two, and reports read them.
              */
             'payment_mode' => ['sometimes', 'in:annual'],
             /*
@@ -454,7 +467,7 @@ class ApplicationController extends Controller
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
-            // Annual only - see the note on the same key in store().
+            // Annual only since 5 October 2026 — see the note in store().
             'payment_mode' => ['sometimes', 'in:annual'],
             // See the note on the same key in store(): `boolean`, not
             // `accepted`, because a draft may legitimately be saved before the

@@ -76,10 +76,19 @@ class PermitType extends Model
      * runs once at submission and nothing re-derives it afterwards. That is on
      * purpose — an LGU adding a requirement must not retroactively block
      * applications people have already paid for.
+     *
+     * ── "Every application" is no longer what this means ─────────────────
+     *
+     * Since 5 October 2026 a new filing does not carry all of these: BPLO
+     * ticks which of them a new business needs when it approves the form
+     * (client: *"BPLO decides, no rules — but without pre-ticked"*), and the
+     * filing carries those (`WorkflowService::approveMainForm`). This list is
+     * now the set BPLO may tick from, and "required" means "required once on
+     * the filing" — readiness still counts every one the filing carries.
      */
     public const REQUIRED_CLEARANCE_CODES = ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'];
 
-    /** Is this one of the five every application must obtain? */
+    /** Is this one of the five clearances (the set BPLO ticks from on a new filing)? */
     public function isRequiredClearance(): bool
     {
         return in_array($this->code, self::REQUIRED_CLEARANCE_CODES, true);

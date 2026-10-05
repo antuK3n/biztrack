@@ -181,6 +181,15 @@ decide what building them would mean:
   row is written at ₱0 anyway: the stacking is then real and visible, the
   January line already says what it is for, and the day BPLO names a price it
   is one constant and nothing else changes.
+
+  **5 October 2026:** the amount is now **₱200** (`config('biztrack.amendment_fee')`,
+  env `BIZTRACK_AMENDMENT_FEE`) — an assumption from comparable LGUs' schedules
+  (Manila ₱100, Quezon City ₱200, Makati ₱300) while question A31 in
+  `questions-for-malabon.md` asks BPLO for Malabon's own figure. It is still
+  deferred to the next Business Permit renewal, never billed on the amendment.
+  A move's **Zoning Clearance** fee is now deferred the same way when CPDO
+  issues it (`WorkflowService::recordDeferredFee`); before this date it was
+  neither billed nor deferred.
 - **Can a business move BARANGAY?** Only the street line is amendable today. A
   move across barangays is still a counter visit.
 - **Does a move need the clearances redone?** The client chose notification over

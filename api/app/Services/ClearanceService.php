@@ -121,9 +121,11 @@ class ClearanceService
          * to a filing that was already priced and paid.
          *
          * So the stage renders the filing's own set. On a new application that
-         * is still all five and nothing changes; `attachRequiredPermitTypes`
-         * has already attached them by the time this stage is reachable, since
-         * it is gated on payment.
+         * is the clearances BPLO ticked when it approved the form (client,
+         * 5 October 2026: "BPLO decides, no rules") — attached by
+         * `WorkflowService::approveMainForm` before the bill, so always in
+         * place by the time this stage is reachable, since it is gated on
+         * payment. An unticked clearance is simply not a row here.
          */
         $carried = $application->permitTypes->pluck('id')->flip();
         $rows = $types
@@ -631,12 +633,17 @@ class ClearanceService
          * were "not open on this application yet", with no way to learn what
          * would open them. A locked stage that cannot say what unlocks it is the
          * exact failure this docblock exists to forbid.
+         *
+         * "The five LGU clearances" went on 5 October 2026: BPLO now picks
+         * which of the five a new business needs when it approves the form
+         * (client: "BPLO decides, no rules"), so before that moment nobody
+         * knows how many will open, and after it they are the ones BPLO listed.
          */
         return match ($application->status) {
-            ApplicationStatus::Draft => 'Finish and submit this application first. BPLO reviews your Business Permit form, then you settle the Tax Order of Payment — the five LGU clearances open here once that payment clears.',
-            ApplicationStatus::ForApproval => 'BPLO is reviewing your Business Permit form. Once it is approved you will be given a Tax Order of Payment, and the five LGU clearances open here as soon as you have settled it.',
-            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment for your Business Permit. The five LGU clearances open here the moment that payment clears.',
-            ApplicationStatus::Returned => 'BPLO sent this application back for changes. Make them and submit it again — the five LGU clearances open here once it has been approved and paid for.',
+            ApplicationStatus::Draft => 'Finish and submit this application first. BPLO reviews your Business Permit form and lists the other permits you need; they open here once you pay.',
+            ApplicationStatus::ForApproval => 'BPLO is reviewing your Business Permit form and will list the other permits you need. They open here once you pay.',
+            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment. The other permits BPLO listed open here the moment that payment clears.',
+            ApplicationStatus::Returned => 'BPLO sent this application back for changes. Make them and submit it again — the other permits open here once it is approved and paid for.',
             ApplicationStatus::Rejected => 'This application was not approved, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             ApplicationStatus::Cancelled => 'This application was cancelled, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             /*
@@ -761,7 +768,10 @@ class ClearanceService
          */
         if ($type->isRequiredClearance()) {
             throw ValidationException::withMessages([
-                'permit_type' => [$type->name.' is required on every application and cannot be withdrawn.'],
+                // "Required on every application" until 5 October 2026; BPLO
+                // now lists a new business's clearances, and a listed one is
+                // on the bill, so it still cannot be withdrawn here.
+                'permit_type' => [$type->name.' is on your bill and cannot be withdrawn.'],
             ]);
         }
 

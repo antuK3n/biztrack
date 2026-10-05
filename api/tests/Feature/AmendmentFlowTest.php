@@ -589,10 +589,9 @@ it('stacks the amendment fee for the January renewal to collect', function () {
      * fee amounts stacked up until they are ready to be paid on the business
      * permit renewal on January."*
      *
-     * The same pile the deferred clearance fees go into. The AMOUNT is ₱0 and
-     * deliberately so — A10-2016 as seeded carries no amendment fee — but the
-     * row is written anyway, so the stacking is real and the line is visible
-     * the day a figure is given.
+     * The same pile the deferred clearance fees go into. The AMOUNT was ₱0
+     * until 5 October 2026 — A10-2016 as seeded carries no amendment fee —
+     * and is ₱200 since, an assumption pending BPLO's answer to A31.
      */
     [$appId, $businessId] = amendmentFiling(['business_area_sqm' => '250']);
     $owner = authAs('owner@biztrack.local');
@@ -611,7 +610,8 @@ it('stacks the amendment fee for the January renewal to collect', function () {
         // It says what it is for, so the January line does not read as a
         // second business-permit fee beside the real one.
         ->and($fee->description)->toContain('Amendment')
-        ->and($fee->description)->toContain('Floor area');
+        ->and($fee->description)->toContain('Floor area')
+        ->and((float) $fee->amount)->toBe(200.0);
 });
 
 it('does not stack the same amendment twice', function () {
@@ -662,10 +662,77 @@ it('prices the amendment from the LGU setting, not from the ordinance', function
         ->and($fee->billed_on_application_id)->toBeNull();
 });
 
-it('defaults the amendment fee to zero while the LGU has not set one', function () {
-    // Zero because it is unknown, not because it is free — and the row is
-    // written regardless, so the January line exists and says what it is for.
-    expect(config('biztrack.amendment_fee'))->toBe(0.0);
+it('defaults the amendment fee to ₱200 while the LGU has not set one', function () {
+    /*
+     * It was zero until 5 October 2026 — unknown, not free. The client asked
+     * for a figure: ₱200, the middle of Manila ₱100 / Quezon City ₱200 /
+     * Makati ₱300, an assumption until BPLO answers A31.
+     */
+    expect(config('biztrack.amendment_fee'))->toBe(200.0);
+});
+
+it('defers a move’s Zoning Clearance fee to the next Business Permit renewal', function () {
+    /*
+     * The gap closed on 5 October 2026: a move carries a new Zoning
+     * Clearance, CPDO issues it, and its fee was neither billed (an amendment
+     * raises no bill) nor deferred (`recordDeferredFee` handled renewals
+     * only). The client's rule for amendments is the deferral, so it now
+     * joins the pile the next Business Permit renewal sweeps.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'address_street' => 'Rizal Avenue',
+        'address_pin' => '14.6600,120.9500',
+    ]);
+    $zoningType = PermitType::where('code', 'ZONING')->firstOrFail();
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    satisfyChecklist(Application::findOrFail($appId), $zoningType);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", ['form_data' => [], 'submit' => true])
+        ->assertSuccessful();
+
+    $cpdo = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', Department::where('code', 'CPDO')->value('id'))
+        ->firstOrFail();
+    test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$cpdo->id}/approve")->assertOk();
+    $visitId = test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/permits/ZONING/inspection", ['scheduled_at' => now()->toDateTimeString()])
+        ->assertCreated()->json('data.id');
+    test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+
+    $fee = UnbilledPermitFee::where('application_id', $appId)
+        ->where('permit_type_id', $zoningType->id)
+        ->sole();
+
+    expect($fee->business_id)->toBe($businessId)
+        ->and((float) $fee->amount)->toBeGreaterThan(0.0)
+        // An amendment is not a renewal: there is no term to be late against.
+        ->and((float) $fee->surcharge + (float) $fee->interest)->toBe(0.0)
+        ->and($fee->billed_on_application_id)->toBeNull();
+
+    // January: the Business Permit renewal's bill claims it.
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $prior = Permit::where('business_id', $businessId)
+        ->where('permit_type_id', PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'))
+        ->latest('id')->firstOrFail();
+    $january = Application::create([
+        'business_id' => $businessId,
+        'applicant_user_id' => $owner->id,
+        'application_type' => 'renewal',
+        'status' => 'draft',
+        'prior_permit_id' => $prior->id,
+    ]);
+    $january->priorPermits()->sync([$prior->id]);
+    $january->permitTypes()->sync([$prior->permit_type_id]);
+    app(WorkflowService::class)->submit($january->fresh());
+
+    expect($fee->fresh()->billed_on_application_id)->toBe($january->id)
+        ->and(collect($january->fresh()->feeAssessment->line_items)->pluck('label')->implode(' | '))
+        ->toContain($zoningType->name);
 });
 
 it('carries the zoning clearance when the premises move, not when an address is respelled', function () {

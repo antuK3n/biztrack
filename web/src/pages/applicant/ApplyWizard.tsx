@@ -328,6 +328,20 @@ const BASE_PHASES: BasePhase[] = [
  * CPDD's sheet becomes a step between the changes and the documents; one that
  * only corrects how an address is written does not, and never sees it.
  */
+/*
+ * ── No Mode of Payment question, since 5 October 2026 ───────────────────
+ *
+ * The renewal step asked it as MCG-BPLO-FO-002 prints it: Annually,
+ * Semi-Annually, Quarterly. Revenue Code Sec. 2N allows quarterly tax
+ * instalments, semi-annual was never in the Code, and the system has only
+ * ever billed once — one Tax Order of Payment for the year — so the answer
+ * was stored and read by nothing. The client: *"remove the Annually,
+ * Semi-annually, and Quarterly options in the renewal … every payment is
+ * annually so that the business owner only pays one time"*, and asked about
+ * a one-option box, *"Remove the question entirely."* The server writes
+ * `annual` by default and accepts nothing else.
+ */
+
 const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 'review']
 
 /**
@@ -3727,7 +3741,6 @@ export function ApplyWizard() {
   }
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
-
   /*
    * ── All five at once, not one after another ────────────────────
    *
@@ -9635,8 +9648,8 @@ export function ApplyWizard() {
               'inspection. No action needed from you right now — nothing is due today, and ' +
               'the fee joins your next business permit renewal in January.'
             : 'BPLO is now reviewing your form. No action needed from you right now — we will ' +
-              'tell you when your Tax Order of Payment is ready, and your five LGU clearances ' +
-              'open once it is paid.'}
+              'tell you when your Tax Order of Payment is ready, and the other permits BPLO ' +
+              'lists open once it is paid.'}
         </p>
         <div className="mt-3 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
@@ -12347,14 +12360,6 @@ export function ApplyWizard() {
             </div>
           )}
 
-          {/*
-            Mode of Payment (Annually / Semi-Annually / Quarterly, after
-            MCG-BPLO-FO-002) was asked here until checklist 2026-09-27, renew
-            item 3: a filing is annual, which is all the Tax Order of Payment
-            ever billed, and Revenue Code Sec. 2N has no semi-annual instalment.
-            The server files annual and refuses the others. Bringing quarterly
-            back needs a bill that is actually split, not only a recorded answer.
-          */}
         </div>
       </WizardSection>
 
@@ -13241,9 +13246,13 @@ export function ApplyWizard() {
                 ? `${renewingOffice ?? 'The issuing office'} reviews this and inspects your ` +
                   'premises. Nothing to pay now — the fee joins your next business permit ' +
                   'renewal in January.'
+                : applicationType === 'new'
+                ? 'BPLO reviews this form and lists the other permits you need. You pay one Tax '
+                  + 'Order of Payment; your Business Permit is released and the other permits '
+                  + 'BPLO confirmed open.'
                 : 'BPLO reviews this form first. If they accept it, we raise your Tax Order of '
                   + 'Payment and you pay. Your Business Permit is released as soon as you pay; '
-                  + 'the five clearances are applied for after that, each approved on its own.'}
+                  + 'any other permit you are renewing follows, each approved on its own.'}
             </p>
             {/*
               ── The summary of payment, on the step that asks for a decision ──
@@ -13363,10 +13372,19 @@ export function ApplyWizard() {
                 are still being typed and brackets a clerk may read differently —
                 so it is an estimate, and the applicant is told who decides.
               */}
+              {/*
+                "Including the five other permits every application needs"
+                until 5 October 2026. BPLO now picks a new business's other
+                permits when it approves the form (client: "BPLO decides, no
+                rules"), so the estimate covers the Business Permit and says
+                where the rest of the bill comes from.
+              */}
               <p className="mt-3 text-xs leading-relaxed text-ink-secondary">
-                An estimate from your own answers, including the five other permits every
-                application needs. BPLO assesses the actual amount and issues your Tax Order of
-                Payment after it approves this form.
+                {applicationType === 'new'
+                  ? 'An estimate for your Business Permit. BPLO decides which other permits you '
+                    + 'need when it reads your form; their fees are added to your Tax Order of Payment.'
+                  : 'An estimate from your own answers. BPLO assesses the actual amount and issues '
+                    + 'your Tax Order of Payment after it approves this form.'}
               </p>
             </div>
             )}

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ApplicationType;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
@@ -189,6 +190,18 @@ function authAs(string $email, string $password = 'biztrack1'): array
  * its authorization are the subject of Ra11032ClassificationTest.
  */
 /**
+ * The ids of all five other permits — BPLO's ticks for a fixture that calls
+ * `approveMainForm` directly on a NEW filing carrying none (since 5 October
+ * 2026, see `bploApprovesForm`).
+ *
+ * @return list<int>
+ */
+function allOtherPermitIds(): array
+{
+    return PermitType::whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)->pluck('id')->all();
+}
+
+/**
  * BPLO accepts the main form, which is what raises the bill.
  *
  * A PRECONDITION of paying, and since 6 September 2026 it is not an optional
@@ -207,16 +220,38 @@ function authAs(string $email, string $password = 'biztrack1'): array
  * stays one line and does not disturb the acting user, which is the convention
  * `classifyAsOfficer` below documents and this depends on: the workflow refuses
  * to approve a filing nobody has categorised.
+ *
+ * ── The other permits, on a NEW filing ───────────────────────────────────
+ *
+ * Since 5 October 2026 a new filing is submitted with the Business Permit
+ * alone and BPLO ticks its other permits here (client: "BPLO decides, no
+ * rules"); approving one that carries none, with none ticked, is refused.
+ * `$codes` are those ticks. Left null, a NEW filing that carries no clearance
+ * yet is given all five — what every fixture written before that date
+ * assumed it carried — and one that already carries some (created with an
+ * explicit `permit_type_ids`) keeps them, as the product does.
+ *
+ * @param  list<string>|null  $codes
  */
-function bploApprovesForm(Application|int $app): Application
+function bploApprovesForm(Application|int $app, ?array $codes = null): Application
 {
     // An id is accepted because most fixtures hold one, not a model, and making
     // twelve files import Application to call one helper is a worse trade than
     // one lookup here.
     $app = $app instanceof Application ? $app : Application::findOrFail($app);
 
+    if ($codes === null
+        && $app->application_type === ApplicationType::New
+        && ! $app->permitTypes()->whereIn('permit_types.code', PermitType::REQUIRED_CLEARANCE_CODES)->exists()) {
+        $codes = PermitType::REQUIRED_CLEARANCE_CODES;
+    }
+
     classifyAsOfficer($app);
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    app(WorkflowService::class)->approveMainForm(
+        $app->fresh(),
+        null,
+        $codes === null ? null : PermitType::whereIn('code', $codes)->pluck('id')->all(),
+    );
 
     return $app->fresh();
 }

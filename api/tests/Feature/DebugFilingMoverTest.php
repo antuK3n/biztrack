@@ -157,7 +157,8 @@ it('finds a filing by its tracking ID and shows where it stands and what BPLO ca
     $filing = test()->getJson("/api/v1/debug/filings/{$app->id}")->assertOk();
     expect($filing->json('data.status'))->toBe('for_approval')
         ->and(collect($filing->json('data.steps'))->pluck('key')->all())->toBe(['bplo_approve', 'bplo_return'])
-        ->and($filing->json('data.steps.0.label'))->toBe('BPLO accepts the form')
+        // A tester's shortcut ticks every other permit, and says so (5 October 2026).
+        ->and($filing->json('data.steps.0.label'))->toBe('BPLO accepts the form, ticking all five other permits')
         ->and(collect($filing->json('data.targets'))->pluck('to')->all())->toBe(['pending_payment', 'paid', 'approved']);
 });
 
@@ -175,7 +176,9 @@ it('has BPLO accept the form through approveAssignment, recorded as the super ad
     $app->refresh();
     expect($app->status)->toBe(ApplicationStatus::PendingPayment)
         // approveMainForm's own side effect: the business permit's row opens.
-        ->and(moverPivot($app, 'BUSINESS')->status)->toBe(ClearanceStatus::ForApproval);
+        ->and(moverPivot($app, 'BUSINESS')->status)->toBe(ClearanceStatus::ForApproval)
+        // And the mover ticked all five other permits.
+        ->and($app->permitTypes()->count())->toBe(6);
 
     $history = ApplicationStatusHistory::where('application_id', $app->id)
         ->where('to_status', 'pending_payment')->firstOrFail();

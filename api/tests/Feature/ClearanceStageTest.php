@@ -542,12 +542,19 @@ it('refuses every write while the application is still a draft', function () {
  * nobody has paid for.
  */
 it('refuses to start a permit on a submitted filing that has not been paid for', function () {
+    /*
+     * Approved by BPLO and unpaid. Since 5 October 2026 a new filing carries
+     * no clearance until BPLO ticks them at that approval, so this is the
+     * state in which an unpaid filing carries one to try to start.
+     */
     $app = submittedClearanceApplication();
+    bploApprovesForm($app);
+    authAs('owner@biztrack.local');
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
 
-    // Attached and billed since submission, but not STARTED — and no office has
-    // been given work.
+    // Attached and billed since BPLO's approval, but not STARTED — and no
+    // office has been given work.
     $row = ApplicationPermitType::where('application_id', $app->id)
         ->where('permit_type_id', PermitType::where('code', 'ZONING')->value('id'))
         ->firstOrFail();
@@ -568,7 +575,10 @@ it('refuses to start a permit on a submitted filing that has not been paid for',
  * had not yet approved, let alone billed.
  */
 it('refuses an office sheet handed in on a submitted filing that has not been paid for', function () {
+    // Approved by BPLO and unpaid — see the test above for why.
     $app = submittedClearanceApplication();
+    bploApprovesForm($app);
+    authAs('owner@biztrack.local');
     satisfyChecklist($app->fresh(), 'SANITARY');
 
     $this->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [

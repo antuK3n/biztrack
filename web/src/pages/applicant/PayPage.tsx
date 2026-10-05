@@ -295,9 +295,10 @@ export function PayPage() {
           payment closes it, so it is told so and offered no clearances button.
         */}
         <p className="mt-6 text-center text-sm text-ink-secondary">
+          {/* "Your five LGU Clearances" until 5 October 2026 — BPLO now lists them. */}
           {app.application_type === 'renewal'
             ? 'Your renewed Business Permit is released.'
-            : 'Your Business Permit is released. Your five LGU Clearances are now open — apply for each under Permit Tracking; each is approved on its own.'}
+            : 'Your Business Permit is released. Your other permits are now open — apply for each under Permit Tracking.'}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-3">
           {app.application_type !== 'renewal' && (

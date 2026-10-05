@@ -440,10 +440,18 @@ async function approveAndPay(page: Page, appId: number): Promise<void> {
       throw new Error(`classifying answered ${classified.status}: ${await classified.text()}`)
     }
 
+    // BPLO ticks the other permits at this approval since 5 October 2026; all five here.
+    const types = (await (
+      await fetch('/api/v1/reference/permit-types', { headers: asBplo })
+    ).json()).data as { id: number; code: string }[]
     const approved = await fetch(`/api/v1/assignments/${assignment.id}/approve`, {
       method: 'POST',
       headers: asBplo,
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        permit_type_ids: types
+          .filter((t) => ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'].includes(t.code))
+          .map((t) => t.id),
+      }),
     })
     if (!approved.ok) {
       throw new Error(`BPLO's approval answered ${approved.status}: ${await approved.text()}`)
@@ -1704,7 +1712,7 @@ test('one bill at submission covers all five, and applying adds nothing to it', 
    * the surprise this paragraph exists to prevent.
    */
   await expect(page.getByText(/bplo reviews this form first/i)).toBeVisible()
-  await expect(page.getByText(/five lgu clearances open/i)).toBeVisible()
+  await expect(page.getByText(/other permits bplo confirmed open/i)).toBeVisible()
   await expect(page.getByText(/released after all of them are approved/i)).toBeVisible()
 
   /*

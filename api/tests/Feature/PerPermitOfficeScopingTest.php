@@ -67,7 +67,7 @@ function paidFilingForScoping(): Application
     $app->refresh();
 
     classifyAsOfficer($app);
-    $workflow->approveMainForm($app->fresh());
+    $workflow->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
 
     // Straight to the paid state. The payment itself is exercised elsewhere;
