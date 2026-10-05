@@ -12945,6 +12945,19 @@ export function ApplyWizard() {
                             className="text-sm font-medium text-ink"
                           >
                             {row.label}
+                            {/*
+                              The one field on this step that can be required:
+                              a new barangay needs a pin inside it, and Next
+                              says so ("A map pin for the new address") — so
+                              the label carries the wizard's required marker
+                              while that holds, as every gated field does.
+                            */}
+                            {row.field === 'address_pin' && amendChangesBarangay && (
+                              <>
+                                <span className="text-s-red" aria-hidden="true"> *</span>
+                                <span className="sr-only"> (required)</span>
+                              </>
+                            )}
                           </label>
 
                           {row.help !== null && (

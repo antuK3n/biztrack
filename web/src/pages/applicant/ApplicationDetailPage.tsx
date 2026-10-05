@@ -1053,7 +1053,17 @@ export function ApplicationDetailPage() {
         */}
         {status !== 'draft' && amendmentNeedsZoning && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
-            <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
+            {/*
+              Marked required the way every required field is (FieldLabel's
+              red asterisk and its "(required)" for screen readers): BPLO
+              cannot approve this amendment until the Zoning Clearance is
+              issued (`WorkflowService::approveAmendment`). Ken, 6 October 2026.
+            */}
+            <h2 className="text-lg font-bold text-ink">
+              LGU Clearances
+              <span className="text-s-red" aria-hidden="true"> *</span>
+              <span className="sr-only"> (required)</span>
+            </h2>
             <p className="mt-1 text-sm text-ink-secondary">
               {/*
                 Any part of the address, as the rule that attached ZONING
