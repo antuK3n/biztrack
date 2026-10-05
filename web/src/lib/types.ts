@@ -317,6 +317,8 @@ export interface Business {
     permit_number: string
     valid_until: string | null
   } | null
+  /** The amendment BPLO is still reviewing, if any; one at a time per business. */
+  open_amendment?: { id: number; tracking_id: string | null } | null
   trade_name: string | null
   registration_type: string | null
   registration_number: string | null

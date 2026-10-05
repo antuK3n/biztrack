@@ -2603,10 +2603,21 @@ function IdentifyFilingModal({
             </>
           ) : (
             choosableBusinesses.map((b) => (
-              <option key={b.id} value={b.id}>
-                {applicationType === 'amendment' && b.current_business_permit
-                  ? `${b.name} — ${b.current_business_permit.permit_number}`
-                  : b.name}
+              <option
+                key={b.id}
+                value={b.id}
+                /*
+                 * One open amendment per business. Said at the picker since
+                 * 5 October 2026 — it used to surface as an error box halfway
+                 * down the form (client: "wHAT IS THIS? kindly fix").
+                 */
+                disabled={applicationType === 'amendment' && !!b.open_amendment}
+              >
+                {applicationType === 'amendment' && b.open_amendment
+                  ? `${b.name} — amendment ${b.open_amendment.tracking_id ?? ''} under review`
+                  : applicationType === 'amendment' && b.current_business_permit
+                    ? `${b.name} — ${b.current_business_permit.permit_number}`
+                    : b.name}
               </option>
             ))
           )}
@@ -12697,10 +12708,7 @@ export function ApplyWizard() {
                 Awaiting the paper to name it as FO-003 names it.
               */}
               <p className="mb-3 max-w-3xl text-xs leading-relaxed text-ink-secondary">
-                The paper form has four boxes and so does this. Tick the ones you are amending and
-                fill in the new values — BPLO writes them to your business record when they
-                approve, so you do not need to change anything yourself. Clearing a value withdraws
-                that request; unticking a box leaves what you typed alone.
+                Tick what you are changing and type the new value.
               </p>
 
               {amendError !== null && (
@@ -13032,8 +13040,7 @@ export function ApplyWizard() {
 
               {amendRows.length > 0 && !amendRows.some((r) => r.requested) && (
                 <p className="mt-3 max-w-2xl text-xs font-medium text-ink">
-                  Nothing is being changed yet. Tick a box above and fill in at least one new
-                  value, or this amendment has nothing for BPLO to act on.
+                  Tick a box and enter at least one new value.
                 </p>
               )}
 
@@ -13053,13 +13060,9 @@ export function ApplyWizard() {
                 window even after it is approved, and why.
               */}
               <p className="mt-8 max-w-3xl rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
-                <span className="font-semibold text-ink">After BPLO approves.</span> Most of these
-                are written to your business record straight away and your Business Permit is
-                reprinted with them. A <span className="font-semibold text-ink">change of owner</span>{' '}
-                is the exception: your permit prints the name on the BizTrack account it belongs to,
-                so BPLO moves the business to the new owner’s account by hand once they have seen
-                the Deed of Transfer. The new owner needs a BizTrack account of their own before
-                that can happen.
+                <span className="font-semibold text-ink">After BPLO approves,</span> your record
+                and permit are updated. A change of owner also needs the new owner’s own BizTrack
+                account.
               </p>
             </>
           )}

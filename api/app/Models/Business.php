@@ -461,6 +461,23 @@ class Business extends Model
     }
 
     /**
+     * The amendment BPLO is still reviewing for this business, if any.
+     *
+     * One open amendment per business (`AmendmentScope::openRefusal`). Loaded
+     * with the owner's business list so the amendment chooser can say so at
+     * the picker instead of refusing mid-form (client, 5 October 2026).
+     */
+    public function openAmendment(): HasOne
+    {
+        return $this->hasOne(Application::class)
+            ->where('application_type', \App\Enums\ApplicationType::Amendment->value)
+            ->where('status', '!=', \App\Enums\ApplicationStatus::Draft->value)
+            ->whereNull('decided_at')
+            ->whereNotIn('status', [\App\Enums\ApplicationStatus::Rejected->value, \App\Enums\ApplicationStatus::Cancelled->value])
+            ->latestOfMany();
+    }
+
+    /**
      * Permit fees this business has been issued and not yet billed for.
      *
      * The receivable is the BUSINESS's, not any one filing's: the filing that

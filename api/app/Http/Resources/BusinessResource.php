@@ -42,6 +42,14 @@ class BusinessResource extends JsonResource
                     'valid_until' => $this->currentBusinessPermit->valid_until?->toDateString(),
                 ],
             ),
+            // The amendment still under review, so the chooser can say so up front.
+            'open_amendment' => $this->whenLoaded(
+                'openAmendment',
+                fn () => $this->openAmendment === null ? null : [
+                    'id' => $this->openAmendment->id,
+                    'tracking_id' => $this->openAmendment->tracking_id,
+                ],
+            ),
             'trade_name' => $this->trade_name,
             'registration_type' => $this->registration_type,
             'registration_number' => $this->registration_number,
