@@ -47,7 +47,6 @@ import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldError,
   FieldLabel,
-  OriginalsNotice,
   PillButton,
   ProtoModal,
   inputCls,
@@ -12208,7 +12207,6 @@ export function ApplyWizard() {
       >
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <SectionMarker letter="C" label="Documentary Requirements" />
-          <OriginalsNotice />
 
           {/*
             ── Which boxes produced this list ──────────────────────────────

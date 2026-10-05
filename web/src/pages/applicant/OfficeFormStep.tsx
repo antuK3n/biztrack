@@ -3,7 +3,7 @@ import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
-import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
+import { FieldError, FieldLabel, inputCls } from '../../components/ui/Proto'
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
@@ -2070,13 +2070,6 @@ function RequirementsChecklist({
     <section className="space-y-3 border-t border-line pt-7">
       <div>
         <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">{meta.title}</h2>
-        {/*
-          Not in read-only. There, this list is the record of what the office
-          RECEIVED — the heading above it says so — and telling somebody their
-          originals will be checked, about an upload already made and already
-          checked, is advice arriving after the thing it is advice about.
-        */}
-        {!ro && <OriginalsNotice />}
         <p className="mt-1 text-xs leading-relaxed text-ink-muted">
           {/*
             Required, and said once. Every row blocks now, so the old

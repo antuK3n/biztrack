@@ -985,62 +985,6 @@ export function FieldError({
     </span>
   )
 }
-/**
- * "All uploaded documents will be verified against the originals."
- *
- * Client, 24 September 2026: *"In every Documentary Requirements section,
- * please add a message like 'Documents uploaded will be verified against
- * original' ... and make it very apparent."*
- *
- * ── Why it is a component and not a sentence typed twice ─────────────────────
- *
- * An applicant meets two separate lists of documents — the wizard's
- * Documentary Requirements and each office sheet's own checklist — and this is
- * a standing rule about all of them. Two copies of one rule drift, and a rule
- * that is worded one way on BPLO's list and another way on CENRO's reads as two
- * different rules to the person deciding what to bring to City Hall.
- *
- * ── It states a fact and asks for nothing ────────────────────────────────────
- *
- * The first version of this read "Bring your original documents. Everything you
- * upload will be checked against them", and the client corrected it the same
- * day: *"The user won't have to bring that."* Right on both counts — BizTrack
- * exists so a permit can be filed without a trip to City Hall, and nothing in
- * the flow or on either paper form asks an applicant to present originals at a
- * counter. The sentence was describing a procedure that does not exist.
- *
- * ── Why it is loud ───────────────────────────────────────────────────────────
- *
- * *"Make it very apparent."* It is the one thing on these screens about what
- * happens AFTER the upload, and it is worth reading before somebody attaches a
- * scan they have tidied up. So it gets the amber treatment the rest of the
- * product uses — border, tint and weight — rather than the grey small print the
- * help text around it is set in.
- *
- * Amber and not red, on this codebase's standing rule: nothing has failed.
- */
-export function OriginalsNotice() {
-  return (
-    <p className="mt-3 flex items-start gap-2.5 rounded-lg border-l-4 border-s-orange bg-s-orange-tint px-4 py-3 text-sm font-semibold text-ink">
-      {/*
-        Decorative. The sentence carries the whole message, and a screen reader
-        announcing "warning triangle" before it adds a word the applicant
-        cannot act on.
-      */}
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        aria-hidden="true"
-        className="mt-0.5 shrink-0 text-s-orange"
-      >
-        <path d="M12 2 1 21h22L12 2Zm0 6a1 1 0 0 1 1 1v5a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Zm0 9.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z" />
-      </svg>
-      All uploaded documents will be verified against the originals.
-    </p>
-  )
-}
 
 /**
  * Field label above an input.
