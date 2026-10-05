@@ -677,7 +677,9 @@ class NotificationService
             return;
         }
         $unit = $threshold === 1 ? 'day' : 'days';
-        $expiresOn = $permit->valid_until->format('j M Y');   // cast to a date on the model
+        // Cast to a date on the model. The month in full, as on every date
+        // the owner reads (checklist, Apply for Permit 7): "December 31, 2026".
+        $expiresOn = $permit->valid_until->format('F j, Y');
 
         /*
          * ── The right permit's name, and only where it was wrong ────────

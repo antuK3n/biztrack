@@ -102,6 +102,16 @@ it('carries the paper\'s reminder wording and the mockup\'s title', function () 
     expect($notice->link)->toBe('/permits');
 });
 
+it('names the expiry date with the month in full', function () {
+    $permit = reminderPermit(30);
+
+    $this->artisan('biztrack:scan-permits')->assertSuccessful();
+
+    // "expires on December 31, 2026", never "31 Dec 2026" (checklist, Apply for Permit 7).
+    expect(AppNotification::where('type', 'expiry')->firstOrFail()->body)
+        ->toContain("Permit {$permit->permit_number} expires on {$permit->valid_until->format('F j, Y')}.");
+});
+
 it('says "1 day", not "1 days", on the final reminder', function () {
     reminderPermit(1);
 

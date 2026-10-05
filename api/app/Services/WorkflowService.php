@@ -742,10 +742,12 @@ class WorkflowService
              * The rows own description when it has one, so an amendment
              * does not print as a second business-permit fee beside the
              * real one. Falls back to the permit type, which is the right
-             * answer for every clearance row and always was.
+             * answer for every clearance row and always was. The month is
+             * spelled out, "June 2026", as in every date (checklist, Apply
+             * for Permit 7).
              */
             'label' => ($fee->description ?? $fee->permitType?->name.' fee')
-                .' ('.$fee->incurred_at->format('M Y').', unbilled until now)',
+                .' ('.$fee->incurred_at->format('F Y').', unbilled until now)',
             'amount' => (float) $fee->amount,
         ];
 
@@ -2523,7 +2525,8 @@ class WorkflowService
             $app,
             'Your City Environmental Certificate has been issued. '
             .count($outstanding).' DENR document(s) are now due under Other Requirements by '
-            .$due->toFormattedDateString().'.',
+            // The month in full, as in every date (checklist, Apply for Permit 7).
+            .$due->format('F j, Y').'.',
         );
     }
 

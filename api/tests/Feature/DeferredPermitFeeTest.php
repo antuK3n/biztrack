@@ -146,6 +146,9 @@ it('puts the deferred fee on the next business permit renewal’s bill', functio
 
     expect($labels)->toContain('unbilled until now');
     expect(UnbilledPermitFee::where('billed_on_application_id', $january->id)->count())->toBe(1);
+    // The month the fee was incurred, spelled out (checklist, Apply for Permit 7).
+    $incurred = UnbilledPermitFee::where('billed_on_application_id', $january->id)->firstOrFail()->incurred_at;
+    expect($labels)->toContain('('.$incurred->format('F Y').', unbilled until now)');
 
     /*
      * Claimed, not yet collected. The applicant has been SHOWN the fee; they

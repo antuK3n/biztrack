@@ -77,6 +77,8 @@ it('records an officer signing in outside office hours', function (string $email
     $row = AuditLog::where('action', 'user.signed_in_outside_hours')->latest('id')->firstOrFail();
     expect($row->user_id)->toBe(User::where('email', $email)->value('id'));
     expect($row->changes['portal'])->toBe($portal);
+    // The month in full, as in every date (checklist, Apply for Permit 7).
+    expect($row->changes['local_time'])->toBe('Sat, September 26, 2026 21:15');
 })->with([
     'officer' => ['bplo@biztrack.local', 'staff'],
     'super admin' => ['admin@biztrack.local', 'admin'],

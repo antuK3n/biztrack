@@ -661,7 +661,8 @@ class AuthController extends Controller
         if ($portal !== 'public' && ! OfficeHours::isOpen()) {
             Audit::log('user.signed_in_outside_hours', $user, [
                 'portal' => $portal,
-                'local_time' => OfficeHours::now()->format('D, j M Y H:i'),
+                // The month in full, as on every date (checklist, Apply for Permit 7).
+                'local_time' => OfficeHours::now()->format('D, F j, Y H:i'),
             ], actorId: $user->id);
         }
 
