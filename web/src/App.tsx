@@ -41,9 +41,7 @@ import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { StaffMessagesPage } from './pages/admin/StaffMessagesPage'
-import { RecordsPage } from './pages/admin/RecordsPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
-import { BusinessMapPage } from './pages/admin/BusinessMapPage'
 import { ImportPage } from './pages/admin/ImportPage'
 import { DebugPage, RequireDebugAccess } from './pages/admin/debug/DebugPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -592,14 +590,6 @@ export default function App() {
             lies: a rail that hides the entry while the route still admits a
             typed URL is a screen nobody can find and anybody can reach.
           */}
-          <Route
-            path="/staff/admin/records"
-            element={
-              <RequirePermission permission="user.manage">
-                <RecordsPage />
-              </RequirePermission>
-            }
-          />
           {/*
             Every issued certificate, as one table (issue #103).
 
@@ -643,14 +633,6 @@ export default function App() {
             (AGENTS.md §10) says it belongs to the one role that is allowed to
             see across all of them.
           */}
-          <Route
-            path="/staff/admin/business-map"
-            element={
-              <RequirePermission permission="user.manage">
-                <BusinessMapPage />
-              </RequirePermission>
-            }
-          />
           <Route
             path="/staff/admin/audit-logs"
             element={
@@ -840,26 +822,10 @@ export default function App() {
             }
           />
           <Route
-            path="/admin/records"
-            element={
-              <RequirePermission permission="user.manage">
-                <RecordsPage />
-              </RequirePermission>
-            }
-          />
-          <Route
             path="/admin/permits"
             element={
               <RequirePermission permission="permit.view_all">
                 <AdminPermitsPage />
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/admin/business-map"
-            element={
-              <RequirePermission permission="user.manage">
-                <BusinessMapPage />
               </RequirePermission>
             }
           />

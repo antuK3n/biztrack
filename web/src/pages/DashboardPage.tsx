@@ -4,7 +4,6 @@ import {
   AmendIcon,
   ChartIcon,
   FilePlusIcon,
-  FolderIcon,
   InboxIcon,
   RenewIcon,
   ShieldCheckIcon,
@@ -310,7 +309,6 @@ function StaffHome({ permissions }: { permissions: string[] }) {
      * offers. A card gated more loosely than its route is a tile that bounces
      * the reader back to where they started.
      */
-    { to: '/admin/records', icon: FolderIcon, label: 'Records', permission: 'user.manage' },
   ].map((c) => ({
     ...c,
     to: portalPath(portal, c.to),

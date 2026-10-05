@@ -40,7 +40,6 @@ test('every admin console screen answers under the admin prefix', async ({ page 
    */
   const screens = [
     { path: '/admin/users', heading: 'Officer Assignment' },
-    { path: '/admin/records', heading: /records/i },
     { path: '/admin/audit-logs', heading: /audit/i },
   ]
 

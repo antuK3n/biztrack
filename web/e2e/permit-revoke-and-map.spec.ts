@@ -23,7 +23,7 @@ async function shot(page: Page, name: string) {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false })
 }
 
-/** Tiles are stubbed — see business-map.spec.ts for why. */
+/** Tiles are stubbed so the test never waits on OpenStreetMap. */
 async function quietTiles(page: Page) {
   const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
   await page.route(/tile\.openstreetmap\.org|server\.arcgisonline\.com/, (route) =>
@@ -185,7 +185,7 @@ test.describe('the Map view on the Permits page', () => {
 test.describe('the super admin', () => {
   test.use({ storageState: sessionFor('admin') })
 
-  test('keeps the Business Map and gets the Map view too', async ({ page }) => {
+  test('gets the Map view on Permits', async ({ page }) => {
     await quietTiles(page)
     await page.goto('/admin/permits')
     await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
