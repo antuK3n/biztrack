@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\WizardDraft;
+use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -222,12 +223,37 @@ class DraftController extends Controller
      * Idempotent for a row that has already gone: the wizard deletes one the
      * moment a real draft exists, and must not fail if a second tab got there
      * first.
+     *
+     * ── Kept in the audit log, like an application draft ────────────────
+     *
+     * Deleting an application draft has kept a full copy under the audit
+     * log's "Removed" view since Audit Log 1; deleting one of these from the
+     * same card, behind the same dialog, left no trace at all (checklist,
+     * Audit Log 1, re-check). So the applicant's delete is now
+     * `wizard_draft.deleted` through Audit::removed(), answers and all.
+     *
+     * `superseded` is the wizard's own clean-up once a real draft exists:
+     * nothing is lost, the answers live on in the application draft. That is
+     * logged as what it is, with no copy, so the Removed view lists only the
+     * drafts somebody actually threw away.
      */
     public function destroy(Request $request, int $wizardDraft): JsonResponse
     {
-        WizardDraft::where('user_id', $request->user()->id)
-            ->whereKey($wizardDraft)
-            ->delete();
+        $draft = WizardDraft::where('user_id', $request->user()->id)->find($wizardDraft);
+
+        if ($draft !== null) {
+            $changes = [
+                'application_type' => $draft->application_type,
+                'title' => $draft->title,
+            ];
+
+            // Logged BEFORE the delete, while the row still says what it said.
+            $request->boolean('superseded')
+                ? Audit::log('wizard_draft.superseded', $draft, $changes)
+                : Audit::removed('wizard_draft.deleted', $draft, $changes);
+
+            $draft->delete();
+        }
 
         return response()->json(null, 204);
     }

@@ -380,8 +380,17 @@ export const wizardDrafts = {
    */
   rename: (id: number, title: string | null) =>
     unwrap<WizardDraftSummary>(api.put(`/wizard-drafts/${id}`, { title })),
-  /** Idempotent — deleting nothing is a success. */
+  /**
+   * The applicant throws it away. Idempotent — deleting nothing is a success.
+   * Kept in the audit log's Removed view, like a deleted application draft.
+   */
   discard: (id: number) => api.delete(`/wizard-drafts/${id}`),
+  /**
+   * The wizard's own clean-up once a real draft exists. Nothing is lost —
+   * the answers live on in that draft — so the audit log records it as
+   * superseded rather than removed. Idempotent, like `discard`.
+   */
+  supersede: (id: number) => api.delete(`/wizard-drafts/${id}`, { params: { superseded: 1 } }),
 }
 export const applications = {
   /**

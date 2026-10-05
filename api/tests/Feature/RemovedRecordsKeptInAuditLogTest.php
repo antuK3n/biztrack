@@ -7,6 +7,7 @@ use App\Models\Business;
 use App\Models\DocumentType;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Models\WizardDraft;
 
 /*
  * Audit Log 1 — keep removed records (Ken's checklist, 27 September 2026).
@@ -70,6 +71,52 @@ it('keeps a deleted draft, with its documents and permit types, in the audit log
         ->and($snapshot['documents'])->toHaveCount(1)
         ->and($snapshot['documents'][0]['original_filename'])->toBe('dti-certificate.pdf')
         ->and(collect($snapshot['permit_types'] ?? $snapshot['permitTypes'])->pluck('code')->all())->toBe(['BUSINESS']);
+});
+
+/*
+ * The unfinished draft beside it on the Drafts page, behind the same dialog,
+ * left no trace when deleted (checklist, Audit Log 1, re-check).
+ */
+function ownersUnfinishedDraft(): WizardDraft
+{
+    return WizardDraft::create([
+        'user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
+        'application_type' => 'new',
+        'title' => 'Corner sari-sari store',
+        'payload' => ['business' => ['name' => 'Corner sari-sari store']],
+    ]);
+}
+
+it('keeps a deleted unfinished draft, answers and all, in the audit log', function () {
+    $draft = ownersUnfinishedDraft();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->deleteJson("/api/v1/wizard-drafts/{$draft->id}")->assertNoContent();
+
+    expect(WizardDraft::find($draft->id))->toBeNull();
+
+    $row = removalRow('wizard_draft.deleted', WizardDraft::class, $draft->id);
+    expect($row->user_id)->toBe($draft->user_id)
+        ->and($row->snapshot['title'])->toBe('Corner sari-sari store')
+        ->and($row->snapshot['application_type'])->toBe('new')
+        ->and($row->snapshot['payload'])->toBe(['business' => ['name' => 'Corner sari-sari store']]);
+
+    // And it is what the super admin's "Removed" view lists.
+    $removed = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/audit-logs?removed=1')->assertOk()->json('data'));
+    expect($removed->firstWhere('id', $row->id))->not->toBeNull();
+});
+
+it('does not call an unfinished draft removed when the wizard drops it for the real draft', function () {
+    $draft = ownersUnfinishedDraft();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->deleteJson("/api/v1/wizard-drafts/{$draft->id}?superseded=1")->assertNoContent();
+
+    expect(WizardDraft::find($draft->id))->toBeNull()
+        ->and(AuditLog::where('action', 'wizard_draft.deleted')->where('auditable_id', $draft->id)->exists())->toBeFalse()
+        ->and(AuditLog::where('action', 'wizard_draft.superseded')->where('auditable_id', $draft->id)->exists())->toBeTrue()
+        ->and(AuditLog::where('action', 'wizard_draft.superseded')->where('auditable_id', $draft->id)->value('snapshot'))->toBeNull();
 });
 
 it('keeps a removed document row in the audit log', function () {

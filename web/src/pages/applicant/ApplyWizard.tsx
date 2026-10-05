@@ -8641,7 +8641,7 @@ export function ApplyWizard() {
       const scratchId = scratchIdRef.current
       if (scratchId !== null) {
         scratchIdRef.current = null
-        void wizardDrafts.discard(scratchId).catch(() => {})
+        void wizardDrafts.supersede(scratchId).catch(() => {})
       }
 
       return
@@ -8790,7 +8790,7 @@ export function ApplyWizard() {
              * which is exactly the value that is out of date.
              */
             if (applicationIdRef.current !== null) {
-              void wizardDrafts.discard(created.id).catch(() => {})
+              void wizardDrafts.supersede(created.id).catch(() => {})
 
               return
             }
