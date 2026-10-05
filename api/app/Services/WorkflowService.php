@@ -6247,6 +6247,15 @@ class WorkflowService
      */
     public function rescheduleInspection(Inspection $inspection, mixed $scheduledAt): Inspection
     {
+        /*
+         * Only a visit that has not happened yet moves (inspection row 4,
+         * 5 October 2026). "Moving" a failed visit set it Rescheduled with the
+         * result kept, so it stopped counting as a standing failure: the
+         * re-inspection was refused, a fresh first booking was let through,
+         * and another office's pass lifted the suspension the failure caused.
+         */
+        $this->refuseIfConducted($inspection);
+
         $scheduledAt = $this->visitInstant($scheduledAt);
         $this->refusePastVisitDate($scheduledAt);
 

@@ -732,3 +732,34 @@ it('keeps a failed visit failed: it cannot be recorded again as passed', functio
         ->and(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection')
         ->and(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 });
+
+it('refuses to move a visit that already has a result; the failure is answered by a re-inspection', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Moved After Failing');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addDays(4)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This visit already has a result.');
+
+    $visit = Inspection::findOrFail($fire->id);
+    expect($visit->status->value)->toBe('completed')
+        ->and($visit->result->value)->toBe('failed');
+
+    // The way on still works: a re-inspection from the failed visit.
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->addDays(6)->toDateTimeString()])
+        ->assertCreated();
+
+    // And the standing failure still holds the Mayor's Permit when another office passes.
+    $cho = $visits->firstWhere('department.code', 'CHO');
+    test()->withHeaders(authAs($deptEmail['CHO']))
+        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'])
+        ->assertOk();
+    expect(mayorsPermitOf($appId)->status->value)->toBe('suspended');
+});
