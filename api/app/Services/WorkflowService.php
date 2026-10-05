@@ -2991,6 +2991,34 @@ class WorkflowService
      * text is never parsed to derive this.
      */
     /**
+     * A clearance office may not point at a row its checklist carries from the
+     * Business Permit application — that document is BPLO's to return.
+     * Client, 5 October 2026: *"you SHOULD NOT BE ABLE TO RETURN ANY FIELDS
+     * THAT ARE INCORPORATED FROM THE BUSINESS PERMIT APPLICATION when you are
+     * using the other permits' office admins."*
+     */
+    private function refuseCarriedTargets(ApplicationPermitType $row, ?string $target, array $notes): void
+    {
+        $named = array_merge(
+            array_filter(array_map('trim', explode(',', (string) $target))),
+            array_keys($notes),
+        );
+        if ($named === []) {
+            return;
+        }
+        $carried = collect(SheetRequirements::for($row->application, $row->permitType->code) ?? [])
+            ->where('source', 'carried')
+            ->pluck('code')
+            ->filter()
+            ->all();
+        if (array_intersect($named, $carried) !== []) {
+            throw ValidationException::withMessages([
+                'target' => ['Only BPLO can return a document from the Business Permit application.'],
+            ]);
+        }
+    }
+
+    /**
      * @param  array<string, string>  $notes  One remark per returned row,
      *                                        keyed by the same code as $target. The officer's UI refuses to send
      *                                        a return until every ticked row has one, and until 30 September
@@ -3004,6 +3032,8 @@ class WorkflowService
         ?string $target = null,
         array $notes = [],
     ): void {
+        $this->refuseCarriedTargets($row, $target, $notes);
+
         DB::transaction(function () use ($row, $remarks, $target, $notes) {
             /*
              * The pointer is REPLACED on every return, including with null. A
@@ -3109,6 +3139,8 @@ class WorkflowService
         /** @var array<string, string> What is wrong with each named row. */
         array $notes = [],
     ): void {
+        $this->refuseCarriedTargets($row, $target, $notes);
+
         $reason = trim($reason);
         $remedy = trim($remedy);
         if ($reason === '') {

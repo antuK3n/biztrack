@@ -459,3 +459,26 @@ it('replaces the main form pointer on every return, including with nothing', fun
     expect($bplo->fresh()->remarks_target)->toBeNull();
     expect($bplo->fresh()->remarks)->toBe('Now the barangay is wrong.');
 });
+
+it('does not let a clearance office return a document carried from the Business Permit application', function () {
+    /*
+     * Client, 5 October 2026: "you SHOULD NOT BE ABLE TO RETURN ANY FIELDS
+     * THAT ARE INCORPORATED FROM THE BUSINESS PERMIT APPLICATION when you are
+     * using the other permits' office admins." The CPDD checklist carries the
+     * title, tax declaration, DTI/SEC papers and sketch from BPLO's form.
+     */
+    $app = filingWithoutTin('123-456-789-000');
+    $app->permitTypes()->syncWithoutDetaching([
+        \App\Models\PermitType::where('code', 'ZONING')->value('id') => ['status' => \App\Enums\ClearanceStatus::ForApproval->value],
+    ]);
+    $app = $app->fresh();
+    $row = app(\App\Services\WorkflowService::class)->pivotFor($app, 'ZONING');
+    $carried = collect(\App\Support\SheetRequirements::for($app, 'ZONING') ?? [])
+        ->where('source', 'carried')->pluck('code')->filter()->first();
+    expect($carried)->not->toBeNull();
+
+    expect(fn () => app(\App\Services\WorkflowService::class)->returnClearance($row, 'Wrong page.', $carried))
+        ->toThrow(\Illuminate\Validation\ValidationException::class, 'Only BPLO can return a document from the Business Permit application.');
+    expect(fn () => app(\App\Services\WorkflowService::class)->rejectClearance($row, 'No.', 'Apply again.', null, [$carried => 'Wrong page.']))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});
