@@ -17,6 +17,9 @@ use App\Models\User;
 use App\Services\WorkflowService;
 use Illuminate\Validation\ValidationException;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * A terminal filing cannot be brought back to life (INS-5).
  *

@@ -9,6 +9,9 @@ use App\Models\PermitType;
 use App\Models\PsicCode;
 use Illuminate\Support\Facades\DB;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * The inspector is a name the office types, for the record.
  *
@@ -268,10 +271,15 @@ it('no longer has a claim or release on a visit', function () {
  * once, with the instant spelled in UTC.
  */
 
-/** Tomorrow 06:28 in Manila, as the browser would send it: UTC with a Z. */
-function tomorrowAt0628AsUtc(): array
+/**
+ * The next weekday at 08:28 in Manila, as the browser would send it: UTC with
+ * a Z (00:28). It was tomorrow at 06:28, which crossed the date in UTC; a
+ * visit is now booked on a weekday from 8:00 AM (manage item 4), and an
+ * eight-hour shift is still the bug if it comes back.
+ */
+function nextWeekdayAt0828AsUtc(): array
 {
-    $manila = now('Asia/Manila')->addDay()->setTime(6, 28);
+    $manila = now('Asia/Manila')->addWeekday()->setTime(8, 28);
 
     return [$manila->copy()->utc()->toISOString(), $manila->format('Y-m-d H:i:s')];
 }
@@ -282,7 +290,7 @@ function storedScheduledAt(int $id): string
 }
 
 it('stores a first booking sent in UTC as Manila time', function () {
-    [$utc, $manila] = tomorrowAt0628AsUtc();
+    [$utc, $manila] = nextWeekdayAt0828AsUtc();
     ['visit' => $visit] = filingWithSanitaryVisitBooked($utc);
 
     expect(storedScheduledAt($visit->id))->toBe($manila);
@@ -290,7 +298,7 @@ it('stores a first booking sent in UTC as Manila time', function () {
 
 it('stores a rescheduled time sent in UTC as Manila time', function () {
     ['visit' => $visit] = filingWithSanitaryVisitBooked();
-    [$utc, $manila] = tomorrowAt0628AsUtc();
+    [$utc, $manila] = nextWeekdayAt0828AsUtc();
 
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/inspections/{$visit->id}/reschedule", ['scheduled_at' => $utc])->assertOk();
@@ -300,7 +308,7 @@ it('stores a rescheduled time sent in UTC as Manila time', function () {
 
 it('stores a re-inspection time sent in UTC as Manila time', function () {
     ['visit' => $visit] = filingWithSanitaryVisitBooked();
-    [$utc, $manila] = tomorrowAt0628AsUtc();
+    [$utc, $manila] = nextWeekdayAt0828AsUtc();
 
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'failed'])->assertOk();

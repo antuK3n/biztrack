@@ -12,6 +12,9 @@ use App\Models\PsicCode;
 use App\Services\WorkflowService;
 use Illuminate\Validation\ValidationException;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * The five other permits run independently, and nothing waits for the slowest.
  *

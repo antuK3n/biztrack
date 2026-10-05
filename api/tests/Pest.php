@@ -14,6 +14,7 @@ use App\Services\WorkflowService;
 use App\Support\Ra11032;
 use App\Support\RequiredDocuments;
 use App\Support\SheetRequirements;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -103,6 +104,31 @@ function takeFiling(int $applicationId, string $departmentCode): int
         ->update(['officer_user_id' => $officer->id, 'assigned_at' => now()]);
 
     return $departmentId;
+}
+
+/**
+ * Move the clock FORWARD to the next weekday at 10:00 AM, Manila.
+ *
+ * An office books a visit only on a weekday between 8:00 AM and 5:00 PM
+ * (checklist 2026-09-27, manage item 4), and the inspection suites book for
+ * "today" so the result can be recorded straight away. Run at 10 PM or on a
+ * Sunday they would be refused, so they run in office hours instead.
+ *
+ * Forward and never back, because the seeded rows were written at the real
+ * time and a clock behind them would make "now" older than the register.
+ */
+function duringOfficeHours(): void
+{
+    $now = CarbonImmutable::now(config('app.timezone'));
+    $at = $now->setTime(10, 0);
+    if ($at->lessThanOrEqualTo($now)) {
+        $at = $at->addDay();
+    }
+    while ($at->isWeekend()) {
+        $at = $at->addDay();
+    }
+
+    test()->travelTo($at);
 }
 
 function portalFor(string $email): string

@@ -7,6 +7,9 @@ use App\Models\Inspection;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * INS-8 — an office reads the write-up of its OWN visits, and nobody else's.
  *

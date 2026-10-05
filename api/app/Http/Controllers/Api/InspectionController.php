@@ -12,6 +12,8 @@ use App\Models\Inspection;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -156,7 +158,7 @@ class InspectionController extends Controller
     public function schedule(Request $request, Application $application, string $code): JsonResponse
     {
         $data = $request->validate([
-            'scheduled_at' => ['required', 'date'],
+            'scheduled_at' => $this->visitRules(),
         ], [
             'scheduled_at.required' => 'Choose the date of the inspection.',
         ]);
@@ -187,7 +189,7 @@ class InspectionController extends Controller
         $this->workflow->refuseWhileOnHold($inspection->application?->business);
 
         $data = $request->validate([
-            'scheduled_at' => ['required', 'date'],
+            'scheduled_at' => $this->visitRules(),
         ]);
 
         // In the service since 5 October 2026, so the move refuses a past
@@ -221,7 +223,7 @@ class InspectionController extends Controller
         $this->authorizeDepartment($request, $inspection);
 
         $data = $request->validate([
-            'scheduled_at' => ['required', 'date'],
+            'scheduled_at' => $this->visitRules(),
         ]);
 
         abort_unless(
@@ -240,6 +242,49 @@ class InspectionController extends Controller
         return response()->json([
             'data' => new InspectionResource($visit->load($this->eager)),
         ], 201);
+    }
+
+    /**
+     * When an office may book a visit: a weekday, between 8:00 AM and 5:00 PM.
+     *
+     * "Ensure correct scheduling for the inspection" (checklist 2026-09-27,
+     * manage item 4). A Sunday, or 2 AM, went through - the field is a
+     * `datetime-local`, which cannot grey out weekends or hours, so the rule is
+     * here. One rule for all three ways a visit gets a date: the first
+     * booking, a move, and a re-inspection.
+     *
+     * Read on Manila's clock, as the service stores it (visitInstant): the
+     * browser sends UTC. A past date is left to the service, which already
+     * says "Pick today or a later date." and should keep saying it whatever
+     * day of the week the past date fell on.
+     *
+     * Here and not in WorkflowService on purpose: the service is also called by
+     * the analytics history seeder and the debug filing mover, which book
+     * visits on whatever day they are re-enacting. The rule is about what an
+     * office may book.
+     */
+    private function visitRules(): array
+    {
+        return ['bail', 'required', 'date', function (string $attribute, mixed $value, Closure $fail) {
+            $when = CarbonImmutable::parse((string) $value)->setTimezone(config('app.timezone'));
+
+            if ($when->lessThan(CarbonImmutable::now()->startOfDay())) {
+                return;
+            }
+            if ($when->isWeekend()) {
+                $fail('Pick a weekday.');
+
+                return;
+            }
+            // A bare date carries no time to check; the API has always taken one.
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string) $value))) {
+                return;
+            }
+            $minutes = $when->hour * 60 + $when->minute;
+            if ($minutes < 8 * 60 || $minutes > 17 * 60) {
+                $fail('Pick a time between 8:00 AM and 5:00 PM.');
+            }
+        }];
     }
 
     private function scopeToDepartment(Request $request, $query): void

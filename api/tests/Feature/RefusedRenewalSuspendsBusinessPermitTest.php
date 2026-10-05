@@ -22,7 +22,9 @@ use Carbon\Carbon;
  */
 
 beforeEach(function () {
-    $this->travelTo(Carbon::parse('2027-01-05 02:00:00'));
+    // 10 AM on a Tuesday: visits are booked on a weekday in office hours
+    // (manage item 4). It was 2 AM.
+    $this->travelTo(Carbon::parse('2027-01-05 10:00:00'));
 });
 
 /** An owner's business, with a live Business Permit and a Sanitary Permit due. */

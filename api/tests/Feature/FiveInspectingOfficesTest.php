@@ -10,6 +10,9 @@ use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * Every office that issues a clearance can book and close the visit behind it.
  *

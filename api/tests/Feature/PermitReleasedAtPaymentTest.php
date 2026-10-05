@@ -12,6 +12,9 @@ use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * The Business Permit is released at PAYMENT, and a refused clearance suspends it.
  *

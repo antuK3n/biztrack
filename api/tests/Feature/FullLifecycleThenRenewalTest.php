@@ -10,6 +10,9 @@ use App\Models\PsicCode;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * The whole thing, end to end, through the endpoints a browser calls.
  *

@@ -1149,6 +1149,18 @@ test('the sheet leads with the office reading it, and offers no other office’s
 /** The clearance this suite's session issues. CPDO's, and it is inspected. */
 const OWN_PERMIT = { code: 'ZONING', office: 'CPDO' } as const
 
+/**
+ * Tomorrow or later, on a weekday at 10:00 local time, as the browser sends
+ * it. A visit is booked Monday to Friday, 8:00 AM to 5:00 PM, so the refusals
+ * below are about the office and not about the date.
+ */
+function weekdaySlot(): string {
+  const when = new Date(Date.now() + 86_400_000)
+  when.setHours(10, 0, 0, 0)
+  while (when.getDay() === 0 || when.getDay() === 6) when.setDate(when.getDate() + 1)
+  return when.toISOString()
+}
+
 /** Act as another account in its own context, closing it even on a failure. */
 async function asAccount<T>(
   browser: Browser,
@@ -1347,7 +1359,7 @@ test('an office that does not issue the permit is offered no way to book its vis
      * controller at all — the route gate is the refusal here.
      */
     const status = await bplo.evaluate(
-      async ([id, code]) => {
+      async ([id, code, slot]) => {
         const token = localStorage.getItem('biztrack.token.staff')
         const res = await fetch(`/api/v1/applications/${id}/permits/${code}/inspection`, {
           method: 'POST',
@@ -1356,11 +1368,11 @@ test('an office that does not issue the permit is offered no way to book its vis
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ scheduled_at: new Date(Date.now() + 86_400_000).toISOString() }),
+          body: JSON.stringify({ scheduled_at: slot }),
         })
         return res.status
       },
-      [appId, OWN_PERMIT.code] as const,
+      [appId, OWN_PERMIT.code, weekdaySlot()] as const,
     )
     expect(status, 'BPLO was allowed to book another office’s inspection').toBe(403)
   })
@@ -1374,7 +1386,7 @@ test('an office that does not issue the permit is offered no way to book its vis
    */
   await asAccount(browser, 'sanitary', '/staff/queue', async (cho) => {
     const status = await cho.evaluate(
-      async ([id, code]) => {
+      async ([id, code, slot]) => {
         const token = localStorage.getItem('biztrack.token.staff')
         const res = await fetch(`/api/v1/applications/${id}/permits/${code}/inspection`, {
           method: 'POST',
@@ -1383,11 +1395,11 @@ test('an office that does not issue the permit is offered no way to book its vis
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ scheduled_at: new Date(Date.now() + 86_400_000).toISOString() }),
+          body: JSON.stringify({ scheduled_at: slot }),
         })
         return res.status
       },
-      [appId, OWN_PERMIT.code] as const,
+      [appId, OWN_PERMIT.code, weekdaySlot()] as const,
     )
     expect(status, 'the City Health Office booked a zoning inspection').toBe(403)
   })
@@ -1450,6 +1462,8 @@ test('the office that issues a permit books its first visit from the review scre
    */
   const when = new Date(Date.now() + 3 * 86_400_000)
   when.setHours(10, 0, 0, 0)
+  // A weekday: an office books visits Monday to Friday, 8:00 AM to 5:00 PM.
+  while (when.getDay() === 0 || when.getDay() === 6) when.setDate(when.getDate() + 1)
   const pad = (n: number) => String(n).padStart(2, '0')
   const localValue = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T10:00`
   await dateField.fill(localValue)

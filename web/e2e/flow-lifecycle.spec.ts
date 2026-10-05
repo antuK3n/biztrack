@@ -422,6 +422,8 @@ async function bookOwnVisit(page: Page, narrative: Narrative) {
    */
   const when = new Date(Date.now() + 3 * 86_400_000)
   when.setHours(10, 0, 0, 0)
+  // A weekday: an office books visits Monday to Friday, 8:00 AM to 5:00 PM.
+  while (when.getDay() === 0 || when.getDay() === 6) when.setDate(when.getDate() + 1)
   const pad = (n: number) => String(n).padStart(2, '0')
   await dateField.fill(
     `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T10:00`,

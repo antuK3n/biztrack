@@ -176,7 +176,14 @@ test('a refused permit, applied for again, opens an editable sheet and goes back
   )
   const assignmentId = await bfpAssignment(appId)
   await ok(await fire.post(`/api/v1/assignments/${assignmentId}/approve`, { data: {} }), 'BFP approve')
-  const when = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 19).replace('T', ' ')
+  /*
+   * Today, as a date: the result is recorded straight after, and a visit
+   * takes no result before its booked day. A bare date carries no time, so
+   * the office-hours rule has nothing to check; a weekday is still required.
+   */
+  const today = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const when = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
   const visit = await ok<{ id: number }>(
     await fire.post(`/api/v1/applications/${appId}/permits/FSIC/inspection`, { data: { scheduled_at: when } }),
     'book',

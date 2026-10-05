@@ -5,10 +5,12 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\Barangay;
-use App\Models\Inspection;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
 
 /**
  * The two end states must reach the applicant (tester item 51). Approval used

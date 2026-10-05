@@ -10,7 +10,11 @@ use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
+
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
 
 /**
  * Re-inspection after a failed visit.
@@ -535,10 +539,64 @@ it('refuses to book or move a visit to a day already gone', function () use ($de
         ->assertStatus(422)
         ->assertJsonPath('errors.scheduled_at.0', 'Pick today or a later date.');
 
-    // Today itself is fine, at any hour.
+    // Today itself is fine, at any hour the office books (manage item 4).
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->startOfDay()->toIso8601String()])
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->setTime(8, 0)->toIso8601String()])
         ->assertCreated();
+});
+
+/*
+ * ── A weekday, in office hours ──────────────────────────────────────────────
+ *
+ * "Ensure correct scheduling for the inspection" (checklist 2026-09-27, manage
+ * item 4): a Sunday and 2 AM were both accepted. All three ways a visit gets a
+ * date are asked.
+ */
+
+it('books, moves and re-books a visit only on a weekday between 8:00 AM and 5:00 PM', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Weekday Diner');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+    $saturday = now()->next(CarbonInterface::SATURDAY)->setTime(10, 0);
+    $weekday = now()->addWeekdays(2);
+
+    // Moving it: a Saturday, a Sunday, 2 AM and 5:30 PM are refused.
+    foreach ([
+        [$saturday, 'Pick a weekday.'],
+        [$saturday->copy()->addDay(), 'Pick a weekday.'],
+        [$weekday->copy()->setTime(2, 0), 'Pick a time between 8:00 AM and 5:00 PM.'],
+        [$weekday->copy()->setTime(17, 30), 'Pick a time between 8:00 AM and 5:00 PM.'],
+    ] as [$when, $refusal]) {
+        test()->withHeaders($officer)
+            ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => $when->toDateTimeString()])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.scheduled_at.0', $refusal);
+    }
+
+    // The edges are in hours, and the browser's UTC is read on Manila's clock.
+    foreach ([[8, 0], [17, 0]] as [$h, $m]) {
+        test()->withHeaders($officer)
+            ->postJson("/api/v1/inspections/{$fire->id}/reschedule", [
+                'scheduled_at' => $weekday->copy()->setTime($h, $m)->utc()->toIso8601String(),
+            ])->assertOk();
+    }
+
+    // Re-booking after a failure, and a first booking, follow the same rule.
+    test()->travelTo($weekday->copy()->setTime(9, 0));
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
+        ->assertOk();
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->next(CarbonInterface::SUNDAY)->setTime(10, 0)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'Pick a weekday.');
+
+    $cho = $visits->firstWhere('department.code', 'CHO');
+    Inspection::whereKey($cho->id)->delete();
+    test()->withHeaders(authAs($deptEmail['CHO']))
+        ->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", ['scheduled_at' => now()->addWeekday()->setTime(18, 0)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.scheduled_at.0', 'Pick a time between 8:00 AM and 5:00 PM.');
 });
 
 it('refuses a first booking in the past too', function () use ($deptEmail) {
@@ -557,7 +615,7 @@ it('refuses a result recorded before the day the visit is booked for', function 
     [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Early Bird Grill');
     $fire = $visits->firstWhere('department.code', 'BFP');
     $officer = authAs($deptEmail['BFP']);
-    $booked = now()->addDays(2)->setTime(14, 0);
+    $booked = now()->addWeekdays(2)->setTime(14, 0);
 
     test()->withHeaders($officer)
         ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => $booked->toDateTimeString()])
@@ -579,7 +637,7 @@ it('refuses a result recorded before the day the visit is booked for', function 
 it('tells the applicant when a visit is moved', function () use ($deptEmail) {
     [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Moved Visit Cafe');
     $fire = $visits->firstWhere('department.code', 'BFP');
-    $to = now()->addDays(3);
+    $to = now()->addWeekdays(3);
 
     test()->withHeaders(authAs($deptEmail['BFP']))
         ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => $to->toDateTimeString()])
@@ -743,7 +801,7 @@ it('refuses to move a visit that already has a result; the failure is answered b
         ->assertOk();
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addDays(4)->toDateTimeString()])
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addWeekdays(4)->toDateTimeString()])
         ->assertStatus(422)
         ->assertJsonPath('message', 'This visit already has a result.');
 
@@ -753,7 +811,7 @@ it('refuses to move a visit that already has a result; the failure is answered b
 
     // The way on still works: a re-inspection from the failed visit.
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->addDays(6)->toDateTimeString()])
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", ['scheduled_at' => now()->addWeekdays(6)->toDateTimeString()])
         ->assertCreated();
 
     // And the standing failure still holds the Mayor's Permit when another office passes.
@@ -770,11 +828,11 @@ it('refuses a second booking while the office’s moved visit is still open', fu
     $officer = authAs($deptEmail['BFP']);
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addDays(6)->toDateTimeString()])
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addWeekdays(6)->toDateTimeString()])
         ->assertOk();
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/applications/{$appId}/permits/FSIC/inspection", ['scheduled_at' => now()->addDays(8)->toDateTimeString()])
+        ->postJson("/api/v1/applications/{$appId}/permits/FSIC/inspection", ['scheduled_at' => now()->addWeekdays(8)->toDateTimeString()])
         ->assertStatus(422)
         ->assertJsonPath('message', 'This office already has a visit booked for this filing.');
 

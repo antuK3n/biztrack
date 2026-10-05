@@ -9,6 +9,9 @@ use App\Models\PsicCode;
 use App\Support\RenewalSeason;
 use Carbon\CarbonImmutable;
 
+// Visits are booked on a weekday in office hours (manage item 4).
+beforeEach(fn () => duringOfficeHours());
+
 /*
  * The whole lifecycle, walked once, over the 6 September 2026 flow
  * (docs/application-flow-2026-09.md).

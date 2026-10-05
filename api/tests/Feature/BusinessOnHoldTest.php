@@ -43,6 +43,8 @@ const HOLD_KP_MERCHANT = 'M-HOLD';
 const HOLD_KP_KEY = 'hold-test-key-not-real';
 
 beforeEach(function () {
+    // Visits are booked on a weekday in office hours (manage item 4).
+    duringOfficeHours();
     config([
         'payments.kwikpay.base_url' => HOLD_KP_BASE,
         'payments.kwikpay.merchant' => HOLD_KP_MERCHANT,
@@ -325,12 +327,12 @@ it('refuses booking, moving or re-booking a visit on a held filing', function ()
     holdSetStatus($app->business_id, 'suspended')->assertOk();
 
     authAs('sanitary@biztrack.local');
-    test()->postJson("/api/v1/inspections/{$visit}/reschedule", ['scheduled_at' => now()->addDays(5)->toDateTimeString()])
+    test()->postJson("/api/v1/inspections/{$visit}/reschedule", ['scheduled_at' => now()->addWeekdays(5)->toDateTimeString()])
         ->assertStatus(422)
         ->assertJsonPath('message', HOLD_SUSPENDED);
     test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'failed', 'findings' => 'No handwashing sink.'])
         ->assertOk();
-    test()->postJson("/api/v1/inspections/{$visit}/reinspect", ['scheduled_at' => now()->addDays(5)->toDateTimeString()])
+    test()->postJson("/api/v1/inspections/{$visit}/reinspect", ['scheduled_at' => now()->addWeekdays(5)->toDateTimeString()])
         ->assertStatus(422)
         ->assertJsonPath('message', HOLD_SUSPENDED);
 
@@ -347,7 +349,7 @@ it('refuses booking the first visit on a held filing', function () {
 
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->addWeekdays(2)->toDateTimeString(),
     ])->assertStatus(422)->assertJsonPath('message', HOLD_SUSPENDED);
 
     expect(Inspection::where('application_id', $appId)->count())->toBe(0);
@@ -399,7 +401,7 @@ it('refuses the Debug panel paying for, or passing a visit on, a held filing', f
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
     test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->addWeekdays(2)->toDateTimeString(),
     ])->assertCreated();
     $unpaid = holdFiling();
     holdSetStatus($app->business_id, 'suspended')->assertOk();

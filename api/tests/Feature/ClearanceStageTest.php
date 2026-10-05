@@ -16,7 +16,6 @@ use App\Models\PsicCode;
 use App\Services\ClearanceService;
 use App\Services\WorkflowService;
 use App\Support\PermitFees;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -291,6 +290,8 @@ function driveClearanceToApproved(Application $app, string $code): void
 }
 
 beforeEach(function () {
+    // Visits are booked on a weekday in office hours (manage item 4).
+    duringOfficeHours();
     // Keep uploads out of the developer's real storage directory.
     Storage::fake('local');
 });
