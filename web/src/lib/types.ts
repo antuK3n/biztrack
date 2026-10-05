@@ -1307,6 +1307,12 @@ export interface PermitRegisterRow extends Permit {
    */
   office_form: Record<string, unknown> | null
   /**
+   * The day the owner submitted the filing (`YYYY-MM-DD`), on every row, the
+   * Mayor's Permit included. Null when the register holds no such date — a
+   * certificate from the old system, or a filing never stamped as submitted.
+   */
+  application_date: string | null
+  /**
    * The requirements uploaded on the filing that belong to THIS permit's
    * office — see PermitRegisterResource::requirementDocuments. Null when not
    * loaded, [] when loaded and nothing was uploaded.
