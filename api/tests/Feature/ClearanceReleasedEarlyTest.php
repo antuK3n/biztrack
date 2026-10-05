@@ -3,6 +3,7 @@
 use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
+use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
 use App\Models\Application;
 use App\Models\ApplicationPermitType;
@@ -214,7 +215,19 @@ it('does not raise the same DENR requirement twice', function () {
     expect($before)->toBeGreaterThan(0);
 
     app(WorkflowService::class)->transitionClearance($row, ClearanceStatus::Approved);
-    $inspection = $app->inspections()->latest('id')->firstOrFail();
+    /*
+     * A NEW visit, as a re-inspection is. This recorded a second result on the
+     * visit already conducted, which the service refuses since 5 October 2026
+     * ("This visit already has a result.").
+     */
+    $done = $app->inspections()->latest('id')->firstOrFail();
+    $inspection = $done->replicate()->fill([
+        'status' => InspectionStatus::Scheduled,
+        'result' => null,
+        'findings' => null,
+        'conducted_at' => null,
+    ]);
+    $inspection->save();
     app(WorkflowService::class)->recordInspection($inspection, InspectionResult::Passed, 'Re-checked.');
 
     expect(OfficerRequest::where('application_id', $app->id)->count())->toBe($before);
