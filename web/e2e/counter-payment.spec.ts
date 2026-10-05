@@ -3,7 +3,8 @@ import { mergedStorageState } from './helpers'
 import { makeBilledApplication } from './payments'
 
 /*
- * BPLO marks a filing paid at the counter [Ken, 4 October 2026].
+ * BPLO marks a filing paid at the counter [Ken, 4 October 2026], after the
+ * owner chose Over the Counter on their Pay page.
  *
  * An owner who pays in person at City Hall: BPLO finds the filing on its
  * Pending Payment tab and marks it paid, entering nothing. The row leaves the
@@ -12,7 +13,7 @@ import { makeBilledApplication } from './payments'
 test.describe.configure({ timeout: 180_000 })
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
 
-test('BPLO marks a filing paid at the counter from the Pending Payment tab', async ({ page }) => {
+test('the owner chooses Over the Counter, and BPLO marks the filing paid from the Pending Payment tab', async ({ page }) => {
   const appId = await makeBilledApplication(page)
 
   const filing = await page.evaluate(async (id) => {
@@ -23,6 +24,25 @@ test('BPLO marks a filing paid at the counter from the Pending Payment tab', asy
     return { tracking: data.tracking_id as string, status: data.status as string }
   }, appId)
   expect(filing.status).toBe('pending_payment')
+
+  /*
+   * The owner chooses Over the Counter on the Pay page (checklist 2026-09-27,
+   * apply item 27). Nothing is paid by choosing it and no gateway opens: one
+   * line says where to pay, and the bill waits for BPLO below.
+   */
+  await page.goto(`/applications/${appId}/pay`)
+  await page.getByRole('button', { name: 'Over the Counter' }).click()
+  await expect(page.getByRole('button', { name: 'Over the Counter' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText('Pay at the BPLO counter, Malabon City Hall. BPLO records your payment.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Pay Online' })).toHaveCount(0)
+
+  const stillOwed = await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/applications/${id}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.public')}` },
+    })
+    return (await res.json()).data.status as string
+  }, appId)
+  expect(stillOwed).toBe('pending_payment')
 
   await page.goto('/staff/queue')
   await page.getByRole('radio', { name: 'Pending Payment', exact: true }).check()

@@ -75,6 +75,15 @@ export function PayPage() {
   } = useAsync<PaymentOptions>(() => payments.options(appId), [appId])
 
   const [method, setMethod] = useState<PaymentMethod | null>(null)
+  /*
+   * Over the Counter, chosen here (checklist 2026-09-27, apply item 27).
+   *
+   * Held on this page and nowhere else: choosing it records nothing and opens
+   * no gateway. The bill stays unpaid until BPLO takes the cash and records it
+   * with the counter payment it already has (POST /counter-payment), which is
+   * what moves the filing on - "over the counter should be paid" [Ken].
+   */
+  const [overCounter, setOverCounter] = useState(false)
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState<string | null>(null)
   /** The payment this screen is showing: none yet, waiting, paid or failed. */
@@ -134,7 +143,7 @@ export function PayPage() {
   const online = options?.mode === 'kwikpay'
 
   async function pay() {
-    if (paying || !chosen || !(fee ?? app?.fee_assessment)) return
+    if (overCounter || paying || !chosen || !(fee ?? app?.fee_assessment)) return
     setPaying(true)
     setPayError(null)
     try {
@@ -429,13 +438,16 @@ export function PayPage() {
         ) : (
           <div className="flex flex-wrap gap-3">
             {methods.map((m) => {
-              const selected = chosen === m.value
+              const selected = !overCounter && chosen === m.value
               return (
                 <button
                   key={m.value}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => setMethod(m.value)}
+                  onClick={() => {
+                    setMethod(m.value)
+                    setOverCounter(false)
+                  }}
                   className={`rounded-full border px-6 py-2 text-sm font-semibold transition-colors ${
                     selected
                       ? 'border-royal bg-royal text-white'
@@ -448,6 +460,18 @@ export function PayPage() {
                 </button>
               )
             })}
+            <button
+              type="button"
+              aria-pressed={overCounter}
+              onClick={() => setOverCounter(true)}
+              className={`rounded-full border px-6 py-2 text-sm font-semibold transition-colors ${
+                overCounter
+                  ? 'border-royal bg-royal text-white'
+                  : 'border-input-border bg-input text-ink hover:brightness-95'
+              }`}
+            >
+              Over the Counter
+            </button>
           </div>
         )}
       </fieldset>
@@ -459,7 +483,7 @@ export function PayPage() {
         until Ken asked for every "test" and "simulated" on screen to go
         [2026-10-05], and the sentence says all of it.
       */}
-      {online && options?.test_charge && (
+      {online && options?.test_charge && !overCounter && (
         <div className="mt-6">
           <Alert variant="info">
             You will be charged {formatMoney(options.test_charge)} for this bill
@@ -469,22 +493,28 @@ export function PayPage() {
         </div>
       )}
 
-      <div className="mt-7">
-        <PillButton
-          onClick={pay}
-          aria-disabled={paying || !assessment || !chosen}
-          className="w-full py-3 text-base aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-        >
-          {paying ? 'Processing…' : 'Pay Online'}
-        </PillButton>
-        {/* Nothing under the button with KwikPay off: it read "This is a
-            simulated payment. No real charge is made." [Ken, 2026-10-05]. */}
-        {options && online && (
-          <p className="mt-2.5 text-center text-xs text-ink-muted">
-            {`You will finish paying in your ${chosen === 'qrph' ? 'bank or e-wallet' : paymentMethodLabel(chosen ?? '')} app. Your application moves on once the payment is confirmed.`}
-          </p>
-        )}
-      </div>
+      {overCounter ? (
+        <p className="mt-7 text-center text-sm text-ink">
+          Pay at the BPLO counter, Malabon City Hall. BPLO records your payment.
+        </p>
+      ) : (
+        <div className="mt-7">
+          <PillButton
+            onClick={pay}
+            aria-disabled={paying || !assessment || !chosen}
+            className="w-full py-3 text-base aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          >
+            {paying ? 'Processing…' : 'Pay Online'}
+          </PillButton>
+          {/* Nothing under the button with KwikPay off: it read "This is a
+              simulated payment. No real charge is made." [Ken, 2026-10-05]. */}
+          {options && online && (
+            <p className="mt-2.5 text-center text-xs text-ink-muted">
+              {`You will finish paying in your ${chosen === 'qrph' ? 'bank or e-wallet' : paymentMethodLabel(chosen ?? '')} app. Your application moves on once the payment is confirmed.`}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
