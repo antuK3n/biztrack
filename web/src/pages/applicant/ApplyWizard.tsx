@@ -3339,6 +3339,17 @@ export function ApplyWizard() {
    */
   const openedSnapshotRef = useRef<string | null>(null)
   /*
+   * Whether the applicant has typed, ticked or chosen anything on this page.
+   *
+   * Client, 5 October 2026: *"everytime I click New Business Permit then left
+   * the page, it always spawn New Business Permit (4) in the draft."* The
+   * wizard fills its own default title a moment after opening, the autosave
+   * read that as an edit, and every visit left a draft behind. A change the
+   * page made to itself is not the applicant's work; only input events on
+   * the page set this (see the root element's capture handlers).
+   */
+  const userActedRef = useRef(false)
+  /*
    * Has the restore below had its turn AND landed?
    *
    * State rather than a ref, and that is the whole point of it. Effects run in
@@ -8652,6 +8663,7 @@ export function ApplyWizard() {
       return
     }
     if (openedSnapshotRef.current === snapshot) return
+    if (!userActedRef.current) return
     /*
      * Not while the amendment's entry dialog is still up. The title names
      * itself ("2026 Amendment") the moment the form opens, which counted as a
@@ -9735,7 +9747,20 @@ export function ApplyWizard() {
   const neverSaved = applicationId === null && scratchSavedSnapshot === null
 
   return (
-    <div className="mx-auto max-w-5xl pb-4">
+    <div
+      className="mx-auto max-w-5xl pb-4"
+      // The applicant's own input, and nothing the page does to itself — see userActedRef.
+      onInputCapture={() => {
+        userActedRef.current = true
+      }}
+      onChangeCapture={() => {
+        userActedRef.current = true
+      }}
+      onPointerDownCapture={(e) => {
+        // A pin on the map and a chip-style answer are input too; a tab or Next is not.
+        if ((e.target as HTMLElement).closest('.leaflet-container, [role=radio], [role=checkbox]')) userActedRef.current = true
+      }}
+    >
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
       <div className="mb-3 flex items-center gap-3">
         <ClipboardIcon size={34} className="shrink-0 text-royal" />
