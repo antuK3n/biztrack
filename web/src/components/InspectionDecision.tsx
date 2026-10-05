@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { CalendarIcon, CheckCircleFilledIcon, XCircleIcon, XIcon } from './icons'
 import { InspectorNameField } from './InspectorNameField'
 import { ProtoModal } from './ui/Proto'
@@ -736,6 +736,8 @@ function FirstInspectionCard({
   busy,
   hintId,
   onChange,
+  inspector,
+  onInspectorChange,
   onBook,
 }: {
   permit: string
@@ -744,8 +746,29 @@ function FirstInspectionCard({
   /** Ties the "pick a date first" sentence to the button it explains. */
   hintId: string
   onChange: (value: string) => void
+  /** The inspector's name, typed with the booking — optional, see below. */
+  inspector: string
+  onInspectorChange: (value: string) => void
   onBook: () => void
 }) {
+  const nameId = useId()
+  const listId = useId()
+  const [names, setNames] = useState<string[]>([])
+
+  // The office's past inspectors, as InspectorNameField offers them.
+  useEffect(() => {
+    let live = true
+    inspectionsApi
+      .inspectorNames()
+      .then((list) => live && setNames(list))
+      .catch(() => {
+        // An autocomplete that fails is a plain text box, not an error.
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
   return (
     <li
       className="overflow-hidden rounded-2xl bg-white shadow-card"
@@ -767,6 +790,32 @@ function FirstInspectionCard({
           Your office has accepted the paperwork for this permit. Say when an inspector will visit
           the premises — the permit cannot be issued until a visit passes.
         </p>
+
+        {/*
+          The inspector's name, with the booking (request of 6 October 2026).
+          It could only be typed once a visit existed, so a permit waiting to
+          be booked had nowhere to put it. Optional, as it is on the card — the
+          officer in charge still decides the visit, and the name stays
+          editable there afterwards (InspectorNameField). Same label.
+        */}
+        <label htmlFor={nameId} className="mt-4 block text-sm text-ink-muted">
+          Inspector (for the record)
+        </label>
+        <input
+          id={nameId}
+          type="text"
+          value={inspector}
+          maxLength={120}
+          list={listId}
+          placeholder="Full name"
+          onChange={(e) => onInspectorChange(e.target.value)}
+          className="mt-1 w-64 max-w-full rounded-lg border border-input-border bg-input px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+        />
+        <datalist id={listId}>
+          {names.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           <InspectionDateInput
@@ -870,6 +919,7 @@ export function InspectionDecisionPanel({
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedValue, setReschedValue] = useState('')
   const [bookValue, setBookValue] = useState('')
+  const [bookInspector, setBookInspector] = useState('')
   const [booking, setBooking] = useState(false)
   const [bookNote, setBookNote] = useState<string | null>(null)
   /** The visit this panel has just opened, before the caller has re-fetched. */
@@ -1079,8 +1129,10 @@ export function InspectionDecisionPanel({
         book.applicationId,
         book.code,
         new Date(bookValue).toISOString(),
+        bookInspector.trim() || null,
       )
       setBookValue('')
+      setBookInspector('')
       setBooked(visit)
       setBookNote(
         `${book.permit} inspection booked for ${formatDate(visit.scheduled_at)}. The applicant has been told the date.`,
@@ -1165,6 +1217,8 @@ export function InspectionDecisionPanel({
         setError(null)
         setBookValue(next)
       }}
+      inspector={bookInspector}
+      onInspectorChange={setBookInspector}
       onBook={bookFirstVisit}
     />
   ) : null

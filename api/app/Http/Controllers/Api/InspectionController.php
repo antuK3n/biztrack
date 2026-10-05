@@ -159,8 +159,16 @@ class InspectionController extends Controller
     {
         $data = $request->validate([
             'scheduled_at' => $this->visitRules(),
+            /*
+             * The inspector's name, optional, typed with the booking (request
+             * of 6 October 2026): until then it could only be added once a
+             * visit existed, so a permit waiting to be booked had nowhere to
+             * put it. Same rule as nameInspector().
+             */
+            'inspector_name' => ['nullable', 'string', 'max:120'],
         ], [
             'scheduled_at.required' => 'Choose the date of the inspection.',
+            'inspector_name.max' => 'Keep the name under 120 characters.',
         ]);
 
         $type = PermitType::where('code', strtoupper($code))->firstOrFail();
@@ -177,6 +185,14 @@ class InspectionController extends Controller
             ->firstOrFail();
 
         $visit = $this->workflow->scheduleClearanceInspection($row, $data['scheduled_at']);
+
+        $inspector = trim((string) ($data['inspector_name'] ?? '')) ?: null;
+        if ($inspector !== null) {
+            $visit->forceFill(['inspector_name' => $inspector])->save();
+            // The same audit row nameInspector() writes, so the name's history
+            // reads the same however it was first given.
+            Audit::log('inspection.inspector_named', $visit, ['from' => null, 'to' => $inspector]);
+        }
 
         return response()->json([
             'data' => new InspectionResource($visit->load($this->eager)),
