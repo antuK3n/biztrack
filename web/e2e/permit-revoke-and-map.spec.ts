@@ -88,14 +88,16 @@ test.describe('BPLO revokes a permit', () => {
   })
 })
 
-test.describe('an office revokes its own certificates, and maps them', () => {
+test.describe('an office changes its own certificates, and maps them', () => {
   test.use({ storageState: sessionFor('fire') })
 
   /*
    * Client, 4 October 2026: "yung mga kanya kanya nilang permit pwede nilang
-   * irevoke syempre tas maglagay din ng maps tulad sa bplo".
+   * irevoke syempre tas maglagay din ng maps tulad sa bplo". The revoking
+   * half was withdrawn on 5 October 2026 (Ken): only BPLO and the super admin
+   * revoke, and an office's Change status is Active and Rejected.
    */
-  test('the fire office is offered Revoke on FSICs only, and a Map of its own certificate', async ({ page }) => {
+  test('the fire office is offered Change status on FSICs only, and a Map of its own certificate', async ({ page }) => {
     await page.goto('/staff/admin/permits')
     await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
 

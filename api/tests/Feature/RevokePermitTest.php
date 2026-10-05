@@ -78,7 +78,7 @@ it('lets BPLO revoke a permit, recording when and why', function () {
 });
 
 it('lets the super admin revoke any office’s permit', function () {
-    // Ken, 5 October 2026: the super admin revokes anything; each office only its own.
+    // Ken, 5 October 2026: the super admin revokes anything; BPLO only the Mayor's Permit.
     foreach ([PermitType::OUTCOME_CODE, 'SANITARY'] as $code) {
         $permit = revocablePermit($code);
 
@@ -97,25 +97,42 @@ it('refuses BPLO on another office’s permit — it revokes the Mayor’s Permi
 
         test()->withHeaders(authAs('bplo@biztrack.local'))
             ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Not BPLO’s to take back.'])
-            ->assertForbidden();
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This permit is issued by another office.');
 
         expect($permit->fresh()->status)->toBe(PermitStatus::Active);
     }
 });
 
-it('lets an office revoke the certificate it issued', function () {
-    // Client, 4 October 2026: "yung mga kanya kanya nilang permit pwede nilang irevoke".
+it('refuses a clearance office revoking even the certificate it issued', function () {
+    /*
+     * Ken, 5 October 2026: only BPLO and the super admin revoke — BPLO the
+     * Mayor's Permit, the super admin any permit. A clearance office changes
+     * its own between Active and Rejected and never reaches Revoked, on this
+     * door or through Change status.
+     */
     $permit = revocablePermit('SANITARY');
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Failed the sanitary re-inspection.'])
-        ->assertOk()
-        ->assertJsonPath('data.status', 'revoked');
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Revoked is not a status this permit can be set to.');
+
+    // Routed to the health office, so it reads the row and reaches Change status.
+    ApplicationAssignment::firstOrCreate([
+        'application_id' => $permit->application_id,
+        'department_id' => $permit->permitType->issuing_department_id,
+    ]);
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/status", ['status' => 'revoked', 'reason' => 'Failed the sanitary re-inspection.'])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.status.0', 'Revoked is not a status this permit can be set to.');
+
+    expect($permit->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('refuses every office but the issuer, and the owner', function () {
+it('refuses every clearance office, and the owner', function () {
     /*
-     * "yung cert na nirerelease ng office na yon sya lang pwede mag revoke".
      * The other offices can SEE this permit's row where they read it, so the
      * refusal has to come from the server, not from the row being out of
      * reach. The owner is here because the one person who must never be able
@@ -124,6 +141,7 @@ it('refuses every office but the issuer, and the owner', function () {
     $permit = revocablePermit('SANITARY');
 
     foreach ([
+        'sanitary@biztrack.local',
         'fire@biztrack.local',
         'zoning@biztrack.local',
         'obo@biztrack.local',

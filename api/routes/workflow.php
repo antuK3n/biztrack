@@ -467,11 +467,12 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::middleware('permission:permit.issue')
         ->post('permits/{permit}/lift-suspension', [PermitController::class, 'liftSuspension']);
     /*
-     * Revoking a permit — BPLO and the super admin (checklist item 23). Its own
-     * permission rather than `permit.issue`, which the lift above uses: A26
-     * named `permit.revoke` as the thing to add, and taking a certificate away
-     * is a different act from minting one even while the same two roles hold
-     * both.
+     * Revoking a permit — BPLO (the Mayor's Permit only) and the super admin
+     * (any), checked in the controller; the clearance offices hold the
+     * permission for Change status but never revoke (Ken, 5 October 2026).
+     * Checklist item 23. Its own permission rather than `permit.issue`, which
+     * the lift above uses: A26 named `permit.revoke` as the thing to add, and
+     * taking a certificate away is a different act from minting one.
      */
     Route::middleware('permission:permit.revoke')
         ->post('permits/{permit}/revoke', [PermitController::class, 'revoke']);

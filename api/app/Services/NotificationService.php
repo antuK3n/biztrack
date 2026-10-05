@@ -479,7 +479,9 @@ class NotificationService
 
         $permit->loadMissing('permitType.department');
         $name = $permit->permitType?->name ?? 'Permit';
-        // The office that revoked it, since each office now revokes its own.
+        // The office that issued it, the one the owner takes it up with. Since
+        // 5 October 2026 only BPLO and the super admin revoke, so this is BPLO
+        // for a Mayor's Permit and the issuing office for anything else.
         $office = $permit->permitType?->department?->name ?? 'issuing office';
 
         /*

@@ -503,16 +503,19 @@ class PermitController extends Controller
 
     /**
      * Revoke a permit (checklist item 23). Behind `permit.revoke` on the
-     * route, which BPLO and the five clearance offices hold. See
+     * route, which BPLO and the five clearance offices hold — the offices for
+     * Change status, which reads the same permission. See
      * `WorkflowService::revokePermit` for what may be revoked and what the act
      * writes.
      *
-     * And only by the office that ISSUED it [client, 4 October 2026: "yung
-     * cert na nirerelease ng office na yon sya lang pwede mag revoke, sa side
-     * ng bplo mayors permit lang"]. BPLO reads every office's certificates but
-     * revokes only the Mayor's Permit; CHO revokes its Sanitary Permits, and so
-     * on. The super admin belongs to no office and revokes nothing. Refused
-     * here rather than only hidden on screen, so a direct request is refused too.
+     * Only BPLO and the super admin revoke (Ken, 5 October 2026): BPLO the
+     * Mayor's Permit and nothing else, the super admin any permit. A clearance
+     * office never revokes, not even what it issued; its Change status stays
+     * Active and Rejected, and this door answers it with the sentence that
+     * door would. This replaced the client's 4 October rule ("yung cert na
+     * nirerelease ng office na yon sya lang pwede mag revoke"), under which
+     * each office revoked its own. Refused here rather than only hidden on
+     * screen, so a direct request is refused too.
      *
      * Answers with the register row rather than the contracted payload, so the
      * table that sent the request can redraw the row with its revocation
@@ -526,15 +529,21 @@ class PermitController extends Controller
             'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
         ]);
 
-        // The issuing office revokes its own certificate; the super admin
-        // revokes any (Ken, 5 October 2026).
         $user = $request->user();
-        $issuer = $permit->permitType?->issuing_department_id;
-        abort_unless(
-            $user->hasRole('admin') || ($issuer !== null && (int) $issuer === (int) $user->department_id),
-            403,
-            'Only the office that issued this permit can revoke it.',
-        );
+        if (! $user->hasRole('admin')) {
+            $issuer = $permit->permitType?->issuing_department_id;
+            abort_unless(
+                $issuer !== null && (int) $issuer === (int) $user->department_id,
+                403,
+                'This permit is issued by another office.',
+            );
+            // Its own office, then — which revokes only if it is BPLO's Mayor's Permit.
+            abort_unless(
+                $permit->permitType?->code === PermitType::OUTCOME_CODE,
+                403,
+                PermitStatus::Revoked->label().' is not a status this permit can be set to.',
+            );
+        }
 
         $this->workflow->revokePermit($permit, $data['reason']);
 
@@ -578,8 +587,8 @@ class PermitController extends Controller
      * has, AND may revoke any of them. The client asked on 4 October 2026 for
      * Revoke to be taken off the super admin ("paki tanggal ang revoke sa
      * super admin"); Ken overrode that on 5 October 2026 — the super admin
-     * revokes any permit, as `revoke()` already lets it. Offices still revoke
-     * and change only their own.
+     * revokes any permit, as `revoke()` already lets it. Offices change only
+     * their own, and of them only BPLO revokes (the Mayor's Permit).
      */
     private function isSuperAdmin(Request $request): bool
     {
