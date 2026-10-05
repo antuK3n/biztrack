@@ -325,10 +325,14 @@ export const NOT_RENEWED_COLUMNS: PermitColumn[] = [
   },
 ]
 
-/** The columns with the list's two in place of the expiry pair, right after Status. */
+/**
+ * The columns with the list's two in place of the expiry pair, right after
+ * Business, so they are on screen without scrolling sideways [Ken, 5 October
+ * 2026]. Only on this list; the register keeps its own order.
+ */
 export function withNotRenewedColumns(columns: PermitColumn[]): PermitColumn[] {
   const kept = columns.filter((c) => c.key !== 'valid_until' && c.key !== 'days')
-  const at = kept.findIndex((c) => c.key === 'status') + 1
+  const at = kept.findIndex((c) => c.key === 'business') + 1
   return [...kept.slice(0, at), ...NOT_RENEWED_COLUMNS, ...kept.slice(at)]
 }
 
