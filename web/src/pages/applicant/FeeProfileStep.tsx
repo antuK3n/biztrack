@@ -1804,7 +1804,10 @@ export function FeeProfileStep({
               counts. The client asked for each number to appear once.
 
               So a paper item that is several boxes is now a GROUP, and the group
-              carries the number. Inside it the fields say only what they count.
+              carries the number. Inside it each box still says in full what it
+              counts — "No. of Male Employees", not "Male" — because the client
+              asked for "number of" before every kind of employee (checklist,
+              Apply for Permit 5); only the item number is not repeated.
               Item 3 is its own box on the paper and stays its own field here.
 
               A visible heading plus an sr-only <legend>, rather than a visible
@@ -1840,7 +1843,7 @@ export function FeeProfileStep({
                 <NumberField
                   className="grow basis-[5rem]"
                   box="max-w-[8rem]"
-                  label="Total"
+                  label="Total No. of Employees"
                   required
                   kind="count"
                   locked
@@ -1853,7 +1856,7 @@ export function FeeProfileStep({
                 <NumberField
                   className="grow basis-[5rem]"
                   box="max-w-[8rem]"
-                  label="Male"
+                  label="No. of Male Employees"
                   required
                   kind="count"
                   value={value.male_employees}
@@ -1864,7 +1867,7 @@ export function FeeProfileStep({
                 <NumberField
                   className="grow basis-[5rem]"
                   box="max-w-[8rem]"
-                  label="Female"
+                  label="No. of Female Employees"
                   required
                   kind="count"
                   value={value.female_employees}
@@ -1921,7 +1924,7 @@ export function FeeProfileStep({
                 <NumberField
                   className="grow basis-[7rem]"
                   box="max-w-[8rem]"
-                  label="Motorized"
+                  label="No. of Motorized Delivery Units"
                   hint="truck, van, motor vehicle"
                   kind="count"
                   value={value.delivery_vehicles_motorized}
@@ -1933,7 +1936,7 @@ export function FeeProfileStep({
                 <NumberField
                   className="grow basis-[7rem]"
                   box="max-w-[8rem]"
-                  label="Other"
+                  label="No. of Other Delivery Units"
                   hint="pedicab, cart"
                   kind="count"
                   value={value.delivery_vehicles_other}
