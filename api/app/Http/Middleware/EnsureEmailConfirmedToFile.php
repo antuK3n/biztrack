@@ -16,9 +16,10 @@ use Symfony\Component\HttpFoundation\Response;
  * Ken: "it shouldn't be on the application, but when signing up"), and an
  * owner who closes that tab is sent a code at their next sign-in, so an owner
  * reaching Submit is normally confirmed already. The wizard's own code box went
- * with that change. This stays for whoever is not: an account registered
- * before, or one signed in past the login gate with it switched off. They are
- * refused with the sentence below and confirm from Profile.
+ * with that change, and sign-in asks an unconfirmed owner for the code
+ * whenever mail is on. This stays for whoever is not: a session held from
+ * before those. They are refused with the sentence below and confirm from
+ * Profile.
  *
  * On the SUBMIT route only. Drafting, uploading and saving stay open. Tester
  * item 99 is why it is here and not a banner on every page: that banner

@@ -139,6 +139,13 @@ return [
     | accounts (or backfill `email_verified_at` for the ones City Hall vouches
     | for), and make sure MAIL_MAILER is something other than `log`. Until then
     | the flag documents the gate rather than springing it.
+    |
+    | Since 6 October 2026 [Ken] the flag matters only while mail is OFF. With
+    | a real mailer an unconfirmed owner is always sent the sign-in code, on
+    | or off, because a code that can arrive locks nobody out, and typing it
+    | confirms the address (AuthController::login). Off and mail off: they
+    | sign in as before. On and mail off: they are refused. Staff are never
+    | gated either way.
     */
     'verification' => [
         'expire' => (int) env('AUTH_VERIFICATION_EXPIRE', 60),

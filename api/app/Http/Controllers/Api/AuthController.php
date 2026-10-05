@@ -147,10 +147,10 @@ class AuthController extends Controller
                  * web app never has to know how mail is configured: false for
                  * every account while mail is off, false for staff, and false
                  * once the address is confirmed. Since sign-up asks for the code
-                 * before handing out a session, an owner signed in with this
-                 * true is one who registered before that, or signed in past
-                 * the login gate with it switched off; Profile offers them the
-                 * code box.
+                 * before handing out a session, and sign-in asks an unconfirmed
+                 * owner for one whenever mail is on, an owner signed in with
+                 * this true holds a session from before those; Profile offers
+                 * them the code box.
                  */
                 'email_verification_required' => EmailSwitch::on()
                     && $user->roles->contains('name', 'business_owner')
@@ -377,9 +377,9 @@ class AuthController extends Controller
          * the application"]. Until then the code was asked at Submit, after a
          * whole application had been filled in under an address nobody had
          * proved. If the tab is closed first, the next sign-in sends a code
-         * instead of a session (the unverified-owner gate in login(), on in
-         * production, and the sign-in code itself), and typing it confirms the
-         * address. Why a code and not the link: see EmailCodes.
+         * instead of a session (the unverified-owner gate in login(), always
+         * on while mail is), and typing it confirms the address. Why a code
+         * and not the link: see EmailCodes.
          */
         if (EmailSwitch::on()) {
             return $this->startSignUpCode($user);
@@ -610,8 +610,17 @@ class AuthController extends Controller
          * are switched on for everyone: typing it proves the inbox, and
          * `verifySignInCode` confirms the address as it signs them in. Staff
          * accounts are not gated; City Hall vouches for those.
+         *
+         * ── With mail on, whatever the switch says ─────────────────────────
+         *
+         * Ken, 6 October 2026: whenever mail is on, an unconfirmed owner is
+         * always asked for the code at sign-in. `required_at_login` was there
+         * to stop a gate on mail nobody received; with a code that can arrive
+         * it locks nobody out, and leaving it to the switch was the one way an
+         * owner who never typed the sign-up code could hold a session. The
+         * switch now decides only the mail-off refusal below.
          */
-        if (config('auth.verification.required_at_login') && $belongs === 'public' && ! $user->hasVerifiedEmail()) {
+        if ($belongs === 'public' && ! $user->hasVerifiedEmail() && (EmailSwitch::on() || config('auth.verification.required_at_login'))) {
             if (EmailSwitch::on()) {
                 return $this->startSignInCode($user, $portal);
             }

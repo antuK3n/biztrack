@@ -6,6 +6,7 @@ use App\Models\EmailCode;
 use App\Models\User;
 use App\Notifications\VerifyEmailAddress;
 use App\Support\EmailSwitch;
+use App\Support\SystemSwitches;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 
@@ -390,8 +391,9 @@ it('refuses the sign-up code after thirty minutes', function () {
 });
 
 it('asks again at the next sign-in when the sign-up code was never typed', function () {
+    // With enforcement left at its default (off): mail on is enough.
     mailOn();
-    config(['auth.verification.required_at_login' => true]);
+    SystemSwitches::set('sign_in_codes', 'off');
     signUp('closed.tab@example.com');
 
     $challenge = startSignIn('closed.tab@example.com');

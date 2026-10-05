@@ -207,7 +207,8 @@ wrong tries; only the newest one works. At sign-up, "Send a new code" works once
 a minute, up to 5 e-mails, and wrong codes count toward the sign-in lockout;
 from Profile the resend is limited to 3 in 15 minutes per account. An owner who
 closes the tab before typing it is sent a sign-in code at their next sign-in,
-which confirms the address the same way. Submit still refuses an unconfirmed
+whatever `AUTH_REQUIRE_VERIFIED_EMAIL` says (that switch now only matters with
+mail off), and the code confirms the address the same way. Submit still refuses an unconfirmed
 address, as a guard; resubmitting a filing an office sent back is not blocked.
 
 **The password-change code** (`Your code to change your BizTrack password`).

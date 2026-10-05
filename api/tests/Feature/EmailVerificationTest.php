@@ -203,8 +203,12 @@ it('says so plainly when the address is already confirmed, and sends nothing', f
  *
  * Both halves are pinned. The default has to stay false, and the gate has to
  * work when it is true, or the flag is a comment rather than a control.
+ *
+ * The flag governs only the mail-OFF case now [Ken, 6 October 2026]: with a
+ * real mailer an unconfirmed owner is sent the sign-in code whatever it says,
+ * since a code that can arrive locks nobody out.
  */
-it('lets an unverified account sign in, because enforcement ships off', function () {
+it('lets an unverified account sign in while mail is off, because enforcement ships off', function () {
     expect(config('auth.verification.required_at_login'))->toBeFalse();
 
     User::where('email', 'owner@biztrack.local')->firstOrFail()
@@ -217,7 +221,7 @@ it('lets an unverified account sign in, because enforcement ships off', function
     ])->assertOk();
 });
 
-it('blocks an unverified sign-in once the LGU turns enforcement on', function () {
+it('blocks an unverified sign-in while mail is off once the LGU turns enforcement on', function () {
     config(['auth.verification.required_at_login' => true]);
 
     User::where('email', 'owner@biztrack.local')->firstOrFail()
@@ -230,7 +234,7 @@ it('blocks an unverified sign-in once the LGU turns enforcement on', function ()
     ])->assertStatus(403);
 });
 
-it('emails an unverified owner the sign-in code once enforcement is on and mail works, and the code confirms them', function () {
+it('emails an unverified owner the sign-in code while mail works, and the code confirms them', function () {
     config(['auth.verification.required_at_login' => true, 'mail.default' => 'smtp']);
     Mail::fake();
 
@@ -272,8 +276,23 @@ it('emails the code to an unverified owner even with sign-in codes switched off 
     ])->assertOk()->assertJsonPath('data.code_required', true);
 });
 
-it('does not gate an unverified staff account', function () {
-    config(['auth.verification.required_at_login' => true, 'mail.default' => 'smtp']);
+it('emails an unverified owner the code while mail is on even with enforcement switched off', function () {
+    config(['auth.verification.required_at_login' => false, 'mail.default' => 'smtp']);
+    Mail::fake();
+    SystemSwitches::set('sign_in_codes', 'off');
+
+    User::where('email', 'owner@biztrack.local')->firstOrFail()
+        ->forceFill(['email_verified_at' => null])->save();
+
+    $this->postJson('/api/v1/auth/login', [
+        'email' => 'owner@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'public',
+    ])->assertOk()->assertJsonPath('data.code_required', true)->assertJsonMissingPath('data.token');
+});
+
+it('does not gate an unverified staff account while mail is on, enforcement on or off', function (bool $enforced) {
+    config(['auth.verification.required_at_login' => $enforced, 'mail.default' => 'smtp']);
     Mail::fake();
     SystemSwitches::set('sign_in_codes', 'off');
 
@@ -287,7 +306,7 @@ it('does not gate an unverified staff account', function () {
     ])->assertOk()->assertJsonPath('data.code_required', null);
 
     Mail::assertNothingSent();
-});
+})->with(['enforcement on' => true, 'enforcement off' => false]);
 
 it('lets a verified account in with enforcement on', function () {
     config(['auth.verification.required_at_login' => true]);
