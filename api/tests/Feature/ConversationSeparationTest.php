@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
+use App\Models\Message;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 
@@ -225,6 +226,37 @@ it('keeps an office reply out of the other offices on the same filing', function
     expect(collect($owner)->pluck('body'))
         ->toContain('Health question.')
         ->toContain('Bring the sanitary permit.');
+});
+
+/*
+ * Opening the panel reads the conversation it lands on, not every one.
+ *
+ * The panel's first request names no office, and the server marked every
+ * thread on the filing read. The panel then settles on BPLO, so the owner's
+ * badge dropped for a CHO reply that never reached the screen.
+ */
+it('reads only the conversation the panel opens on when no office is named', function () {
+    [$appId] = separationApplication('ABC Store', 'DTI-70011');
+    $choId = assignOffice($appId, 'CHO');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'CHO: bring the water test', 'department_id' => $choId])
+        ->assertCreated();
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'BPLO: noted'])
+        ->assertCreated();
+
+    authAs('owner@biztrack.local');
+    $before = test()->getJson('/api/v1/unread-summary')->json('data.messages');
+    test()->getJson("/api/v1/applications/{$appId}/messages")->assertOk();
+
+    expect(Message::where('body', 'CHO: bring the water test')->value('read_at'))->toBeNull()
+        ->and(Message::where('body', 'BPLO: noted')->value('read_at'))->not->toBeNull()
+        ->and($before - test()->getJson('/api/v1/unread-summary')->json('data.messages'))->toBe(1);
+
+    // Naming the office is reading it.
+    test()->getJson("/api/v1/applications/{$appId}/messages?department_id={$choId}")->assertOk();
+    expect(Message::where('body', 'CHO: bring the water test')->value('read_at'))->not->toBeNull();
 });
 
 it('never mixes the conversations of two different filings', function () {

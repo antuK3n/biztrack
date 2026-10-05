@@ -1675,8 +1675,21 @@ class MessageController extends Controller
         }
 
         $threadIds = $threads->pluck('id')->all();
-        // Opening a conversation is reading it — there is no separate gesture.
-        $this->markThreadsRead($threadIds, $user);
+        /*
+         * Opening a conversation is reading it — there is no separate gesture.
+         *
+         * But only the one that is opened. With no office named this answers
+         * every readable thread, and marking them all read cleared a CHO
+         * reply the owner never saw: the panel's first request names no
+         * office, then it settles on BPLO and shows BPLO's thread alone. So
+         * an unnamed read marks only the thread of the office a message would
+         * go to unnamed: the reader's own office, else BPLO — the default
+         * resolveAddressee() writes to.
+         */
+        $shown = $requested !== null
+            ? $threadIds
+            : $threads->where('department_id', $user->department_id ?? $this->bplo()?->id)->pluck('id')->all();
+        $this->markThreadsRead($shown, $user);
         /*
          * Scoped to the READER as well as to the thread.
          *
