@@ -7,7 +7,6 @@ import { toApiError } from '../../lib/api'
 import { applications, assignments, inspections, payments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
 import {
-  GATHERING_META,
   TONE_CLASSES,
   applicationStatusMeta,
   clearanceStatusMeta,
@@ -28,7 +27,7 @@ import type {
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
-type Tab = 'all' | 'approval' | 'payment' | 'gathering' | 'inspection' | 'final'
+type Tab = 'all' | 'approval' | 'payment' | 'inspection' | 'final'
 
 /**
  * The stages, in the order the flow visits them (docs/application-flow-2026-09.md):
@@ -134,17 +133,12 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
   /*
-   * Read off the status table rather than written here, which is what stops
-   * this tab drifting a fourth time.
-   *
-   * It said "Awaiting Other Permits" until 26 September 2026, on the argument
-   * that the officer's seat sees a wait the applicant does not. That stopped
-   * being true when the permit started being issued at payment: the five
-   * offices working afterwards can suspend it, not grant it, so nothing here
-   * waits for permits. Hardcoding the replacement would have set up the same
-   * drift again, so it does not.
+   * No "Approved" stage. BPLO had one — the paid filings out with the
+   * other offices — until 5 October 2026, when the client saw six
+   * Approved cards on Manage Applications: *"All APPROVED SHOULD NOT BE
+   * HERE."* A paid filing is BPLO's finished work, not its queue; what
+   * the other offices still owe it is their queue. Records lists them.
    */
-  { value: 'gathering', label: GATHERING_META.label },
   { value: 'inspection', label: 'For Inspection' },
   /*
    * "With BPLO" since 3 October 2026, matching the chip and the API
@@ -373,16 +367,6 @@ const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
  */
 const FINAL_STATUSES = ['for_final_approval'] as const
 
-/**
- * The stage BPLO waits through, and the one it could not see.
- *
- * The same filing status the For Inspection tab reads, from the other seat:
- * an office at an undecided `approved` is doing the work, and BPLO is
- * waiting for it. That is why the two tabs share a position in TABS and why
- * no account is offered both.
- */
-const GATHERING_STATUSES = ['approved'] as const
-
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   /*
    * Empty, and the one entry here that is not sent to the server. `all`
@@ -394,7 +378,6 @@ const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   all: [],
   approval: APPROVAL_STATUSES,
   payment: PAYMENT_STATUSES,
-  gathering: GATHERING_STATUSES,
   inspection: INSPECTION_STATUSES,
   final: FINAL_STATUSES,
 }
@@ -446,9 +429,6 @@ const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
     approved: 'Your permit · waiting on your review',
   },
   payment: {},
-  // BPLO's own tab for the stage, so the status and the tab say the same
-  // thing and there is nothing to relabel.
-  gathering: {},
   inspection: {
     approved: 'Your permit · site visit outstanding',
   },
@@ -1576,7 +1556,7 @@ export function QueuePage() {
    * once every clearance is approved, so a sanitary officer's own work on it is
    * finished and the tab could only ever tell them what somebody else owes.
    */
-  const BPLO_ONLY_TABS: Tab[] = ['payment', 'gathering', 'final']
+  const BPLO_ONLY_TABS: Tab[] = ['payment', 'final']
   /*
    * For Inspection is the one that runs the other way: it is a clearance's
    * stage, read from the office that inspects, and BPLO holds no clearance.
@@ -2518,13 +2498,7 @@ export function QueuePage() {
                      * clear" and reasonably concluding the feature was broken.
                      */
                     'Nothing is waiting on your department’s review at this stage. Unassigned and My assigned above cover every stage.'
-                  : tab === 'gathering'
-                    ? // Said from BPLO's seat, because this tab is only ever
-                      // read from it: nothing here is waiting on BPLO, and an
-                      // empty version of it is good news rather than an idle
-                      // queue.
-                      'No filing is out with the other offices right now.'
-                    : tab === 'final'
+                  : tab === 'final'
                       ? /*
                          * ── Say WHY this tab is usually empty ─────────────────
                          *
