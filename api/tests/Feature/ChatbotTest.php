@@ -274,11 +274,19 @@ it('answers payment method questions with the accepted methods', function () {
 });
 
 it('tells owners how payment really works in the current payment mode', function () {
-    // Simulated: nothing moves, and the BPLO counter is still a way to pay.
+    // KwikPay off: the receipt comes at once, the BPLO counter is still a way
+    // to pay, and nothing calls payment simulated (Ken, 5 October 2026).
     expect(ask('can I pay cash over the counter?'))
-        ->toContain('no real money moves')
         ->toContain('BPLO counter')
+        ->not->toContain('simulated')
+        ->not->toContain('prototype')
+        ->not->toContain('no real money moves')
         ->not->toContain('There is no over-the-counter option');
+    expect(ask('how do I pay?'))
+        ->toContain('You get a receipt right away')
+        ->not->toContain('simulated')
+        ->not->toContain('prototype')
+        ->not->toContain('no real money moves');
 
     // Online payment switched on: no "simulated" claim, and the methods it offers.
     config([

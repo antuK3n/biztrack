@@ -221,7 +221,7 @@ class ChatbotFacts
 
         $online = PaymentMode::isKwikPay()
             ? "Pay online with {$list}. The receipt is issued once the payment is confirmed."
-            : "Pay online with {$list}. Online payment is simulated in BizTrack right now, so no real money moves, and the receipt is issued at once.";
+            : "Pay online with {$list}. The receipt is issued at once.";
 
         return "PAYING\nPay once BPLO has approved the application and its Tax Order of Payment is ready: open the application in Track and press Pay Online. {$online} "
             .'You can also pay in person at the BPLO counter at Malabon City Hall, and BPLO marks the bill paid in BizTrack. '

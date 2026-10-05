@@ -946,6 +946,10 @@ class ChatbotResponder
      * and BPLO marks a bill paid at the City Hall counter
      * (`POST applications/{id}/counter-payment`, Ken, 4 October 2026). The
      * methods are the ones the Pay online screen offers in that mode.
+     *
+     * Nor does it say "simulated" or "prototype" with the switch off (Ken,
+     * 5 October 2026): BizTrack is presented as a working system. With
+     * KwikPay off it says only what the owner sees — the receipt at once.
      */
     private function payment(string $text, ?PermitType $type): string
     {
@@ -956,9 +960,7 @@ class ChatbotResponder
             $methods = collect(PaymentMethod::forMode(PaymentMode::current()))->map(fn (PaymentMethod $m) => $m->label())->all();
             $list = implode(', ', array_slice($methods, 0, -1)).' and '.end($methods);
 
-            return "BizTrack accepts {$list} on the Pay online screen."
-                .($simulated ? ' Payment is simulated in this prototype, so no real money moves.' : '')
-                ."\n{$counter}";
+            return "BizTrack accepts {$list} on the Pay online screen.\n{$counter}";
         }
 
         if ($type) {
@@ -966,8 +968,7 @@ class ChatbotResponder
                 .'Open the application in My Applications and use Pay online once the Tax Order of Payment is ready.';
         }
 
-        return ($simulated ? "Paying in BizTrack is simulated for this prototype, so no real money moves.\n" : '')
-            .'Open your application from My Applications; once your Tax Order of Payment is ready, use the Pay online button on the application detail page. '
+        return 'Open your application from My Applications; once your Tax Order of Payment is ready, use the Pay online button on the application detail page. '
             .($simulated
                 ? 'You get a receipt right away and your application moves to review.'
                 : 'Your receipt is issued once the payment is confirmed.')
