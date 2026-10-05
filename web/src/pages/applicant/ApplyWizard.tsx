@@ -3677,6 +3677,26 @@ export function ApplyWizard() {
    * it is a request that was never made.
    */
   const [amendPinError, setAmendPinError] = useState<string | null>(null)
+  /*
+   * ── The pin fills the street, as it does on Location & Zoning ────────────
+   *
+   * `fillAddressFromPin`'s rule, for the amendment's two boxes: what OSM says
+   * is at the pin goes into House/Bldg No. and Street when the box is empty
+   * or still holds what we last wrote there, so anything the applicant typed
+   * is never overwritten. The amendment map had the pin and not the fill, so
+   * the same address was looked up for them on one screen and not the other.
+   *
+   * Refs rather than state for the same reason as there: the answer arrives
+   * after the click that asked, and has to compare against the boxes as they
+   * are THEN.
+   */
+  const amendTypedRef = useRef(amendTyped)
+  const amendAutoFilledRef = useRef<Record<string, string | null>>({})
+  const amendReverseAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    amendTypedRef.current = amendTyped
+  })
+  useEffect(() => () => amendReverseAbortRef.current?.abort(), [])
 
   /*
    * ── CPDD's sheet, as the clearance stage keeps it ─────────────────────
@@ -8023,7 +8043,13 @@ export function ApplyWizard() {
                 }
 
                 setAmendPinError(null)
-                choose(`${pickedLat},${pickedLng}`)
+                const pin = `${pickedLat},${pickedLng}`
+                type(pin)
+                fillAmendAddressFromPin(
+                  pickedLat,
+                  pickedLng,
+                  saveAmendment('address_pin', pin),
+                )
               }}
             />
             {amendPinError !== null && (
@@ -8100,6 +8126,53 @@ export function ApplyWizard() {
           />
         )
     }
+  }
+
+  /**
+   * Write what OSM says is at an accepted pin into the amendment's address
+   * boxes — see `amendAutoFilledRef`.
+   *
+   * Waits for the pin's own save before saving the boxes: each save answers
+   * with the whole set of rows, so two in flight at once could land in either
+   * order and the later answer would drop the other's row from the screen.
+   */
+  function fillAmendAddressFromPin(
+    latitude: number,
+    longitude: number,
+    pinSaved: Promise<void>,
+  ) {
+    amendReverseAbortRef.current?.abort()
+    const controller = new AbortController()
+    amendReverseAbortRef.current = controller
+
+    void Promise.all([reverseGeocode(latitude, longitude, controller.signal), pinSaved]).then(
+      async ([hit]) => {
+        // Silent on every failure: the boxes simply stay as they were.
+        if (hit === null || controller.signal.aborted) return
+
+        const fills = [
+          ['address_house_bldg_no', hit.houseNumber],
+          ['address_street', hit.street],
+        ] as const
+
+        for (const [field, found] of fills) {
+          const current = amendTypedRef.current[field] ?? ''
+          const prev = amendAutoFilledRef.current[field] ?? null
+          const ours = current.trim() === '' || (prev !== null && current === prev)
+          if (!ours) continue
+
+          // A box we filled earlier is emptied when the new point has nothing
+          // for it, so an old pin's house number does not ride along.
+          const value = found ?? ''
+          amendAutoFilledRef.current[field] = found
+          if (current === value) continue
+
+          setAmendTyped((t) => ({ ...t, [field]: value }))
+          await saveAmendment(field, value)
+          if (controller.signal.aborted) return
+        }
+      },
+    )
   }
 
   async function saveAmendment(field: string, chosen?: string): Promise<void> {
