@@ -423,6 +423,12 @@ function ThreadCard({
               than wrapping onto a line of its own - which cost a line per row
               down the whole column on the narrow left pane.
             */}
+            {/* Said, not only placed: the owner's General enquiry stays on top. */}
+            {isApplicant && thread.kind === 'general' && (
+              <span className="shrink-0 rounded-full bg-royal-tint px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-royal">
+                Pinned
+              </span>
+            )}
             <span
               className="shrink-0 text-[11px] text-ink-muted"
               title={formatDate(thread.updated_at)}
@@ -717,9 +723,17 @@ export function MessagesPage() {
      * page sorts and filters on its own and any ordering it does not respect
      * is an ordering it will silently lose.
      */
-    const pinned = byDate.filter((t) => t.kind === 'admin')
-    return pinned.length > 0 ? [...pinned, ...byDate.filter((t) => t.kind !== 'admin')] : byDate
-  }, [threads, query, sort])
+    /*
+     * And a business owner's General enquiry, on top under it [client, 5
+     * October 2026: "naka pin sa taas ang General enquiry · Ask any office"]:
+     * it is the one conversation not about any filing, the place to ask
+     * anything, and it must not sink below months of permits. An owner has
+     * exactly one; an office has one per owner, so it is not pinned there.
+     */
+    const isPinned = (t: (typeof byDate)[number]) => t.kind === 'admin' || (!readerIsOfficer && t.kind === 'general')
+    const pinned = byDate.filter(isPinned)
+    return pinned.length > 0 ? [...pinned, ...byDate.filter((t) => !isPinned(t))] : byDate
+  }, [threads, query, sort, readerIsOfficer])
   /*
    * ---- Which half of the office's mail is on screen --------------------
    *
