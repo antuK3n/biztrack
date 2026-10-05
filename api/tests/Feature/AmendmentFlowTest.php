@@ -1562,3 +1562,16 @@ it('supersedes the old Zoning Clearance when the move’s new one is issued', fu
         ->and(Permit::where('business_id', $businessId)->where('permit_type_id', $zoningType->id)
             ->where('status', 'active')->count())->toBe(1);
 });
+
+it('lists the owner’s businesses with the amendment still under review', function () {
+    /*
+     * 5 October 2026: the chooser's eager load selected columns on a
+     * latest-of-many relation, the join made `business_id` ambiguous, and the
+     * owner's business list answered 500 — so the amendment picker said "You
+     * have no registered businesses yet."
+     */
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/businesses?per_page=100')
+        ->assertOk()
+        ->assertJsonStructure(['data' => [['id', 'name', 'open_amendment']]]);
+});
