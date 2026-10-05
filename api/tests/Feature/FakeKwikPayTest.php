@@ -129,6 +129,20 @@ it('sends a signed multipart callback with a six-decimal amount when the order i
         ->assertJson(['status' => '5']);
 });
 
+it('shows the payer a payment page and an account name with nothing about practice or play money', function () {
+    $this->postJson('/api/v1/fake-kwikpay/api/transfer', fkOrder())->assertOk();
+
+    $page = strtolower($this->get('/api/v1/fake-kwikpay/pay/PAY-2026-000001-AAAAAA')->assertOk()->getContent());
+    $me = $this->postJson('/api/v1/fake-kwikpay/api/me', fkSigned([]))->assertOk();
+
+    expect($page)->toContain('<h1>payment</h1>')
+        ->and($page)->toContain('pay ₱1,500.00')
+        ->and($page)->not->toContain('practice')
+        ->and($page)->not->toContain('real money')
+        ->and($page)->not->toContain('tested')
+        ->and($me->json('merchant_display_name'))->toBe('BizTrack');
+});
+
 it('reports an order it does not hold as 404 with status 0', function () {
     $this->postJson('/api/v1/fake-kwikpay/api/query', fkSigned(['order_id' => 'NOPE']))
         ->assertNotFound()

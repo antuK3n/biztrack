@@ -40,6 +40,12 @@ use Illuminate\Support\Facades\Log;
  * not worth loosening for a practice page. Orders are held in the cache for a
  * day.
  *
+ * What it shows says nothing about practice or play money (Ken, 5 October
+ * 2026, for a defense where BizTrack is presented as a working system): the
+ * page is headed "Payment", and /api/me names the account "BizTrack". It read
+ * "Practice payment", "No real money moves" and "Practice account (not real
+ * money)" before.
+ *
  * Not imitated: the IP allowlist, fees, USDT and withdrawals.
  */
 class FakeKwikPayController extends Controller
@@ -128,7 +134,7 @@ class FakeKwikPayController extends Controller
 
         return response()->json([
             'merchant' => (string) $fields['merchant'],
-            'merchant_display_name' => 'Practice account (not real money)',
+            'merchant_display_name' => 'BizTrack',
             'balance' => '0.0000',
             'pending_balance' => '0.0000',
             'sign' => (string) $fields['sign'],
@@ -154,9 +160,8 @@ class FakeKwikPayController extends Controller
         $html = <<<HTML
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Practice payment</title></head><body><main>
-<h1>Practice payment</h1>
-<p class="note">This page stands in for the payment app while BizTrack is being tested. No real money moves.</p>
+<title>Payment</title></head><body><main>
+<h1>Payment</h1>
 <dl><dt>Order</dt><dd>{$e($orderId)}</dd><dt>Amount</dt><dd>₱{$e(number_format((float) $order['amount'], 2))}</dd><dt>Channel</dt><dd>{$e($order['bank_code'])}</dd></dl>
 {$state}
 </main></body></html>
