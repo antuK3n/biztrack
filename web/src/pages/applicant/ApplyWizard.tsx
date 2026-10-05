@@ -10942,38 +10942,54 @@ export function ApplyWizard() {
             </div>
           )}
           {/*
-            ── One wrapping row, 24 September 2026 ──────────────────────
+            ── One grid, 6 October 2026 ──────────────────────────────────
 
-            Every field is a flex item the width of its own answer. They
-            pack along the line and wrap when it is full, so items 1, 2 and
-            3 share the first line instead of each taking a half. Nothing
-            carries `flex-1`, because stretching is what recreated the equal
-            halves the last two attempts were trying to remove.
+            Twelve columns, and every field starts and ends on one of their
+            lines. Ken: *"This UI is too uneven, can you improve it?"*
+
+            What it replaced was one wrapping flex row (24 September), where
+            every field was the width of its own answer. That packed the
+            section tight, and it is also why nothing lined up: each line
+            wrapped at a different place, so item 4's box ended where item
+            8's did not, and the boxes down the page made a ragged edge on
+            both sides. Spacing alone could not fix that; only shared column
+            lines can.
+
+            Three layouts, chosen by the width of the SHEET rather than the
+            window — `@container` — because the same JSX is drawn narrower on
+            the review step:
+              · from 56rem, quarters: four fields a row, items 1 and 4 take
+                three quarters and a half, and 14 sits beside the 15–17 box;
+              · from 36rem, halves: two a row, item 1 alone;
+              · below that, one column.
+            Below 56rem the quarters are too narrow for the mobile number's
+            three boxes after +63, which is what sets that line.
+
+            `items-end` is what keeps a row's boxes level. Where a label is
+            too long for its column it wraps, the cells are aligned by their
+            bottom edge, and since every box in the section is the same
+            height the boxes still sit on one line however many lines the
+            labels above them take. Errors float (FieldError) and hints are
+            `sr-only`, so nothing else ever sits under a box to throw that
+            off — item 16's free-text box is the one exception, and it is
+            given a row of its own below.
           */}
-          <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div className="@container mt-3 grid grid-cols-12 items-end gap-x-5 gap-y-4">
             {/* `contents`: these children join the wrap rather than form a row. */}
             <div className="contents">
             {/*
-              Shares its row with item 2, the number it governs.
+              Shares its row with item 2, the number it governs, so the pair
+              reads as the one question it is: which register, and the number
+              it issued.
 
-              This was `w-full` after an attempt to float it up beside two
-              18rem text boxes wrapped the pills onto two lines and left a
-              hole in the page. The field beside it now is 13rem, so four
-              pills and a number fit on one line — and the pair reads as the
-              one question it is: which register, and the number it issued.
-
-              `shrink-0` rather than a basis, on the client's instruction of
-              24 September 2026: *"Form of Org. should be one row only."* At a
-              basis the cell was sized as a SHARE of the row, which at some
-              widths came out under the four pills and dropped Cooperative
-              onto a second line. Unshrinkable, the cell is exactly as wide as
-              the pills need and item 2 takes what is left.
-
-              `max-w-full` is the escape hatch: on a phone the four pills are
-              wider than the page, and without a ceiling `shrink-0` would push
-              the whole form into a horizontal scroll rather than wrap.
+              Three quarters of the row, which is wider than the four pills
+              need, on the client's instruction of 24 September 2026: *"Form
+              of Org. should be one row only."* The pills grow to fill it, so
+              Cooperative ends on the same column line as item 4's box below.
+              In halves it takes the whole row for the same reason; only on a
+              phone, where four pills are wider than the page, do they wrap.
             */}
-            <div className="max-w-full shrink-0">
+            <div className="col-span-12 @4xl:col-span-9">
               <FieldLabel required>1. Form of Organization</FieldLabel>
               {/*
                * A radiogroup, not four toggle buttons. These are four mutually
@@ -10997,7 +11013,7 @@ export function ApplyWizard() {
                       role="radio"
                       aria-checked={selected}
                       onClick={() => chooseRegistrationType(selected ? '' : rt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                      className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                         selected
                           ? 'border-royal bg-input text-ink'
                           : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -11014,7 +11030,7 @@ export function ApplyWizard() {
                 })}
               </div>
             </div>
-            <div className="relative grow basis-[13rem] max-w-full">
+            <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
               <label className="block">
                 {/*
                  * The label TEXT changes with the chosen structure, so the
@@ -11171,9 +11187,13 @@ export function ApplyWizard() {
                * autosave, BusinessController's normalisation, the stored value
                * — knows the difference.
                */}
-              {/* Fixed boxes: growing the cell would only pad it. */}
-              <div className="relative shrink-0">
+              {/*
+                `fill`: the four boxes share the cell's width, so the last one
+                ends on the column line like every other box in its column.
+              */}
+              <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 <TinInput
+                  fill
                   /*
                    * It showed no number, alone among the questions on this
                    * step — TinInput has taken one since the numbering went in
@@ -11229,7 +11249,7 @@ export function ApplyWizard() {
               </div>
             </div>
             <div className="contents">
-              <div className="relative grow basis-[24rem] max-w-full">
+              <div className="relative col-span-12 @xl:col-span-6">
                 <label className="block">
                   <FieldLabel required>4. Business Name</FieldLabel>
                   <input
@@ -11246,7 +11266,7 @@ export function ApplyWizard() {
                   </FieldError>
                 )}
               </div>
-            <div className="grow basis-[12rem] max-w-full">
+            <div className="col-span-12 @xl:col-span-6 @4xl:col-span-3">
               <label className="block">
                 <FieldLabel>5. Trade Name / Franchise</FieldLabel>
                 <input
@@ -11280,7 +11300,7 @@ export function ApplyWizard() {
              * website, and no paper form marks either with an asterisk.
              */}
             <div className="contents">
-              <div className="relative shrink-0">
+              <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 {/*
                  * Item 10 — the area code is its own group, not a convention
                  * the applicant has to remember. A single box with "Area code
@@ -11308,7 +11328,7 @@ export function ApplyWizard() {
                   </FieldError>
                 )}
               </div>
-              <div className="relative shrink-0">
+              <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 {/*
                  * Item 10 — +63 and ten digits, and the 09 form does not
                  * appear here at all.
@@ -11356,7 +11376,7 @@ export function ApplyWizard() {
               they are the same and retyping a number you gave at sign-up is not
               a question worth asking. Editable, and stored on the business.
             */}
-                <div className="grow basis-[14rem] max-w-full">
+                <div className="col-span-12 @xl:col-span-6 @4xl:col-span-3">
                   <label className="block">
                     <FieldLabel required>8. E-mail Address</FieldLabel>
                     <input
@@ -11369,7 +11389,7 @@ export function ApplyWizard() {
                     />
                   </label>
                 </div>
-              <div className="relative grow basis-[13rem] max-w-full">
+              <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 <label className="block">
                   <FieldLabel>9. Website Address</FieldLabel>
                   <input
@@ -11439,11 +11459,11 @@ export function ApplyWizard() {
                 so the heading was a row of page spent on a grouping the
                 numbers no longer expressed.
 
-                `contents` so the five join section A's single wrap and pack
-                with the fields either side of them.
+                `contents` so the five are cells of section A's grid, on the
+                same column lines as the fields above them.
               */}
               <div className="contents">
-                <label className="block grow basis-[11rem]">
+                <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
                   <FieldLabel required>10. Surname</FieldLabel>
                   <input
                     value={form.owner_surname}
@@ -11451,7 +11471,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <label className="block grow basis-[11rem]">
+                <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
                   <FieldLabel required>11. Given Name</FieldLabel>
                   <input
                     value={form.owner_given_name}
@@ -11459,7 +11479,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <label className="block grow basis-[11rem]">
+                <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
                   <FieldLabel>12. Middle Name</FieldLabel>
                   <input
                     value={form.owner_middle_name}
@@ -11467,7 +11487,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <label className="block grow basis-[7rem]">
+                <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
                   <FieldLabel>13. Suffix</FieldLabel>
                   <input
                     value={form.owner_suffix}
@@ -11478,12 +11498,11 @@ export function ApplyWizard() {
                 </label>
               </div>
               {/*
-                Ends the line so items 14 to 17 begin one of their own —
-                see the note on this section's wrap. Zero height, and the
-                negative margin cancels the row gap it would double.
+                Items 10 to 13 fill their row exactly, so 14 to 17 begin one
+                of their own without the zero-height line break that used to
+                stand here to force it.
               */}
-              <div className="-my-1.5 basis-full" aria-hidden="true" />
-              <div className="shrink-0">
+              <div className="col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 <FieldLabel required>14. Gender</FieldLabel>
                 {/*
                   Two options, as the paper's M / F boxes print. A radiogroup
@@ -11502,7 +11521,7 @@ export function ApplyWizard() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => update('owner_gender', selected ? '' : opt.value)}
-                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                           selected
                             ? 'border-royal bg-input text-ink'
                             : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -11540,9 +11559,9 @@ export function ApplyWizard() {
              * discover it by tabbing back.
              */}
             {/*
-              One cell on Gender's row, holding a box rather than three loose
-              fields. Client, 24 September 2026: *"You may group 15 to 17 in a
-              bigger box to group them."*
+              Three quarters of Gender's row, holding a box rather than three
+              loose fields. Client, 24 September 2026: *"You may group 15 to 17
+              in a bigger box to group them."*
 
               All three are about ONE person, which is the reason items 16 and
               17 carry "(of President/OIC)" inside their own labels — the
@@ -11550,22 +11569,42 @@ export function ApplyWizard() {
               The border shows it, and the labels can stay as the paper prints
               them.
 
+              The box is a SUBGRID, so its three fields sit on the section's
+              own column lines — under items 11, 12 and 13 — instead of on a
+              grid of the box's own a padding's width to the right. That is
+              also why the border is drawn by an absolutely placed layer rather
+              than by the box: it sits out in the gutters around the fields,
+              where padding would have pushed them off the lines.
+
+              When item 16's free-text box opens, it takes a second row of the
+              box, and in quarters the box then spans two rows of the SECTION
+              (`row-span-2`, rows subgridded too). Otherwise the box would be
+              one tall cell, and `items-end` would level item 14's pills with
+              that free-text box instead of with the select above it.
+
               The live region stays on the element: `presidentAsked` is true
               for every structure since 16 September, so nothing toggles here
               and there is no announcement to lose.
             */}
-            <div aria-live="polite" className="grow basis-[34rem] max-w-full">
+            <div
+              aria-live="polite"
+              className={`relative col-span-12 grid grid-cols-subgrid items-end gap-x-5 gap-y-4 @4xl:col-span-9 ${
+                citizenshipMode === 'other' ? '@4xl:row-span-2 @4xl:grid-rows-subgrid' : ''
+              }`}
+            >
               {presidentAsked && (
-                <div className="rounded-xl border border-line p-3">
+                <>
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
+                  />
                   {/*
                     All three describe ONE person — the paper labels item 12
                     "Citizenship (of President/OIC)" — so they read as a row
                     rather than as three questions that happen to follow each
                     other. It also takes two rows out of the form.
                   */}
-                  {/* The box packs its own three, the way the section packs its own. */}
-                  <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                    <div className="grow basis-[15rem]">
+                  <div className="col-span-12 @4xl:col-span-3">
                       <label className="block">
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
                           15. Name of President / Officer in Charge
@@ -11608,7 +11647,7 @@ export function ApplyWizard() {
                         </p>
                       )}
                     </div>
-                    <div className="grow basis-[11rem]">
+                    <div className="col-span-12 @xl:col-span-6 @4xl:col-span-3">
                       <label className="block">
                         {/*
                         The paper's own wording, item 14: "Citizenship (of
@@ -11649,29 +11688,21 @@ export function ApplyWizard() {
                             // submitted under another.
                             update('citizenship', mode === 'filipino' ? 'Filipino' : '')
                           }}
-                          className={inputCls}
+                          /*
+                           * `h-9.5`, the 38px every other box in the section
+                           * comes to: a select given the same padding renders
+                           * two pixels taller, which put item 16 out of line
+                           * with 15 and 17 beside it.
+                           */
+                          className={`${inputCls} h-9.5`}
                         >
                           <option value="">Select</option>
                           <option value="filipino">Filipino</option>
                           <option value="other">Other</option>
                         </select>
                       </label>
-                      {/*
-                        Only for the rare filing, so only the rare filing pays
-                        the extra line in a row the client packed deliberately.
-                      */}
-                      {citizenshipMode === 'other' && (
-                        <input
-                          value={form.citizenship}
-                          onChange={(e) => update('citizenship', e.target.value)}
-                          placeholder="Which nationality"
-                          maxLength={100}
-                          aria-label="Citizenship of the President or Officer in Charge"
-                          className={`${inputCls} mt-2`}
-                        />
-                      )}
                     </div>
-                    <div className="relative grow basis-[11rem]">
+                    <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                       <label className="block">
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
                           17. Capital Participation (% Filipino)
@@ -11742,8 +11773,28 @@ export function ApplyWizard() {
                         </FieldError>
                       )}
                     </div>
-                  </div>
-                </div>
+                    {/*
+                      Only for the rare filing, so only the rare filing pays the
+                      extra line. It follows item 17 in the source so that, in
+                      one column, it sits straight under the select it answers.
+                      From halves up it is moved, by `order` and a column start,
+                      onto a row of its own under item 16: left in place it
+                      would shove 17 along a cell. `order` moves the box, not
+                      the tab stop — the select, this box and then 17 is still
+                      the order they are reached. The negative margin takes the
+                      row gap back to the 8px it had under the select.
+                    */}
+                    {citizenshipMode === 'other' && (
+                      <input
+                        value={form.citizenship}
+                        onChange={(e) => update('citizenship', e.target.value)}
+                        placeholder="Which nationality"
+                        maxLength={100}
+                        aria-label="Citizenship of the President or Officer in Charge"
+                        className={`${inputCls} col-span-12 -mt-2 @xl:order-last @xl:col-span-6 @4xl:col-span-3 @4xl:col-start-4`}
+                      />
+                    )}
+                </>
               )}
             </div>
           </div>

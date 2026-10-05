@@ -95,6 +95,7 @@ export function TinInput({
   errorId,
   number,
   required = true,
+  fill = false,
 }: {
   /** The dash-joined TIN the form holds — unchanged from the single-field days. */
   value: string
@@ -115,6 +116,18 @@ export function TinInput({
    * rather than being stopped at the first step of the form.
    */
   required?: boolean
+  /**
+   * Share the parent's width between the four boxes, up to 5rem each, instead
+   * of drawing each at its fixed three-digit width.
+   *
+   * For a grid that lines its fields up. Section A of the wizard puts this in
+   * a column with ordinary text boxes above and below, and fixed boxes ended
+   * short of the column's right edge where every other box reached it — one
+   * of the things Ken called uneven on 6 October 2026. Off by default, so a
+   * TIN on its own in a wider form (RequestsPage) keeps its fixed boxes; see
+   * the note on the group below for why stretching is capped.
+   */
+  fill?: boolean
 }) {
   const groupId = useId()
 
@@ -299,7 +312,7 @@ export function TinInput({
       aria-describedby={[hintId, error ? errorId : null].filter(Boolean).join(' ') || undefined}
       className="min-w-0 border-0 p-0"
     >
-      <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+      <legend className="mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
         {/*
@@ -316,7 +329,7 @@ export function TinInput({
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
         {required && (
           <>
-            <span className="text-s-red" aria-hidden="true"> *</span>
+            <span className="text-s-red" aria-hidden="true">{'\u00a0*'}</span>
             <span className="sr-only"> (required)</span>
           </>
         )}
@@ -345,8 +358,17 @@ export function TinInput({
            * name. `min-w-0` went with it: it exists to let a flex child shrink
            * below its content, which is the opposite of what a fixed-width box
            * should ever do.
+           *
+           * `fill` brings the stretch back, on a leash. Section A's grid gives
+           * the TIN a quarter of the row on a desktop, where four equal boxes
+           * come out at about their fixed width anyway; the 5rem ceiling is
+           * for the half-row it gets on a narrower screen, where unbounded
+           * they would be the hundred-pixel boxes the client objected to.
+           * The group is `contents` then, so dashes and boxes are items of one
+           * row and the boxes come out equal — grown as groups, the three that
+           * carry a dash would each be a dash narrower than the first.
            */
-          <div key={index} className="flex items-center gap-1.5">
+          <div key={index} className={fill ? 'contents' : 'flex items-center gap-1.5'}>
             {index > 0 && (
               // Decorative: the separator a screen reader must not read as
               // "minus" four times. The group's name already says it is a TIN.
@@ -376,7 +398,9 @@ export function TinInput({
               maxLength={GROUP}
               aria-label={GROUP_LABELS[index]}
               aria-invalid={Boolean(error)}
-              className={`${inputBoxCls} ${error ? 'ring-2 ring-s-red' : ''}`}
+              className={`${inputBoxCls} ${fill ? 'min-w-0 max-w-20 flex-1' : 'w-12 shrink-0'} ${
+                error ? 'ring-2 ring-s-red' : ''
+              }`}
             />
           </div>
         ))}
@@ -386,9 +410,15 @@ export function TinInput({
 }
 
 /*
- * The prototype's filled input, centred and narrowed to the three digits it
- * holds. `tnum` because a TIN is a number read digit by digit and proportional
- * figures make three of them look like a different width in each box.
+ * The prototype's filled input, centred, and narrowed to the three digits it
+ * holds unless `fill` says otherwise. `tnum` because a TIN is a number read
+ * digit by digit and proportional figures make three of them look like a
+ * different width in each box.
+ *
+ * `py-2`, the same as `inputCls` and the phone boxes in ContactNumberInput,
+ * so the boxes are the height of every other box on the form. They were
+ * `py-2.5`, four pixels taller than the business name beside them, which was
+ * one of the things that made Section A's rows look uneven.
  */
 const inputBoxCls =
-  'tnum w-12 shrink-0 rounded-lg border border-input-border bg-input px-1 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+  'tnum rounded-lg border border-input-border bg-input px-1 py-2 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'

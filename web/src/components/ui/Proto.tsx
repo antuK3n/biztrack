@@ -1017,13 +1017,28 @@ export function FieldLabel({
    */
   number?: number
 }) {
+  /*
+   * `leading-snug`: the label set no line height of its own and inherited the
+   * body's 24px, which is a paragraph's spacing on a 13px label. Nobody saw it
+   * while labels sat on one line; a label that wraps in a narrow column read
+   * as two loose lines with a gap between them. TinInput's legend and
+   * ContactNumberInput's `legendCls` carry the same classes, so a fieldset
+   * question beside a labelled box still starts on the same line.
+   */
   return (
-    <span className="mb-1.5 block text-[13px] font-semibold text-ink">
+    <span className="mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
       {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
       {children}
+      {/*
+        A no-break space before the asterisk, not a plain one. A plain space
+        is a place to wrap, so a label one character too long for its column
+        left the asterisk alone on a second line — Section A's item 15 did
+        exactly that — and an orphaned red star reads as a stray mark, not as
+        "this field is required".
+      */}
       {required && (
         <>
-          <span className="text-s-red" aria-hidden="true"> *</span>
+          <span className="text-s-red" aria-hidden="true">{'\u00a0*'}</span>
           <span className="sr-only"> (required)</span>
         </>
       )}

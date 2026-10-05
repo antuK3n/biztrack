@@ -189,7 +189,7 @@ function SegmentedDigits({
 
   return (
     <div
-      className="flex items-center gap-1.5"
+      className="flex w-full items-center gap-1.5"
       /*
        * One touch point for "finished with this question". Blurring a box to
        * reach the next one is not leaving the field, and treating it as such
@@ -210,7 +210,12 @@ function SegmentedDigits({
          * the same control with different group sizes. Width now follows
          * `size`, so the boxes are proportioned like the number they spell.
          */
-        <div key={index} className="flex items-center gap-1.5">
+        /*
+         * `contents`, so the separators and boxes are all items of the one
+         * row: the boxes share its width in proportion to their digits, and
+         * one carrying a separator is not a separator narrower than its size.
+         */
+        <div key={index} className="contents">
           {index > 0 && separator && (
             <span aria-hidden="true" className="shrink-0 text-ink-muted">
               {separator}
@@ -235,11 +240,17 @@ function SegmentedDigits({
             aria-label={labels[index]}
             aria-invalid={Boolean(invalid)}
             /*
-             * `ch` is the width of a figure in `tnum`, which is exactly what
-             * this box holds, plus the horizontal padding. An arbitrary Tailwind
-             * step would have to be re-guessed every time a group size changes.
+             * The boxes fill the row, in proportion to the digits each holds —
+             * 3 : 3 : 4 for the mobile number, 4 : 8 for the landline — so the
+             * last one ends on the right edge of its column in Section A's
+             * grid, where every other box on the form ends.
+             *
+             * They used to be a fixed `calc(<digits>ch + 1.75rem)` each, which
+             * fitted the digits exactly and stopped short of that edge by a
+             * different amount for each control. The grow factor is still the
+             * group size, so a size change needs no other edit here.
              */
-            style={{ width: `calc(${size}ch + 1.75rem)` }}
+            style={{ flex: `${size} 1 0%` }}
             className={`${boxCls} ${invalid ? 'ring-2 ring-s-red' : ''}`}
           />
         </div>
@@ -458,7 +469,7 @@ export function LandlineInput({
  * labelled input sitting side by side in the same grid read as one row of
  * questions rather than two kinds of thing.
  */
-const legendCls = 'mb-1.5 block text-[13px] font-semibold text-ink'
+const legendCls = 'mb-1.5 block text-[13px] font-semibold leading-snug text-ink'
 
 /*
  * The prototype's filled input. `tnum` because a phone number is read digit by
@@ -469,4 +480,4 @@ const boxCls =
   // `py-2` matches `inputCls`. It was `py-2.5` and stayed behind when the
   // shared input tightened on 24 September, which left a landline box four
   // pixels taller than the text box beside it on the same row.
-  'tnum shrink-0 rounded-lg border border-input-border bg-input px-2 py-2 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+  'tnum min-w-0 rounded-lg border border-input-border bg-input px-2 py-2 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
