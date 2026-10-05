@@ -251,7 +251,9 @@ test('a line of business made red on Review keeps the box on Review and holds Su
     timeout: 30_000,
   })
   const submit = page.getByRole('button', { name: /^submit$/i })
+  const ready = page.getByText('Your Business Permit application is ready to submit')
   await expect(submit).toBeEnabled({ timeout: 20_000 })
+  await expect(ready).toBeVisible()
 
   const location = page.locator('section[aria-labelledby="review-address"]')
   await location.getByRole('button', { name: 'Edit this section' }).click()
@@ -266,5 +268,17 @@ test('a line of business made red on Review keeps the box on Review and holds Su
   await expect(shown).toHaveCount(1)
   await expect(shown).toHaveText(REFUSAL)
   await expect(submit).toBeDisabled()
+  // Not "ready to submit" under a red box (Ken, 6 October 2026).
+  await expect(ready).toHaveCount(0)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/zg-after-review.png`, fullPage: true })
+
+  // Back to a line the zone lists: the box goes, the line and Submit return.
+  await location.getByRole('button', { name: 'Edit this section' }).click()
+  await page.getByRole('button', { name: 'Change line of business' }).click()
+  await pickLine(page, 'warehousing')
+  await expect(shown).toHaveAttribute('data-verdict', 'listed', { timeout: 20_000 })
+  await location.getByRole('button', { name: 'Done editing' }).click()
+  await expect(page.locator('[data-testid="zoning-note"][data-verdict="refused"]')).toHaveCount(0)
+  await expect(ready).toBeVisible()
+  await expect(submit).toBeEnabled({ timeout: 20_000 })
 })

@@ -13368,13 +13368,19 @@ export function ApplyWizard() {
       {phase === 'review' && (
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-            <p className="text-lg font-medium text-royal">
-              {applicationType === 'amendment'
-                ? 'Your amendment is ready to submit'
-                : clearanceOnlyRenewal
-                ? `Your ${priorPermitChoice?.permit_type?.name ?? 'permit'} renewal is ready to submit`
-                : 'Your Business Permit application is ready to submit'}
-            </p>
+            {/*
+              Not while the zone at the pin refuses the filing: it is not
+              ready, and the red box below says why (Ken, 6 October 2026).
+            */}
+            {zoneRefusal === null && (
+              <p className="text-lg font-medium text-royal">
+                {applicationType === 'amendment'
+                  ? 'Your amendment is ready to submit'
+                  : clearanceOnlyRenewal
+                  ? `Your ${priorPermitChoice?.permit_type?.name ?? 'permit'} renewal is ready to submit`
+                  : 'Your Business Permit application is ready to submit'}
+              </p>
+            )}
             {/*
               What happens next, said here rather than discovered later.
 
