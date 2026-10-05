@@ -218,6 +218,8 @@ async function viewBlob(url: string, target?: Window | null): Promise<void> {
 
 export const reference = {
   barangays: () => unwrap<Barangay[]>(api.get('/reference/barangays')),
+  /** Names only, and public: the owner's home address on sign-up and Edit Profile. */
+  barangayNames: () => unwrap<Pick<Barangay, 'id' | 'name'>[]>(api.get('/barangays')),
   psicCodes: () => unwrap<PsicCode[]>(api.get('/reference/psic-codes')),
   departments: () => unwrap<Department[]>(api.get('/reference/departments')),
   documentTypes: () => unwrap<DocumentType[]>(api.get('/reference/document-types')),

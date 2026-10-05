@@ -16,6 +16,7 @@ import {
   homeAddressMissingParts,
   homeAddressFrom,
   homeAddressPayload,
+  useHomeBarangays,
   validateHomeAddressField,
   type HomeAddressField,
   type HomeAddressValues,
@@ -225,6 +226,8 @@ export function SettingsPage() {
    * malformed ZIP by its own error once the field is left.
    */
   const homeIncomplete = isOwner && homeAddressMissingParts(home)
+  // Malabon's barangays, plus the one on file if it is not one of them (see the hook).
+  const barangays = useHomeBarangays(user?.home_barangay ?? '', isOwner)
   const zipInvalid = isOwner && !!validateHomeAddressField('home_postal_code', home)
 
   /*
@@ -581,8 +584,9 @@ export function SettingsPage() {
              * Required on this form for an owner, not merely accepted. The
              * checklist item is "make sure that profile details are complete",
              * and an owner who registered before the address was asked meets
-             * it here: Save waits for the four starred parts, and the line
-             * below says so. The API agrees — a part that is sent must be
+             * it here: Save waits for the starred parts, and the line below says
+             * so. Barangay is a choice of Malabon's and city and province are
+             * not asked [checklist Register 3] — the same as sign-up. The API agrees — a part that is sent must be
              * filled, and one part sent makes the rest required
              * (AuthController::homeAddressRules).
              */
@@ -610,30 +614,53 @@ export function SettingsPage() {
                         error={error}
                         hint={hint}
                       >
-                        <div className="relative">
-                          <input
+                        {field === 'home_barangay' ? (
+                          <select
                             id={id}
                             value={home[field]}
-                            onChange={(e) => {
-                              // Digits only, capped here rather than with
-                              // `maxLength`, which would cut a pasted "ZIP
-                              // 1485" short before this sees it (see the same
-                              // field on RegisterPage).
-                              const value = isZip
-                                ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS)
-                                : e.target.value
-                              setHome((prev) => ({ ...prev, [field]: value }))
-                            }}
+                            onChange={(e) => setHome((prev) => ({ ...prev, [field]: e.target.value }))}
                             onBlur={() => setHomeTouched((prev) => ({ ...prev, [field]: true }))}
                             autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
-                            inputMode={isZip ? 'numeric' : undefined}
-                            aria-required={HOME_ADDRESS_REQUIRED.includes(field) ? 'true' : undefined}
+                            aria-required="true"
                             aria-invalid={error ? true : undefined}
                             aria-describedby={describedBy}
-                            className={`${inputCls} pr-10`}
-                          />
-                          <InputPencil />
-                        </div>
+                            className={`${inputCls} ${home[field] === '' ? 'text-ink-muted' : ''}`}
+                          >
+                            <option value="" disabled>
+                              Select
+                            </option>
+                            {barangays.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              id={id}
+                              value={home[field]}
+                              onChange={(e) => {
+                                // Digits only, capped here rather than with
+                                // `maxLength`, which would cut a pasted "ZIP
+                                // 1485" short before this sees it (see the same
+                                // field on RegisterPage).
+                                const value = isZip
+                                  ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS)
+                                  : e.target.value
+                                setHome((prev) => ({ ...prev, [field]: value }))
+                              }}
+                              onBlur={() => setHomeTouched((prev) => ({ ...prev, [field]: true }))}
+                              autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
+                              inputMode={isZip ? 'numeric' : undefined}
+                              aria-required={HOME_ADDRESS_REQUIRED.includes(field) ? 'true' : undefined}
+                              aria-invalid={error ? true : undefined}
+                              aria-describedby={describedBy}
+                              className={`${inputCls} pr-10`}
+                            />
+                            <InputPencil />
+                          </div>
+                        )}
                       </ProfileField>
                     </div>
                   )

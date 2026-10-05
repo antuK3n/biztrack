@@ -8,8 +8,12 @@ import { DEMO_PASSWORD } from './helpers'
  *
  * Two journeys: a new owner gives it at sign-up, and an owner who registered
  * before it was asked is prompted on Profile and completes it from there. The
- * rules themselves (required parts, ZIP shape, no blanking) are pinned in
- * HomeAddressTest; this file is about whether they reach a reader.
+ * rules themselves (required parts, Malabon's barangays, ZIP shape, no
+ * blanking) are pinned in HomeAddressTest; this file is about whether they
+ * reach a reader.
+ *
+ * Since Register 3 neither form asks a city or province: the barangay is one
+ * of Malabon's, and the server writes Malabon, Metro Manila.
  *
  * Every account here is registered fresh, so nothing leans on — or changes —
  * the seeded owner that other specs sign in as.
@@ -42,6 +46,7 @@ async function registerViaApi(page: Page, email: string) {
           data_privacy_consent: true,
           home_street: '12 Gen. Luna St.',
           home_barangay: 'Longos',
+          // An older form's payload: the server ignores these two and writes its own.
           home_city: 'Malabon',
           home_province: 'Metro Manila',
         }),
@@ -104,11 +109,12 @@ test('a new owner gives their home address at sign-up, and it is on their Profil
   await expect(home.getByLabel('ZIP Code')).not.toHaveAttribute('aria-invalid', 'true')
   await expect(page).toHaveURL(/\/register/)
 
-  // An owner who lives outside Malabon, with a barangay not on the city's list.
-  await street.fill('7 M. Naval St.')
-  await home.getByLabel('Barangay').fill('San Roque')
-  await home.getByLabel('City or Municipality').fill('Navotas')
-  await home.getByLabel('Province').fill('Metro Manila')
+  // Barangay is a choice of Malabon's; city and province are not asked.
+  await expect(home.getByRole('combobox', { name: 'Barangay' })).toBeVisible()
+  await expect(home.getByLabel('City or Municipality')).toHaveCount(0)
+  await expect(home.getByLabel('Province')).toHaveCount(0)
+  await street.fill('30 Rizal Ave.')
+  await home.getByLabel('Barangay').selectOption('Tonsuya')
   // Digits only, four at most, as they are typed.
   await home.getByLabel('ZIP Code').fill('14a85x9')
   await expect(home.getByLabel('ZIP Code')).toHaveValue('1485')
@@ -120,7 +126,7 @@ test('a new owner gives their home address at sign-up, and it is on their Profil
 
   await page.goto('/profile')
   const row = page.getByRole('term').filter({ hasText: 'Home address' }).locator('xpath=following-sibling::dd')
-  await expect(row).toHaveText('7 M. Naval St., Brgy. San Roque, Navotas, Metro Manila 1485')
+  await expect(row).toHaveText('30 Rizal Ave., Brgy. Tonsuya, Malabon, Metro Manila 1485')
   await expect(page.getByRole('region', { name: /Add your home address/ })).toHaveCount(0)
 })
 
@@ -156,9 +162,9 @@ test('an owner from before the address was asked is prompted on Profile and comp
 
   const home = dialog.getByRole('group', { name: 'Home Address' })
   await home.getByLabel('House No., Building, Street').fill('Blk 4 Lot 12, Sampaguita St.')
-  await home.getByLabel('Barangay').fill('Tonsuya')
-  await home.getByLabel('City or Municipality').fill('Malabon')
-  await home.getByLabel('Province').fill('Metro Manila')
+  await expect(home.getByLabel('City or Municipality')).toHaveCount(0)
+  await expect(home.getByLabel('Province')).toHaveCount(0)
+  await home.getByLabel('Barangay').selectOption('Tonsuya')
   await expect(save).not.toHaveAttribute('aria-disabled', 'true')
   await save.click()
 

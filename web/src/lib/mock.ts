@@ -1,5 +1,6 @@
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 import { AxiosError } from 'axios'
+import { BARANGAY_POLYGONS } from './malabonGeo.data'
 import type { User } from './types'
 
 /*
@@ -187,8 +188,9 @@ function handle(config: InternalAxiosRequestConfig): MockResponse {
         mobile_number: body.mobile_number,
         home_street: body.home_street,
         home_barangay: body.home_barangay,
-        home_city: body.home_city,
-        home_province: body.home_province,
+        // Written by the server, as AuthController::register does [Register 3].
+        home_city: 'Malabon',
+        home_province: 'Metro Manila',
         home_postal_code: body.home_postal_code || null,
         password: body.password,
         email_verified_at: null,
@@ -243,6 +245,17 @@ function handle(config: InternalAxiosRequestConfig): MockResponse {
       sessions.delete(header.replace(/^Bearer\s+/i, ''))
       return { status: 204, data: undefined }
     }
+
+    // The sign-up form's barangay dropdown (ReferenceController::barangayNames).
+    case 'get /barangays':
+      return {
+        status: 200,
+        data: {
+          data: BARANGAY_POLYGONS.map((b, i) => ({ id: i + 1, name: b.name })).sort((a, b) =>
+            a.name.localeCompare(b.name),
+          ),
+        },
+      }
 
     case 'get /auth/me': {
       const user = authed(config)

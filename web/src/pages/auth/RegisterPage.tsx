@@ -16,6 +16,7 @@ import {
   HOME_ADDRESS_REQUIRED,
   ZIP_DIGITS,
   homeAddressPayload,
+  useHomeBarangays,
   validateHomeAddressField,
   type HomeAddressField,
   type HomeAddressValues,
@@ -84,8 +85,6 @@ function validateField(name: FieldName, values: FormValues): string | undefined 
       return values.data_privacy_consent ? undefined : 'You need to agree to the Data Privacy Notice to register.'
     case 'home_street':
     case 'home_barangay':
-    case 'home_city':
-    case 'home_province':
     case 'home_postal_code':
       return validateHomeAddressField(name, values)
     default:
@@ -135,18 +134,22 @@ function Field({
 
 /**
  * One part of the home address. The street line takes the full width because
- * it is the long answer; the other four pair up from `sm` and stack on a phone.
+ * it is the long answer; barangay and ZIP pair up from `sm` and stack on a
+ * phone. Barangay is a choice of Malabon's [checklist Register 3], styled as
+ * Gender above it is.
  */
 function HomeAddressInput({
   field,
   value,
   error,
+  barangays,
   onChange,
   onBlur,
 }: {
   field: HomeAddressField
   value: string
   error?: string
+  barangays: string[]
   onChange: (value: string) => void
   onBlur: () => void
 }) {
@@ -166,24 +169,46 @@ function HomeAddressInput({
       controlId={id}
       className={field === 'home_street' ? 'sm:col-span-2' : ''}
     >
-      <input
-        id={id}
-        autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
-        value={value}
-        /*
-         * ZIP takes digits only, as the character is typed: a letter here is
-         * never part of an answer. The cap is the slice, not `maxLength` —
-         * the browser applies maxLength to a paste BEFORE this handler sees
-         * it, so "1485 " copied with a space, or "ZIP 1485", lost its last
-         * digits and came out short (the e2e spec caught "14a85" becoming 148).
-         */
-        onChange={(e) => onChange(isZip ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS) : e.target.value)}
-        onBlur={onBlur}
-        inputMode={isZip ? 'numeric' : undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={inputCls}
-      />
+      {field === 'home_barangay' ? (
+        <select
+          id={id}
+          autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={`${inputCls} ${value === '' ? 'text-ink-muted' : ''}`}
+        >
+          <option value="" disabled>
+            Select
+          </option>
+          {barangays.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={id}
+          autoComplete={HOME_ADDRESS_AUTOCOMPLETE[field]}
+          value={value}
+          /*
+           * ZIP takes digits only, as the character is typed: a letter here is
+           * never part of an answer. The cap is the slice, not `maxLength` —
+           * the browser applies maxLength to a paste BEFORE this handler sees
+           * it, so "1485 " copied with a space, or "ZIP 1485", lost its last
+           * digits and came out short (the e2e spec caught "14a85" becoming 148).
+           */
+          onChange={(e) => onChange(isZip ? e.target.value.replace(/\D/g, '').slice(0, ZIP_DIGITS) : e.target.value)}
+          onBlur={onBlur}
+          inputMode={isZip ? 'numeric' : undefined}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          className={inputCls}
+        />
+      )}
       {hint && (
         <p id={hintId} className="mt-1.5 text-xs text-ink-secondary">
           {hint}
@@ -205,6 +230,7 @@ export function RegisterPage() {
   /* Prototype's second checkbox row — notification consent (visual, not part of the API payload). */
   const [notifyConsent, setNotifyConsent] = useState(true)
   const formRef = useRef<HTMLFormElement>(null)
+  const barangays = useHomeBarangays()
 
   function setValue<K extends FieldName>(name: K, value: FormValues[K]) {
     setValues((prev) => {
@@ -388,6 +414,7 @@ export function RegisterPage() {
                   field={field}
                   value={values[field]}
                   error={errors[field]}
+                  barangays={barangays}
                   onChange={(value) => setValue(field, value)}
                   onBlur={() => blurValidate(field)}
                 />
