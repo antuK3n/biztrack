@@ -43,7 +43,8 @@ return [
     'sms' => [
         'driver' => env('SMS_DRIVER', 'log'),
         'gateway' => [
-            'url' => env('SMS_GATEWAY_URL', 'https://api.sms-gate.app/3rdparty/v1/messages'),
+            // Blank or absent: sms-gate.app's public cloud server.
+            'url' => env('SMS_GATEWAY_URL'),
             'username' => env('SMS_GATEWAY_USERNAME'),
             'password' => env('SMS_GATEWAY_PASSWORD'),
             // Seconds. Sent from the queue worker, never a request, but an

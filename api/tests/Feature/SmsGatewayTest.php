@@ -60,6 +60,16 @@ it('posts the text and number to the gateway with basic auth', function () {
         ]);
 });
 
+it('posts to the public cloud server when SMS_GATEWAY_URL is blank', function (?string $url) {
+    useSmsGateway();
+    config(['services.sms.gateway.url' => $url]);
+    Http::fake([SMS_GATEWAY => Http::response(['id' => 'abc'], 202)]);
+
+    app(SmsChannel::class)->send('+639171234567', 'BizTrack: test.');
+
+    Http::assertSent(fn ($request) => $request->url() === SMS_GATEWAY);
+})->with(['blank' => '', 'absent' => null]);
+
 it('throws when the gateway answers with an error, so the job can retry', function () {
     useSmsGateway();
     Http::fake([SMS_GATEWAY => Http::response('Service Unavailable', 503)]);

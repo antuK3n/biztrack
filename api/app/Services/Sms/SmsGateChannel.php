@@ -28,6 +28,9 @@ use Illuminate\Support\Facades\Log;
  */
 class SmsGateChannel implements SmsChannel
 {
+    /** The public cloud server. Fallback for a blank SMS_GATEWAY_URL, which env() reads as "", not as unset. */
+    public const CLOUD_URL = 'https://api.sms-gate.app/3rdparty/v1/messages';
+
     public function __construct(
         private string $url,
         private ?string $username,
@@ -38,7 +41,7 @@ class SmsGateChannel implements SmsChannel
     public static function fromConfig(): self
     {
         return new self(
-            (string) config('services.sms.gateway.url'),
+            (string) config('services.sms.gateway.url') ?: self::CLOUD_URL,
             config('services.sms.gateway.username'),
             config('services.sms.gateway.password'),
             (int) config('services.sms.gateway.timeout', 10),
