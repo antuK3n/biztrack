@@ -212,12 +212,12 @@ function num(value: number): string {
   return value.toLocaleString()
 }
 
-/** "2026-07-30" reads as "30 Jul 2026". */
+/** "2026-07-30" reads as "July 30, 2026" — the month in full (checklist, Apply for Permit 7). */
 function dateLabel(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-PH', {
     day: 'numeric',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
   })
 }
@@ -1048,7 +1048,8 @@ function RenewalForecastPanel({ forecast }: { forecast: RenewalForecast }) {
  */
 function monthTick(month: string): string {
   const [y, m] = month.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' })
+  // "July 2026", not "Jul 26": the month in full (checklist, Apply for Permit 7).
+  return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
 }
 
 function MovementPanel({ report }: { report: DashboardReport }) {

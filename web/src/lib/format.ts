@@ -101,22 +101,17 @@ export function formatDate(iso: string | null | undefined): string {
 /**
  * The date a value was superseded, for the one-line revision notes.
  *
- * The only short date in the app, and named for its one job rather than
- * offered as a general `formatDateShort` — which the note above refuses, and
- * rightly: "the second helper is the one that quietly spreads."
- *
- * This is the screen the same note allows for. A revision note sits INSIDE a
- * record box — `was 111111 · 29 Sep 2026` under a field that may be 13rem
- * wide — and the long form wrapped it onto a second and third line, which is
- * what the client reported on 29 September 2026. Nobody transcribes one onto
- * a printed form; it is an at-a-glance marker of when something changed, so
- * the reason for spelling the month out does not apply to it.
+ * This used to be the app's one short date, `was 111111 · 29 Sep 2026`, on
+ * the reasoning that the long form wrapped inside a 13rem record box (client
+ * report, 29 September 2026). The client then asked for the whole month name
+ * in EVERY date (checklist, Apply for Permit 7), which settles it: the note
+ * reads `was 111111 · September 29, 2026` like every other date, and a note
+ * that wraps is the lesser fault. Kept under its own name so the revision
+ * notes stay findable from here.
  */
-const versionDateFmt = new Intl.DateTimeFormat('en-PH', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-})
+export function formatVersionDate(iso: string | null | undefined): string {
+  return formatDate(iso)
+}
 
 /**
  * A calendar date the server sends bare ("2027-01-25"), as "January 25, 2027".
@@ -131,59 +126,31 @@ export function formatCalendarDate(ymd: string | null | undefined): string {
   return dateFmt.format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
 }
 
-export function formatVersionDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-
-  return Number.isNaN(d.getTime()) ? '—' : versionDateFmt.format(d)
-}
-
 /**
- * A date and time small enough for a list tile.
+ * A date and time for a list tile: "October 4, 9:49 PM".
  *
- * The second named short format, and named for its job rather than offered
- * as a general one — see the note above, which refuses a generic
- * `formatDateShort` because "the second helper is the one that quietly
- * spreads".
+ * Its own helper because a draft tile is about 200px wide and carries two
+ * dated lines, Started and Last opened, so it drops the year while the year
+ * is the current one — the part of the answer the reader already knows — and
+ * keeps it for a draft from another year, when that digit is the whole
+ * point. The month is spelled out like every other date (checklist, Apply for
+ * Permit 7); it read "Oct 4, 9:49 PM" until then.
  *
- * A draft tile is about 200px wide and carries two dated lines, Started and
- * Last opened. The long form is "September 29, 2026 at 5:38 PM", which wraps
- * each of them onto two lines and buries a one-line title under four lines
- * of metadata. Nobody transcribes a draft's timestamps onto a paper form,
- * which is the reason the long form exists at all.
+ * Built from parts rather than one Intl format so the time keeps the tile's
+ * comma: en-PH joins a long-month date to its time with " at ", and the tile
+ * was asked to change its month, not its time.
  */
-const tileDateTimeFmt = new Intl.DateTimeFormat('en-PH', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-})
+const monthDayFmt = new Intl.DateTimeFormat('en-PH', { month: 'long', day: 'numeric' })
 
-/*
- * The same thing without the year, for a date in the current one.
- *
- * "Last opened: Sep 29, 2026, 10:15 PM" wrapped a tile and left "PM" on a
- * line of its own. Dropping the year saves six characters and drops the
- * part of the answer the reader already knows — and only while they know
- * it: a draft from another year still carries its year, which is when that
- * digit is the whole point.
- */
-const tileThisYearFmt = new Intl.DateTimeFormat('en-PH', {
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-})
+const timeFmt = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit' })
 
 export function formatTileDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
 
-  return d.getFullYear() === new Date().getFullYear()
-    ? tileThisYearFmt.format(d)
-    : tileDateTimeFmt.format(d)
+  const day = d.getFullYear() === new Date().getFullYear() ? monthDayFmt.format(d) : dateFmt.format(d)
+  return `${day}, ${timeFmt.format(d)}`
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
@@ -209,19 +176,19 @@ export function formatRelative(iso: string | null | undefined): string {
 }
 
 /**
- * The stamp beside a name in a conversation list: "4:33 AM", "24 Sep",
- * "1 Sep 2025".
+ * The stamp beside a name in a conversation list: "4:33 AM", "September 24",
+ * "September 1, 2025".
  *
- * A message list is scanned down a narrow column, and "September 24, 2026"
- * is eighteen characters of a fact the reader mostly needs to the nearest
- * day. It was taking a third of the row and truncating the business name
- * beside it - "SAMPLE Bagon...", "SAMPLE Riversi..." - which is the part an
- * officer is actually looking for.
+ * A message list is scanned down a narrow column, so it says only what
+ * distinguishes this row from the others near it: the time when it is today,
+ * the month and day within the year, the year as well once it is old enough
+ * that a bare "September 1" would be ambiguous. The full stamp is still in the
+ * `title`, and still on every message in the transcript.
  *
- * So it says only what distinguishes this row from the others near it: the
- * time when it is today, the day and month within the year, the year as well
- * once it is old enough that a bare "1 Sep" would be ambiguous. The full
- * stamp is still in the `title`, and still on every message in the transcript.
+ * It was "24 Sep" until the client asked for the whole month name in every
+ * date (checklist, Apply for Permit 7). The month costs the business name
+ * beside it a few characters; the row gives the stamp `shrink-0` and the name
+ * `truncate`, so the name gives way rather than the row wrapping.
  */
 export function formatListStamp(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -238,9 +205,7 @@ export function formatListStamp(iso: string | null | undefined): string {
     return d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })
   }
 
-  return d.getFullYear() === now.getFullYear()
-    ? d.toLocaleDateString('en-PH', { day: 'numeric', month: 'short' })
-    : d.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' })
+  return d.getFullYear() === now.getFullYear() ? monthDayFmt.format(d) : dateFmt.format(d)
 }
 
 export function formatBytes(bytes: number): string {

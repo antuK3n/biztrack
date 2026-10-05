@@ -61,20 +61,25 @@ const FAST = '#14171d'
 
 const AXIS_TICK = { fontSize: 12, fill: '#5b6472' } as const
 
-/** "20 Apr 2026" — the written form used wherever a week is named as text. */
+/*
+ * Both spell the month out, as every date does (checklist, Apply for Permit
+ * 7); they read "20 Apr 2026" and "20 Apr" until then.
+ */
+
+/** "April 20, 2026" — the written form used wherever a week is named as text. */
 export function spcWeekDate(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number)
   return new Date(year, month - 1, day).toLocaleDateString('en-PH', {
     day: 'numeric',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
   })
 }
 
-/** "20 Apr" — the axis form, where the year would only crowd the ticks. */
+/** "April 20" — the axis form, where the year would only crowd the ticks. */
 export function spcWeekTick(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString('en-PH', { day: 'numeric', month: 'short' })
+  return new Date(year, month - 1, day).toLocaleDateString('en-PH', { day: 'numeric', month: 'long' })
 }
 
 /** "+1.8" / "-0.5" — a deviation only means something with its sign attached. */

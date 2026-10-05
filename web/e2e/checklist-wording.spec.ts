@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
  * are finished, built through the API, so the section map lets the wizard open
  * Business Operation.
  */
-async function draftPastBusinessInformation(page: Page): Promise<number> {
+async function draftPastBusinessInformation(page: Page, bizName = `E2E wording ${Date.now()}`): Promise<number> {
   return page.evaluate(async (bizName) => {
     const token = localStorage.getItem('biztrack.token.public')
     const headers = {
@@ -98,7 +98,7 @@ async function draftPastBusinessInformation(page: Page): Promise<number> {
       }),
     )
     return app.id as number
-  }, `E2E wording ${Date.now()}`)
+  }, bizName)
 }
 
 test('each employee and delivery box says "No. of" what it counts (Apply for Permit 5)', async ({
@@ -121,4 +121,19 @@ test('each employee and delivery box says "No. of" what it counts (Apply for Per
   const delivery = page.getByRole('group', { name: 'Number of delivery units' })
   await expect(delivery.getByRole('textbox', { name: /^No\. of Motorized Delivery Units/ })).toBeVisible()
   await expect(delivery.getByRole('textbox', { name: /^No\. of Other Delivery Units/ })).toBeVisible()
+})
+
+test('a draft tile spells the month in full (Apply for Permit 7)', async ({ page }) => {
+  await page.goto('/dashboard')
+  const name = `E2E month ${Date.now()}`
+  await draftPastBusinessInformation(page, name)
+
+  await page.goto('/drafts')
+  const tile = page.getByRole('link').filter({ hasText: name })
+  const month = new Date().toLocaleDateString('en-PH', { month: 'long' })
+  // "Started: October 4, 9:49 PM" — this year's draft, so no year; the time as it was.
+  await expect(tile.getByText(/^Started: /)).toHaveText(
+    new RegExp(`^Started: ${month} \\d{1,2}, \\d{1,2}:\\d{2}\\s?[AP]M$`),
+    { timeout: WIZARD_PAINT_MS },
+  )
 })
