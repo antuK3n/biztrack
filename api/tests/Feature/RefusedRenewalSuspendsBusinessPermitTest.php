@@ -63,7 +63,7 @@ function rrsBusiness(): array
 
     return [
         $businessId,
-        $permit('BUSINESS', 'active', '2026-01-21', '2027-01-20'),
+        $permit('BUSINESS', 'active', '2027-01-02', '2027-12-31'),
         $permit('SANITARY', 'expired', '2026-01-02', '2026-12-31'),
     ];
 }

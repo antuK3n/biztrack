@@ -28,8 +28,9 @@ use Carbon\CarbonImmutable;
  *     add 2% a month to the applicant's bill.
  *  2. AND IT FREEZES THERE. The wait until January is the city's collection
  *     scheme, not the applicant's delay.
- *  3. THE BUSINESS PERMIT IS LATE FROM 21 JANUARY — the day after the term
- *     `RenewalSeason` anchors every business permit to.
+ *  3. THE BUSINESS PERMIT IS LATE FROM 21 JANUARY — the day after the
+ *     penalty-free window that follows its 31 December expiry
+ *     (`RenewalSeason::penaltyFreeUntil`; Ken, 5 October 2026).
  *  4. ONE DEFAULT, ONE PENALTY. A deferred fee that already carries a frozen
  *     penalty is not surcharged again by the January bill that collects it.
  */

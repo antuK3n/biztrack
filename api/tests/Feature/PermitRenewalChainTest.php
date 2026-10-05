@@ -130,6 +130,10 @@ it('chains a permit issued by the real approval path', function () {
     $business = chainBusiness();
     $prior = $business->permits()->orderBy('id')->firstOrFail();
 
+    // Filed in the renewal season: a business permit ending 31 December is
+    // renewable from the 1 January after it (RenewalWindow).
+    $this->travelTo(now()->addYear()->startOfYear()->addDays(4));
+
     $appId = $this->postJson('/api/v1/applications', [
         'business_id' => $business->id,
         'data_privacy_consent' => true,

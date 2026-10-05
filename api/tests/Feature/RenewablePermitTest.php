@@ -55,7 +55,7 @@ function rnpPermit(int $businessId, PermitStatus $status = PermitStatus::Active)
         'permit_number' => 'RNP-'.random_int(100000, 999999),
         'issued_at' => '2026-01-21',
         'valid_from' => '2026-01-21',
-        'valid_until' => '2027-01-20',
+        'valid_until' => '2026-12-31',
         'status' => $status,
     ]);
 }

@@ -70,7 +70,7 @@ it('re-bills a returned renewal whose gross sales were corrected', function () {
             'business_id' => $businessId,
             'permit_type_id' => PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'),
             'permit_number' => 'RSB-'.random_int(100000, 999999),
-            'issued_at' => '2026-01-21', 'valid_from' => '2026-01-21', 'valid_until' => '2027-01-20',
+            'issued_at' => '2026-01-21', 'valid_from' => '2026-01-21', 'valid_until' => '2026-12-31',
             'status' => 'active',
         ]);
 

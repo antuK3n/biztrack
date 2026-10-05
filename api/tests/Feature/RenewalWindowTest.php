@@ -25,8 +25,8 @@ use Carbon\CarbonImmutable;
  * we invented.
  *
  * The last case pins the exemption that is easy to lose: the business permit
- * is anchored to 20 January by `RenewalSeason` and the client ruled out a
- * filing lock on it — *"don't add a lock in our system yet for this."*
+ * is anchored to its own season by `RenewalSeason` (31 December, renewed free
+ * from 1 to 20 January) and is bound by that, not by the day count.
  */
 
 /** A permit of `$code` whose term ends on `$validUntil`. */
@@ -156,7 +156,7 @@ it('still allows a late renewal inside the cutoff, so the surcharge can bite', f
 it('binds the business permit by its January season, not by the day count', function () {
     /*
      * This asserted the opposite until 3 October 2026, and said why:
-     * `RenewalSeason` anchors every business permit to 20 January and the
+     * `RenewalSeason` anchored every business permit to the season and the
      * client was explicit on 1 October that no filing lock went with it —
      * *"don't add a lock in our system yet for this."*
      *
@@ -174,9 +174,12 @@ it('binds the business permit by its January season, not by the day count', func
     config(['biztrack.renewal_window.opens_days_before' => 300]);
     config(['biztrack.renewal_window.closes_months_after' => 36]);
 
-    /* A term ending on the next 20 January, which is the only shape one has. */
+    /*
+     * A term ending on 31 December, the only shape one has since 5 October
+     * 2026; its season is the January after, free to the 20th.
+     */
     $season = CarbonImmutable::create(CarbonImmutable::now()->year + 1, 1, 20);
-    $business = windowPermit('BUSINESS', $season->toDateString());
+    $business = windowPermit('BUSINESS', CarbonImmutable::create($season->year - 1, 12, 31)->toDateString());
 
     /* Inside its January: open, and the 300-day count is not consulted. */
     expect(RenewalWindow::refusalFor($business, $season->startOfMonth()))->toBeNull()

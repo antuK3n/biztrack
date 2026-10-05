@@ -195,9 +195,10 @@ it('releases the renewed business permit the moment the money lands', function (
         ->and($issued->first()->permitType->code)->toBe(PermitType::OUTCOME_CODE);
 
     /*
-     * And it ends on 20 January, whatever today is — the other half of the
-     * 17 September decision. `RenewalSeason` owns the date; this asserts the
-     * business permit is the permit type that reads it.
+     * And it ends on 31 December, whatever today is (Ken, 5 October 2026;
+     * 20 January of the following year before that). `RenewalSeason` owns
+     * the date; this asserts the business permit is the permit type that
+     * reads it.
      */
     expect($issued->first()->valid_until->toDateString())->toBe(
         RenewalSeason::endOfTermFor(

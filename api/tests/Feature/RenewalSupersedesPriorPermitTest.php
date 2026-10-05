@@ -246,7 +246,7 @@ it('starts a renewed clearance the day it is issued, and runs it a year', functi
 it('still continues the term on a renewed BUSINESS permit', function () {
     /*
      * The branch the clearance rule above must not flatten. A business
-     * permit is anchored to 20 January whatever day it starts, so where its
+     * permit is anchored to 31 December whatever day it starts, so where its
      * term begins moves no date a reader sees — which is exactly why a
      * careless edit could change it and nothing would look wrong.
      */

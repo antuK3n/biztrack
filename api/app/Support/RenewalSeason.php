@@ -5,71 +5,57 @@ namespace App\Support;
 use Carbon\CarbonImmutable;
 
 /**
- * When the business permit year ends — Ordinance Sec. 2N.
+ * When the business permit year ends, and when renewing it stops being free.
  *
- * ── Why 20 January, and why it is not a new number ────────────────────────
+ * ── 31 December, and the twenty days after it ──────────────────────────────
  *
- * The renewal window is the first twenty days of January. That is already
- * stated twice in this codebase, from the ordinance rather than from a
- * preference: `ApplicationController` validates the payment mode against
- * "Sec. 2N: annual (first 20 days of January) or quarterly", and
- * `ChatbotResponder` has been telling applicants "Business permits are renewed
- * during the first 20 days of January every year" since it was written.
+ * Ken, 5 October 2026, from the Malabon Revenue Code, Ch. III art. A (e): the
+ * Mayor's / Business Permit *"expires on the thirty-first (31st) of December
+ * following date of issuance … renewed within the first twenty (20) days of
+ * January"*. So the term ends on 31 December of the year the permit is issued,
+ * new filing or renewal alike, and 1 to 20 January is the window in which it
+ * is renewed WITHOUT penalty. The Sec. 8A.04/8A.05 surcharge and interest
+ * start after 20 January (`penaltyFreeUntil`).
  *
- * So a business permit expiring ON the 20th means renewing inside the window
- * keeps cover continuous: the old permit is good through the last day the LGU
- * accepts a renewal, and the new term begins the moment it ends.
+ * ── What it overrides ──────────────────────────────────────────────────────
  *
- * ── What this changes, and what it deliberately does not ──────────────────
+ * From 17 September to 5 October 2026 the term ended on 20 January of the
+ * year after issue. The client chose that on 1 October, put to them with the
+ * consequence that a 31 December expiry leaves the holder uncovered for the
+ * twenty days of January in which the LGU accepts renewals; they kept 20
+ * January for the business permit and took 31 December for the five
+ * clearances. Ken's decision of 5 October overrides that for the business
+ * permit, on the ordinance's own words: the permit expires on 31 December and
+ * the twenty days are a grace period for renewing, not more term. Migration
+ * 2026_10_05_100000 moved the permits issued under the old rule.
  *
- * The client's decision of 17 September 2026: *"Business permits always expire
- * on January, regardless of application date."* New filings and renewals
- * alike — so a permit issued in June 2026 expires 20 January 2027, a
- * seven-month first term, and one issued in December 2026 expires the same day
- * after one month.
+ * The twenty days were already in the code from the ordinance rather than
+ * from a preference: `ApplicationController` validates the payment mode
+ * against "Sec. 2N: annual (first 20 days of January) or quarterly".
  *
- * This REVERSES a decision of 9 September, which `WorkflowService::issuePermitFor`
- * records: the calendar-year convention was put to the client then and was not
- * chosen, in favour of "a renewal continues the term". It is reversed for the
- * BUSINESS permit only. The other five keep continue-the-term, because they
- * renew any time and anchoring them would punish renewing early — which is the
- * reasoning the 9 September note gives and which still holds for them.
- *
- * There is NO LOCK on filing outside January, and that is explicit: *"don't add
- * a lock in our system yet for this."* A renewal filed in June is accepted and
- * gets a permit expiring on the next 20 January.
+ * There is a floor on filing: renewal opens on 1 January after the term ends
+ * (`RenewalWindow`, the client's 3 October rule).
  */
 final class RenewalSeason
 {
-    /** The last day of the renewal window, and so the day a term ends. */
+    /** The last day of the penalty-free renewal window: 20 January. */
     public const CLOSES_MONTH = 1;
 
     public const CLOSES_DAY = 20;
 
     /**
-     * When a CLEARANCE issued on `$from` expires: 31 December of that year.
-     *
-     * ── The client's rule, and why it is not the business permit's ──────────
+     * When a CLEARANCE first issued on `$from` expires: 31 December of that
+     * year — and, since 5 October 2026, the business permit too.
      *
      * *"Sa mga permit, ang expiration ay always end of a year, so laging
-     * December 31, 202X, depende kung anong year na ngayon"* [1 October 2026].
+     * December 31, 202X, depende kung anong year na ngayon"* [client, 1
+     * October 2026]. It replaced continue-the-term — `validFrom + 365` — for
+     * the five clearances, at the cost that a clearance issued in November
+     * runs about seven weeks. (A renewed clearance runs a year from its
+     * renewal instead; see `WorkflowService::issuePermitFor`.)
      *
-     * Put to them with the one consequence that matters — a certificate
-     * expiring on 31 December leaves the holder uncovered for the twenty days
-     * of January in which the LGU accepts renewals — they kept 20 January for
-     * the Mayor's / Business Permit and took 31 December for the rest. That is
-     * the right split: the twenty-day window is Sec. 2N's, and Sec. 2N is about
-     * the business permit. The five clearances renew any time, so there is no
-     * window to stay inside and no gap to leave.
-     *
-     * It replaces continue-the-term for those five — `validFrom + 365` — which
-     * came from the 9 September reasoning that anchoring would punish renewing
-     * early. That reasoning is overruled here rather than forgotten: a fixed
-     * year-end is what the client wants to read on a certificate, and the cost
-     * is that a clearance issued in November runs about seven weeks.
-     *
-     * No branches, for the same reason `endOfTermFor` has none: "the end of the
-     * year it was issued in" has no boundary case to get wrong.
+     * No branches: "the end of the year it was issued in" has no boundary
+     * case to get wrong.
      */
     public static function endOfCalendarYearFor(CarbonImmutable $from): CarbonImmutable
     {
@@ -77,43 +63,41 @@ final class RenewalSeason
     }
 
     /**
-     * When a business permit issued on `$from` expires: 20 January of the
-     * FOLLOWING year, always.
+     * When a business permit issued on `$from` expires: 31 December of the
+     * year it is issued (Ken, 5 October 2026; see the class note).
      *
-     * ── It has no branches, and the first attempt at it did ──────────────────
+     *     issued Jun 2026  → expires 31 Dec 2026   (about 7 months)
+     *     issued Dec 2026  → expires 31 Dec 2026   (days)
+     *     renewed Jan 2027 → expires 31 Dec 2027   (about 12 months)
      *
-     * This was written as "the close of the term `$from` falls in" — on or
-     * before 20 January takes that January, otherwise the next one — which
-     * looks right and is wrong at the one date that matters most. A permit
-     * issued on 5 January would have expired on the 20th of the same month:
-     * fifteen days of cover, in the middle of the renewal season, for a
-     * business that had just paid for a year. Caught by printing the boundary
-     * cases rather than by reading the code.
+     * A short first term is intended, not a defect: a business registering
+     * late in the year renews with everybody else in January, which is the
+     * point of a common season. A renewal cannot be filed before 1 January
+     * (`RenewalWindow`), so a renewed permit always gets its whole year.
      *
-     * The client's own worked examples are the specification and they have no
-     * boundary in them:
-     *
-     *     issued Jun 2026  → expires 20 Jan 2027   (about 7 months)
-     *     issued Dec 2026  → expires 20 Jan 2027   (about 1 month)
-     *     renewed Jan 2027 → expires 20 Jan 2028   (about 12 months)
-     *
-     * All three are "20 January of the year after the issue year", and so is
-     * every other date: for anything from 21 January to 31 December the next
-     * 20 January IS in the following year, and for the first twenty days of
-     * January the applicant is buying the year ahead because their current
-     * permit already covers them to the 20th.
-     *
-     * A short first term is intended, not a defect. A business registering in
-     * December gets about a month and then renews with everybody else, which is
-     * the point of a common season — every permit in the city falls due at once
-     * and the LGU's January is the one time it has to process them.
+     * It returned 20 January of the FOLLOWING year until 5 October 2026.
      */
     public static function endOfTermFor(CarbonImmutable $from): CarbonImmutable
     {
-        return CarbonImmutable::create(
-            $from->year + 1,
-            self::CLOSES_MONTH,
-            self::CLOSES_DAY,
-        )->startOfDay();
+        return self::endOfCalendarYearFor($from);
+    }
+
+    /**
+     * The last day a business permit expiring on `$expiry` may be renewed
+     * without the Sec. 8A.04/8A.05 penalty: 20 January after a 31 December
+     * expiry.
+     *
+     * Any other expiry date is its own last free day, as it was for every
+     * permit before 5 October 2026. That is a permit the season never set —
+     * one recorded from paper with whatever date it carried — and a term the
+     * ordinance did not give it earns no grace period after it.
+     */
+    public static function penaltyFreeUntil(CarbonImmutable $expiry): CarbonImmutable
+    {
+        if ($expiry->month === 12 && $expiry->day === 31) {
+            return CarbonImmutable::create($expiry->year + 1, self::CLOSES_MONTH, self::CLOSES_DAY)->startOfDay();
+        }
+
+        return $expiry->startOfDay();
     }
 }

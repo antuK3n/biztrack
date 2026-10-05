@@ -656,9 +656,11 @@ class WorkflowService
         /*
          * ── This filing's OWN lateness ───────────────────────────────────
          *
-         * A business permit's term ends on 20 January (`RenewalSeason`), so
-         * a renewal filed on the 21st is late and Secs. 8A.04/8A.05 attach.
-         * Client, 1 October 2026: *"Day after 20 January."*
+         * A business permit's term ends on 31 December and it renews free
+         * through 20 January (`RenewalSeason`), so a renewal filed on the
+         * 21st is late and Secs. 8A.04/8A.05 attach. Client, 1 October 2026:
+         * *"Day after 20 January."* — kept when Ken moved the expiry to 31
+         * December on 5 October (`latePenaltyFor`).
          *
          * Charged on the WHOLE assessment — business tax and every
          * regulatory and permit line on this bill. Client, same date:
@@ -5776,6 +5778,22 @@ class WorkflowService
         }
 
         $expired = CarbonImmutable::parse($prior->valid_until)->endOfDay();
+
+        /*
+         * ── A business permit is late only after 20 January ─────────────
+         *
+         * It expires on 31 December, and 1 to 20 January is the window in
+         * which it is renewed without penalty (Malabon Revenue Code Ch. III
+         * art. A (e); Ken, 5 October 2026). So the lateness is counted from
+         * the end of that window, not from the expiry: a renewal filed on 15
+         * January owes nothing, one filed on 21 January is a month late.
+         * `RenewalSeason::penaltyFreeUntil` gives any other expiry no grace.
+         * The clearances keep counting from their own expiry.
+         */
+        if ($prior->permitType?->code === PermitType::OUTCOME_CODE) {
+            $expired = RenewalSeason::penaltyFreeUntil($expired)->endOfDay();
+        }
+
         // The pretend date while the Debug page sets one; the real filing time
         // otherwise (BusinessDate). submitted_at itself is never rewritten.
         $filed = BusinessDate::filedAt($app->submitted_at ?? $app->created_at);
@@ -5785,8 +5803,8 @@ class WorkflowService
         }
 
         /*
-         * Whole months, rounded UP, so a filing one day past expiry is one
-         * month late rather than none. Sec. 8A.05 charges "per month or
+         * Whole months from that day, rounded UP, so a filing one day past it
+         * is one month late rather than none. Sec. 8A.05 charges "per month or
          * fraction thereof", which is that rule and not a rounding choice
          * of ours; `diffInMonths` alone would give nought and the surcharge
          * would arrive with no interest beside it for a whole month.
@@ -5918,7 +5936,7 @@ class WorkflowService
          * issued — so the overlap is on paper and not in the register.
          *
          * The BUSINESS permit keeps continue-the-term, and nothing about it
-         * changes: it is anchored to 20 January either way, so where its term
+         * changes: it is anchored to 31 December either way, so where its term
          * starts moves no date a reader ever sees.
          */
         $renewedClearance = $prior !== null && $type->code !== PermitType::OUTCOME_CODE;
@@ -5928,31 +5946,27 @@ class WorkflowService
             : now()->startOfDay();
 
         /*
-         * ── The BUSINESS permit ends on 20 January, whatever the start ───────
+         * ── The BUSINESS permit ends on 31 December, whatever the start ──────
          *
-         * The client's decision of 17 September 2026: *"Business permits always
-         * expire on January, regardless of application date."* New filings and
-         * renewals alike — so one issued in June 2026 runs to 20 January 2027,
-         * a seven-month first term, and one issued that December runs to the
-         * same day after a month. `RenewalSeason` carries the date and the
-         * ordinance reference.
-         *
-         * This is the calendar-year convention that was put to the client on
-         * 9 September and NOT chosen (see the note above). It is chosen now, and
-         * only for this one permit type: the other five renew any time and keep
-         * continue-the-term, because anchoring them would penalise renewing
-         * early, which is the reasoning of the 9 September note and still holds.
+         * Ken, 5 October 2026, from Malabon Revenue Code Ch. III art. A (e):
+         * the Mayor's / Business Permit expires on 31 December following its
+         * issue and is renewed in the first twenty days of January. New
+         * filings and renewals alike — so one issued in June 2026 runs to 31
+         * December 2026, a seven-month first term, and its January 2027
+         * renewal runs the whole of 2027. `RenewalSeason` carries the date,
+         * the ordinance reference and the decisions it replaced (17 September:
+         * 20 January of the following year).
          *
          * `validity_days` is ignored for the business permit and deliberately
-         * left on the row at 365. It is what the OTHER branch reads and what a
-         * future permit type will read; zeroing it to signal "anchored instead"
-         * would make the column mean two things.
+         * left on the row at 365. It is what a future permit type will read;
+         * zeroing it to signal "anchored instead" would make the column mean
+         * two things.
          */
         /*
          * ---- Two anchors, and `validity_days` is now read by neither -------
          *
-         * The business permit ends on 20 January, per Sec. 2N above. Every
-         * other certificate ends on 31 December of the year it was issued:
+         * The business permit ends on 31 December, per the note above. Every
+         * other certificate first issued ends on 31 December of that year too:
          * *"ang expiration ay always end of a year, so laging December 31,
          * 202X"* [client, 1 October 2026].
          *

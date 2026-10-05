@@ -139,6 +139,9 @@ it('submits a renewal that names its permit', function () {
     ['business' => $business] = renewalDraft();
     ['application_id' => $appId] = renewalDraft($business->permits()->firstOrFail()->id);
 
+    // Submitted in the renewal season: the seeded business permit ends on 31
+    // December and is renewable from the 1 January after it (RenewalWindow).
+    $this->travelTo(now()->addYear()->startOfYear()->addDays(4));
     attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 });

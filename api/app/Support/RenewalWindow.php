@@ -37,35 +37,36 @@ use Carbon\CarbonImmutable;
  *
  * ── The business permit has its OWN window: January ────────────────────────
  *
- * It had none. The Mayor's Permit is anchored to 20 January by
- * `RenewalSeason`, and the client was explicit on 1 October 2026 that this
- * carried no filing lock — *"don't add a lock in our system yet for this"* —
- * so a renewal filed in June was accepted and ran to the next 20 January.
+ * It had none. The Mayor's Permit is anchored to the year's end by
+ * `RenewalSeason` (20 January until 5 October 2026, 31 December since), and
+ * the client was explicit on 1 October 2026 that this carried no filing lock
+ * — *"don't add a lock in our system yet for this"* — so a renewal filed in
+ * June was accepted.
  *
  * They reversed that on 3 October: *"make the Mayor's Permit renewable for
  * JANUARY ONLY. Make it January 1 to 20 and 21 onwards will cause an
  * additional charge to the payment."*
  *
  * So the business permit is bounded here too, by a DATE rather than by a
- * count of days: renewal opens on 1 January of the year the term ends, and
- * a filing before that is refused and told when to come back. The five
+ * count of days: renewal opens on the 1 January after the term ends on 31
+ * December, and a filing before that is refused and told when to come back. The five
  * clearances keep the rolling day-count window above, because their terms
  * are their own year and not the city's season.
  *
  * ── The 21 January charge needs nothing here ───────────────────────────────
  *
- * It already works, and it is worth saying where so nobody adds it twice.
- * `WorkflowService::latePenaltyFor` compares the filing date with the prior
- * permit's `valid_until`, which for a Mayor's Permit IS 20 January, and
- * hands the difference to `FeeCalculator::latePenalty`: 25% once under Sec.
- * 8A.04, plus 2% a month under 8A.05, capped at 36 months. A filing on 21
- * January is one month late by Sec. 8A.05's "month or fraction thereof" and
- * is charged accordingly.
+ * It is worth saying where it lives so nobody adds it twice.
+ * `WorkflowService::latePenaltyFor` compares the filing date with the end of
+ * the penalty-free window — 20 January after the 31 December expiry
+ * (`RenewalSeason::penaltyFreeUntil`) — and hands the difference to
+ * `FeeCalculator::latePenalty`: 25% once under Sec. 8A.04, plus 2% a month
+ * under 8A.05, capped at 36 months. A filing on 21 January is one month late
+ * by Sec. 8A.05's "month or fraction thereof" and is charged accordingly.
  *
  * This class therefore sets the FLOOR only. The ceiling stays
- * `closes_months_after`, so a lapsed business permit is still renewable —
- * with the surcharge — for 36 months, which is where the interest cap makes
- * renewal stop deterring anything.
+ * `closes_months_after`, counted from that same 20 January, so a lapsed
+ * business permit is still renewable — with the surcharge — for 36 months,
+ * which is where the interest cap makes renewal stop deterring anything.
  */
 final class RenewalWindow
 {
@@ -130,24 +131,28 @@ final class RenewalWindow
         /*
          * ── The business permit's season ────────────────────────────────
          *
-         * Its term always ends on 20 January (`RenewalSeason`), so the
-         * January it belongs to is the January of `valid_until` — derived
-         * from the permit rather than from today, which is what makes this
-         * answer the same whoever asks and whenever.
+         * Its term ends on 31 December (`RenewalSeason`), so the January it
+         * belongs to is the one that follows: the January of the day after
+         * `valid_until`. Derived from the permit rather than from today,
+         * which is what makes this answer the same whoever asks and whenever.
+         * (A permit still dated 20 January, from before 5 October 2026, gets
+         * that same January, as it did then.)
          *
          * Only the floor. Past 20 January the filing is accepted and
          * surcharged by `WorkflowService::latePenaltyFor`; the ceiling is
-         * `closes_months_after` below, which this falls through to.
+         * `closes_months_after`, counted from that 20 January as the
+         * surcharge's months are.
          */
         if ($prior->permitType?->code === PermitType::OUTCOME_CODE) {
-            $opensOn = CarbonImmutable::create($expires->year, 1, 1)->startOfDay();
+            $opensOn = CarbonImmutable::create($expires->addDay()->year, 1, 1)->startOfDay();
 
             if ($filed->lessThan($opensOn)) {
                 return sprintf('Renewable from %s.', $opensOn->format('j F Y'));
             }
 
             $closes = self::closesMonthsAfter();
-            if ($closes !== null && $filed->greaterThan($expires->addMonths($closes)->endOfDay())) {
+            $lateFrom = RenewalSeason::penaltyFreeUntil($expires)->endOfDay();
+            if ($closes !== null && $filed->greaterThan($lateFrom->addMonths($closes))) {
                 return sprintf(
                     'Expired %s, over %d months ago. File a New Application.',
                     $expires->format('j F Y'),

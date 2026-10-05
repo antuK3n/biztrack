@@ -323,7 +323,7 @@ function revokedMidRenewal(): array
 {
     test()->travelTo(Carbon::parse('2027-01-05 02:00:00'));
     $permit = revocablePermit();
-    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2027-01-20']);
+    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2026-12-31']);
 
     $owner = authAs('owner@biztrack.local');
     $renewalId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
@@ -389,7 +389,7 @@ it('stops a renewal billed before the revocation from being paid after it', func
 it('leaves a renewal draft alone, which then cannot be submitted', function () {
     test()->travelTo(Carbon::parse('2027-01-05 02:00:00'));
     $permit = revocablePermit();
-    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2027-01-20']);
+    $permit->update(['valid_from' => '2026-01-21', 'valid_until' => '2026-12-31']);
     $owner = authAs('owner@biztrack.local');
     $draftId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $permit->business_id,
