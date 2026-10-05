@@ -481,7 +481,7 @@ final class FilingMover
             case self::INSPECTION_BOOK:
                 $visit = $this->workflow->scheduleClearanceInspection($row, now());
 
-                return 'Inspection booked for '.$visit->scheduled_at->format('j M Y')
+                return 'Inspection booked for '.$visit->scheduled_at->format('F j, Y')
                     .($visit->inspector ? ', with '.$visit->inspector->fullName().' as inspector.' : '.');
 
             case self::INSPECTION_PASS:
@@ -506,7 +506,7 @@ final class FilingMover
                 }
                 $visit = $this->workflow->scheduleReinspection($failed, now());
 
-                return 'Re-inspection booked for '.$visit->scheduled_at->format('j M Y').'.';
+                return 'Re-inspection booked for '.$visit->scheduled_at->format('F j, Y').'.';
         }
 
         $this->refuse('That is not a step this page knows.');

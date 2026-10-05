@@ -4102,7 +4102,7 @@ class WorkflowService
 
             $this->notify->applicationNote(
                 $app,
-                $row->permitType->name.' inspection is set for '.$visit->scheduled_at->format('d M Y').'.',
+                $row->permitType->name.' inspection is set for '.$visit->scheduled_at->format('F j, Y').'.',
             );
 
             return $visit;
@@ -4181,7 +4181,7 @@ class WorkflowService
         if ($inspection->scheduled_at !== null
             && now()->lessThan($inspection->scheduled_at->copy()->startOfDay())) {
             throw ValidationException::withMessages([
-                'scheduled_at' => ['The visit is booked for '.$inspection->scheduled_at->format('d M Y').'.'],
+                'scheduled_at' => ['The visit is booked for '.$inspection->scheduled_at->format('F j, Y').'.'],
             ]);
         }
 
@@ -4297,7 +4297,7 @@ class WorkflowService
             // paid filing wears while its visits happen.
             $this->notify->applicationNote(
                 $app,
-                'A re-inspection has been scheduled for '.$visit->scheduled_at->format('d M Y').'.',
+                'A re-inspection has been scheduled for '.$visit->scheduled_at->format('F j, Y').'.',
             );
 
             return $visit;
@@ -6299,7 +6299,7 @@ class WorkflowService
                     ?? ($inspection->department?->name ?? 'The office');
                 $this->notify->applicationNote(
                     $app,
-                    $permit.' inspection has been moved to '.$inspection->scheduled_at->format('d M Y').'.',
+                    $permit.' inspection has been moved to '.$inspection->scheduled_at->format('F j, Y').'.',
                 );
             }
 

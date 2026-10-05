@@ -232,7 +232,7 @@ it('tells the owner when the re-inspection is booked', function () use ($deptEma
 
     $app = Application::findOrFail($appId);
     expect(AppNotification::where('user_id', $app->applicant_user_id)
-        ->where('body', "{$app->tracking_id}: A re-inspection has been scheduled for {$when->format('d M Y')}.")
+        ->where('body', "{$app->tracking_id}: A re-inspection has been scheduled for {$when->format('F j, Y')}.")
         ->exists())->toBeTrue();
 });
 
@@ -566,7 +566,7 @@ it('refuses a result recorded before the day the visit is booked for', function 
     test()->withHeaders($officer)
         ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
         ->assertStatus(422)
-        ->assertJsonPath('errors.scheduled_at.0', 'The visit is booked for '.$booked->format('d M Y').'.');
+        ->assertJsonPath('errors.scheduled_at.0', 'The visit is booked for '.$booked->format('F j, Y').'.');
     expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
 
     // On the morning of the booked day it can be recorded, before the hour.
@@ -587,7 +587,7 @@ it('tells the applicant when a visit is moved', function () use ($deptEmail) {
 
     $owner = Application::findOrFail($appId)->applicant_user_id;
     expect(AppNotification::where('user_id', $owner)
-        ->where('body', 'like', '%inspection has been moved to '.$to->format('d M Y').'.')
+        ->where('body', 'like', '%inspection has been moved to '.$to->format('F j, Y').'.')
         ->exists())->toBeTrue();
 });
 
