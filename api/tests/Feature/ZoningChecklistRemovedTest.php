@@ -59,6 +59,9 @@ it('keeps no zoning answers with a draft, and sends no checklist with the filing
 
     attachRequiredDocuments($id);
     $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
+    // The Zoning Clearance joins a new filing when BPLO ticks it at approval
+    // (5 October 2026), so the payload is read once it carries one.
+    bploApprovesForm($id, ['ZONING']);
     $payload = json_encode($this->getJson("/api/v1/applications/{$id}")->assertOk()->json('data'));
     expect($payload)->not->toContain('"zoning_facts"')
         ->and($payload)->not->toContain('"zoning_check"')
