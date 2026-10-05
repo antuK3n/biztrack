@@ -29,6 +29,8 @@ class PermitResource extends JsonResource
             'business' => $this->relationLoaded('business') && $this->business ? [
                 'id' => $this->business->id,
                 'name' => $this->business->name,
+                // The Business Account Number, beside the name on My Permits.
+                'ban' => $this->business->ban,
             ] : null,
             'application' => $this->relationLoaded('application') && $this->application ? [
                 'id' => $this->application->id,

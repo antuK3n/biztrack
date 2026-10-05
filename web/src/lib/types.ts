@@ -1167,7 +1167,8 @@ export interface Permit {
   days_until_expiry: number | null
   /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
   permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
-  business: { id: number; name: string }
+  /** `ban`: the Business Account Number, shown beside the name on My Permits. */
+  business: { id: number; name: string; ban?: string | null }
   application: { id: number; tracking_id: string }
   verify_url: string
   /** Requirements submitted for it, when the list was asked `with_requirements`. */
@@ -1303,7 +1304,7 @@ export interface HeldClearance {
    * soft-deletes while its filings stay, so this is a real state and readers
    * must run it through `businessName()` rather than reading `.name`.
    */
-  business: { id: number; name: string } | null
+  business: { id: number; name: string; ban?: string | null } | null
   /**
    * The filing the copy was uploaded to.
    *

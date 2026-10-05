@@ -33,7 +33,7 @@ class PermitController extends Controller
 {
     // The issuing office comes down too, so the owner's screen can name it
     // and open a conversation with it [client, 5 October 2026].
-    private array $eager = ['permitType.department:id,name', 'business:id,name', 'application:id,tracking_id'];
+    private array $eager = ['permitType.department:id,name', 'business:id,name,ban', 'application:id,tracking_id'];
 
     public function __construct(private WorkflowService $workflow) {}
 
@@ -501,6 +501,7 @@ class PermitController extends Controller
                 'business' => $doc->application?->business ? [
                     'id' => $doc->application->business->id,
                     'name' => $doc->application->business->name,
+                    'ban' => $doc->application->business->ban,
                 ] : null,
                 'application' => $doc->application ? [
                     'id' => $doc->application->id,
