@@ -75,13 +75,24 @@ export const TONE_CLASSES: Record<StatusTone, string> = {
    * exist in this build — a badge asking for one renders with no background
    * and no border, silently. These three were written that way first.
    */
-  review: 'bg-s-purple-tint text-s-purple border-s-purple',
+  /*
+   * Blue since 5 October 2026 (client: *"change the color of For Approval to
+   * blue … for all showing the For Approval banner"*). Every For Approval
+   * badge — filing and clearance alike — reads this one tone, which is why
+   * one line changes all of them.
+   */
+  review: 'bg-blue-50 text-blue-800 border-blue-300',
   verify: 'bg-s-teal-tint text-s-teal-ink border-s-teal',
+  /*
+   * Returned and Rejected are two reds, not one (client, 5 October 2026):
+   * Returned the lighter rose — a correction, and the applicant's move;
+   * Rejected the deep red below — the office's refusal.
+   */
   warning: 'bg-s-rose-tint text-s-rose-ink border-s-rose',
   muted: 'border-dashed bg-white text-ink-muted border-line',
   scheduled: 'bg-s-yellow-tint text-s-yellow-ink border-s-yellow',
   success: 'bg-green-50 text-green-700 border-green-200',
-  danger: 'bg-red-50 text-red-700 border-red-200',
+  danger: 'bg-s-red-tint text-s-red-deep border-s-red',
 }
 
 export const TONE_ICONS: Record<StatusTone, IconType> = {

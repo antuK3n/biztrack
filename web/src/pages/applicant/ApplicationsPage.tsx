@@ -380,7 +380,7 @@ function permitChip(
    * neither is what the applicant needs to know. Client, 5 October 2026, on a
    * Mayor's Permit row reading "Approved" beside a rejected Sanitary Permit.
    */
-  if (issuedStatus === 'suspended') return { tone: 'danger', label: 'Suspended' }
+  if (issuedStatus === 'suspended') return { tone: 'neutral', label: 'Suspended' }
 
   // A decided or unpaid filing answers for all of its permits at once.
   const own = appStateChip(appStatus)
@@ -1110,11 +1110,11 @@ function StatusGuide() {
             has gone right — and NEW filings only: a suspension follows one of
             the other permits being refused, which an amendment never gathers.
 
-            Red, matching the notice PermitDetailPage prints on a suspended
-            certificate — NOT the purple a suspended BUSINESS wears in
-            BUSINESS_STATUS wears. That one is an admin action against the whole
-            account for a different reason, and one word in two colours is the
-            confusion this row exists to prevent.
+            Gray since 5 October 2026 (client: *"Suspended being gray"*) — a
+            hold, not a verdict, and the same gray the Track row's chip and the
+            permits register use for a suspended certificate. NOT the purple a
+            suspended BUSINESS wears in BUSINESS_STATUS: that one is an admin
+            action against the whole account for a different reason.
           */}
           {flow === 'new' && (
             <li className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-1 sm:flex-nowrap">
@@ -1122,7 +1122,7 @@ function StatusGuide() {
                 <ChevronRightIcon size={14} />
               </span>
               <span
-                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${TONE_CLASSES.danger}`}
+                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${TONE_CLASSES.neutral}`}
               >
                 Suspended
               </span>
