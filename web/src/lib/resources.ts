@@ -38,7 +38,6 @@ import type {
   Department,
   DocumentType,
   FeeAssessment,
-  FeeLineItem,
   FeeProfile,
   Inspection,
   InspectionResult,
@@ -529,9 +528,6 @@ export const applications = {
     ),
   reject: (id: number, reason: string) =>
     unwrap<Application>(api.post(`/applications/${id}/reject`, { reason })),
-  /** Adjust the fee assessment (permission fee.adjust; v2). */
-  feeAdjust: (id: number, line_items: FeeLineItem[], total_amount: string) =>
-    unwrap<FeeAssessment>(api.post(`/applications/${id}/fee/adjust`, { line_items, total_amount })),
 }
 
 /* ── LGU Clearances (the stage that opens once the first payment clears) ── */

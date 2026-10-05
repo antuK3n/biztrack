@@ -666,6 +666,49 @@ it('prices the amendment from the LGU setting, not from the ordinance', function
         ->and($fee->billed_on_application_id)->toBeNull();
 });
 
+it('shows BPLO the amendment’s fixed fee as its assessed fee, before and after approval', function () {
+    /*
+     * Ken, 6 October 2026: the assessed fee is never typed by staff — every
+     * filing shows its fixed or computed price. An amendment raises no Tax
+     * Order of Payment (its fee waits for the January renewal), so the review
+     * sheet had no figure to read and printed a dash. It reads this instead.
+     */
+    [$appId] = amendmentFiling(['trade_name' => 'Fixed Price Sign']);
+    $owner = authAs('owner@biztrack.local');
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $before = test()->withHeaders(authAs('bplo@biztrack.local'))->getJson("/api/v1/applications/{$appId}")->assertOk();
+    expect($before->json('data.fee_assessment'))->toBeNull()
+        ->and((float) $before->json('data.amendment_fee'))->toBe(200.0);
+
+    // Once approval has written the stacked fee, that recorded row is the figure.
+    bploApprovesForm($appId);
+    UnbilledPermitFee::where('application_id', $appId)->update(['amount' => 275]);
+
+    expect((float) test()->withHeaders(authAs('bplo@biztrack.local'))->getJson("/api/v1/applications/{$appId}")
+        ->assertOk()->json('data.amendment_fee'))->toBe(275.0);
+});
+
+it('sends no amendment fee on a filing that is not an amendment', function () {
+    $owner = authAs('owner@biztrack.local');
+    $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))
+        ->firstOrFail();
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $business->id,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    expect(
+        test()->withHeaders($owner)->getJson("/api/v1/applications/{$appId}")
+            ->assertOk()->json('data.amendment_fee')
+    )->toBeNull();
+});
+
 it('defaults the amendment fee to ₱200 while the LGU has not set one', function () {
     /*
      * It was zero until 5 October 2026 — unknown, not free. The client asked

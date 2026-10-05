@@ -124,7 +124,7 @@ Artisan `biztrack:scan-permits`: (1) notify owners at 60/30/7 days before `valid
 - `POST /applications` now accepts optional `prior_permit_id` (stored).
 
 ### Fee adjustment + OIC (S3)
-- `POST /applications/{id}/fee/adjust` (permission `fee.adjust`) `{line_items:[{label,amount}], total_amount}` → updates assessment, sets adjusted_by, audits, notifies owner if pending payment.
+- ~~`POST /applications/{id}/fee/adjust`~~ — removed 2026-09-06; the fee is system-computed and no account can change it (404). An amendment's fixed fee is `amendment_fee` on the application.
 - `POST /assignments/{id}/assign` (permission `oic.assign`) `{officer_user_id, reason?}` → sets officer, audits. Officer must belong to the assignment's department.
 
 ### Business status (Owner Status page becomes real)

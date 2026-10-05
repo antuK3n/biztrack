@@ -1515,6 +1515,12 @@ export interface Application extends ApplicationListItem {
   business: Business
   documents: AppDocument[]
   fee_assessment: FeeAssessment | null
+  /**
+   * An amendment's fixed fee (₱200 since 5 October 2026), which is stacked on
+   * the January renewal rather than billed, so `fee_assessment` is null on
+   * one. Null on every other filing type.
+   */
+  amendment_fee?: number | null
   /** Applicant-declared revenue-code inputs (null when never filled). */
   fee_profile?: FeeProfile | null
   /** Submitted per-office form payloads (full application payload). */

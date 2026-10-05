@@ -2185,7 +2185,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const permitTypesRef = useAsync(() => reference.permitTypes(), [])
 
   const user = useAuth((s) => s.user)
-  const canAdjustFee = Boolean(user?.permissions.includes('fee.adjust'))
   const canAssign = Boolean(user?.permissions.includes('oic.assign'))
   const canListUsers = Boolean(user?.permissions.includes('user.manage'))
   /*
@@ -2370,19 +2369,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const [actionError, setActionError] = useState<string | null>(null)
 
   /*
-   * The only two FOR OFFICE USE ONLY boxes that go anywhere: the assessment
-   * (fee.adjust) and the remarks that ride along with Approve or Return. The
-   * rest of that panel is read back from the record, so it is shown, not typed.
+   * The remarks that ride along with Approve or Return. The rest of FOR OFFICE
+   * USE ONLY is read back from the record, so it is shown, not typed — the
+   * Assessed Fee included: it is never typed by staff on any filing (Ken,
+   * 6 October 2026), and the `fee/adjust` route it once saved through was
+   * removed on 2026-09-06.
    */
-  const [feeInput, setFeeInput] = useState<string | null>(null)
   const [remarks, setRemarks] = useState('')
 
   /*
    * The RA 11032 processing category, while the officer is choosing it.
    *
-   * Null means "show whatever the record says" — the same shape as `feeInput`
-   * above, and for the same reason: a reload has to be able to overtake a
-   * stale local value, and a select seeded once from the payload would go on
+   * Null means "show whatever the record says", because a reload has to be
+   * able to overtake a stale local value, and a select seeded once from the payload would go on
    * showing the officer their old choice after the save that changed it.
    */
   const [tierInput, setTierInput] = useState<string | null>(null)
@@ -2394,9 +2393,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const [issuedSavingCode, setIssuedSavingCode] = useState<string | null>(null)
   const [issuedNote, setIssuedNote] = useState<string | null>(null)
 
-  // Fee adjustment (fee.adjust) + officer assignment (oic.assign) — v2.
-  const [feeSaving, setFeeSaving] = useState(false)
-  const [feeNote, setFeeNote] = useState<string | null>(null)
+  // Officer assignment (oic.assign) — v2.
   const [assignTarget, setAssignTarget] = useState('')
   const [assignReason, setAssignReason] = useState('')
   const [assignBusy, setAssignBusy] = useState(false)
@@ -4070,7 +4067,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     { label: 'Business Account No.', value: business.ban ?? '' },
     { label: 'PSIC Code', value: business.lines?.[0]?.psic_code?.code ?? '' },
   ]
-  const feeValue = feeInput ?? String(app.fee_assessment?.total_amount ?? '')
+  /*
+   * The bill this filing carries. An amendment has no Tax Order of Payment —
+   * its fixed fee waits for the January renewal — so it reads `amendment_fee`.
+   */
+  const assessedFee = app.fee_assessment?.total_amount ?? app.amendment_fee ?? null
 
   /*
    * One group per issuance-date-bearing sheet THIS READER ACTUALLY HOLDS.
@@ -4394,23 +4395,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     }
   }
 
-  async function saveAssessment() {
-    const amount = feeValue.trim()
-    if (!amount) return
-    setFeeSaving(true)
-    setFeeNote(null)
-    setActionError(null)
-    try {
-      await applications.feeAdjust(app.id, [{ label: 'Adjusted assessment', amount }], amount)
-      setFeeNote(`Assessment saved at ${formatMoney(amount)}. The owner was notified.`)
-      reload()
-    } catch (err) {
-      setActionError(toApiError(err).message)
-    } finally {
-      setFeeSaving(false)
-    }
-  }
-
   async function assignOfficer() {
     if (!assignTarget) return
     setAssignBusy(true)
@@ -4461,8 +4445,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * So the list is built from the same gates the controls themselves are drawn
    * behind — one source, so a control that appears or disappears cannot leave
    * the banner describing a screen that is not there. Read against the JSX
-   * below: Assessed Fee is `editing && canAdjustFee`, Evaluator Remarks is
-   * `editing` alone, an issuance-date group exists per sheet in `issuedGroups`,
+   * below: Evaluator Remarks is `editing` alone, an issuance-date group exists per sheet in `issuedGroups`,
    * and Assign officer-in-charge is `canAssign && editing` with at least one
    * officer in the department to pick.
    *
@@ -4470,7 +4453,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * that ever stops being true, this list has to stop asserting it.
    */
   const liveFields: string[] = []
-  if (canAdjustFee) liveFields.push('Assessed Fee')
   liveFields.push('Evaluator Remarks')
   /*
    * Named in the banner because it is the one field on this panel that changes
@@ -7318,7 +7300,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             {/*
              * This used to promise that "each field saves with its own button".
              * Evaluator Remarks has no button and never did (SEP-6), so for a
-             * sanitary officer with no `fee.adjust` and no occupancy sheet the
+             * sanitary officer with no occupancy sheet the
              * sentence described a panel containing ZERO save buttons while
              * pointing at the only field in it.
              */}
@@ -7337,7 +7319,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               <p className="mt-1 text-xs text-ink-secondary">
                 {decided
                   ? 'What this office recorded during its review.'
-                  : canAdjustFee || issuedGroups.length > 0 || canSetTier
+                  : issuedGroups.length > 0 || canSetTier
                     ? 'This panel is the only part of the sheet you can change. Evaluator Remarks travels with the decision you make at the top of the page; the other fields here each save with their own button.'
                     : 'This panel is the only part of the sheet you can change. Evaluator Remarks is the only field in it, and it travels with the decision you make at the top of the page.'}
               </p>
@@ -7356,33 +7338,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               Yours to fill in
             </p>
             <div className="mt-2 grid gap-4 sm:grid-cols-2">
-              {editing && canAdjustFee ? (
-                <label className="block">
-                  <FieldLabel>Assessed Fee (Php)</FieldLabel>
-                  <input
-                    className={`${officeInput} tnum`}
-                    value={feeValue}
-                    placeholder="0.00"
-                    onChange={(e) => setFeeInput(e.target.value)}
-                  />
-                  <span className="mt-1.5 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={saveAssessment}
-                      disabled={feeSaving || !feeValue.trim()}
-                      className="rounded-md bg-royal px-3 py-1 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-                    >
-                      {feeSaving ? 'Saving…' : 'Save assessment'}
-                    </button>
-                    {feeNote && <span className="text-xs font-medium text-s-green">{feeNote}</span>}
-                  </span>
-                </label>
-              ) : (
-                <OfficeReadout
-                  label="Assessed Fee (Php)"
-                  value={feeValue ? formatMoney(feeValue) : ''}
-                />
-              )}
+              {/*
+                Read-only for every reader on every filing: the figure is the
+                server's — the computed Tax Order of Payment, or an amendment's
+                fixed fee — and never typed here (Ken, 6 October 2026).
+              */}
+              <OfficeReadout
+                label="Assessed Fee (Php)"
+                value={assessedFee !== null ? formatMoney(assessedFee) : ''}
+              />
               {editing ? (
                 <label className="block">
                   <FieldLabel>Evaluator Remarks</FieldLabel>

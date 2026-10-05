@@ -7,6 +7,7 @@ use App\Enums\OfficerRequestStatus;
 use App\Models\ApplicationCorrection;
 use App\Models\ApplicationStatusHistory;
 use App\Models\PermitType;
+use App\Models\UnbilledPermitFee;
 use App\Support\AmendableFields;
 use App\Support\ApplicationVisibility;
 use App\Support\ClearanceStanding;
@@ -454,6 +455,24 @@ class ApplicationResource extends JsonResource
                 'line_items' => $this->feeLineItems($request),
                 'total_amount' => $this->feeAssessment->total_amount,
             ] : null,
+            /*
+             * What an amendment costs, for the review sheet's Assessed Fee.
+             *
+             * An amendment raises no Tax Order of Payment — its fee is stacked
+             * against the January renewal (WorkflowService::recordAmendmentFee)
+             * — so `fee_assessment` above is null and the sheet printed a dash
+             * where the price belonged. Ken, 6 October 2026: the assessed fee
+             * is never typed by staff on any filing; every filing shows its
+             * fixed or computed price. The recorded row once approval has
+             * written it, the configured price until then. Null on every other
+             * filing type, whose figure is `fee_assessment`.
+             */
+            'amendment_fee' => $this->application_type === ApplicationType::Amendment
+                ? (float) (UnbilledPermitFee::query()
+                    ->where('application_id', $this->id)
+                    ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+                    ->value('amount') ?? config('biztrack.amendment_fee', 200))
+                : null,
             'payments' => $this->relationLoaded('payments')
                 ? PaymentResource::collection($this->payments)
                 : [],
