@@ -3903,11 +3903,12 @@ class WorkflowService
         DB::transaction(function () use ($permit, $from, $to, $reason, $isOutcome) {
             $snapshot = Audit::snapshot($permit);
 
-            $permit->update([
-                'status' => $to,
-                // BPLO's own suspension is marked so no condition lifts it.
-                'suspended_cause' => $to === PermitStatus::Suspended ? 'manual' : null,
-            ]);
+            $permit->update(['status' => $to] + ($to === PermitStatus::Suspended
+                // BPLO's own suspension is marked so no condition lifts it,
+                // and dated and explained like every other, naming no permit.
+                ? ['suspended_cause' => 'manual', 'suspended_at' => now(), 'suspension_reason' => mb_substr($reason, 0, 500)]
+                // Any other status ends the suspension, cause and all.
+                : ['suspended_cause' => null] + Permit::suspensionCleared()));
 
             Audit::log('permit.status_changed', $permit, [
                 'permit_number' => $permit->permit_number,
@@ -3959,7 +3960,14 @@ class WorkflowService
 
         if ($outcome->status === PermitStatus::Active) {
             $snapshot = Audit::snapshot($outcome);
-            $outcome->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
+            $outcome->update([
+                'status' => PermitStatus::Suspended,
+                'suspended_cause' => 'refusal',
+                // Dated, explained, and naming the permit that was rejected.
+                'suspended_at' => now(),
+                'suspension_reason' => mb_substr($reason, 0, 500),
+                'suspended_for_permit_type_id' => $rejected->permit_type_id,
+            ]);
 
             Audit::log('permit.suspended', $outcome, [
                 'application_id' => $outcome->application_id,

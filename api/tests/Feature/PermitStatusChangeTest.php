@@ -213,6 +213,44 @@ it('lets the super admin change any office’s permit with that office’s choic
     setStatus('sanitary@biztrack.local', $other, 'revoked', 'Trying anyway.')->assertUnprocessable();
 });
 
+it('dates and explains every suspension Change status makes, and clears it on the way back', function () {
+    /*
+     * Rupert's suspension record (when, why, which permit) on Mike's two
+     * ways of suspending: BPLO by hand, and an office setting its permit
+     * to Rejected. Each way back clears it with the cause.
+     */
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+
+    setStatus('bplo@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
+    $mp->refresh();
+    expect($mp->suspended_cause)->toBe('manual')
+        ->and($mp->suspended_at)->not->toBeNull()
+        ->and($mp->suspension_reason)->toBe('Violations found.')
+        ->and($mp->suspended_for_permit_type_id)->toBeNull();
+
+    setStatus('bplo@biztrack.local', $mp, 'active', 'Settled.')->assertOk();
+    $mp->refresh();
+    expect($mp->suspended_cause)->toBeNull()
+        ->and($mp->suspended_at)->toBeNull()
+        ->and($mp->suspension_reason)->toBeNull();
+
+    setStatus('sanitary@biztrack.local', $hc, 'rejected', 'No handwashing sink.')->assertOk();
+    $mp->refresh();
+    expect($mp->status)->toBe(PermitStatus::Suspended)
+        ->and($mp->suspended_cause)->toBe('refusal')
+        ->and($mp->suspended_at)->not->toBeNull()
+        ->and($mp->suspension_reason)->toBe('No handwashing sink.')
+        ->and($mp->suspended_for_permit_type_id)->toBe($hc->permit_type_id);
+
+    setStatus('sanitary@biztrack.local', $hc, 'active', 'Sink installed.')->assertOk();
+    $mp->refresh();
+    expect($mp->status)->toBe(PermitStatus::Active)
+        ->and($mp->suspended_cause)->toBeNull()
+        ->and($mp->suspended_at)->toBeNull()
+        ->and($mp->suspension_reason)->toBeNull()
+        ->and($mp->suspended_for_permit_type_id)->toBeNull();
+});
+
 it('asks for a reason', function () {
     ['business' => $mp] = statusPair();
 
