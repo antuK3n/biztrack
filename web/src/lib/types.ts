@@ -1170,6 +1170,8 @@ export interface Permit {
   business: { id: number; name: string }
   application: { id: number; tracking_id: string }
   verify_url: string
+  /** Requirements submitted for it, when the list was asked `with_requirements`. */
+  requirements_count?: number
   /**
    * Why this permit cannot be renewed today, in the applicant's words, or
    * null if it can.

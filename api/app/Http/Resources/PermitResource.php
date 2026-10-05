@@ -36,6 +36,17 @@ class PermitResource extends JsonResource
             ] : null,
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$this->permit_number,
             /*
+             * How many requirements were submitted for this permit, when the
+             * list was asked `with_requirements` — the same list the office's
+             * Requirements Submitted column shows (PermitRegisterResource).
+             * Absent otherwise, so nobody reads a missing count as zero.
+             */
+            'requirements_count' => $this->when(
+                $this->relationLoaded('permitType') && $this->permitType?->relationLoaded('documentTypes')
+                    && $this->relationLoaded('application') && $this->application?->relationLoaded('documents'),
+                fn () => count((new PermitRegisterResource($this->resource))->requirementsFor() ?? []),
+            ),
+            /*
              * Why this permit cannot be renewed today, or null if it can.
              *
              * The renewal picker offered EVERY active and expired permit and

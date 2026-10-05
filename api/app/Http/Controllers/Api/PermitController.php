@@ -211,6 +211,13 @@ class PermitController extends Controller
              * this one costs four more eager loads and the office sheet.
              */
             'detail' => ['sometimes', 'boolean'],
+            /*
+             * A count of each permit's submitted requirements, for the owner's
+             * My Permits [client, 5 October 2026: show "Requirements submitted
+             * (N)" only where there are some]. Three eager loads more, so asked
+             * for rather than always paid for.
+             */
+            'with_requirements' => ['sometimes', 'boolean'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -218,6 +225,13 @@ class PermitController extends Controller
         $detail = $request->boolean('detail');
 
         $query = Permit::with($detail ? $this->registerEager() : $this->eager);
+        if (! $detail && $request->boolean('with_requirements')) {
+            $query->with([
+                'permitType.documentTypes',
+                'application.documents.documentType.permitTypes',
+                'application.documents.requestResponses.officerRequest:id,department_id,title',
+            ]);
+        }
         $this->scopeToReader($request, $query);
 
         if ($status = $request->query('status')) {
