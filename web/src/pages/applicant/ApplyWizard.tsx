@@ -93,7 +93,6 @@ import BarangayZoningMap from './BarangayZoningMap'
 import { useZoneAtPin, type ZoneAtPinQuery } from '../../lib/zoneAtPin'
 import { RequestedChanges } from '../../components/RequestedChanges'
 import {
-  LocationInsightsPanel,
   ZoningConformanceNote,
   useLocationInsights,
   type LocationInsightsQuery,
@@ -4693,18 +4692,6 @@ export function ApplyWizard() {
       // barangay — a changed dropdown is a question not yet answered.
       insightsQuery.barangayId !== livePin.barangayId)
 
-  /*
-   * The radius the ring on the map is drawn at — the API's own `radius_m`, never
-   * a 500 written here. Null until a lookup has answered, so before the first
-   * response there is simply no ring rather than a guessed one.
-   *
-   * Deliberately NOT cleared while `insightsStale`. The radius is a property of
-   * the lookup, not of the point, so the ring the applicant is looking at is
-   * still the right size for the pin they just moved — dropping it would make
-   * the ring blink out and back on every correction, which reads as the map
-   * losing its place. The FIGURES go to loading; the ring does not.
-   */
-  const insightsRadiusM = insights.data?.radius_m ?? null
 
   /*
    * `carriedOverBusiness` is gone from this file.
@@ -10242,13 +10229,6 @@ export function ApplyWizard() {
                 <MapPicker
                   latitude={form.latitude}
                   longitude={form.longitude}
-                  /*
-                   * The ring, at the radius the API says it measured over. Null
-                   * until the first response, so nothing is drawn on a guess —
-                   * and see `insightsRadiusM` for why it is deliberately kept
-                   * while the next lookup is in flight.
-                   */
-                  radiusM={insightsRadiusM}
                   highlightBarangay={barangayName ?? null}
                   // Only for the barangay it was worked out for — a stale one
                   // would start the applicant in the wrong place.
@@ -10460,20 +10440,6 @@ export function ApplyWizard() {
                    * decide.
                    */}
                   {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
-                  {/*
-                   * The figures for the pin, the moment there is a pin. Gated on
-                   * `livePin` rather than on the response, so the card appears
-                   * with the pin and shows its own skeleton while the lookup
-                   * runs; `insightsStale` is folded into `loading` for the same
-                   * reason (see where it is computed).
-                   */}
-                  {livePin !== null && (
-                    <LocationInsightsPanel
-                      insights={insights.data}
-                      loading={insights.loading || insightsStale}
-                      error={insights.error}
-                    />
-                  )}
                 </div>
               </div>
             </LocationStep>
