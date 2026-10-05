@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\BusinessLine;
 use App\Support\ApplicationVisibility;
+use App\Support\PermitFace;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -202,7 +203,9 @@ class InspectionResource extends JsonResource
              * falling back to the *applicant* would not, because whoever filed
              * the paperwork is frequently not the owner.
              */
-            'owner_name' => ($business?->owner?->fullName() ?: null) ?? $business?->owner?->name,
+            // The permit's own answer first (PermitFace::ownerName): the named
+            // owner, which an approved change of ownership rewrites.
+            'owner_name' => (PermitFace::ownerName($business) ?: null) ?? $business?->owner?->name,
             'address' => $address?->line1,
             'address_line2' => $address?->line2,
             'barangay' => $address?->relationLoaded('barangay') ? $address->barangay?->name : null,

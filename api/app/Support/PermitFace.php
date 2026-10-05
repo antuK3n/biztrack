@@ -106,6 +106,31 @@ class PermitFace
     }
 
     /**
+     * The owner a permit names: the person named on the paper, else the
+     * account that files.
+     *
+     * The named owner (`business_owners`, BPLO items 10–13) first, because it
+     * is the one an approved change of ownership rewrites — see the note on
+     * AmendableFields. Printing the ACCOUNT's name, as this did until
+     * 5 October 2026, meant an approved transfer reissued a certificate still
+     * naming the seller, for as long as the buyer had no account to move it to.
+     *
+     * The account's name where no part of a named owner is held, which is
+     * every business filed before the application form asked for one: for
+     * those it is the only name there is, and it is what they always printed.
+     */
+    public static function ownerName(?Business $business): ?string
+    {
+        $named = $business?->owners->firstWhere('is_primary', true)?->fullName();
+
+        if ($named !== null && $named !== '') {
+            return $named;
+        }
+
+        return $business?->owner?->fullName();
+    }
+
+    /**
      * What is true of this business right now.
      *
      * @return array<string, string|null>
@@ -119,7 +144,7 @@ class PermitFace
             // from "never named".
             'business_name' => $business?->name,
             'trade_name' => $business?->trade_name,
-            'owner_name' => $business?->owner?->fullName(),
+            'owner_name' => self::ownerName($business),
             'address' => $address?->line1,
             'barangay' => $address?->barangay?->name,
             'city' => $address?->city,

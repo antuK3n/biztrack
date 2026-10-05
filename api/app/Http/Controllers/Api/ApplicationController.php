@@ -15,6 +15,7 @@ use App\Models\Business;
 use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
+use App\Support\AmendableFields;
 use App\Support\AmendmentScope;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
@@ -753,6 +754,22 @@ class ApplicationController extends Controller
                     .'what the detail should say now, not only that it changed.',
                 ],
             ]);
+        }
+
+        /*
+         * A new owner needs a Surname and a Given Name. Approval replaces the
+         * named owner part by part, all at once (AmendableFields::flush), so a
+         * surname alone would name a business's owner with no first name.
+         */
+        if ($application->application_type === ApplicationType::Amendment) {
+            $ownerRefusal = AmendableFields::ownershipNameRefusal(
+                $application->requestedChanges()->whereNotNull('new_value')
+                    ->pluck('new_value', 'field')->all(),
+            );
+
+            if ($ownerRefusal !== null) {
+                throw ValidationException::withMessages(['requested_changes' => [$ownerRefusal]]);
+            }
         }
 
         /*

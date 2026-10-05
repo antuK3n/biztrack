@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Barangay;
 use App\Models\Business;
+use App\Models\BusinessOwner;
 use App\Models\PsicCode;
 
 /**
@@ -24,37 +25,47 @@ use App\Models\PsicCode;
  *  | (unnumbered) Amendment of area         | `other`      | ✅    |
  *  | (unnumbered) Others, kindly specify    | `other`      | ✅    |
  *  | I. Change of address                   | `address`    | ✅    |
- *  | II. Change of ownership                | `ownership`  | part  |
+ *  | II. Change of ownership                | `ownership`  | ✅    |
  *  | III. Change of trade name              | `trade_name` | ✅    |
  *
  * Each group also carries its OWN requirements list on the paper, which is why
  * the group key is on every field here: the document rules read it. See the
  * `amend_*` contexts in `permit_type_requirements`.
  *
- * ── Ownership is recorded, not applied ────────────────────────────────────
+ * ── Ownership is applied: the named owner changes, the account does not ────
  *
- * Client's decision, 21 September 2026: *"Write the owner's name, BPLO moves
- * the account."* The permit prints `business->owner->fullName()` — the
- * ACCOUNT's name — and the new owner may not hold a BizTrack account at all,
- * so nothing here can honestly write it. `owner_name` is therefore recorded
- * against the filing, reaches BPLO complete with the Deed of Transfer attached,
- * and BPLO moves the account by hand. The alternative was a certificate
- * printing a name no account backs, which is a lie on a document the LGU signs.
+ * Request of 5 October 2026: approving a change of owner *"should replace the owner
+ * name of the business and the name in the permit itself."* It did neither.
+ * Until then (client's decision, 21 September 2026: *"Write the owner's name,
+ * BPLO moves the account."*) the new owner was one free-text `owner_name`,
+ * recorded and never applied, because the permit printed the ACCOUNT holder's
+ * name and the new owner may hold no BizTrack account at all.
  *
- * The other half of this decision — actually moving the account — EXISTS:
- * `BusinessStatusController::transferOwner`, reached from Owner Status in the
- * admin rail, which takes the new owner's e-mail and a reason.
+ * What changed is where the name lives. A business has two owners on record
+ * and they were always different questions: `owner()`, the USER ACCOUNT that
+ * files, and `owners()`, the person named on the paper (BPLO items 10–13, in
+ * `business_owners`). An approved change of ownership now rewrites the second
+ * — all four parts, as the application form asks for them — and the permit
+ * prints that person (`PermitFace::ownerName`), so the certificate names the
+ * new owner whether or not they have an account. No column was added: the
+ * parts already had one each.
+ *
+ * The four parts are replaced TOGETHER (`flush`): a part the new owner left
+ * blank is cleared, not kept, or the previous owner's middle name would ride
+ * along onto somebody else's. Gender (item 14) is cleared with them — the
+ * amendment does not ask for it, and the previous owner's is not the new
+ * one's; the next renewal asks for it again.
+ *
+ * Moving the ACCOUNT is still a person's job, because only BPLO can say which
+ * account is the new owner's: `BusinessStatusController::transferOwner`,
+ * reached from Owner Status in the admin rail.
  * `WorkflowService::tellBploToMoveTheAccount` sends BPLO there after an
- * approval, so the handover is prompted rather than remembered.
+ * approval. Not to be confused with the admin "Reassign" screen, which moves
+ * FILINGS BETWEEN OFFICERS — a different thing that shares a word.
  *
- * This paragraph used to say no such thing existed — true when written, false
- * the day the transfer shipped, and left standing long enough to mislead a
- * reader into telling the client the feature was missing. A comment describing
- * an ABSENCE rots silently, because nothing fails when the absence ends. Name
- * what exists instead.
- *
- * Not to be confused with the admin "Reassign" screen, which moves FILINGS
- * BETWEEN OFFICERS — a different thing that shares a word.
+ * `owner_name` may still be on filings made before this — see LEGACY_LABELS.
+ * Those rows are recorded and not applied, exactly as they were promised when
+ * filed.
  *
  * ── Why `address_line1` is gone ───────────────────────────────────────────
  *
@@ -138,8 +149,9 @@ class AmendableFields
      *   `address`       — a column on `business_addresses` (staged, see apply)
      *   `line_primary`  — replaces the PSIC code on the business's one line
      *   `pin`           — latitude and longitude together
-     *   `null`          — recorded for BPLO and applied by hand (ownership),
-     *                     or a note that was never a field (the paper's
+     *   `owner`         — the business's named owner, all parts at once
+     *                     (staged, see apply and flush)
+     *   `null`          — a note that was never a field (the paper's
      *                     "AMENDMENT OF … DETAILS" blanks)
      *
      * `cast` runs on the way in and is what makes a text column safe to hold a
@@ -381,20 +393,55 @@ class AmendableFields
             /* ── II. CHANGE OF OWNERSHIP ──────────────────────────────────── */
 
             /*
-             * Recorded, never applied — see the class note. The Deed of
-             * Transfer rides along as an upload on the Documentary
-             * Requirements step, and BPLO moves the account at the window.
+             * The new owner, in the four parts the application form asks for
+             * (BPLO items 10–13), written to the business's named owner on
+             * approval — see the class note. The labels are that form's own,
+             * without its item numbers, which are not FO-003's.
+             *
+             * Surname and Given Name are required together at submission
+             * (`ownershipNameRefusal`); middle name and suffix stay optional,
+             * as they are on the application form.
              */
-            'owner_name' => [
+            'owner_surname' => [
                 'group' => 'ownership',
-                'label' => 'Owner',
+                'label' => 'Surname',
                 'help' => 'BPLO transfers the business to this person when they approve. '
                     .'Upload the Deed of Transfer on the next step.',
                 'type' => 'text',
-                'writes' => null,
-                'column' => null,
+                'writes' => 'owner',
+                'column' => 'surname',
                 'cast' => $text,
                 'validation' => ['required', 'string', 'max:255'],
+            ],
+            'owner_given_name' => [
+                'group' => 'ownership',
+                'label' => 'Given Name',
+                'help' => null,
+                'type' => 'text',
+                'writes' => 'owner',
+                'column' => 'given_name',
+                'cast' => $text,
+                'validation' => ['required', 'string', 'max:255'],
+            ],
+            'owner_middle_name' => [
+                'group' => 'ownership',
+                'label' => 'Middle Name',
+                'help' => null,
+                'type' => 'text',
+                'writes' => 'owner',
+                'column' => 'middle_name',
+                'cast' => $text,
+                'validation' => ['required', 'string', 'max:255'],
+            ],
+            'owner_suffix' => [
+                'group' => 'ownership',
+                'label' => 'Suffix',
+                'help' => null,
+                'type' => 'text',
+                'writes' => 'owner',
+                'column' => 'suffix',
+                'cast' => $text,
+                'validation' => ['required', 'string', 'max:50'],
             ],
             // "AMENDMENT OF OWNERSHIP DETAILS".
             'ownership_details' => [
@@ -496,20 +543,87 @@ class AmendableFields
     /**
      * Does approving this field change the business record?
      *
-     * False for `owner_name` alone, which is recorded against the filing and
-     * applied by a person — see the note at the top of this class. Asked so
-     * that `applyAmendments` does not stamp `applied_at` on a row nothing
-     * was written for, which made the amendment log claim a transfer that
-     * had not happened.
+     * False for the paper's note blanks, and for a legacy `owner_name` row,
+     * which was recorded against the filing and never applied — see the note
+     * at the top of this class. Asked so that `applyAmendments` does not stamp
+     * `applied_at` on a row nothing was written for, which made the amendment
+     * log claim a transfer that had not happened.
      */
     public static function writesToRecord(string $field): bool
     {
         return self::allows($field) && (self::kinds()[$field]['writes'] ?? null) !== null;
     }
 
+    /**
+     * Fields no longer offered, still named for the filings that carry them.
+     *
+     * `owner_name` was the new owner as one box until 5 October 2026. A filing
+     * made before then keeps its row, and the officer reading it should see
+     * "Owner", not a column name. Remove an entry once no filing holds it.
+     */
+    public const LEGACY_LABELS = [
+        'owner_name' => 'Owner',
+    ];
+
     public static function label(string $field): string
     {
-        return self::kinds()[$field]['label'] ?? $field;
+        return self::kinds()[$field]['label'] ?? self::LEGACY_LABELS[$field] ?? $field;
+    }
+
+    /** The four parts of the new owner's name, in the order the form asks. */
+    public const OWNER_FIELDS = [
+        'owner_surname', 'owner_given_name', 'owner_middle_name', 'owner_suffix',
+    ];
+
+    /**
+     * Why a change of ownership cannot be submitted yet, or null.
+     *
+     * Surname and Given Name, both, whenever any part of the new owner is
+     * given: the parts replace the named owner together (see `flush`), so a
+     * surname alone would leave a business owned by somebody with no first
+     * name. The sentence is Laravel's own required message, with the form's
+     * labels, rather than a new one.
+     *
+     * @param  array<string, ?string>  $requested  field => new value
+     */
+    public static function ownershipNameRefusal(array $requested): ?string
+    {
+        $given = array_filter(
+            array_intersect_key($requested, array_flip(self::OWNER_FIELDS)),
+            fn (?string $v) => $v !== null && trim($v) !== '',
+        );
+
+        if ($given === []) {
+            return null;
+        }
+
+        foreach (['owner_surname', 'owner_given_name'] as $field) {
+            if (! array_key_exists($field, $given)) {
+                return trans('validation.required', ['attribute' => self::label($field)]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The new owner as one name, "Given Middle Surname Suffix" — the order
+     * `User::fullName()` and `BusinessOwner::fullName()` print — or null.
+     *
+     * @param  array<string, ?string>  $requested  field => new value
+     */
+    public static function requestedOwnerName(array $requested): ?string
+    {
+        $part = fn (string $f) => trim((string) ($requested[$f] ?? ''));
+
+        $name = trim(collect([
+            $part('owner_given_name'),
+            $part('owner_middle_name'),
+            $part('owner_surname'),
+            $part('owner_suffix'),
+        ])->filter()->implode(' '));
+
+        return $name === '' ? null : $name;
     }
 
     public static function group(string $field): ?string
@@ -560,9 +674,9 @@ class AmendableFields
     /**
      * The business's current value for this field, as the register holds it.
      *
-     * Null for anything that has no "current": the paper's details blanks and
-     * the new owner. A screen showing "Currently: —" against those is telling
-     * the truth.
+     * Null for anything that has no "current": the paper's details blanks, and
+     * a part of the named owner the register does not hold. A screen showing
+     * "Currently: —" against those is telling the truth.
      */
     public static function current(Business $business, string $field): ?string
     {
@@ -572,23 +686,13 @@ class AmendableFields
 
         $spec = self::kinds()[$field];
 
-        /*
-         * The new owner is RECORDED rather than applied — `writes` is null —
-         * but the register plainly knows who owns the business today, and a
-         * change of ownership is the one amendment where "who is it now"
-         * matters most. Keyed on the field instead of on `writes`, because
-         * what can be READ and what can be WRITTEN are different questions
-         * and only the second is about `owner_user_id`.
-         */
-        if ($field === 'owner_name') {
-            return $business->owner?->fullName();
-        }
-
         $value = match ($spec['writes']) {
             'business' => $business->getAttribute($spec['column']),
             'address' => $business->address?->getAttribute($spec['column']),
             'pin' => self::pinOf($business),
             'line_primary' => $business->lines()->orderBy('id')->first()?->psic_code_id,
+            // The named owner as the register holds them, part by part.
+            'owner' => $business->owners()->where('is_primary', true)->value($spec['column']),
             // The paper's note blanks, which were never fields.
             default => null,
         };
@@ -648,11 +752,14 @@ class AmendableFields
                 self::$pending[$business->id]['line_primary'] = $cast($newValue);
                 break;
 
+            case 'owner':
+                self::$pending[$business->id]['owner'][$spec['column']] = $cast($newValue);
+                break;
+
             default:
                 /*
-                 * Recorded only — the ownership request and the paper's notes.
-                 * There is nothing to write and nothing to reverse, and the
-                 * row's own `applied_at` is what says BPLO has dealt with it.
+                 * Recorded only — the paper's notes. There is nothing to write
+                 * and nothing to reverse.
                  */
                 break;
         }
@@ -713,6 +820,26 @@ class AmendableFields
              */
             $line = $business->lines()->orderBy('id')->first();
             $line?->update(['psic_code_id' => $staged['line_primary']]);
+        }
+
+        if (isset($staged['owner'])) {
+            /*
+             * A new PERSON, so every part is replaced and a part not given is
+             * cleared — see the class note. Gender goes with them for the
+             * same reason. Created when the business has no named owner yet,
+             * unlike the address above: here the amendment IS the answer to
+             * "who is named", not a patch on a row that should already exist.
+             */
+            BusinessOwner::updateOrCreate(
+                ['business_id' => $business->id, 'is_primary' => true],
+                [
+                    'surname' => $staged['owner']['surname'] ?? null,
+                    'given_name' => $staged['owner']['given_name'] ?? null,
+                    'middle_name' => $staged['owner']['middle_name'] ?? null,
+                    'suffix' => $staged['owner']['suffix'] ?? null,
+                    'gender' => null,
+                ],
+            );
         }
 
     }
