@@ -60,6 +60,8 @@ class ApplicationController extends Controller
          */
         'business.owners',
         'documents.documentType', 'feeAssessment', 'payments',
+        // ApplicationVisibility::readsDocument reads who asked for a reply.
+        'documents.requestResponses.officerRequest:id,department_id',
         'assignments.department', 'assignments.officer',
         'inspections.department', 'inspections.inspector',
         /*

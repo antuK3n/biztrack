@@ -178,7 +178,11 @@ final class ApplicationVisibility
      *    it (`permit_type_id` set; HeldPermits), and
      *  - an upload into an office sheet's own checklist — FSIC_REQ_*,
      *    ZONING_REQ_*, OCC_REQ_*, CEC_REQ_PREVIOUS — which carries no
-     *    `permit_type_id` and is placed by its code (SheetRequirements::sheetOf).
+     *    `permit_type_id` and is placed by its code (SheetRequirements::sheetOf),
+     *  - a file the applicant sent in answer to an office's Other Requirement,
+     *    which belongs to the office that raised it (Ken, 5 October 2026). A
+     *    file that answered requirements from more than one office is read by
+     *    each of them.
      *
      * The second kind was missing until checklist Manage Applications 3: the
      * list filtered on `permit_type_id` alone, so every office routed to a
@@ -191,6 +195,21 @@ final class ApplicationVisibility
      */
     public static function readsDocument(?User $user, ApplicationDocument $document): bool
     {
+        /*
+         * A reply to an Other Requirement is typed "Other Requirements", a
+         * shared type, so without this it fell through to "everyone's". The
+         * office is the requirement's, stamped from whoever raised it; one
+         * with no office matches no office reader, as readsOfficeSheet fails
+         * closed on a null department.
+         */
+        $replies = $document->loadMissing('requestResponses.officerRequest:id,department_id')->requestResponses;
+        if ($replies->isNotEmpty()) {
+            return $replies
+                ->map(fn ($reply) => $reply->officerRequest?->department_id)
+                ->unique()
+                ->contains(fn ($office) => self::readsOfficeSheet($user, $office === null ? null : (int) $office));
+        }
+
         if ($document->permit_type_id !== null) {
             return self::readsOfficeSheet(
                 $user,

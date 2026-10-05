@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\User;
 use App\Support\FsicRequirements;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -185,6 +186,56 @@ it('does not list one office’s checklist file to another office on the same fi
 
 it('refuses the download of one office’s checklist file to another office', function () {
     ['application' => $app, 'document' => $doc] = fsicChecklistFile();
+
+    authAs('sanitary@biztrack.local');
+    $this->get("/api/v1/documents/{$doc->id}/download")
+        ->assertForbidden()
+        ->assertJsonPath('message', 'You may not access this document.');
+
+    foreach (['fire@biztrack.local', 'bplo@biztrack.local', 'admin@biztrack.local', $app->applicant->email] as $reader) {
+        authAs($reader);
+        $this->get("/api/v1/documents/{$doc->id}/download")->assertOk();
+    }
+});
+
+/*
+ * Ken, 5 October 2026: a file the owner sends in answer to an office's Other
+ * Requirement is that office's, like its checklist files. It is typed "Other
+ * Requirements", a shared type, so it went to every office on the filing.
+ */
+
+/** BFP asks for a file on RxCare's filing, and the owner sends one. */
+function fireRequirementReply(): array
+{
+    ['application' => $app] = scopedDocument();
+
+    $requestId = test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/requests", ['title' => 'Fire extinguisher refill receipt'])
+        ->assertCreated()->json('data.id');
+
+    $before = ApplicationDocument::where('application_id', $app->id)->max('id');
+    test()->withHeaders(authAs($app->applicant->email))
+        ->post("/api/v1/requests/{$requestId}/respond", [
+            'document' => UploadedFile::fake()->createWithContent('refill-receipt.pdf', "%PDF-1.4\nrefill receipt\n%%EOF\n"),
+        ])->assertOk();
+
+    $doc = ApplicationDocument::where('application_id', $app->id)->where('id', '>', $before)->sole();
+
+    return ['application' => $app, 'document' => $doc];
+}
+
+it('lists a reply to an office’s requirement only to that office', function () {
+    ['application' => $app, 'document' => $doc] = fireRequirementReply();
+
+    expect(listedDocumentIds('sanitary@biztrack.local', $app))->not->toContain($doc->id);
+
+    foreach (['fire@biztrack.local', 'bplo@biztrack.local', 'admin@biztrack.local', $app->applicant->email] as $reader) {
+        expect(listedDocumentIds($reader, $app))->toContain($doc->id);
+    }
+});
+
+it('refuses the download of a reply to another office’s requirement', function () {
+    ['application' => $app, 'document' => $doc] = fireRequirementReply();
 
     authAs('sanitary@biztrack.local');
     $this->get("/api/v1/documents/{$doc->id}/download")

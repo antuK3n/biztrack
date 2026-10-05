@@ -586,6 +586,8 @@ class AssignmentController extends Controller
              */
             'application.complexitySetBy:id,name',
             'application.documents.documentType', 'application.feeAssessment',
+            // ApplicationVisibility::readsDocument reads who asked for a reply.
+            'application.documents.requestResponses.officerRequest:id,department_id',
             'application.officeForms.permitType.department',
             'application.payments', 'application.assignments.department',
             'application.assignments.officer', 'application.inspections.department',
