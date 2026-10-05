@@ -377,6 +377,7 @@ class BusinessController extends Controller
     {
         $this->authorizeOwner($request, $business);
         $data = $this->validateBusiness($request, $business);
+        $this->refuseRenameUnderReview($business, $data);
 
         DB::transaction(function () use ($business, $data) {
             $business->update([
@@ -413,6 +414,41 @@ class BusinessController extends Controller
         return response()->json([
             'data' => new BusinessResource($business->load($this->eager)),
         ]);
+    }
+
+    /**
+     * The owner may not rename the business or change its line of business
+     * under a filing the offices are reading [Ken, 5 October 2026].
+     *
+     * This checked ownership only, so a business was renamed and moved to
+     * another line while BPLO read the filing, and again after payment while
+     * the offices held it: the filing BPLO approved and billed was no longer
+     * the business on the register. "Under review" is a filing past Draft and
+     * not Returned that is not yet decided — paid and gathering included.
+     *
+     * Only the name and the lines. Every autosave sends the whole business
+     * back, unchanged, and an amendment's or a clearance return's own writes
+     * still have to land; refusing the whole PUT would refuse those too.
+     */
+    private function refuseRenameUnderReview(Business $business, array $data): void
+    {
+        $lines = fn (iterable $rows) => collect($rows)
+            ->map(fn ($line) => (int) data_get($line, 'psic_code_id'))
+            ->sort()->values()->all();
+
+        $renamed = trim((string) $data['name']) !== trim((string) $business->name);
+        $relined = $lines($data['lines'] ?? []) !== $lines($business->lines()->get());
+
+        if (! $renamed && ! $relined) {
+            return;
+        }
+
+        $underReview = $business->applications()
+            ->whereNotIn('status', [ApplicationStatus::Draft, ApplicationStatus::Returned])
+            ->get()
+            ->contains(fn (Application $app) => ! $app->isDecided());
+
+        abort_if($underReview, 422, 'You can change this once the filing is returned to you.');
     }
 
     /**
