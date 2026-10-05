@@ -3054,7 +3054,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
           Tax Order of Payment
         </p>
-        {!hasBusinessTax && (
+        {/*
+          BPLO's warning, about BPLO's bill. A clearance office is sent only its
+          own permit's lines (ApplicationResource::feeAssessmentFor, Ken,
+          6 October 2026), which never carry the business tax — so on its seat
+          the absence says nothing.
+        */}
+        {!hasBusinessTax && !foldsFiledSheet && (
           <p
             role="alert"
             className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-4 py-2.5 text-sm font-semibold text-s-orange-ink"

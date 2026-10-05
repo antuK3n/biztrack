@@ -451,10 +451,9 @@ class ApplicationResource extends JsonResource
                         ];
                     })->values()
                 : [],
-            'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
-                'line_items' => $this->feeLineItems($request),
-                'total_amount' => $this->feeAssessment->total_amount,
-            ] : null,
+            'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment
+                ? $this->feeAssessmentFor($request)
+                : null,
             /*
              * What an amendment costs, for the review sheet's Assessed Fee.
              *
@@ -467,7 +466,12 @@ class ApplicationResource extends JsonResource
              * written it, the configured price until then. Null on every other
              * filing type, whose figure is `fee_assessment`.
              */
+            /*
+             * BPLO's fee, so a clearance office is not sent it — the same rule
+             * `feeAssessmentFor` applies to the bill's lines.
+             */
             'amendment_fee' => $this->application_type === ApplicationType::Amendment
+                && ! ($request->user() && ApplicationVisibility::readsOwnOffice($request->user()))
                 ? (float) (UnbilledPermitFee::query()
                     ->where('application_id', $this->id)
                     ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
@@ -751,6 +755,58 @@ class ApplicationResource extends JsonResource
             'set_at' => optional($this->complexity_set_at)->toISOString(),
             'editable' => ! $this->resource->isDecided(),
             'tiers' => Ra11032::tierOptions(),
+        ];
+    }
+
+    /**
+     * The Tax Order of Payment as this reader may see it.
+     *
+     * Ken, 6 October 2026: a clearance office (CHO, BFP, OBO, CENRO, CPDO)
+     * sees only its OWN share of the Assessed Fee — the lines for the permits
+     * it issues, and their sum — while BPLO, the super admin and the applicant
+     * see the whole bill. Filtered here rather than on the review sheet,
+     * because a figure the browser hides is still in the network tab; the
+     * same boundary `ApplicationVisibility::readsOfficeSheet` draws for the
+     * office forms.
+     *
+     * A line is the office's when it prices a permit the office issues
+     * (`permit_codes`), or, carrying no permit, when the revenue code books
+     * it to that office (`office`).
+     *
+     * @return array{line_items: array, total_amount: string}
+     */
+    private function feeAssessmentFor(Request $request): array
+    {
+        $items = $this->feeLineItems($request);
+        $user = $request->user();
+
+        if ($user === null || ! ApplicationVisibility::readsOwnOffice($user)) {
+            return ['line_items' => $items, 'total_amount' => $this->feeAssessment->total_amount];
+        }
+
+        $ownCodes = PermitType::query()
+            ->where('issuing_department_id', $user->department_id)
+            ->pluck('code')
+            ->all();
+        $officeCode = $user->department?->code;
+
+        $own = array_values(array_filter($items, function ($item) use ($ownCodes, $officeCode) {
+            if (! is_array($item)) {
+                return false;
+            }
+            $codes = $item['permit_codes'] ?? [];
+
+            return $codes !== []
+                ? array_intersect($codes, $ownCodes) !== []
+                : $officeCode !== null && ($item['office'] ?? null) === $officeCode;
+        }));
+
+        return [
+            'line_items' => $own,
+            'total_amount' => number_format(
+                array_sum(array_map(fn (array $item) => (float) ($item['amount'] ?? 0), $own)),
+                2, '.', '',
+            ),
         ];
     }
 

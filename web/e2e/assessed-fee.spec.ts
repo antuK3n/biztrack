@@ -179,3 +179,48 @@ test('an amendment’s assessed fee is its fixed price', async ({ page }) => {
   await expect(assessedFee(page)).toHaveText(peso(200))
   await expect(page.getByRole('button', { name: 'Save assessment' })).toHaveCount(0)
 })
+
+/*
+ * A clearance office sees its own share (Ken, 6 October 2026): the Assessed
+ * Fee on CHO's sheet is the sum of the Sanitary Permit's lines the server sent
+ * it, never BPLO's whole bill.
+ */
+test.describe('a clearance office', () => {
+  test.use({ storageState: mergedStorageState(['sanitary.json']) })
+
+  test('sees only its own share of the Assessed Fee', async ({ page, browser }) => {
+    await page.goto('/staff/queue')
+    const first = page.locator('ul li a[href^="/staff/queue/"]').first()
+    const any = await first.waitFor({ timeout: 30_000 }).then(() => true, () => false)
+    test.skip(!any, 'nothing on CHO’s queue to open on this register')
+
+    const href = (await first.getAttribute('href'))!
+    await page.goto(href)
+    await expect(page.getByRole('link', { name: 'Back to Manage Applications' })).toBeVisible({ timeout: 30_000 })
+
+    type Fee = { total_amount: string; line_items: { permit_codes?: string[] }[] } | null
+    const appId = await page.evaluate(async (id) => {
+      const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.staff')}` }
+      const assignment = (await (await fetch(`/api/v1/assignments/${id}`, { headers })).json()).data
+      return (assignment.application?.id ?? assignment.application_id) as number
+    }, href.split('/').pop()!)
+    const feeAs = (p: Page) =>
+      p.evaluate(async (id) => {
+        const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.staff')}` }
+        return (await (await fetch(`/api/v1/applications/${id}`, { headers })).json()).data.fee_assessment as Fee
+      }, appId)
+
+    const own = await feeAs(page)
+    test.skip(own === null, 'this filing has no Tax Order of Payment yet')
+    for (const line of own!.line_items) expect(line.permit_codes ?? []).not.toContain('BUSINESS')
+
+    const bploContext = await browser.newContext({ storageState: mergedStorageState(['bplo.json']) })
+    const bplo = await bploContext.newPage()
+    await bplo.goto('/dashboard')
+    const whole = await feeAs(bplo)
+    await bploContext.close()
+    expect(Number(whole!.total_amount)).toBeGreaterThan(Number(own!.total_amount))
+
+    await expect(assessedFee(page)).toHaveText(peso(Number(own!.total_amount)))
+  })
+})

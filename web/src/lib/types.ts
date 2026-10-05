@@ -1514,11 +1514,16 @@ export interface Application extends ApplicationListItem {
   /** Full resource embeds the complete business (address + lines). */
   business: Business
   documents: AppDocument[]
+  /**
+   * The Tax Order of Payment. A clearance office's payload carries only its
+   * own permit's lines and their sum (6 October 2026); BPLO, the super admin
+   * and the applicant get the whole bill.
+   */
   fee_assessment: FeeAssessment | null
   /**
    * An amendment's fixed fee (₱200 since 5 October 2026), which is stacked on
    * the January renewal rather than billed, so `fee_assessment` is null on
-   * one. Null on every other filing type.
+   * one. Null on every other filing type, and for a clearance office.
    */
   amendment_fee?: number | null
   /** Applicant-declared revenue-code inputs (null when never filled). */
