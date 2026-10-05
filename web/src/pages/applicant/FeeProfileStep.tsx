@@ -1437,20 +1437,22 @@ export function FeeProfileStep({
 
   return (
     <div className="space-y-8">
-      {onExtras && (
-        <p className="-mt-2 text-xs leading-relaxed text-ink-secondary">
-          At the counter a clerk works these out and writes the amount into the form&rsquo;s
-          &ldquo;Assessed Fee&rdquo; box by hand. BizTrack computes it instead, under the Revenue
-          Code (Ord. A10-2016), so it has to ask what the clerk would have determined.
-          {derivedStructure && (
-            <>
-              {' '}
-              Assessed as a <span className="font-semibold">{derivedStructure.label}</span> &mdash;
-              change that on Business Information.
-            </>
-          )}
-        </p>
-      )}
+      {/*
+        ── The opening paragraph is gone — 6 October 2026 ───────────────────
+
+        It read: "At the counter a clerk works these out and writes the amount
+        into the form's 'Assessed Fee' box by hand. BizTrack computes it
+        instead, under the Revenue Code (Ord. A10-2016), so it has to ask what
+        the clerk would have determined. Assessed as a <structure> — change
+        that on Business Information." Ken had it removed as too much text.
+
+        Its last clause was where the structure the tax assumes was shown,
+        after item 72 took the read-only Business Structure box away; nothing
+        on this step names it now. The value is unaffected — ApplyWizard still
+        syncs `feeDraft.business_structure` from the Form of Organization. If
+        an applicant needs to see the assumption again, a clause like that one
+        is the way back, not the old box.
+      */}
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
       {onExtras && (
@@ -1459,7 +1461,9 @@ export function FeeProfileStep({
         <div className="mt-3 space-y-3">
           {derivedStructure ? (
             /*
-             * Item 72 — nothing. The ANSWER is in this step's opening line now.
+             * Item 72 — nothing. The answer was a clause of this step's
+             * opening paragraph until that paragraph went on 6 October 2026;
+             * see the note at the top of the return.
              *
              * This was a read-only `Business Structure` field mirroring the Type
              * of Registration from Business Information, and the argument for it
@@ -1470,9 +1474,9 @@ export function FeeProfileStep({
              * — the estimate panel at the foot of this step shows the actual
              * computed figures, which is what they are really signing for.
              *
-             * So the fact survives as one clause of the intro rather than as a
-             * repeated field with its own label, hint and read-only box. The
-             * VALUE is untouched: ApplyWizard syncs
+             * So the fact survived as one clause of the intro rather than as a
+             * repeated field with its own label, hint and read-only box, and
+             * now not at all. The VALUE is untouched: ApplyWizard syncs
              * `feeDraft.business_structure` from `form.registration_type` in its
              * own effect, so removing the display removed nothing the fee engine
              * reads. The branch below still ASKS, for the draft that arrived
@@ -1530,11 +1534,15 @@ export function FeeProfileStep({
           */}
           <div>
             <FieldLabel required>Tax Classification (Malabon Revenue Code)</FieldLabel>
-            <p id="fee-category-help" className="mb-3 text-xs text-ink-secondary">
-              Not the line of business again — the Revenue Code bracket it is taxed under. A carinderia
-              and a franchised fast-food branch are both food, at different rates. Start typing to
-              pick the closest match from the list; the reviewing officer checks it.
-            </p>
+            {/*
+              The hint that stood here went on 6 October 2026, at Ken's request
+              ("too much text"): "Not the line of business again — the Revenue
+              Code bracket it is taxed under. A carinderia and a franchised
+              fast-food branch are both food, at different rates. Start typing
+              to pick the closest match from the list; the reviewing officer
+              checks it." The note above says why the field is not a
+              duplicate; the input's `aria-describedby` no longer points here.
+            */}
             {/*
               * The list offers the LABEL as the option value, and the slug is
               * recovered from it by normalizeCategory when the answer is
@@ -1626,8 +1634,8 @@ export function FeeProfileStep({
                           aria-invalid={Boolean(errorFor(`line:${line.id}:category`, cat.category))}
                           aria-describedby={
                             errorFor(`line:${line.id}:category`, cat.category)
-                              ? `fee-category-help fee-category-${line.id}-error`
-                              : 'fee-category-help'
+                              ? `fee-category-${line.id}-error`
+                              : undefined
                           }
                         />
                         {errorFor(`line:${line.id}:category`, cat.category) && (
