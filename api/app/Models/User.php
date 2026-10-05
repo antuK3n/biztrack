@@ -48,8 +48,24 @@ class User extends Authenticatable implements MustVerifyEmail
      * many people do not know theirs, and nothing downstream reads it. One list,
      * so registration, the profile form and the "complete your profile" prompt
      * cannot disagree about what complete means.
+     *
+     * City and province are not on it [checklist Register 3, "remove
+     * unnecessary registration details (city/municipality, province …)"]: the
+     * owner is no longer asked for them — the server writes HOME_CITY and
+     * HOME_PROVINCE — so an owner who registered without them must not be told
+     * they owe two answers no form lets them give.
      */
-    public const HOME_ADDRESS_REQUIRED = ['home_street', 'home_barangay', 'home_city', 'home_province'];
+    public const HOME_ADDRESS_REQUIRED = ['home_street', 'home_barangay'];
+
+    /**
+     * What every home address chosen from Malabon's barangays is written with
+     * [Register 3, Ken, 5 October 2026]. Spelled as the seeded owners and the
+     * older free-text answers spell them, so one city does not end up stored
+     * two ways.
+     */
+    public const HOME_CITY = 'Malabon';
+
+    public const HOME_PROVINCE = 'Metro Manila';
 
     protected function casts(): array
     {
@@ -188,9 +204,9 @@ class User extends Authenticatable implements MustVerifyEmail
     /**
      * Whether every required part of the home address is on file.
      *
-     * All four or nothing counts: a street with no city is not an address
-     * anyone can use, and treating it as one would switch the prompt off for
-     * an owner whose record is still unusable.
+     * Street and barangay or nothing: a street with no barangay is not an
+     * address anyone can use, and treating it as one would switch the prompt
+     * off for an owner whose record is still unusable.
      */
     public function hasHomeAddress(): bool
     {

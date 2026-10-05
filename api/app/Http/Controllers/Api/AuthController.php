@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\Barangay;
 use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
@@ -25,6 +26,7 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -190,38 +192,51 @@ class AuthController extends Controller
      * Validation for the home address, shared by registration and the profile
      * form so a value one accepts the other cannot refuse.
      *
-     * Free text throughout, barangay included: an owner may live outside
-     * Malabon, so the city's barangay list (the one a business address is
-     * picked from) cannot be the list of answers. ZIP is optional and, when
+     * The owner gives a street and one of Malabon's barangays; city and
+     * province are not asked [checklist Register 3, Ken, 5 October 2026] —
+     * the server writes User::HOME_CITY and HOME_PROVINCE. Until then every
+     * part was free text, on the reasoning that an owner may live outside
+     * Malabon; Ken decided the sign-up is for Malabon residents. A `home_city`
+     * or `home_province` an older form still sends is not validated, so it
+     * never reaches $data and is never stored. ZIP is optional and, when
      * given, is the four digits every Philippine ZIP code is.
      *
-     * @param  bool  $onUpdate  false at registration, where all four parts are
-     *                          simply required. True on the profile form,
-     *                          where three rules share the work:
-     *                          - an ABSENT key keeps what is stored, so a
-     *                          caller that predates the address (or a staff
-     *                          account, whose form never shows it) can still
-     *                          save a name edit;
-     *                          - `filled`: a key that IS sent may not be empty,
-     *                          so an address once given is corrected, never
-     *                          blanked;
-     *                          - `required_with`: sending any one part makes
-     *                          the other three required, so an owner cannot
-     *                          end up holding a street with no city.
-     * @return array<string, array<int, string>>
+     * @param  User|null  $editing  null at registration, where street and
+     *                              barangay are simply required. The owner on
+     *                              the profile form, where three rules share
+     *                              the work:
+     *                              - an ABSENT key keeps what is stored, so a
+     *                              caller that predates the address (or a staff
+     *                              account, whose form never shows it) can still
+     *                              save a name edit;
+     *                              - `filled`: a key that IS sent may not be
+     *                              empty, so an address once given is
+     *                              corrected, never blanked;
+     *                              - `required_with`: sending one part makes the
+     *                              other required, so an owner cannot end up
+     *                              holding a street with no barangay.
+     *                              Their stored barangay is also accepted as it
+     *                              stands: an owner who registered with a
+     *                              free-text barangay outside Malabon keeps it
+     *                              until they choose another, rather than being
+     *                              unable to save a name edit.
+     * @return array<string, array<int, mixed>>
      */
-    private function homeAddressRules(bool $onUpdate): array
+    private function homeAddressRules(?User $editing = null): array
     {
         $parts = User::HOME_ADDRESS_REQUIRED;
-        $presence = fn (string $field) => $onUpdate
+        $presence = fn (string $field) => $editing !== null
             ? ['required_with:'.implode(',', array_diff($parts, [$field])), 'filled']
             : ['required'];
 
+        $barangays = Barangay::pluck('name')->all();
+        if (filled($editing?->home_barangay)) {
+            $barangays[] = $editing->home_barangay;
+        }
+
         return [
             'home_street' => [...$presence('home_street'), 'string', 'max:255'],
-            'home_barangay' => [...$presence('home_barangay'), 'string', 'max:100'],
-            'home_city' => [...$presence('home_city'), 'string', 'max:100'],
-            'home_province' => [...$presence('home_province'), 'string', 'max:100'],
+            'home_barangay' => [...$presence('home_barangay'), 'string', 'max:100', Rule::in($barangays)],
             'home_postal_code' => ['nullable', 'string', 'regex:/^\d{4}$/'],
         ];
     }
@@ -237,11 +252,14 @@ class AuthController extends Controller
         $said = [
             'home_street' => 'Enter your house number, building and street.',
             'home_barangay' => 'Enter your barangay.',
-            'home_city' => 'Enter your city or municipality.',
-            'home_province' => 'Enter your province.',
         ];
 
-        $messages = ['home_postal_code.regex' => 'A ZIP code is 4 digits.'];
+        $messages = [
+            'home_postal_code.regex' => 'A ZIP code is 4 digits.',
+            // Only a caller other than the dropdown can send a barangay off
+            // the list; the same sentence serves it.
+            'home_barangay.in' => $said['home_barangay'],
+        ];
         foreach ($said as $field => $sentence) {
             foreach (['required', 'required_with', 'filled'] as $rule) {
                 $messages["{$field}.{$rule}"] = $sentence;
@@ -300,7 +318,7 @@ class AuthController extends Controller
              * accounts are made by the super admin (Admin\UserController),
              * which never asks for a home address.
              */
-            ...$this->homeAddressRules(onUpdate: false),
+            ...$this->homeAddressRules(),
         ], [
             'email.unique' => 'This email is already registered. Try signing in instead.',
             'data_privacy_consent.accepted' => 'You must agree to the data privacy notice to continue.',
@@ -325,8 +343,8 @@ class AuthController extends Controller
             'mobile_number' => $data['mobile_number'],
             'home_street' => $data['home_street'],
             'home_barangay' => $data['home_barangay'],
-            'home_city' => $data['home_city'],
-            'home_province' => $data['home_province'],
+            'home_city' => User::HOME_CITY,
+            'home_province' => User::HOME_PROVINCE,
             'home_postal_code' => $data['home_postal_code'] ?? null,
             'password' => $data['password'],
             'data_privacy_consent_at' => now(),
@@ -913,7 +931,7 @@ class AuthController extends Controller
              * owner who registered before it was asked completes it. What an
              * absent, emptied or partial answer does is on homeAddressRules.
              */
-            ...$this->homeAddressRules(onUpdate: true),
+            ...$this->homeAddressRules(editing: $request->user()),
         ], [
             'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
             ...$this->homeAddressMessages(),
@@ -932,12 +950,24 @@ class AuthController extends Controller
          *
          * The home address goes through the same helper for its "absent keeps"
          * half only: of its parts, ZIP alone may be sent empty, and the
-         * validation above refuses an emptied street, barangay, city or
-         * province before this runs.
+         * validation above refuses an emptied street or barangay before this
+         * runs.
          */
         $optional = function (string $key) use ($data, $user) {
             return array_key_exists($key, $data) ? $data[$key] : $user->{$key};
         };
+
+        /*
+         * City and province follow the barangay [Register 3]: written as
+         * Malabon's when the owner CHOOSES one of its barangays — a different
+         * one from what is stored, or a first one. Sending the stored barangay
+         * back (every save from Edit Profile does) changes neither, so an
+         * owner who registered from Navotas keeps "Navotas" until they pick a
+         * barangay of Malabon themselves.
+         */
+        $chosenFromMalabon = array_key_exists('home_barangay', $data)
+            && ($data['home_barangay'] !== $user->home_barangay || blank($user->home_city))
+            && Barangay::where('name', $data['home_barangay'])->exists();
 
         $user->fill([
             // `name` stays first + last: it is the framework compat column and
@@ -951,8 +981,8 @@ class AuthController extends Controller
             'mobile_number' => $data['mobile_number'],
             'home_street' => $optional('home_street'),
             'home_barangay' => $optional('home_barangay'),
-            'home_city' => $optional('home_city'),
-            'home_province' => $optional('home_province'),
+            'home_city' => $chosenFromMalabon ? User::HOME_CITY : $user->home_city,
+            'home_province' => $chosenFromMalabon ? User::HOME_PROVINCE : $user->home_province,
             'home_postal_code' => $optional('home_postal_code'),
         ])->save();
 

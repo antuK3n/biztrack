@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\User;
 
@@ -12,6 +13,12 @@ use App\Models\User;
  * it, and refuses to let one already given be emptied or left half-written.
  * Filing is NOT gated on it (docs/questions-for-malabon.md, A27) — the payload
  * says an owner owes one, and the web app prompts.
+ *
+ * Since Register 3 ("remove unnecessary registration details (city/
+ * municipality, province, zip code)") the owner gives a street and one of
+ * Malabon's barangays; the server writes Malabon and Metro Manila itself.
+ * `homeAddress()` still carries a city and province, which makes every payload
+ * built from it an older form's — and those must keep working.
  */
 
 function ownerRegistration(array $overrides = []): array
@@ -46,9 +53,9 @@ it('refuses an owner registration that leaves out the home address', function ()
 
     $this->postJson('/api/v1/auth/register', $payload)
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['home_street', 'home_barangay', 'home_city', 'home_province'])
-        // ZIP is the one optional part.
-        ->assertJsonMissingValidationErrors(['home_postal_code'])
+        ->assertJsonValidationErrors(['home_street', 'home_barangay'])
+        // ZIP is optional, and city and province are not asked at all.
+        ->assertJsonMissingValidationErrors(['home_postal_code', 'home_city', 'home_province'])
         ->assertJsonPath('errors.home_barangay.0', 'Enter your barangay.');
 
     expect(User::where('email', 'rosa.manalo@example.test')->exists())->toBeFalse();
@@ -58,26 +65,52 @@ it('refuses an owner registration with any one part of the address blank', funct
     $this->postJson('/api/v1/auth/register', ownerRegistration([$part => '']))
         ->assertStatus(422)
         ->assertJsonValidationErrors([$part]);
-})->with(['home_street', 'home_barangay', 'home_city', 'home_province']);
+})->with(['home_street', 'home_barangay']);
 
-it('registers an owner who lives outside Malabon, with a barangay that is not on the city list', function () {
-    $response = $this->postJson('/api/v1/auth/register', ownerRegistration(homeAddress([
-        'home_street' => '7 M. Naval St.',
-        'home_barangay' => 'San Roque',
-        'home_city' => 'Navotas',
-        'home_postal_code' => null,
-    ])))->assertCreated();
+it('registers an owner from a barangay of Malabon, and writes the city and province itself', function () {
+    $payload = ownerRegistration(['home_barangay' => 'Tonsuya', 'home_postal_code' => null]);
+    unset($payload['home_city'], $payload['home_province']);
 
-    $response->assertJsonPath('data.user.home_street', '7 M. Naval St.')
-        ->assertJsonPath('data.user.home_barangay', 'San Roque')
-        ->assertJsonPath('data.user.home_city', 'Navotas')
+    $this->postJson('/api/v1/auth/register', $payload)
+        ->assertCreated()
+        ->assertJsonPath('data.user.home_barangay', 'Tonsuya')
+        ->assertJsonPath('data.user.home_city', 'Malabon')
         ->assertJsonPath('data.user.home_province', 'Metro Manila')
         ->assertJsonPath('data.user.home_postal_code', null)
         ->assertJsonPath('data.user.home_address_missing', false);
 
     $user = User::where('email', 'rosa.manalo@example.test')->firstOrFail();
-    expect($user->home_city)->toBe('Navotas')
+    expect($user->home_city)->toBe('Malabon')
+        ->and($user->home_province)->toBe('Metro Manila')
         ->and($user->hasHomeAddress())->toBeTrue();
+});
+
+it('refuses a home barangay that is not one of Malabon\'s', function () {
+    $this->postJson('/api/v1/auth/register', ownerRegistration(['home_barangay' => 'San Roque']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['home_barangay'])
+        ->assertJsonPath('errors.home_barangay.0', 'Enter your barangay.');
+
+    expect(User::where('email', 'rosa.manalo@example.test')->exists())->toBeFalse();
+});
+
+it('ignores a city and province an older sign-up form still sends', function () {
+    $this->postJson('/api/v1/auth/register', ownerRegistration([
+        'home_city' => 'Navotas',
+        'home_province' => 'Bulacan',
+    ]))
+        ->assertCreated()
+        ->assertJsonPath('data.user.home_city', 'Malabon')
+        ->assertJsonPath('data.user.home_province', 'Metro Manila');
+});
+
+it('lists Malabon\'s barangays to a visitor with no account, for the sign-up form', function () {
+    $list = $this->getJson('/api/v1/barangays')->assertOk()->json('data');
+
+    expect($list)->toHaveCount(Barangay::count())
+        ->and(collect($list)->pluck('name'))->toContain('Longos', 'Tonsuya')
+        // Names for a dropdown, not the wizard's zoning payload.
+        ->and(array_keys($list[0]))->toBe(['id', 'name']);
 });
 
 it('refuses a ZIP code that is not four digits', function (string $zip) {
@@ -147,11 +180,14 @@ it('completes a missing home address from the profile form', function () {
         'first_name' => 'Nena',
         'last_name' => 'Dela Cruz',
         'mobile_number' => '09171234567',
-        ...homeAddress(['home_street' => 'Blk 4 Lot 12, Sampaguita St.', 'home_barangay' => 'Tonsuya']),
+        'home_street' => 'Blk 4 Lot 12, Sampaguita St.',
+        'home_barangay' => 'Tonsuya',
     ])
         ->assertOk()
         ->assertJsonPath('data.home_street', 'Blk 4 Lot 12, Sampaguita St.')
         ->assertJsonPath('data.home_barangay', 'Tonsuya')
+        ->assertJsonPath('data.home_city', 'Malabon')
+        ->assertJsonPath('data.home_province', 'Metro Manila')
         ->assertJsonPath('data.home_address_missing', false);
 
     expect($user->fresh()->hasHomeAddress())->toBeTrue()
@@ -170,10 +206,67 @@ it('refuses half an address on the profile form', function () {
         'home_street' => '12 Gen. Luna St.',
     ])
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['home_barangay', 'home_city', 'home_province'])
-        ->assertJsonPath('errors.home_city.0', 'Enter your city or municipality.');
+        ->assertJsonValidationErrors(['home_barangay'])
+        ->assertJsonMissingValidationErrors(['home_city', 'home_province'])
+        ->assertJsonPath('errors.home_barangay.0', 'Enter your barangay.');
 
     expect($user->fresh()->home_street)->toBeNull();
+});
+
+it('refuses a barangay outside Malabon on the profile form', function () {
+    $token = loginToken('owner@biztrack.local');
+    $this->app['auth']->forgetGuards();
+
+    $this->withToken($token)->putJson('/api/v1/auth/profile', [
+        'first_name' => 'Nena',
+        'last_name' => 'Dela Cruz',
+        'mobile_number' => '09171234567',
+        'home_street' => '12 Gen. Luna St.',
+        'home_barangay' => 'San Roque',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['home_barangay']);
+
+    expect(User::where('email', 'owner@biztrack.local')->firstOrFail()->home_barangay)->toBe('Longos');
+});
+
+it('keeps an older owner\'s address outside Malabon until they choose a barangay of Malabon', function () {
+    // Registered when the address was free text (the seeded Juan is one).
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $owner->forceFill(homeAddress([
+        'home_street' => '7 M. Naval St.', 'home_barangay' => 'San Roque', 'home_city' => 'Navotas',
+    ]))->save();
+    $token = loginToken('owner@biztrack.local');
+    $this->app['auth']->forgetGuards();
+    $edit = fn (string $barangay) => $this->withToken($token)->putJson('/api/v1/auth/profile', [
+        'first_name' => 'Nena',
+        'last_name' => 'Dela Cruz',
+        'mobile_number' => '09171234567',
+        'home_street' => '7 M. Naval St.',
+        'home_barangay' => $barangay,
+    ]);
+
+    // A name edit sends the stored barangay back unchanged; it is not refused.
+    $edit('San Roque')->assertOk()
+        ->assertJsonPath('data.home_barangay', 'San Roque')
+        ->assertJsonPath('data.home_city', 'Navotas')
+        ->assertJsonPath('data.home_address_missing', false);
+
+    $edit('Tonsuya')->assertOk()
+        ->assertJsonPath('data.home_barangay', 'Tonsuya')
+        ->assertJsonPath('data.home_city', 'Malabon')
+        ->assertJsonPath('data.home_province', 'Metro Manila');
+});
+
+it('does not tell an owner they owe a city or province, which the form no longer asks', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $owner->forceFill(['home_city' => null, 'home_province' => null])->save();
+    $token = loginToken('owner@biztrack.local');
+    $this->app['auth']->forgetGuards();
+
+    $this->withToken($token)->getJson('/api/v1/auth/me')
+        ->assertOk()
+        ->assertJsonPath('data.home_address_missing', false);
 });
 
 it('refuses to blank an address already given', function () {
@@ -186,11 +279,9 @@ it('refuses to blank an address already given', function () {
         'mobile_number' => '09171234567',
         'home_street' => '',
         'home_barangay' => '',
-        'home_city' => '',
-        'home_province' => '',
     ])
         ->assertStatus(422)
-        ->assertJsonValidationErrors(['home_street', 'home_barangay', 'home_city', 'home_province']);
+        ->assertJsonValidationErrors(['home_street', 'home_barangay']);
 
     expect(User::where('email', 'owner@biztrack.local')->firstOrFail()->home_street)->toBe('12 Gen. Luna St.');
 });

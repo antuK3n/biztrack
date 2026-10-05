@@ -223,9 +223,10 @@ class DemoSeeder extends Seeder
      * greet every tester with the "complete your profile" prompt. Staff get
      * none: nothing asks them for it.
      *
-     * Juan lives in Navotas on purpose. A business in Malabon does not mean an
-     * owner who lives there, and the demo should carry one case of that so the
-     * free-text barangay is exercised.
+     * Juan lives in Navotas on purpose. Sign-up took a free-text barangay
+     * until Register 3, when it became a choice of Malabon's; Juan stands for
+     * the owners who registered before that, whose stored address is kept as
+     * given until they choose a barangay of Malabon on Edit Profile.
      */
     private const HOME_ADDRESSES = [
         'owner@biztrack.local' => ['12 Gen. Luna St.', 'Longos', 'Malabon', 'Metro Manila', '1472'],

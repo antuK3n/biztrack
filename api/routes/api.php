@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\KwikPayCallbackController;
 use App\Http\Controllers\Api\OfficeHoursController;
+use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\SystemNoticeController;
 use App\Http\Controllers\FakeKwikPayController;
 use App\Services\KwikPay\FakeKwikPay;
@@ -102,6 +103,9 @@ Route::prefix('auth')->group(function () {
 
 // Is City Hall open now? Public: the sign-in pages show it [Login 6].
 Route::get('office-hours', OfficeHoursController::class);
+
+// Malabon's barangays, for the home address on the sign-up form [Register 3].
+Route::get('barangays', [ReferenceController::class, 'barangayNames']);
 
 // Whether the sign-in form must carry a captcha (the Debug page can switch it off).
 Route::get('auth/sign-in-options', [SystemNoticeController::class, 'signInOptions']);

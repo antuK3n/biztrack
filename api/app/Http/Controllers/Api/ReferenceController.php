@@ -12,10 +12,28 @@ use App\Support\AmendableFields;
 use Illuminate\Http\JsonResponse;
 
 /**
- * Read-only lookups that power the application wizard. Auth required, no gate.
+ * Read-only lookups that power the application wizard. Auth required, no gate —
+ * except barangayNames, which the sign-up form reads before there is an account.
  */
 class ReferenceController extends Controller
 {
+    /**
+     * Malabon's barangays by name, for the owner's home address on sign-up and
+     * on Edit Profile [checklist Register 3, Ken, 5 October 2026].
+     *
+     * Public because sign-up has no token, and a separate endpoint rather than
+     * opening `barangays` below: that one carries each barangay's zoning sheet
+     * for the wizard, which a visitor has no use for. Edit Profile reads this
+     * one too, so the two forms offer the same list.
+     */
+    public function barangayNames(): JsonResponse
+    {
+        return response()->json([
+            'data' => Barangay::orderBy('name')->get(['id', 'name'])
+                ->map(fn (Barangay $b) => ['id' => $b->id, 'name' => $b->name]),
+        ]);
+    }
+
     /**
      * The 21 barangays, each with its official CPDO zoning sheet and the
      * classifications that sheet shows.
