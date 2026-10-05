@@ -187,6 +187,19 @@
     border-radius: var(--radius-sm);
   }
 
+  /*
+   * No focus ring on a map shape. Chrome focuses an SVG <path> that is
+   * clicked, and then draws its blue focus ring around the path's bounding
+   * box: a click on a zone left a rounded rectangle around it, and a zone
+   * covering most of the barangay looked like a square drawn around the
+   * barangay (Ken, 6 October 2026: "What's this square thing appearing?").
+   * The shapes are never in the tab order (Leaflet gives them no tabindex),
+   * so no keyboard user loses a ring here; the map container keeps its own.
+   */
+  .leaflet-container path.leaflet-interactive:focus {
+    outline: none;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
