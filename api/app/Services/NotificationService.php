@@ -27,8 +27,8 @@ use Throwable;
  * which sent a one-line mail to every recipient, staff included, inside the
  * request: harmless while the mailer was `log`, but with a real SMTP relay it
  * would have held every officer action on a network round-trip and turned an
- * unreachable relay into a failed approval. SMS (log driver, §5.5) still goes
- * through fanOut() unchanged — SMS is out of scope for now.
+ * unreachable relay into a failed approval. SMS goes through fanOut(), and
+ * only for the key moments listed there.
  *
  * Generic payloads only (guardrail §9.5) — no PII beyond the tracking id.
  */
@@ -183,7 +183,6 @@ class NotificationService
             "/applications/{$app->id}",
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is now {$to->label()}.");
     }
 
     /**
@@ -257,7 +256,6 @@ class NotificationService
             "/applications/{$app->id}",
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} — {$note}");
     }
 
     /** End state: the application cleared every office (tester item 51). */
@@ -416,10 +414,6 @@ class NotificationService
             "Your Business Permit {$permit->permit_number} has been suspended for {$days} days{$tail}",
             "/permits/{$permit->id}",
         );
-        $this->fanOut(
-            $owner,
-            "BizTrack: Business Permit {$permit->permit_number} suspended for {$days} days{$tail}",
-        );
     }
 
     /**
@@ -446,10 +440,6 @@ class NotificationService
                     ? " BPLO lifted the suspension. Reason: {$reason}"
                     : ' No permit on this application is rejected any more.'),
             '/permits',
-        );
-        $this->fanOut(
-            $app->applicant,
-            "BizTrack: Business Permit {$permit->permit_number} is active again.",
         );
     }
 
@@ -542,7 +532,9 @@ class NotificationService
             $permit,
             disapproval: $to !== PermitStatus::Active,
         );
-        $this->fanOut($owner, "BizTrack: {$title} — {$permit->permit_number}.");
+        if ($to === PermitStatus::Suspended || $to === PermitStatus::Revoked) {
+            $this->fanOut($owner, "BizTrack: {$title} — {$permit->permit_number}.");
+        }
     }
 
     // --- Messaging -----------------------------------------------------------
@@ -561,7 +553,6 @@ class NotificationService
             $this->filingLink($recipient, $app),
             $app,
         );
-        $this->fanOut($recipient, "BizTrack: new message on {$app->tracking_id}.");
     }
 
     // --- Officer requests ----------------------------------------------------
@@ -576,7 +567,6 @@ class NotificationService
             "/applications/{$app->id}",
             $app,
         );
-        $this->fanOut($recipient, "BizTrack: new requirement requested on {$app->tracking_id}.");
     }
 
     public function requestResponded(OfficerRequest $request, User $recipient): void
@@ -595,7 +585,6 @@ class NotificationService
             $this->filingLink($recipient, $app),
             $app,
         );
-        $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }
 
     /**
@@ -627,7 +616,6 @@ class NotificationService
             $this->filingLink($recipient, $app),
             $app,
         );
-        $this->fanOut($recipient, "BizTrack: corrections received on {$app->tracking_id}.");
     }
 
     public function requestClosed(OfficerRequest $request, User $recipient): void
@@ -641,7 +629,6 @@ class NotificationService
             "/applications/{$app->id}",
             $app,
         );
-        $this->fanOut($recipient, "BizTrack: requirement on {$app->tracking_id} {$request->status->label()}.");
     }
 
     // --- Fee adjustment ------------------------------------------------------
@@ -666,7 +653,6 @@ class NotificationService
             "/applications/{$app->id}/pay",
             $app,
         );
-        $this->fanOut($app->applicant, "BizTrack: fee for {$app->tracking_id} adjusted.");
     }
 
     // --- Permit expiry (scheduler) -------------------------------------------
@@ -906,15 +892,30 @@ class NotificationService
          * business, which is what this notice's own body says.
          */
         $this->push($business->owner, 'account_status', $title, $body, '/dashboard', $business);
-        $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
+        if ($to === 'suspended') {
+            $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
+        }
     }
 
-    // --- Channel fan-out (sms log) -------------------------------------------
+    // --- Channel fan-out (SMS) -----------------------------------------------
     /*
      * SMS only. The `Mail::raw` that used to open this method is gone: e-mail
      * now goes from push() to owners alone, queued, with the notice's own title
      * and a link (see the class note). Leaving it here as well would have sent
      * every owner two e-mails per event, one of them a bare line with no link.
+     *
+     * ── Key moments only [Ken, 5 October 2026] ──────────────────────────────
+     *
+     * Only these call it: applicationApproved, applicationRejected,
+     * permitsIssued, inspectionFailed, clearanceRejected; a suspension or
+     * revocation (outcomePermitSuspended, permitRevoked, permitStatusChanged
+     * to Suspended or Revoked, businessStatusChanged to suspended); and the
+     * expiry notices (permitExpiring, permitExpired, renewalDue).
+     *
+     * Every other notice used to text as well and stopped that day; it is
+     * still in the app and, for an owner, e-mailed. That includes newMessage,
+     * which could text an owner about their own message when no officer held
+     * the filing. To make another notice text again, call fanOut() from it.
      */
     private function fanOut(User $user, string $message): void
     {
