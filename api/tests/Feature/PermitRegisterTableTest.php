@@ -144,6 +144,55 @@ it('says null, not an empty sheet, for an office that asks for no form', functio
     expect($row['office_form'])->toBeNull();
 });
 
+/** A permit of the given type, made from one in the fixtures if none exists. */
+function permitOfType(string $code): Permit
+{
+    $type = PermitType::where('code', $code)->firstOrFail();
+    $permit = Permit::where('permit_type_id', $type->id)->whereNotNull('application_id')->first();
+
+    if ($permit === null) {
+        $permit = Permit::whereNotNull('application_id')->firstOrFail();
+        $permit->forceFill(['permit_type_id' => $type->id])->save();
+    }
+
+    return $permit;
+}
+
+it('dates the application the day the owner filed it, on the Mayor’s Permit and an office’s alike', function () {
+    /*
+     * Client, 5 October 2026: "make sure na tama ang nire-reflect sa Date of
+     * Application ... based sa actual date kung kailan nag-apply ang business
+     * owner." The Mayor's Permit has no office sheet, and the column read the
+     * sheet, so its rows printed a dash for a filing that was made.
+     */
+    foreach (['BUSINESS', 'SANITARY'] as $code) {
+        $permit = permitOfType($code);
+        Application::whereKey($permit->application_id)
+            ->update(['submitted_at' => '2026-03-14 09:30:00']);
+
+        $row = collect(registerRows())->firstWhere('id', $permit->id);
+
+        expect($row['application_date'])->toBe('2026-03-14');
+        if ($row['office_form'] !== null) {
+            expect($row['office_form']['application_date'])->toBe('2026-03-14');
+        }
+    }
+});
+
+it('prints no date of application, never today, for a filing with no submission date', function () {
+    /*
+     * The fallback this replaced was `now()`: a permit issued a year ago, off
+     * a filing with no `submitted_at`, read as applied for this morning.
+     */
+    $permit = permitOfType('SANITARY');
+    Application::whereKey($permit->application_id)->update(['submitted_at' => null]);
+
+    $row = collect(registerRows())->firstWhere('id', $permit->id);
+
+    expect($row['application_date'])->toBeNull()
+        ->and($row['office_form']['application_date'])->toBeNull();
+});
+
 it('leaves the contracted payload alone when detail is not asked for', function () {
     /*
      * docs/api-contract.md names PermitResource's eleven keys and the owner's

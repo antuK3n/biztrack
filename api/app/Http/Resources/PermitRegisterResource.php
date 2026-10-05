@@ -145,6 +145,14 @@ class PermitRegisterResource extends PermitResource
             'office_form' => $this->officeForm(),
 
             /*
+             * The day the owner filed — see applicationDate(). On EVERY row,
+             * not only the five with an office sheet: the Mayor's Permit was
+             * applied for too, and reading this off `office_form` left its
+             * column a dash on every row.
+             */
+            'application_date' => $this->applicationDate(),
+
+            /*
              * The requirements submitted for THIS permit, so an office reads
              * its own uploads on the same row as its own form [client,
              * 4 October 2026]. See requirementDocuments().
@@ -319,10 +327,46 @@ class PermitRegisterResource extends PermitResource
             ? $application->officeForms->firstWhere('permit_type_id', $this->permit_type_id)
             : null;
 
-        return OfficeFormAnswers::derive(
+        $answers = OfficeFormAnswers::derive(
             $application,
             $code,
             is_array($saved?->form_data) ? $saved->form_data : [],
         );
+
+        /*
+         * The sheet's own Date of Application, held to the same answer as the
+         * row's. `derive` falls back to TODAY for an unfiled application,
+         * which is right on a sheet being filled in and wrong on a register
+         * of issued permits — see applicationDate().
+         */
+        $answers['application_date'] = $this->applicationDate();
+
+        return $answers;
+    }
+
+    /**
+     * The date the owner submitted the filing this permit came from, or null.
+     *
+     * `applications.submitted_at` — stamped once by `WorkflowService::submit`
+     * and left alone by a resubmission — is the day the owner applied. Read
+     * here rather than through `OfficeFormAnswers::derive`, whose fallback is
+     * `now()`: that is the right answer for a sheet still being filled in,
+     * and on this table it printed TODAY against any permit whose filing
+     * carries no submission date (the approved filings
+     * `SeedExpiringDemoBusinesses` creates, among them) — a permit issued a
+     * year ago "applied for" this morning.
+     *
+     * Null, never a guess, when there is no date to give: a certificate
+     * brought over from the old system has no filing at all, and the table
+     * prints a dash. If the old register's application dates are ever
+     * imported, this is the method that reads them.
+     */
+    private function applicationDate(): ?string
+    {
+        if (! $this->relationLoaded('application')) {
+            return null;
+        }
+
+        return $this->application?->submitted_at?->toDateString();
     }
 }

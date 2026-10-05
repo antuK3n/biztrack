@@ -314,10 +314,11 @@ export const SHARED_COLUMNS: PermitColumn[] = [
     key: 'application_date',
     label: 'Date of Application',
     tnum: true,
-    // On every office sheet and typed on none of them: the API derives it from
-    // the filing's submitted_at. It sits with the shared columns rather than
-    // being repeated under each office.
-    value: (r) => answerDate(r, 'application_date'),
+    // The day the owner filed, read off the row and not the office sheet: the
+    // Mayor's Permit has no sheet, so reading it there printed a dash on every
+    // one of those rows. A dash now means the register holds no date — never
+    // today's, which the sheet's fallback used to put here.
+    value: (r) => formatDate(r.application_date),
   },
 ]
 
