@@ -35,8 +35,10 @@ export interface User {
   /*
    * True only while the API has a real mailer AND this is an owner whose
    * address is unconfirmed: filing is refused until they type the code
-   * [checklist 2026-09-27, Register 1]. Optional because the admin user lists
-   * share this type and never carry it.
+   * [checklist 2026-09-27, Register 1]. Sign-up asks for the code before
+   * signing them in, so this is true only for an owner signed in before that;
+   * Profile offers the code box. Optional because the admin user lists share
+   * this type and never carry it.
    */
   email_verification_required?: boolean
   /*
@@ -108,8 +110,10 @@ export interface ApiError {
   errors: Record<string, string[]>
   /**
    * A machine-readable cause on the few refusals a page must act on rather
-   * than print: `code_expired` (sign-in code dead, go back to the password)
-   * and `email_unconfirmed` (filing refused until the address is confirmed).
+   * than print: `code_expired` (sign-in code dead, go back to the password).
+   * `email_unconfirmed` (filing refused until the address is confirmed) is
+   * still sent, and now printed like any other refusal: the address is
+   * confirmed at sign-up.
    */
   reason?: string
 }

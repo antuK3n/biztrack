@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\Notification;
  *
  * Every rule here has two halves, and both are pinned. With mail OFF (the
  * shipped `log` mailer, and the tester demo) nothing may change: a password
- * still signs you in and an unconfirmed owner can still file. With mail ON a
- * right password earns a code, not a session, and filing waits for a
- * confirmed address. The switch is EmailSwitch::on(); tests turn it on by
- * pointing mail.default at smtp and faking the mailer.
+ * still signs you in, sign-up hands out a session at once, and an unconfirmed
+ * owner can still file. With mail ON a right password earns a code, not a
+ * session; so does a finished sign-up, whose code confirms the address; and
+ * filing still refuses an unconfirmed address. The switch is
+ * EmailSwitch::on(); tests turn it on by pointing mail.default at smtp and
+ * faking the mailer.
  */
 
 function mailOn(): void
@@ -78,12 +80,13 @@ it('signs in with the password alone while mail is off', function () {
     expect(EmailCode::count())->toBe(0);
 });
 
-it('still sends the confirmation link, not a code, on sign-up while mail is off', function () {
+it('signs a new owner straight in and still sends the confirmation link, not a code, while mail is off', function () {
     Notification::fake();
     Mail::fake();
 
     $this->postJson('/api/v1/auth/register', registration('off.path@example.com'))
         ->assertCreated()
+        ->assertJsonStructure(['data' => ['token', 'user']])
         ->assertJsonPath('data.user.email_verification_required', false);
 
     Notification::assertSentTo(User::where('email', 'off.path@example.com')->first(), VerifyEmailAddress::class);
@@ -307,21 +310,112 @@ it('confirms an unconfirmed address when the sign-in code is typed', function ()
     expect($owner->fresh()->email_verified_at)->not->toBeNull();
 });
 
-// ── Mail on: confirming the address (Register 1) ────────────────────────
+// ── Mail on: confirming the address at sign-up (Register 1) ─────────────
 
-it('e-mails a code, not the link, on sign-up while mail is on, and asks for it', function () {
+it('asks for the confirmation code at sign-up, and hands out no session until it is typed', function () {
     mailOn();
     Notification::fake();
 
-    $this->postJson('/api/v1/auth/register', registration('new.owner@example.com'))
+    $response = $this->postJson('/api/v1/auth/register', registration('new.owner@example.com'))
         ->assertCreated()
-        ->assertJsonPath('data.user.email_verification_required', true);
+        ->assertJsonPath('data.code_required', true)
+        ->assertJsonPath('data.expires_in_minutes', 30)
+        ->assertJsonMissingPath('data.token');
 
+    expect($response->json('data.email'))->toBe('n••••@example.com');
+    expect($response->json('data.challenge'))->toBeString()->not->toBeEmpty();
     Mail::assertSent(OneTimeCode::class, fn (OneTimeCode $m) => $m->hasTo('new.owner@example.com') && $m->purpose === EmailCode::VERIFY);
     Notification::assertNothingSent();
+
+    $owner = User::where('email', 'new.owner@example.com')->firstOrFail();
+    expect($owner->tokens()->count())->toBe(0);
+    expect($owner->email_verified_at)->toBeNull();
 });
 
-it('refuses to file until the address is confirmed, then lets it through', function () {
+it('confirms the address and signs the new owner in when the sign-up code is typed', function () {
+    mailOn();
+    $challenge = signUp('typed.code@example.com');
+
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => lastCode(EmailCode::VERIFY)])
+        ->assertOk()
+        ->assertJsonStructure(['data' => ['token', 'user']])
+        ->assertJsonPath('data.user.email_verification_required', false);
+
+    $owner = User::where('email', 'typed.code@example.com')->firstOrFail();
+    expect($owner->email_verified_at)->not->toBeNull();
+    expect($owner->tokens()->latest('id')->first()->name)->toBe('web:public');
+});
+
+it('refuses a wrong sign-up code, says how many tries are left, and confirms nothing', function () {
+    mailOn();
+    $challenge = signUp('wrong.code@example.com');
+
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => wrongCode(lastCode(EmailCode::VERIFY))])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'That code is not right. You have 4 tries left.');
+
+    $owner = User::where('email', 'wrong.code@example.com')->firstOrFail();
+    expect($owner->email_verified_at)->toBeNull();
+    expect($owner->tokens()->count())->toBe(0);
+});
+
+it('resends the sign-up code as a confirmation e-mail, after a minute, and only the newest works', function () {
+    mailOn();
+    $challenge = signUp('resend.code@example.com');
+    $old = lastCode(EmailCode::VERIFY);
+
+    $this->postJson('/api/v1/auth/login/code/resend', ['challenge' => $challenge])->assertStatus(429);
+
+    $this->travel(61)->seconds();
+    Mail::fake();
+    $this->postJson('/api/v1/auth/login/code/resend', ['challenge' => $challenge])->assertOk();
+    Mail::assertSent(OneTimeCode::class, fn (OneTimeCode $m) => $m->hasTo('resend.code@example.com') && $m->purpose === EmailCode::VERIFY);
+    $new = lastCode(EmailCode::VERIFY);
+
+    if ($new !== $old) {
+        $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => $old])->assertStatus(422);
+    }
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => $new])->assertOk();
+});
+
+it('refuses the sign-up code after thirty minutes', function () {
+    mailOn();
+    $challenge = signUp('late.code@example.com');
+    $code = lastCode(EmailCode::VERIFY);
+
+    $this->travel(31)->minutes();
+
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => $code])
+        ->assertStatus(422)->assertJsonPath('reason', 'code_expired');
+});
+
+it('asks again at the next sign-in when the sign-up code was never typed', function () {
+    mailOn();
+    config(['auth.verification.required_at_login' => true]);
+    signUp('closed.tab@example.com');
+
+    $challenge = startSignIn('closed.tab@example.com');
+    $this->postJson('/api/v1/auth/login/code', ['challenge' => $challenge, 'code' => lastCode()])
+        ->assertOk()
+        ->assertJsonPath('data.user.email_verification_required', false);
+});
+
+it('still asks for the code when the confirmation e-mail fails to send at sign-up', function () {
+    // The account is written by then; a 500 would leave the address taken and
+    // the reader with nothing. They are asked for the code, and "Send a new
+    // code" is how they get one once the relay is back.
+    config(['mail.default' => 'smtp']);
+    Mail::shouldReceive('to')->andThrow(new RuntimeException('535 Authentication failed'));
+
+    $this->postJson('/api/v1/auth/register', registration('relay.down@example.com'))
+        ->assertCreated()
+        ->assertJsonPath('data.code_required', true)
+        ->assertJsonMissingPath('data.token');
+});
+
+// ── Mail on: the submit guard, behind the sign-up code ───────────────────
+
+it('still refuses to file for an owner whose address is unconfirmed, then lets it through', function () {
     mailOn();
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $owner->forceFill(['email_verified_at' => null])->save();
@@ -422,6 +516,15 @@ it('never asks staff to confirm an address before filing', function () {
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────
+
+/** Register with mail on and return the challenge the code step needs. */
+function signUp(string $email): string
+{
+    return test()->postJson('/api/v1/auth/register', registration($email))
+        ->assertCreated()
+        ->assertJsonPath('data.code_required', true)
+        ->json('data.challenge');
+}
 
 /** @return array<string, mixed> */
 function registration(string $email): array

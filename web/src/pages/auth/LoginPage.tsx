@@ -77,13 +77,21 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
    * password with `code_required`, which it does only while a real mailer is
    * configured. With mail off this stays null and the page is the one-step
    * form it always was.
+   *
+   * Or arrives already set, from sign-up [Ken, 6 October 2026]: with mail on,
+   * /auth/register answers in this same shape for the address-confirmation
+   * code, and RegisterPage sends the new owner here with it, so the code is
+   * asked on this step — same box, same resend, same way back to the password
+   * if it dies — and typing it signs them in.
    */
-  const [challenge, setChallenge] = useState<SignInCodeChallenge | null>(null)
+  const [challenge, setChallenge] = useState<SignInCodeChallenge | null>(
+    () => (location.state as { signUpCode?: SignInCodeChallenge } | null)?.signUpCode ?? null,
+  )
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState<string | undefined>()
   const [codeNote, setCodeNote] = useState<string | null>(null)
   const [resending, setResending] = useState(false)
-  const [cooldown, setCooldown] = useCooldown(0)
+  const [cooldown, setCooldown] = useCooldown(challenge?.resend_after ?? 0)
   const formRef = useRef<HTMLFormElement>(null)
   const lastPath = useRef(location.pathname)
 

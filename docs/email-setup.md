@@ -10,8 +10,8 @@ Until those lines are in, e-mails are written to `api/storage/logs/laravel.log`
 instead of being sent (`MAIL_MAILER=log`). Nothing breaks either way.
 
 **Setting a real mailer also switches on three account rules** (section 7): a
-six-digit code by e-mail at every sign-in, a confirmed address before an owner
-can file, and a code by e-mail before a password change in Settings. Read
+six-digit code by e-mail at every sign-in, an address confirmed by code at
+sign-up, and a code by e-mail before a password change in Settings. Read
 section 7 before changing `MAIL_MAILER`.
 
 SMS is separate, and only for key moments: see `SMS_DRIVER` in `docs/runbook-deploy.md` §1.
@@ -187,8 +187,8 @@ Brevo), all three switch on together. The decision is made in one place,
 | | Mail off (`log`, today) | Mail on (`smtp`) |
 |---|---|---|
 | Sign-in (all three doors) | password only | password, then a code e-mailed to the account |
-| Sign-up | the old confirmation link is written to the log | a confirmation code is e-mailed |
-| Filing (Submit on a draft) | allowed | refused until the address is confirmed |
+| Sign-up | signed straight in; the old confirmation link is written to the log | a confirmation code is e-mailed, and the next screen asks for it; typing it confirms the address and signs the owner in |
+| Filing (Submit on a draft) | allowed | refused for an unconfirmed address (a guard only: sign-up and sign-in already confirm it) |
 | Profile | nothing extra | "Confirm your email address" box, for owners who have not |
 | Change Password (Settings, every account) | current password only | current password, then a code e-mailed to the account |
 
@@ -200,10 +200,15 @@ Typing the code also confirms the address, so an owner who signs in never needs
 the second e-mail.
 
 **The confirmation code** (`Confirm your email address for BizTrack`). Sent on
-sign-up and from the "Send a new code" button on Profile or in the application
-wizard. Works for 30 minutes and 5 wrong tries; only the newest one works. The
-resend is limited to 3 in 15 minutes per account. Drafting is never blocked,
-only Submit, and resubmitting a filing an office sent back is not blocked.
+sign-up, where it is asked on the sign-in page's code step before any session
+is handed out (Ken, 6 October 2026: asked at sign-up, not on the application),
+and from the "Send a new code" button on Profile. Works for 30 minutes and 5
+wrong tries; only the newest one works. At sign-up, "Send a new code" works once
+a minute, up to 5 e-mails, and wrong codes count toward the sign-in lockout;
+from Profile the resend is limited to 3 in 15 minutes per account. An owner who
+closes the tab before typing it is sent a sign-in code at their next sign-in,
+which confirms the address the same way. Submit still refuses an unconfirmed
+address, as a guard; resubmitting a filing an office sent back is not blocked.
 
 **The password-change code** (`Your code to change your BizTrack password`).
 Sent from Settings → Change Password → Send Code, only after the current

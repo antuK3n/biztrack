@@ -67,10 +67,12 @@ export function CodeField({
 /**
  * "Confirm your email address", for an owner who has not yet [Register 1].
  *
- * Shown where it is needed and nowhere else: on Profile beside the address,
- * and in the application wizard when Submit is refused for it. Not a banner
- * over every page — tester item 99 had that removed, and the reason still
- * holds (see AppShell).
+ * On Profile beside the address, and nowhere else. It was also in the
+ * application wizard, opened when Submit was refused for it; since
+ * 6 October 2026 the code is asked at sign-up, on the sign-in page's code
+ * step, so this is only for an owner signed in before that. Not a banner over
+ * every page — tester item 99 had that removed, and the reason still holds
+ * (see AppShell).
  */
 export function ConfirmEmailCard({ user, onConfirmed }: { user: User; onConfirmed?: (user: User) => void }) {
   const setUser = useAuth((s) => s.setUser)

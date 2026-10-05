@@ -38,7 +38,6 @@ import {
   ClipboardIcon,
   UploadIcon,
 } from '../../components/icons'
-import { ConfirmEmailCard } from '../../components/EmailCode'
 import { Alert } from '../../components/ui/Alert'
 import { DocumentActions } from '../../components/DocumentActions'
 import { TinInput } from '../../components/TinInput'
@@ -3375,12 +3374,13 @@ export function ApplyWizard() {
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   /*
-   * Submit was refused because the owner's address is not confirmed yet
-   * [checklist 2026-09-27, Register 1]. Only possible while the API has a real
-   * mailer; the code box replaces the error, and confirming files straight
-   * away, because "Yes, submit" was already pressed.
+   * No code box here any more. Submit refused for an unconfirmed address used
+   * to open one [checklist 2026-09-27, Register 1]; since 6 October 2026 the
+   * address is confirmed at sign-up instead (Ken: "it shouldn't be on the
+   * application"), so an owner reaching Submit already has. The API still
+   * refuses one who has not (EnsureEmailConfirmedToFile), and that refusal
+   * prints like any other.
    */
-  const [needsEmailCode, setNeedsEmailCode] = useState(false)
   /* Autosave bookkeeping — see the autosave effect below. */
   const [dirty, setDirty] = useState(false)
   /**
@@ -9269,7 +9269,6 @@ export function ApplyWizard() {
       return
     }
     setSubmitError(null)
-    setNeedsEmailCode(false)
     const unsaved = await flushAutosave()
     if (unsaved !== null) {
       setSubmitError(unsaved)
@@ -9288,9 +9287,7 @@ export function ApplyWizard() {
         : await applications.submit(applicationId)
       setTracking(app.tracking_id)
     } catch (err) {
-      const apiError = toApiError(err)
-      if (apiError.reason === 'email_unconfirmed') setNeedsEmailCode(true)
-      else setSubmitError(apiError.message)
+      setSubmitError(toApiError(err).message)
     } finally {
       setSaving(false)
     }
@@ -10016,17 +10013,6 @@ export function ApplyWizard() {
       {submitError && (
         <div className="mb-4">
           <Alert variant="error">{submitError}</Alert>
-        </div>
-      )}
-      {needsEmailCode && account && (
-        <div className="mb-4">
-          <ConfirmEmailCard
-            user={account}
-            onConfirmed={() => {
-              setNeedsEmailCode(false)
-              void submit()
-            }}
-          />
         </div>
       )}
 

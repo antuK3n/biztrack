@@ -89,6 +89,33 @@ class EmailCodes
     }
 
     /**
+     * The address code sent at sign-up [Ken, 6 October 2026: "the confirm
+     * email address should already be asked … when signing up"].
+     *
+     * A VERIFY row, so the e-mail, its thirty minutes and "only the newest
+     * works" are the confirmation code's. It also carries a challenge, as a
+     * sign-in code does, because the reader holds no session yet: sign-up hands
+     * one out only once the address is proved, through the sign-in code's own
+     * endpoints (findChallenge accepts this row). The plain issueVerify rows,
+     * sent from Profile to a signed-in owner, have no challenge and so can
+     * never finish a sign-in.
+     *
+     * @return array{0: EmailCode, 1: string, 2: string} [row, code, challenge]
+     */
+    public static function issueSignUp(User $user): array
+    {
+        [$row, $code] = self::issueVerify($user);
+        $challenge = Str::random(64);
+
+        $row->forceFill([
+            'challenge_hash' => self::hashChallenge($challenge),
+            'portal' => 'public',
+        ])->save();
+
+        return [$row, $code, $challenge];
+    }
+
+    /**
      * A fresh code for changing the password from Settings [checklist
      * 2026-09-27, Edit Settings]. Earlier open ones are closed first, for the
      * reason issueVerify gives: only the newest e-mail should work.
@@ -123,9 +150,10 @@ class EmailCodes
             ->first();
     }
 
+    /** A sign-in code, or the sign-up code (issueSignUp), by its challenge. */
     public static function findChallenge(string $challenge): ?EmailCode
     {
-        return EmailCode::where('purpose', EmailCode::LOGIN)
+        return EmailCode::whereIn('purpose', [EmailCode::LOGIN, EmailCode::VERIFY])
             ->where('challenge_hash', self::hashChallenge($challenge))
             ->first();
     }

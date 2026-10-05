@@ -146,7 +146,11 @@ class AuthController extends Controller
                  * file [checklist 2026-09-27, Register 1]. Worked out here so the
                  * web app never has to know how mail is configured: false for
                  * every account while mail is off, false for staff, and false
-                 * once the address is confirmed.
+                 * once the address is confirmed. Since sign-up asks for the code
+                 * before handing out a session, an owner signed in with this
+                 * true is one who registered before that, or signed in past
+                 * the login gate with it switched off; Profile offers them the
+                 * code box.
                  */
                 'email_verification_required' => EmailSwitch::on()
                     && $user->roles->contains('name', 'business_owner')
@@ -366,35 +370,33 @@ class AuthController extends Controller
         }
 
         /*
-         * Send the verification email, and never let it fail the registration
-         * [checklist item #61].
-         *
-         * The account is already written and the token is already minted by the
-         * time this runs, so a mailer that throws — a misconfigured SMTP host, a
-         * provider rejecting the key — must not turn a successful sign-up into a
-         * 500 that leaves the person unable to register again (the address is
-         * taken) and unable to sign in (they never got a response carrying a
-         * token). The log line is how that outage becomes visible; the reader
-         * gets in either way and can ask for a fresh link from their profile.
-         *
-         * MAIL_MAILER is `log` by default (config/mail.php), so locally this
-         * writes the whole message, link and all, to storage/logs/laravel.log —
-         * verifiable without a single credential. Point MAIL_MAILER at a real
-         * transport in the deployed environment and nothing here changes.
+         * With a real mailer, no session yet: the next screen asks for the
+         * six-digit code just e-mailed, and typing it confirms the address and
+         * signs the owner in [Ken, 6 October 2026 — "upon signing up, the
+         * confirm email address should already be asked. It shouldn't be on
+         * the application"]. Until then the code was asked at Submit, after a
+         * whole application had been filled in under an address nobody had
+         * proved. If the tab is closed first, the next sign-in sends a code
+         * instead of a session (the unverified-owner gate in login(), on in
+         * production, and the sign-in code itself), and typing it confirms the
+         * address. Why a code and not the link: see EmailCodes.
          */
+        if (EmailSwitch::on()) {
+            return $this->startSignUpCode($user);
+        }
+
         /*
-         * With a real mailer configured, a six-digit code goes out instead of
-         * the link, and filing waits for it [checklist 2026-09-27, Register 1;
-         * why a code is on EmailCodes]. With mail off (the demo) the link is
-         * written to the log exactly as before, and nothing waits on it.
+         * Mail off (the demo): the link is written to the log, the owner is
+         * signed straight in, and nothing waits on it.
+         *
+         * Never let it fail the registration [checklist item #61]. The account
+         * is already written, so a mailer that throws must not turn a
+         * successful sign-up into a 500 that leaves the person unable to
+         * register again (the address is taken) and unable to sign in. The log
+         * line is how that outage becomes visible.
          */
         try {
-            if (EmailSwitch::on()) {
-                [, $code] = EmailCodes::issueVerify($user);
-                EmailCodes::send($user, EmailCode::VERIFY, $code);
-            } else {
-                $user->sendEmailVerificationNotification();
-            }
+            $user->sendEmailVerificationNotification();
         } catch (\Throwable $e) {
             Log::error('Verification email failed to send on registration.', [
                 'user_id' => $user->id,
@@ -716,7 +718,42 @@ class AuthController extends Controller
     }
 
     /**
-     * Step two of a sign-in: the code from the e-mail [Login 5].
+     * The code step that follows sign-up while mail is on: the same answer as
+     * startSignInCode, so the sign-in page's code step takes it unchanged, but
+     * for the address-confirmation code (EmailCodes::issueSignUp).
+     *
+     * A relay failure is logged and the step is still answered. The account is
+     * already written, so refusing here would leave the address taken and the
+     * reader with nothing; on the code step "Send a new code" retries the
+     * relay, and says so if it is still down.
+     */
+    private function startSignUpCode(User $user): JsonResponse
+    {
+        [, $code, $challenge] = EmailCodes::issueSignUp($user);
+
+        try {
+            EmailCodes::send($user, EmailCode::VERIFY, $code);
+        } catch (\Throwable $e) {
+            Log::error('Verification email failed to send on registration.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'code_required' => true,
+                'challenge' => $challenge,
+                'email' => EmailCodes::mask($user->email),
+                'expires_in_minutes' => EmailCodes::minutes(EmailCode::VERIFY),
+                'resend_after' => (int) config('auth.email_codes.resend_after', 60),
+            ],
+        ], 201);
+    }
+
+    /**
+     * Step two of a sign-in: the code from the e-mail [Login 5]. Also the
+     * step that finishes a sign-up while mail is on (startSignUpCode).
      *
      * A wrong code counts against the account exactly as a wrong password
      * does — same limiter key, same `failed_login_attempts`. Without that,
@@ -760,7 +797,9 @@ class AuthController extends Controller
              */
             if (! $user->hasVerifiedEmail()) {
                 $user->markEmailAsVerified();
-                Audit::log('user.email_verified', $user, ['via' => 'sign-in code'], actorId: $user->id);
+                Audit::log('user.email_verified', $user, [
+                    'via' => $row->purpose === EmailCode::VERIFY ? 'sign-up code' : 'sign-in code',
+                ], actorId: $user->id);
             }
 
             return $this->completeSignIn($user->fresh(), (string) $row->portal, $key);
@@ -814,7 +853,9 @@ class AuthController extends Controller
         $code = EmailCodes::refresh($row);
 
         try {
-            EmailCodes::send($user, EmailCode::LOGIN, $code);
+            // The row's own purpose: a sign-up code is resent as the
+            // confirmation e-mail it started as, not as a sign-in code.
+            EmailCodes::send($user, $row->purpose, $code);
         } catch (\Throwable $e) {
             Log::error('Sign-in code could not be resent.', [
                 'user_id' => $user->id,

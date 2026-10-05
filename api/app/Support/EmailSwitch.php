@@ -9,7 +9,7 @@ namespace App\Support;
  * ── The one place this is decided ──────────────────────────────────────────
  *
  * Three features need a code to reach somebody's inbox: confirming the address
- * after sign-up (a filing is refused until it is confirmed), the sign-in code
+ * at sign-up (asked before the new owner is signed in), the sign-in code
  * every account is asked for after its password, and the resend buttons behind
  * both. (A fourth came later: the code a password change in Settings needs.)
  * Each would lock people out if it ran while mail goes nowhere: a sign-in

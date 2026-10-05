@@ -21,6 +21,7 @@ import {
   type HomeAddressField,
   type HomeAddressValues,
 } from '../../lib/homeAddress'
+import type { SignInCodeChallenge } from '../../lib/resources'
 import type { User } from '../../lib/types'
 import {
   normalizeMobile,
@@ -294,7 +295,7 @@ export function RegisterPage() {
     setLoading(true)
     setFormError(null)
     try {
-      const { data } = await api.post<{ data: { token: string; user: User } }>('/auth/register', {
+      const { data } = await api.post<{ data: { token: string; user: User } | SignInCodeChallenge }>('/auth/register', {
         first_name: values.first_name.trim(),
         middle_name: values.middle_name.trim() || undefined,
         last_name: values.last_name.trim(),
@@ -307,6 +308,17 @@ export function RegisterPage() {
         data_privacy_consent: values.data_privacy_consent,
         ...homeAddressPayload(values),
       })
+      /*
+       * With a real mailer the API holds the session back until the address is
+       * confirmed [Ken, 6 October 2026: asked at sign-up, not on the
+       * application]. The next screen is the sign-in page's code step, which
+       * takes this answer as it is and signs the owner in once the code is
+       * typed. With mail off the token comes straight back, as it always did.
+       */
+      if ('code_required' in data.data) {
+        navigate('/login', { replace: true, state: { signUpCode: data.data } })
+        return
+      }
       // Self-registration is always a business owner, so always the public portal.
       setSession(data.data.token, data.data.user, 'public')
       navigate('/dashboard', { replace: true })

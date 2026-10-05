@@ -11,12 +11,18 @@ use Symfony\Component\HttpFoundation\Response;
  * No filing until the owner has confirmed their e-mail address — while mail
  * is on [checklist 2026-09-27, Register 1].
  *
- * On the SUBMIT route only. Drafting, uploading and saving stay open, so a new
- * owner can fill the whole application while the code is on its way; only
- * handing it in waits. Tester item 99 is why it is here and not a banner on
- * every page: that banner claimed verification was required when nothing
- * enforced it. Now something does, at the one action it guards, and the wizard
- * shows the code box right there when this answers.
+ * A guard, no longer the place the code is asked. Since 6 October 2026 sign-up
+ * asks for the code before it hands out a session (AuthController::register,
+ * Ken: "it shouldn't be on the application, but when signing up"), and an
+ * owner who closes that tab is sent a code at their next sign-in, so an owner
+ * reaching Submit is normally confirmed already. The wizard's own code box went
+ * with that change. This stays for whoever is not: an account registered
+ * before, or one signed in past the login gate with it switched off. They are
+ * refused with the sentence below and confirm from Profile.
+ *
+ * On the SUBMIT route only. Drafting, uploading and saving stay open. Tester
+ * item 99 is why it is here and not a banner on every page: that banner
+ * claimed verification was required when nothing enforced it.
  *
  * Resubmitting a returned filing is NOT gated. That filing was handed in before
  * the rule existed, an office is waiting on it, and holding it back over an
@@ -25,8 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
  * With mail off this does nothing at all. A gate on a code nobody can receive
  * would lock every owner out of filing.
  *
- * 403 with `reason: email_unconfirmed` so the wizard can tell this apart from
- * every other refusal and offer the code instead of an error.
+ * 403 with `reason: email_unconfirmed`, kept so a client can tell this apart
+ * from every other refusal.
  */
 class EnsureEmailConfirmedToFile
 {
