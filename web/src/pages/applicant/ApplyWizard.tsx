@@ -13322,6 +13322,18 @@ export function ApplyWizard() {
                   January. You will see it on that Tax Order of Payment.
                 </p>
               </div>
+            ) : applicationType === 'new' ? (
+              /*
+               * No estimate on a new filing since 5 October 2026. BPLO ticks the
+               * other permits when it reads the form, so a figure here would be
+               * the Business Permit alone and the real bill larger. Client: *"Since
+               * the other permits were NOT YET determined in this part, … remove
+               * this here and only show when the applicant is about to pay."* The
+               * pay page shows the full Tax Order of Payment, itemised.
+               */
+              <p className="mt-6 max-w-md text-sm text-ink-secondary">
+                Your fees are shown when you pay, after BPLO lists the other permits you need.
+              </p>
             ) : (
             <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -13383,11 +13395,8 @@ export function ApplyWizard() {
                 where the rest of the bill comes from.
               */}
               <p className="mt-3 text-xs leading-relaxed text-ink-secondary">
-                {applicationType === 'new'
-                  ? 'An estimate for your Business Permit. BPLO decides which other permits you '
-                    + 'need when it reads your form; their fees are added to your Tax Order of Payment.'
-                  : 'An estimate from your own answers. BPLO assesses the actual amount and issues '
-                    + 'your Tax Order of Payment after it approves this form.'}
+                An estimate from your own answers. BPLO assesses the actual amount and issues
+                your Tax Order of Payment after it approves this form.
               </p>
             </div>
             )}
