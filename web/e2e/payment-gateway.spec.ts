@@ -84,7 +84,7 @@ test.afterAll(async ({ browser }) => {
   await setMode(browser, 'simulated')
 })
 
-test('simulated: Pay Online is paid in the same press, and says no real charge is made', async ({
+test('simulated: Pay Online is paid in the same press, and nothing calls the payment simulated', async ({
   page,
   browser,
 }) => {
@@ -97,7 +97,8 @@ test('simulated: Pay Online is paid in the same press, and says no real charge i
   // The simulated list, from the server: Card, and none of the online-only channels.
   await expect(page.getByRole('button', { name: 'Card', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'QR Ph', exact: true })).toHaveCount(0)
-  await expect(page.getByText('This is a simulated payment. No real charge is made.')).toBeVisible()
+  // It said "This is a simulated payment. No real charge is made." (Ken, 5 October 2026).
+  await expect(page.getByText(/simulated|no real charge/i)).toHaveCount(0)
   await shot(page, 'simulated-choose')
 
   await page.getByRole('button', { name: 'Pay Online' }).click()
