@@ -11,6 +11,7 @@ use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
+use Illuminate\Validation\ValidationException;
 use Smalot\PdfParser\Parser;
 
 /*
@@ -167,11 +168,25 @@ it('clears the cause when the permit is reinstated, and when BPLO lifts it', fun
         ->and($permit->suspension_reason)->toBeNull()
         ->and($permit->suspended_for_permit_type_id)->toBeNull();
 
+    /*
+     * BPLO's lift. Not while the refusal stands — only the office that
+     * refused releases it (Mike's Change status lock, 5 October 2026) — so
+     * the refusal is settled first, and the lift then clears the cause with
+     * the status.
+     */
     [$other, $second] = suspendableFiling();
     sanitaryRefuses($other);
+    expect(fn () => app(WorkflowService::class)->liftOutcomeSuspension($second->fresh(), 'Refused in error.'))
+        ->toThrow(ValidationException::class);
+    expect($second->fresh()->suspended_for_permit_type_id)->not->toBeNull();
+
+    ApplicationPermitType::where('application_id', $other->id)
+        ->where('permit_type_id', $second->fresh()->suspended_for_permit_type_id)
+        ->update(['status' => ClearanceStatus::Approved->value]);
     app(WorkflowService::class)->liftOutcomeSuspension($second->fresh(), 'Refused in error.');
 
-    expect($second->fresh()->suspended_at)->toBeNull()
+    expect($second->fresh()->status)->toBe(PermitStatus::Active)
+        ->and($second->fresh()->suspended_at)->toBeNull()
         ->and($second->fresh()->suspended_for_permit_type_id)->toBeNull();
 });
 

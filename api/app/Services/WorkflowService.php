@@ -3076,9 +3076,9 @@ class WorkflowService
      * Asked whether a rejection should suspend by itself or raise a decision for
      * BPLO, the client chose automatic with a manual lift. The reason is the gap:
      * a business whose fire clearance has been refused should not keep trading
-     * because nobody opened a queue that morning. BPLO can still lift it — see
-     * `liftOutcomeSuspension` — and every lift is audited with a reason, so the
-     * discretion is preserved without the permit staying live by default.
+     * because nobody opened a queue that morning. The office that refused
+     * releases it by approving after all; BPLO's lift (`liftOutcomeSuspension`)
+     * no longer overrules a refusal that stands (Change status, 5 October 2026).
      *
      * Only an ACTIVE permit is suspended. An expired or superseded certificate
      * is not a thing the business can trade on, and moving it to Suspended would
@@ -3534,20 +3534,19 @@ class WorkflowService
     /**
      * BPLO lifts a suspension on its own judgement, with a recorded reason.
      *
-     * The discretion half of *"can be suspended"*. The suspension fires by
-     * itself so nothing slips, and this is how a human overrules it — an office
-     * that refused in error, or a refusal BPLO judges not to bear on the
-     * business permit.
+     * The discretion half of *"can be suspended"*. Until 5 October 2026 this
+     * overruled a refusal: an office that refused in error, or a refusal BPLO
+     * judged not to bear on the business permit, and the business traded while
+     * the clearance stayed unsettled. Change status took that away [client, 5
+     * October 2026]: while a refusal holds the Mayor's Permit, only the office
+     * that refused can release it (`assertNotHeldByRefusal`), and BPLO is
+     * shown what holds it instead. Nor while the business is on hold.
      *
-     * The refusal is NOT cleared. The permit that was refused stays refused,
-     * because that is the issuing office's decision and BPLO lifting a
-     * suspension is not BPLO granting somebody else's permit. What it means is
-     * that the business may trade on its business permit while that clearance
-     * is still unsettled, which is exactly the judgement being recorded.
-     *
-     * A consequence worth stating: because the refusal stands,
-     * `reconsiderSuspension` will not touch this permit again — it only ever
-     * moves a Suspended one — so a lift is final until somebody suspends again.
+     * So this lifts what nothing on record still warrants. It clears no
+     * refusal either way: a refused permit is its office's decision, and BPLO
+     * lifting a suspension is not BPLO granting somebody else's permit. Bring
+     * the override back by taking `assertNotHeldByRefusal` out of here, if the
+     * client wants BPLO able to overrule an office again.
      */
     public function liftOutcomeSuspension(Permit $permit, string $reason): Permit
     {

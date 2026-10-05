@@ -478,17 +478,13 @@ class PermitController extends Controller
      * *"can be suspended if the other permits applied to were rejected"* — the
      * suspension itself fires automatically the moment an office refuses a
      * permit, so that nothing slips through a queue nobody opened that morning.
-     * This is how a person overrules it: an office that refused in error, or a
-     * refusal BPLO judges not to bear on the business permit.
+     * This is how a person lifts one that nothing on record still warrants —
+     * not, since 5 October 2026, one a refusal still holds: see
+     * `WorkflowService::liftOutcomeSuspension`.
      *
      * Behind `permit.issue`, which BPLO and the super admin hold. The same
      * authority that mints a certificate is the one that decides it may trade
-     * while a clearance is unsettled; an office reviewer cannot reach it, and
-     * neither can the owner.
-     *
-     * The refusal is NOT cleared — see `WorkflowService::liftOutcomeSuspension`
-     * for why BPLO lifting a suspension is not BPLO granting another office's
-     * permit.
+     * again; an office reviewer cannot reach it, and neither can the owner.
      */
     public function liftSuspension(Request $request, Permit $permit): JsonResponse
     {
