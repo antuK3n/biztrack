@@ -498,6 +498,20 @@ export function AppShell() {
             keeps its dismiss button clear of the fixed bell, which sits over
             this corner on a phone.
           */}
+          {/*
+            Which account this is, on every staff page [Ken, 5 October 2026: "a
+            title (visible on all pages) that displays which office or account a
+            user is logged in"]. Offices by their code and name; the super admin,
+            who has no office, by its role. Owners never see it.
+          */}
+          {!isOwner && (
+            <p className="mb-4 mr-12 flex flex-wrap items-baseline gap-x-2 lg:mr-10 print:hidden">
+              <span className="text-lg font-bold text-royal">
+                {user.department ? user.department.code : 'Super Administrator'}
+              </span>
+              {user.department && <span className="text-sm text-ink-secondary">{user.department.name}</span>}
+            </p>
+          )}
           <OfficeHoursNotice audience={portal === 'public' ? 'owner' : 'staff'} className="mr-12 lg:mr-10" />
           {/* While the Debug page simulates renewal dates, every screen says so. */}
           <PretendDateBanner className="mr-12 lg:mr-10" />
