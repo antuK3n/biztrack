@@ -29,6 +29,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -948,6 +949,8 @@ class ApplicationController extends Controller
             ]);
         }
 
+        $this->validateCorrections($sent);
+
         DB::transaction(function () use ($application, $business, $sent) {
             /*
              * The three records a scalar correction can land on. Resolved once
@@ -1051,6 +1054,53 @@ class ApplicationController extends Controller
         return response()->json([
             'data' => new ApplicationResource($application->fresh()->load($this->fullEager)),
         ]);
+    }
+
+    /**
+     * Each corrected value through the rule the first filing applied to it.
+     *
+     * Scenario run, 5 October 2026 (owner-apply-new row 36): corrections were
+     * trimmed and written as typed, so TIN "abc", e-mail "x" and capital
+     * "lots" were stored and the filing went back to BPLO, and "lots" as the
+     * capital share answered 500. The rules and the TIN message are
+     * BusinessController::validateBusiness's for the same columns, and each
+     * field is named as that form names it, so the refusal reads the same on
+     * both doors. Keep the two in step.
+     *
+     * @param  array<string, string|null>  $sent
+     */
+    private function validateCorrections(array $sent): void
+    {
+        $rules = [
+            'form:tin' => ['nullable', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
+            'form:email' => ['nullable', 'email', 'max:255'],
+            'form:capital_investment' => ['nullable', 'numeric', 'min:0', 'max:10000000000'],
+            'form:capital_participation' => ['nullable', 'numeric', 'min:0', 'max:100'],
+        ];
+        $names = [
+            'form:tin' => 'tin',
+            'form:email' => 'address.email',
+            'form:capital_investment' => 'capital investment',
+            'form:capital_participation' => 'capital participation filipino',
+        ];
+
+        // The TIN is shaped first, as the business form shapes it before its rule.
+        $check = $sent;
+        if (is_string($check['form:tin'] ?? null) && trim($check['form:tin']) !== '') {
+            $check['form:tin'] = Tin::normalize(trim($check['form:tin']));
+        }
+
+        $present = array_intersect_key($rules, $check);
+        if ($present === []) {
+            return;
+        }
+
+        Validator::make(
+            ['fields' => $check],
+            collect($present)->mapWithKeys(fn ($rule, $code) => ["fields.{$code}" => $rule])->all(),
+            ['fields.form:tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'],
+            collect($present)->mapWithKeys(fn ($rule, $code) => ["fields.{$code}" => $names[$code]])->all(),
+        )->validate();
     }
 
     public function cancel(Request $request, Application $application): JsonResponse

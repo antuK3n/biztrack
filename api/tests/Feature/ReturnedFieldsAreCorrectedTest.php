@@ -2,9 +2,8 @@
 
 use App\Models\Application;
 use App\Models\ApplicationCorrection;
-use App\Models\Barangay;
 use App\Models\PermitType;
-use App\Models\PsicCode;
+use App\Models\User;
 use App\Services\WorkflowService;
 
 /*
@@ -22,7 +21,6 @@ use App\Services\WorkflowService;
  */
 
 /* `filingReturnedAbout` lives in tests/Pest.php — see BlankTinIsChasedTest. */
-
 
 it('stores every field the officer ticked, not just the first', function () {
     $app = filingReturnedAbout('form:tin,form:trade_name,form:email');
@@ -355,7 +353,7 @@ it('keeps the filing’s moves off the other permits’ timelines', function () 
 it('tells the officer who returned it that corrections arrived', function () {
     $app = filingReturnedAbout('form:trade_name');
 
-    $bplo = App\Models\User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     $before = $bplo->notifications()->count();
 
     $this->withHeaders(authAs('owner@biztrack.local'))
@@ -427,4 +425,59 @@ it('leaves a corporation’s capital share alone', function () {
         ->assertOk();
 
     expect((float) $app->fresh()->business->capital_participation_filipino)->toBe(60.0);
+});
+
+/*
+ * ── A correction is held to the rule the first filing was ───────────────────
+ *
+ * Scenario run, 5 October 2026 (owner-apply-new row 36): this route trimmed a
+ * value and wrote it, so TIN "abc", e-mail "x" and capital "lots" were stored
+ * and the filing went back to BPLO, and "lots" as the capital share answered
+ * 500. Each field now goes through the rule BusinessController::
+ * validateBusiness applies to it, with the same message.
+ */
+it('refuses a correction the business form would refuse, and writes nothing', function () {
+    $app = filingReturnedAbout('form:tin,form:email,form:capital_investment,form:capital_participation');
+    $before = $app->business->only(['tin', 'capital_investment', 'capital_participation_filipino']);
+
+    $errors = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => [
+                'form:tin' => 'abc',
+                'form:email' => 'x',
+                'form:capital_investment' => 'lots',
+                'form:capital_participation' => 'lots',
+            ],
+        ])
+        ->assertStatus(422)
+        ->json('errors');
+
+    expect($errors)->toBe([
+        'fields.form:tin' => ['Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'],
+        'fields.form:email' => ['The address.email field must be a valid email address.'],
+        'fields.form:capital_investment' => ['The capital investment field must be a number.'],
+        'fields.form:capital_participation' => ['The capital participation filipino field must be a number.'],
+    ]);
+
+    $app->refresh();
+    expect($app->status->value)->toBe('returned')
+        ->and($app->business->only(['tin', 'capital_investment', 'capital_participation_filipino']))->toBe($before)
+        ->and(ApplicationCorrection::where('application_id', $app->id)->count())->toBe(0);
+});
+
+it('still takes a well-formed correction of those fields', function () {
+    $app = filingReturnedAbout('form:tin,form:email,form:capital_investment,form:capital_participation');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => [
+                'form:tin' => '123 456 789 000',
+                'form:email' => 'shop@example.test',
+                'form:capital_investment' => '250000',
+                'form:capital_participation' => '60',
+            ],
+        ])
+        ->assertOk();
+
+    expect($app->fresh()->business->tin)->toBe('123-456-789-000');
 });
