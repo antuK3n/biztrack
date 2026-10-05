@@ -1065,20 +1065,21 @@ class AnalyticsHistorySeeder extends Seeder
         $tier = $this->complexityFor($business, $type);
 
         /*
-         * There is no longer a set of permits to choose here.
+         * There is no set of permits to choose here.
          *
          * A `match` on tier and application type used to build a `$codes` list —
          * business + health + fire, plus zoning on the technical filings — and
-         * sync it onto the draft. `submit()` calls `attachRequiredPermitTypes()`
-         * on the way past, which `syncWithoutDetaching`es all five required
-         * clearances onto every filing regardless, so any shorter list this
+         * sync it onto the draft. `submit()` then attached all five required
+         * clearances to every new filing regardless, so any shorter list this
          * seeder picked was silently widened a moment later. Writing it was
          * inventing a distinction the product had stopped making.
          *
          * The wizard is the business permit alone (see `submit()`), so the draft
-         * carries nothing and submission attaches the set. Which offices a
-         * filing actually reaches is decided further down, by how far its
-         * applicant gets through CLEARANCE_JOURNEY before the anchor date.
+         * carries nothing. Since 5 October 2026 submission no longer adds the
+         * five either: BPLO ticks them when it approves the form, which this
+         * seeder does in `runReview()`. Which offices a filing actually reaches
+         * is decided further down, by how far its applicant gets through
+         * CLEARANCE_JOURNEY before the anchor date.
          */
 
         // The permit this filing replaces. Real column, real link: it is what
@@ -1822,9 +1823,27 @@ class AnalyticsHistorySeeder extends Seeder
             $assignment->refresh();
         }
 
+        /*
+         * BPLO's ticks, when this is BPLO reading a NEW filing's form. Since
+         * 5 October 2026 a new filing is submitted with the Business Permit
+         * alone and BPLO ticks its other permits as it approves the form
+         * (client: "BPLO decides, no rules"); `approveMainForm()` refuses one
+         * that carries none and names none. This ticks all five — what
+         * submission attached on its own before that date, and what
+         * CLEARANCE_JOURNEY walks every applicant through — chosen outright
+         * rather than drawn, so it adds nothing to the shared mt_rand stream
+         * and the history comes out as it did before.
+         */
+        $fresh = $app->fresh();
+        $ticks = $review['code'] === 'BPLO'
+            && $fresh->status === ApplicationStatus::ForApproval
+            && $fresh->application_type === ApplicationType::New
+                ? collect(PermitType::REQUIRED_CLEARANCE_CODES)->map(fn (string $code) => $this->permitTypes[$code]->id)->all()
+                : null;
+
         $this->travelTo($completedAt);
         Auth::setUser($officer ?? $app->applicant);
-        $this->workflow->approveAssignment($assignment, $this->reviewRemark($review['code']));
+        $this->workflow->approveAssignment($assignment, $this->reviewRemark($review['code']), $ticks);
         $this->counts['completed_reviews']++;
 
         return $completedAt;
