@@ -70,7 +70,10 @@ it('closes the other offices’ open reviews when BPLO rejects the filing', func
  * to revise a permit on a filing that is over [Ken, 5 October 2026].
  */
 it('refuses an office’s return once BPLO has rejected the filing', function () {
-    $appId = scopedAssignmentFiling('Returned After Rejection'); // BPLO done, CHO open
+    // BPLO done, CHO open and held by its officer — since the request of 6
+    // October 2026 an unheld CHO case refuses the return with 403 before the
+    // decided-filing rule under test is ever asked (scopedFilingHeldByCho).
+    $appId = scopedFilingHeldByCho('Returned After Rejection');
     $cho = ApplicationAssignment::findOrFail(choAssignmentId($appId));
 
     test()->withHeaders(authAs('bplo@biztrack.local'))

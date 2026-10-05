@@ -303,6 +303,9 @@ it('lets the office that issues the permit correct the applicant’s answers, an
         'status' => 'pending',
         'assigned_at' => now(),
     ]);
+    // And held by OBO's officer: since the request of 6 October 2026 a
+    // correction outside BPLO is the holder's to make (CaseHolder; claimAs).
+    claimAs('obo@biztrack.local', $app->id);
 
     $this->withHeaders(authAs('obo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [

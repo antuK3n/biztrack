@@ -78,6 +78,10 @@ function recipientsSeat(string $code, string $email, bool $active = true): User
  * An office opens the conversation. Where nobody there holds the filing the
  * owner may only answer one the office started (checklist 2026-09-27, apply
  * item 23), so the unclaimed-office cases below begin with the office.
+ *
+ * Outside BPLO the office can no longer write on a case nobody holds (request
+ * of 6 October 2026, CaseHolder), so there the cases claim it first — and,
+ * where the case must then be unheld, put it back (`recipientsRelease`).
  */
 function recipientsOpen(int $appId, string $email, string $office): void
 {
@@ -86,6 +90,15 @@ function recipientsOpen(int $appId, string $email, string $office): void
         'body' => 'Opening the conversation.',
         'department_id' => recipientsDept($office),
     ])->assertCreated();
+}
+
+/** The holder puts the office's case back in the pool, as Release does. */
+function recipientsRelease(int $appId, string $email, string $office): void
+{
+    $id = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', recipientsDept($office))->value('id');
+    authAs($email);
+    test()->postJson("/api/v1/assignments/{$id}/release")->assertOk();
 }
 
 function recipientsWrite(int $appId, string $body, ?string $office = null): void
@@ -101,7 +114,11 @@ it('never tells the owner about the message they just sent', function () {
     Bus::fake([SendOwnerUpdateEmail::class]);
     $appId = recipientsFiling();
     recipientsOpen($appId, 'bplo@biztrack.local', 'BPLO');
+    // CHO's officer takes the case to write on it (6 October 2026), and puts
+    // it back, so the owner is still writing to an office nobody holds.
+    claimAs('sanitary@biztrack.local', $appId);
     recipientsOpen($appId, 'sanitary@biztrack.local', 'CHO');
+    recipientsRelease($appId, 'sanitary@biztrack.local', 'CHO');
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $mailToOwner = fn () => Bus::dispatched(SendOwnerUpdateEmail::class, fn ($job) => $job->owner->is($owner))->count();
     $before = $owner->notifications()->count();
@@ -117,7 +134,11 @@ it('never tells the owner about the message they just sent', function () {
 
 it('tells the active accounts of the office written to when nobody there holds the case', function () {
     $appId = recipientsFiling();
+    // Opened by CHO's officer while holding it (6 October 2026), then put
+    // back: an office nobody holds is now one somebody released.
+    claimAs('sanitary@biztrack.local', $appId);
     recipientsOpen($appId, 'sanitary@biztrack.local', 'CHO');
+    recipientsRelease($appId, 'sanitary@biztrack.local', 'CHO');
     $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     $sanitary = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
     $otherCho = recipientsSeat('CHO', 'recipients.cho2@biztrack.local');
@@ -170,7 +191,8 @@ it('still tells the owner when an office writes to them', function () {
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $before = $owner->notifications()->count();
 
-    authAs('sanitary@biztrack.local');
+    // The office writes as the officer holding its case (6 October 2026).
+    claimAs('sanitary@biztrack.local', $appId);
     test()->postJson("/api/v1/applications/{$appId}/messages", [
         'body' => 'Bring the water test.',
         'department_id' => recipientsDept('CHO'),

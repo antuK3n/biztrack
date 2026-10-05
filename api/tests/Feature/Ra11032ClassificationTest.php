@@ -78,6 +78,14 @@ it('lets every reviewing office set the category on its own filing', function (s
         ? 'simple'
         : 'highly_technical';
 
+    /*
+     * Assign to Me first. Outside BPLO an unheld case is not worked since the
+     * request of 6 October 2026 (claimAs in Pest.php); for BPLO the claim is
+     * the one acting would have made anyway. "Every reviewing office" is
+     * still the point — each of them sets it, once it holds the case.
+     */
+    expect(claimAs($email, $assignment->application_id, $assignment->department->code))->toBe($assignment->id);
+
     $this->withHeaders(authAs($email))
         ->postJson("/api/v1/assignments/{$assignment->id}/classification", ['tier' => $target])
         ->assertOk()
@@ -134,6 +142,8 @@ it('records who changed a statutory clock, from what, to what', function () {
     $before = $app->complexity;
     $target = $before === 'complex' ? 'simple' : 'complex';
     $officer = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
+    // CHO's officer holds the case before working it (6 October 2026).
+    expect(claimAs('sanitary@biztrack.local', $app->id))->toBe($assignment->id);
 
     $this->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$assignment->id}/classification", ['tier' => $target])

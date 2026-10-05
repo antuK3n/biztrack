@@ -180,7 +180,10 @@ function clearanceApplicantHalf(int $appId, string $code): void
 /** Everything the OFFICE does for one clearance: approve, schedule, inspect. */
 function clearanceOfficeHalf(int $appId, string $code): void
 {
-    authAs(OFFICER_FOR[$code]);
+    // Assign to Me first: since the request of 6 October 2026 an office
+    // other than BPLO neither opens nor works a case nobody holds (claimAs in
+    // Pest.php). Leaves the officer signed in for the three acts below.
+    claimAs(OFFICER_FOR[$code], $appId);
     $assignment = ApplicationAssignment::where('application_id', $appId)
         ->where('department_id', PermitType::where('code', $code)->value('issuing_department_id'))
         ->firstOrFail();

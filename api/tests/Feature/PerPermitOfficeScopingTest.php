@@ -335,6 +335,9 @@ it('does not show one office the questionnaire another office collected', functi
      */
     $cho = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
     $assignment = $app->assignments()->where('department_id', $cho->department_id)->firstOrFail();
+    // Opened by the officer holding it: since the request of 6 October 2026
+    // CHO cannot open a case nobody holds (CaseHolder; claimAs in Pest.php).
+    claimAs('sanitary@biztrack.local', $app->id);
 
     $sheets = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/assignments/{$assignment->id}")

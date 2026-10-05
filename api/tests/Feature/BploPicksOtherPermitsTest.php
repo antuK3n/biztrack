@@ -205,6 +205,8 @@ it('closes the filing when the last ticked permit is issued', function () {
 
     $cho = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', Department::where('code', 'CHO')->value('id'))->firstOrFail();
+    // CHO's officer takes the case first (request of 6 October 2026; claimAs).
+    claimAs('sanitary@biztrack.local', $app->id);
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$cho->id}/approve")->assertOk();
     $visitId = test()->withHeaders(authAs('sanitary@biztrack.local'))

@@ -209,6 +209,9 @@ function fireRequirementReply(): array
 {
     ['application' => $app] = scopedDocument();
 
+    // BFP's officer holds its case before raising on it: outside BPLO an
+    // unheld case is not worked (request of 6 October 2026; claimAs).
+    claimAs('fire@biztrack.local', $app->id);
     $requestId = test()->withHeaders(authAs('fire@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/requests", ['title' => 'Fire extinguisher refill receipt'])
         ->assertCreated()->json('data.id');

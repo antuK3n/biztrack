@@ -92,6 +92,16 @@ function paidNewFiling(): Application
         ])->assertSuccessful();
     }
 
+    /*
+     * And each office's officer presses Assign to Me. Since the request of 6
+     * October 2026 an office other than BPLO cannot approve, refuse or book on
+     * a case nobody holds (CaseHolder), and every test below acts as these
+     * five accounts — see claimAs() in Pest.php.
+     */
+    foreach (['CHO', 'BFP', 'CPDO', 'OBO', 'CENRO'] as $office) {
+        claimAs(officerEmail($office), $appId);
+    }
+
     return Application::findOrFail($appId)->fresh();
 }
 

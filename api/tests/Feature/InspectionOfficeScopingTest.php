@@ -157,7 +157,9 @@ function filingWithOneOfficesVisitWrittenUp(): array
     foreach ([['CHO', 'sanitary@biztrack.local', 'SANITARY'], ['BFP', 'fire@biztrack.local', 'FSIC']] as [$code, $email, $permit]) {
         $assignment = $app->assignments()->whereRelation('department', 'code', $code)->firstOrFail();
 
-        authAs($email);
+        // Assign to Me first — required outside BPLO since the request of
+        // 6 October 2026 (claimAs in Pest.php); it leaves $email signed in.
+        claimAs($email, $appId);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
         test()->postJson("/api/v1/applications/{$appId}/permits/{$permit}/inspection", [
             'scheduled_at' => now()->toDateString(), // today: no result before the booked day

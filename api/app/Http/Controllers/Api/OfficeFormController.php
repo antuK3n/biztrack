@@ -13,6 +13,7 @@ use App\Services\WorkflowService;
 use App\Support\AccountPrefill;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\CaseHolder;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\RenewalPrefill;
@@ -580,19 +581,15 @@ class OfficeFormController extends Controller
          * by another officer could still rewrite its answers, and the office
          * could rewrite the sheet behind a certificate it had already issued.
          *
-         * "Holds" is the reading `authorizeHolder` and the review page's
-         * `can_act` already give it: held by this officer, or by nobody yet.
+         * "Holds" is CaseHolder's reading, which the review page's `can_act`
+         * also gives: this officer holds it — or, in BPLO, nobody does yet.
          * The issuance dates are not answers and stay open as they always were.
          */
         if (array_diff_key($corrected, array_flip(self::OFFICER_KEYS)) !== []) {
             $reviews = $application->assignments()->where('department_id', $user->department_id)->get();
-            abort_if(
-                $reviews->isNotEmpty() && $reviews->every(
-                    fn ($review) => $review->officer_user_id !== null && $review->officer_user_id !== $user->id,
-                ),
-                403,
-                'This filing is with another officer. Only the Super Administrator can move it.'
-            );
+            if ($reviews->isNotEmpty() && $reviews->every(fn ($review) => ! CaseHolder::mayAct($user, $review))) {
+                abort(403, (string) CaseHolder::refusal($user, $reviews->first()));
+            }
             abort_if(
                 $application->permitTypes()
                     ->where('permit_types.id', $permitType->id)

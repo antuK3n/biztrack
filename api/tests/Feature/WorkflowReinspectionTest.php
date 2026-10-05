@@ -139,11 +139,14 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
     }
 
     foreach (REINSPECTION_OFFICE as $code => $deptCode) {
+        /*
+         * Each office's officer presses Assign to Me first: since the request
+         * of 6 October 2026 none of these five offices may open or work a case
+         * nobody holds (see claimAs() in Pest.php). Held from here on, the same
+         * account conducts and re-books the visits in every test below.
+         */
+        $assignmentId = claimAs($deptEmail[$deptCode], $appId);
         $officer = authAs($deptEmail[$deptCode]);
-
-        $assignmentId = ApplicationAssignment::where('application_id', $appId)
-            ->whereHas('department', fn ($d) => $d->where('code', $deptCode))
-            ->value('id');
 
         test()->withHeaders($officer)
             ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'ok'])

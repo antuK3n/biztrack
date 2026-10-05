@@ -15,6 +15,7 @@ use App\Models\PermitType;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use App\Support\CaseHolder;
 use App\Support\Caseload;
 use App\Support\Ra11032;
 use Illuminate\Database\Eloquent\Builder;
@@ -528,6 +529,13 @@ class AssignmentController extends Controller
     public function show(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
         $this->authorizeDepartment($request, $assignment);
+
+        /*
+         * Not opened until somebody holds it, outside BPLO: the officer
+         * presses Assign to Me first, and once it is held the rest of the
+         * office may read it (request of 6 October 2026 — see CaseHolder).
+         */
+        abort_unless(CaseHolder::mayOpen($request->user(), $assignment), 403, CaseHolder::UNCLAIMED);
 
         $assignment->load([
             'department', 'officer',
@@ -1150,10 +1158,11 @@ class AssignmentController extends Controller
      * audit row would name whoever pressed last. Recording an OIC while letting
      * anyone act is a label, not an assignment.
      *
-     * An UNHELD assignment is not refused: acting on it claims it. That is the
-     * rule `approve()` has always had — it stamped `officer_user_id` on the way
-     * past — and it is kept on purpose, because an office of one should not have
-     * to press Claim to be allowed to do its job.
+     * An UNHELD assignment is refused for every office but BPLO: there the
+     * officer presses Assign to Me first (request of 6 October 2026 — see
+     * CaseHolder). BPLO keeps the older rule, that acting on an unheld case
+     * claims it, which `approve()` has always had: it stamped
+     * `officer_user_id` on the way past.
      *
      * This method only ASKS. The write is `recordHolder()` below, called after
      * the action has succeeded, which preserves the ordering `approve()` already
@@ -1166,12 +1175,8 @@ class AssignmentController extends Controller
     {
         $this->authorizeDepartment($request, $assignment);
 
-        abort_unless(
-            $assignment->officer_user_id === null
-                || $assignment->officer_user_id === $request->user()->id,
-            403,
-            'This filing is with another officer. Only the Super Administrator can move it.'
-        );
+        $refusal = CaseHolder::refusal($request->user(), $assignment);
+        abort_if($refusal !== null, 403, (string) $refusal);
     }
 
     /**

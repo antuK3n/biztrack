@@ -98,8 +98,10 @@ it('refuses a reviewer with the admin role another department’s assignment on 
 });
 
 it('still lets the office that owns the assignment act on it', function () {
-    // The narrowing must not touch the office whose work this is.
-    $appId = scopedAssignmentFiling('Own Office Cafe');
+    // The narrowing must not touch the office whose work this is — once an
+    // officer there holds it, which since the request of 6 October 2026 comes
+    // before working a case outside BPLO (scopedFilingHeldByCho, Pest.php).
+    $appId = scopedFilingHeldByCho('Own Office Cafe');
 
     // Confirmed on receipt: the approval gate wants a name on the processing
     // category, and a 422 from it would look exactly like the 403 this case is

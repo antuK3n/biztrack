@@ -33,7 +33,9 @@ function feeOf(string $email, string $url): array
 }
 
 it('sends a clearance office only the lines for its own permit, and their sum', function () {
-    $appId = scopedAssignmentFiling('Fee Share Eatery');
+    // Held by CHO's officer: since 6 October 2026 an office other than BPLO
+    // opens its review only once somebody holds it (CaseHolder).
+    $appId = scopedFilingHeldByCho('Fee Share Eatery');
     mixedBill($appId);
     $whole = Application::findOrFail($appId)->feeAssessment;
 

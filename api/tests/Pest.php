@@ -108,6 +108,84 @@ function takeFiling(int $applicationId, string $departmentCode): int
 }
 
 /**
+ * Have an officer press "Assign to Me" on their office's case on a filing.
+ *
+ * ── Why every fixture that works a case now calls this ─────────────────────
+ *
+ * Request of 6 October 2026, for every office except BPLO: "The officer must
+ * click 'Assign to Me' before they can access and process the application."
+ * Before it, acting on an unheld case claimed it on the way past, so a fixture
+ * could log an officer in and press Approve. Since it, an unheld CHO, BFP,
+ * CPDO, OBO or CENRO case refuses to be opened or worked
+ * (`App\Support\CaseHolder::UNCLAIMED`), and roughly a hundred and fifty tests
+ * that were about something else entirely — re-inspection, fees, requests —
+ * started failing on that 403 at their first officer action.
+ *
+ * They are modelling an officer who has done what the screen asks, so they do
+ * it too, through the real endpoint: the claim runs, and this asserts it was
+ * accepted. Claiming is the subject of ClaimBeforeWorkTest and
+ * OfficerInChargeTest, not of the callers of this.
+ *
+ * It is the SAME account that then acts, because only the holder may act — a
+ * fixture that claimed as one officer and approved as another would be
+ * refused with `CaseHolder::HELD_ELSEWHERE` instead.
+ *
+ * `$departmentCode` names the office when the account is not the one doing the
+ * claiming's department — left null, it is the account's own office, which is
+ * the only office it can claim for anyway. The office's FIRST case on the
+ * filing by id is claimed, which is the one `CaseHolder::caseOf` judges.
+ *
+ * Side effect, on purpose and worth knowing: the test client is left signed in
+ * as `$email`, because the caller is about to act as that officer. A fixture
+ * that goes on to act as somebody else calls `authAs` for them, as it already
+ * had to.
+ *
+ * Harmless on a BPLO case, where it is the explicit form of the claim that
+ * acting would have made anyway, and on a case this officer already holds,
+ * where the endpoint answers 200 and changes nothing.
+ */
+function claimAs(string $email, int $applicationId, ?string $departmentCode = null): int
+{
+    $user = User::where('email', $email)->firstOrFail();
+    $departmentId = $departmentCode !== null
+        ? Department::where('code', $departmentCode)->value('id')
+        : $user->department_id;
+
+    $assignmentId = ApplicationAssignment::where('application_id', $applicationId)
+        ->where('department_id', $departmentId)
+        ->orderBy('id')
+        ->value('id');
+
+    // A missing assignment is a fixture bug — the office was never routed —
+    // and should say so here, not as a 403 three lines further on.
+    expect($assignmentId)->not->toBeNull("No {$departmentCode} assignment on filing {$applicationId} to claim.");
+
+    authAs($email);
+    test()->postJson("/api/v1/assignments/{$assignmentId}/claim")->assertOk();
+
+    return $assignmentId;
+}
+
+/**
+ * The seeded officer of an office, by office code (DemoSeeder seats one each).
+ *
+ * For fixtures that route a filing by office code and must then have that
+ * office's officer claim it (`claimAs`): the claim has to be made by the
+ * account that will act, and these are the accounts the suites act as.
+ */
+function officerEmail(string $departmentCode): string
+{
+    return match ($departmentCode) {
+        'BPLO' => 'bplo@biztrack.local',
+        'CHO' => 'sanitary@biztrack.local',
+        'BFP' => 'fire@biztrack.local',
+        'CPDO' => 'zoning@biztrack.local',
+        'OBO' => 'obo@biztrack.local',
+        'CENRO' => 'cenro@biztrack.local',
+    };
+}
+
+/**
  * Move the clock FORWARD to the next weekday at 10:00 AM, Manila.
  *
  * An office books a visit only on a weekday between 8:00 AM and 5:00 PM
@@ -351,6 +429,24 @@ function scopedAssignmentFiling(string $name): int
             'form_data' => ['sanitary_classification' => 'Food Establishment'],
             'submit' => true,
         ])->assertSuccessful();
+
+    return $appId;
+}
+
+/**
+ * `scopedAssignmentFiling`, with CHO's officer having pressed Assign to Me.
+ *
+ * For the cases that go on to WORK the CHO review as sanitary@ — approve,
+ * book, conduct. Since the request of 6 October 2026 an unheld CHO case
+ * refuses all of that (CaseHolder::UNCLAIMED), so those cases need the claim
+ * and the rest need it NOT made: OfficerInChargeTest claims and releases the
+ * bare fixture itself, which is why this is a second helper rather than a
+ * change to the first. Leaves sanitary@ signed in (see claimAs).
+ */
+function scopedFilingHeldByCho(string $name): int
+{
+    $appId = scopedAssignmentFiling($name);
+    claimAs('sanitary@biztrack.local', $appId);
 
     return $appId;
 }
