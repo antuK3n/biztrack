@@ -28,6 +28,12 @@
         removed on the client's request (checklist #75) because it bled through
         the figures and made the receipt hard to read when printed.
 
+        An INVOICE, not an Official Receipt — request of 6 October 2026: the
+        system must not issue an OR. Only the City Treasurer does, on its own
+        numbered forms, so this document says what was charged and paid and
+        does not call itself a receipt. The "Official Payment Receipt" line
+        under the city name went with the title.
+
         The header used to read "Official Payment Receipt (Simulated)" and the
         footer "This receipt is for demonstration only. No real funds were
         collected." Both went on Ken's instruction of 5 October 2026: BizTrack
@@ -38,10 +44,9 @@
     <div class="content">
         <div class="header">
             <div class="city">CITY OF MALABON</div>
-            <div class="office">Official Payment Receipt</div>
         </div>
 
-        <div class="title">OFFICIAL RECEIPT</div>
+        <div class="title">INVOICE</div>
 
         <table class="meta">
             <tr><td class="label">Reference No.</td><td class="value">{{ $reference_number }}</td></tr>

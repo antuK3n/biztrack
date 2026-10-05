@@ -557,3 +557,19 @@ it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function (
     $box = $pdf->getPages()[0]->getDetails()['MediaBox'];
     expect([(int) round($box[2]), (int) round($box[3])])->toBe([792, 612]);
 });
+
+it('leaves the OR number blank, because only the City Treasurer issues an Official Receipt', function () {
+    /*
+     * 6 October 2026: "The system should not be able to generate an OR." The
+     * certificate printed BizTrack's payment reference on its OR line, which
+     * made the system the issuer of an Official Receipt. The line stays on
+     * the paper; the Treasurer writes the number in.
+     */
+    $permit = ownersPermit();
+    authAs('owner@biztrack.local');
+
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert)->toHaveKey('or_number')
+        ->and($cert['or_number'])->toBeNull();
+});

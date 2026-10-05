@@ -1137,7 +1137,9 @@ class PermitController extends Controller
                     ? (string) (int) $profile['employees']
                     : null,
                 'amount_paid' => $paid ? '₱'.number_format((float) $paid->amount, 2) : null,
-                'or_number' => $paid?->reference_number,
+                // Blank: the Official Receipt is the City Treasurer's to issue and write
+                // in; BizTrack's payment reference is not one (6 October 2026).
+                'or_number' => null,
                 'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
             ];
         }
@@ -1171,7 +1173,9 @@ class PermitController extends Controller
 
             $sheetFields = [
                 'office_amount_paid' => $paid ? '₱'.number_format($cenroShare, 2) : null,
-                'or_number' => $paid?->reference_number,
+                // Blank: the Official Receipt is the City Treasurer's to issue and write
+                // in; BizTrack's payment reference is not one (6 October 2026).
+                'or_number' => null,
                 'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
                 'letterhead' => config('biztrack.letterheads.CENRO'),
             ];
@@ -1234,7 +1238,9 @@ class PermitController extends Controller
                 'fsic_valid_for' => 'Issuance of FSIC for Business Permit only',
                 'fsic_description' => $description !== '' ? $description : null,
                 'office_amount_paid' => $paid ? '₱'.number_format($bfpShare, 2) : null,
-                'or_number' => $paid?->reference_number,
+                // Blank: the Official Receipt is the City Treasurer's to issue and write
+                // in; BizTrack's payment reference is not one (6 October 2026).
+                'or_number' => null,
                 'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
                 'letterhead' => config('biztrack.letterheads.BFP'),
             ];
@@ -1335,7 +1341,9 @@ class PermitController extends Controller
                 'occ_zoning_no' => $sibling('ZONING'),
                 'occ_fire_no' => $sibling('FSIC') ?? $answer('fsec_no'),
                 'office_amount_paid' => $paid ? '₱'.number_format($oboShare, 2) : null,
-                'or_number' => $paid?->reference_number,
+                // Blank: the Official Receipt is the City Treasurer's to issue and write
+                // in; BizTrack's payment reference is not one (6 October 2026).
+                'or_number' => null,
                 'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
             ];
         }

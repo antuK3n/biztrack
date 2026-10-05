@@ -554,7 +554,14 @@ class PaymentController extends Controller
         ]);
     }
 
-    /** dompdf receipt (resources/views/pdf/receipt.blade.php). */
+    /**
+     * The payment's INVOICE as a PDF (resources/views/pdf/receipt.blade.php).
+     *
+     * Still served at /receipt and stored under receipts/ — renaming a route
+     * and an archive folder would break nothing a reader sees and every link
+     * already handed out. What changed (6 October 2026) is what the document
+     * calls itself: BizTrack does not issue Official Receipts.
+     */
     public function receipt(Request $request, Payment $payment): Response
     {
         $payment->load(['application.business', 'application.feeAssessment']);
@@ -565,7 +572,7 @@ class PaymentController extends Controller
         abort_unless(
             $app && ApplicationVisibility::canView($request->user(), $app),
             403,
-            'This receipt is not yours.'
+            'This invoice is not yours.'
         );
 
         /*
@@ -577,7 +584,7 @@ class PaymentController extends Controller
         abort_unless(
             $payment->status === PaymentStatus::Completed,
             409,
-            'There is no receipt for this payment because it has not gone through.'
+            'There is no invoice for this payment because it has not gone through.'
         );
 
         $fee = $app?->feeAssessment;
@@ -605,7 +612,7 @@ class PaymentController extends Controller
             $payment->update(['receipt_path' => $path]);
         }
 
-        return $file->download("receipt-{$payment->reference_number}.pdf");
+        return $file->download("invoice-{$payment->reference_number}.pdf");
     }
 
     /**
