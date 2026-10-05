@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api, toApiError } from '../lib/api'
-import { PlusIcon, XIcon } from './icons'
+import { XIcon } from './icons'
 
 /* Chatbot bubble + slide-in panel (owner screens, p7-p8), backed by
  * /chatbot/messages; one conversation per user. Who answers is the server's
@@ -224,10 +224,12 @@ export function ChatBubble() {
               </div>
             )}
           </div>
+          {/*
+            No "+" before the box: it was a drawing of an attach button that
+            attached nothing, and a control that does nothing when pressed is
+            worse than none. Bring it back only with something behind it.
+          */}
           <form onSubmit={onSubmit} className="flex items-center gap-2 p-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-royal">
-              <PlusIcon size={18} />
-            </span>
             <input
               ref={inputRef}
               value={draft}
