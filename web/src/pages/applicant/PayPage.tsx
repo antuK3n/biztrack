@@ -455,11 +455,13 @@ export function PayPage() {
       {/*
         Before the button, not after it: this is what the owner is about to
         be charged, and it is not the Total Amount on the card above. Info,
-        not a warning — nothing is wrong, it is a test.
+        not a warning — nothing is wrong. No title: it was "Test charge"
+        until Ken asked for every "test" and "simulated" on screen to go
+        [2026-10-05], and the sentence says all of it.
       */}
       {online && options?.test_charge && (
         <div className="mt-6">
-          <Alert variant="info" title="Test charge">
+          <Alert variant="info">
             You will be charged {formatMoney(options.test_charge)} for this bill
             {assessment ? ` instead of ${formatMoney(assessment.total_amount)}` : ''}. The bill and your
             receipt keep the full amount.
@@ -475,11 +477,11 @@ export function PayPage() {
         >
           {paying ? 'Processing…' : 'Pay Online'}
         </PillButton>
-        {options && (
+        {/* Nothing under the button with KwikPay off: it read "This is a
+            simulated payment. No real charge is made." [Ken, 2026-10-05]. */}
+        {options && online && (
           <p className="mt-2.5 text-center text-xs text-ink-muted">
-            {online
-              ? `You will finish paying in your ${chosen === 'qrph' ? 'bank or e-wallet' : paymentMethodLabel(chosen ?? '')} app. Your application moves on once the payment is confirmed.`
-              : 'This is a simulated payment. No real charge is made.'}
+            {`You will finish paying in your ${chosen === 'qrph' ? 'bank or e-wallet' : paymentMethodLabel(chosen ?? '')} app. Your application moves on once the payment is confirmed.`}
           </p>
         )}
       </div>
@@ -547,7 +549,7 @@ function WaitingCard({
 
       {isTestCharge(payment) && (
         <p className="max-w-md text-center text-xs text-ink-muted">
-          Test charge. Your bill of {formatMoney(payment.amount)} is recorded in full.
+          Your bill of {formatMoney(payment.amount)} is recorded in full.
         </p>
       )}
 

@@ -136,9 +136,11 @@ test.describe('the owner', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await openPayPage(page, appId)
 
-    const note = page.getByRole('status').filter({ hasText: 'Test charge' })
+    const note = page.getByRole('status').filter({ hasText: 'You will be charged' })
     await expect(note).toContainText(`You will be charged ${amount} for this bill instead of ₱`)
     await expect(note).toContainText('The bill and your receipt keep the full amount.')
+    // No "Test charge" title over it (Ken, 5 October 2026).
+    await expect(page.getByText(/test charge/i)).toHaveCount(0)
     await shot(page, 'pay-test-charge-1280')
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(note).toBeVisible()
@@ -147,13 +149,15 @@ test.describe('the owner', () => {
     // The full bill: no note.
     expect((await gateway(browser, { charge: 'full' })).ok).toBe(true)
     await openPayPage(page, appId)
-    await expect(page.getByText('Test charge')).toHaveCount(0)
+    await expect(note).toHaveCount(0)
 
-    // Simulated collects nothing, so a test charge there is not mentioned.
+    // Simulated collects nothing, so a test charge there is not mentioned,
+    // and nothing calls the payment simulated (Ken, 5 October 2026).
     expect((await gateway(browser, { mode: 'simulated', charge: 'test' })).ok).toBe(true)
     await openPayPage(page, appId)
-    await expect(page.getByText('This is a simulated payment. No real charge is made.')).toBeVisible()
-    await expect(page.getByText('Test charge')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Pay Online' })).toBeVisible()
+    await expect(page.getByText(/simulated|no real charge/i)).toHaveCount(0)
+    await expect(note).toHaveCount(0)
   })
 
   test('with the practice KwikPay, a payment opened at ₱1 still asks for ₱1 after the switch moves', async ({
@@ -174,7 +178,7 @@ test.describe('the owner', () => {
 
     const qr = page.getByRole('img', { name: `QR code to pay ${amount}` })
     await expect(qr).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText(/^Test charge\. Your bill of ₱[\d,.]+ is recorded in full\.$/)).toBeVisible()
+    await expect(page.getByText(/^Your bill of ₱[\d,.]+ is recorded in full\.$/)).toBeVisible()
     await shot(page, 'pay-test-charge-waiting-1280')
 
     // The super admin moves to the full bill while this one is waiting.
