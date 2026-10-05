@@ -635,7 +635,18 @@ class AssignmentController extends Controller
     public function approve(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
         $this->authorizeHolder($request, $assignment);
-        $data = $request->validate(['remarks' => ['nullable', 'string', 'max:1000']]);
+        $data = $request->validate([
+            'remarks' => ['nullable', 'string', 'max:1000'],
+            /*
+             * BPLO's ticks on a NEW filing: which of the five clearances this
+             * business needs (client, 5 October 2026: "BPLO decides, no rules
+             * — but without pre-ticked"). Shape only here; which filings may
+             * take them, and that one is required, is
+             * WorkflowService::approveMainForm's.
+             */
+            'permit_type_ids' => ['sometimes', 'array'],
+            'permit_type_ids.*' => ['integer', 'distinct'],
+        ]);
 
         /*
          * The claim is written only once the approval is known to be accepted.
@@ -651,7 +662,11 @@ class AssignmentController extends Controller
          * Both writes now sit on the accepted path, in the order a reader would
          * expect: decide, then record who decided.
          */
-        $this->workflow->approveAssignment($assignment, $data['remarks'] ?? null);
+        $this->workflow->approveAssignment(
+            $assignment,
+            $data['remarks'] ?? null,
+            isset($data['permit_type_ids']) ? array_map('intval', $data['permit_type_ids']) : null,
+        );
         $this->recordHolder($request, $assignment);
 
         return response()->json([

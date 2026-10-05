@@ -1,3 +1,7 @@
+> **5 October 2026:** which clearances open after payment on a new filing is
+> now BPLO's pick at the form approval, not all five — see the dated note in
+> `docs/application-flow-2026-09.md`.
+
 # SUPERSEDED — 6 September 2026
 
 The live spec is `docs/application-flow-2026-09.md`, verified with the client

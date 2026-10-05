@@ -79,7 +79,7 @@ function legacyAssignment(Application $app, string $permitCode): ApplicationAssi
 
 it('keeps a clearance the applicant never submitted out of its office queue', function () {
     $app = filingAwaitingBplo();
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    app(WorkflowService::class)->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
     app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 
@@ -122,7 +122,7 @@ it('shows the clearance the moment its sheet is handed in', function () {
      * about the filing. The same office, the same filing, one submit later.
      */
     $app = filingAwaitingBplo();
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    app(WorkflowService::class)->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
     app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 
@@ -153,7 +153,7 @@ it('counts the tab badge the same way it fills the list', function () {
      * has to be on both.
      */
     $app = filingAwaitingBplo();
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    app(WorkflowService::class)->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
     app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
     legacyAssignment($app->fresh(), 'ZONING');
@@ -176,7 +176,7 @@ it('judges an office on its own permit and not on the one beside it', function (
      * list query.
      */
     $app = filingAwaitingBplo();
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    app(WorkflowService::class)->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
     app(WorkflowService::class)->transition($app, ApplicationStatus::Approved, 'Paid.');
 

@@ -454,8 +454,19 @@ final class FilingMover
             $assignment = $this->assignmentFor($app, $this->workflow->bploDepartmentId())
                 ?? $this->refuse('BPLO has no queue item on this filing, so there is nothing for BPLO to press.');
 
+            /*
+             * A new filing's form approval needs BPLO's ticks since 5 October
+             * 2026 (client: "BPLO decides, no rules"). This is a tester's
+             * shortcut, so it ticks all five — the most a filing can carry,
+             * and so the most of the flow it lets a tester walk. The label
+             * says so.
+             */
+            $ticks = $this->ticksAllFive($app)
+                ? PermitType::whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)->pluck('id')->all()
+                : null;
+
             $step === self::BPLO_APPROVE
-                ? $this->workflow->approveAssignment($assignment)
+                ? $this->workflow->approveAssignment($assignment, null, $ticks)
                 : $this->workflow->returnAssignment($assignment, (string) $note);
 
             return null;
@@ -807,9 +818,11 @@ final class FilingMover
         $permit = $row?->permitType->name ?? 'permit';
 
         return match ($key) {
-            self::BPLO_APPROVE => $app->status === ApplicationStatus::ForFinalApproval
-                ? 'BPLO gives the final approval'
-                : 'BPLO accepts the form',
+            self::BPLO_APPROVE => match (true) {
+                $app->status === ApplicationStatus::ForFinalApproval => 'BPLO gives the final approval',
+                $this->ticksAllFive($app) => 'BPLO accepts the form, ticking all five other permits',
+                default => 'BPLO accepts the form',
+            },
             self::BPLO_RETURN => 'BPLO returns the form to the applicant',
             self::PAYMENT => 'Pay the bill, simulated',
             self::PERMIT_APPROVE => "{$office} accepts the {$permit} paperwork",
@@ -820,6 +833,13 @@ final class FilingMover
             self::INSPECTION_REBOOK => "{$office} books a {$permit} re-inspection for today",
             default => $key,
         };
+    }
+
+    /** Whether BPLO's form approval on this filing is the one that takes the other-permit ticks. */
+    private function ticksAllFive(Application $app): bool
+    {
+        return $app->status === ApplicationStatus::ForApproval
+            && $app->application_type === ApplicationType::New;
     }
 
     private function actingFor(string $step, ?string $code): ?string

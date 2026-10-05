@@ -83,7 +83,12 @@ export async function makeBilledApplication(page: Page): Promise<number> {
     )
     if (!assignment) throw new Error(`filing ${app.id} is not on BPLO's queue`)
     await call(`/api/v1/assignments/${assignment.id}/classification`, bplo, { tier: 'simple' })
-    await call(`/api/v1/assignments/${assignment.id}/approve`, bplo, {})
+    // BPLO ticks the other permits at this approval since 5 October 2026; all five here.
+    await call(`/api/v1/assignments/${assignment.id}/approve`, bplo, {
+      permit_type_ids: permitTypes
+        .filter((pt: { code: string }) => ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'].includes(pt.code))
+        .map((pt: { id: number }) => pt.id),
+    })
 
     return app.id as number
   })

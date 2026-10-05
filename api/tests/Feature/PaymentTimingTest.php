@@ -63,8 +63,8 @@ function filingAt(ApplicationStatus $status): Application
         return $app;
     }
 
-    classifyAsOfficer($app);
-    app(WorkflowService::class)->approveMainForm($app->fresh());
+    // Ticking all five other permits — BPLO's pick since 5 October 2026.
+    bploApprovesForm($app);
 
     return $app->fresh();
 }
@@ -133,13 +133,14 @@ it('takes the payment once BPLO has approved the form, and opens the other permi
     expect($app->status->isPaid())->toBeTrue();
 });
 
-it('bills every required permit in the one Tax Order of Payment', function () {
+it('bills every permit BPLO ticked in the one Tax Order of Payment', function () {
     /*
      * The other half of the client's answer — "the bill will charge all
      * regardless if the applicant selects upload or apply" — and the reason the
-     * running-balance copy came off four screens. `submit()` attaches the
-     * required permits BEFORE it assesses, so the single bill prices all of
-     * them; nothing the applicant does in the clearance stage adds to it.
+     * running-balance copy came off four screens. BPLO's form approval
+     * attaches the permits it ticked BEFORE it re-assesses (5 October 2026),
+     * so the single bill prices all of them; nothing the applicant does in
+     * the clearance stage adds to it.
      */
     $app = filingAt(ApplicationStatus::PendingPayment);
 

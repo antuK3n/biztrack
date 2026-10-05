@@ -113,7 +113,16 @@ async function paidFiling(): Promise<number> {
     await bplo.post(`/api/v1/assignments/${assignment.id}/classification`, { data: { tier: 'simple' } }),
     'classify',
   )
-  await ok(await bplo.post(`/api/v1/assignments/${assignment.id}/approve`, { data: {} }), 'BPLO approve')
+  // BPLO ticks the other permits at this approval since 5 October 2026; all five here.
+  const otherPermitIds = types
+    .filter((t) => ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'].includes(t.code))
+    .map((t) => t.id)
+  await ok(
+    await bplo.post(`/api/v1/assignments/${assignment.id}/approve`, {
+      data: { permit_type_ids: otherPermitIds },
+    }),
+    'BPLO approve',
+  )
   await ok(await owner.post(`/api/v1/applications/${app.id}/pay`, { data: { method: 'gcash' } }), 'pay')
 
   return app.id

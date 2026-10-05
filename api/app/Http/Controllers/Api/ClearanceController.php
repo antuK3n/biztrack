@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\ApplicationType;
 use App\Enums\ClearanceStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
@@ -59,6 +60,20 @@ class ClearanceController extends Controller
             $this->clearances->isAppliedFor($application, $type),
             422,
             'You have already applied for the '.$type->name.' on this application.'
+        );
+
+        /*
+         * A new business's other permits are the ones BPLO ticked (client,
+         * 5 October 2026: "BPLO decides, no rules"). `startClearance` attaches
+         * a type the filing lacks, which would let an applicant add an
+         * unticked clearance — unbilled — and route an office to it.
+         */
+        abort_if(
+            $application->application_type === ApplicationType::New
+                && $type->isRequiredClearance()
+                && ! $application->permitTypes()->where('permit_types.id', $type->id)->exists(),
+            422,
+            'BPLO did not list the '.$type->name.' for this business.'
         );
 
 

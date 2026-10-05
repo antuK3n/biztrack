@@ -25,6 +25,16 @@ Answer and Submit Whole Application Form            (B)
     other permit is approved                        (BPLO)
 ```
 
+> **5 October 2026 — BPLO picks a new business's other permits.** The client:
+> *"BPLO decides, no rules — but without pre-ticked. Do not put reason too."* A
+> new filing is submitted carrying the Business Permit alone (rule 1's "all five
+> are required" no longer holds). When BPLO approves the form it ticks which of
+> the five — Sanitary, FSIC, Zoning, Occupancy, CEC — this business needs (none
+> pre-ticked, no reason, at least one); only those are attached, billed on the
+> Tax Order of Payment and opened after payment, and the filing closes when the
+> last of them is issued. Renewals and amendments are unchanged. See
+> `WorkflowService::approveMainForm`.
+
 In prose: the owner applies, BPLO approves the form, the owner pays, and only
 then do the other permits open. Each of those runs its own review and its own
 inspection, and **each permit is released the moment its own office approves

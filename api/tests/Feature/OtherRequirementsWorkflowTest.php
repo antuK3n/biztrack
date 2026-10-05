@@ -614,6 +614,8 @@ function filingWithClearancesSettled(string $name, string $registrationNumber): 
     $appId = requirementFiling($name, $registrationNumber, ['CHO']);
 
     $app = Application::findOrFail($appId);
+    // A new filing carries the other permits BPLO ticked (5 October 2026); one is enough here.
+    $app->permitTypes()->syncWithoutDetaching([PermitType::where('code', 'SANITARY')->value('id') => ['status' => ClearanceStatus::Approved->value]]);
     DB::table('application_permit_types')
         ->where('application_id', $appId)
         ->update(['status' => ClearanceStatus::Approved->value]);

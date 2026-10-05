@@ -114,8 +114,15 @@ function bploAccepts(int $appId, string $remarks): void
 
     test()->postJson("/api/v1/assignments/{$assignment->id}/classification", ['tier' => 'simple'])
         ->assertOk();
-    test()->postJson("/api/v1/assignments/{$assignment->id}/approve", ['remarks' => $remarks])
-        ->assertOk();
+    /*
+     * Ticking all five other permits, through the endpoint BPLO's screen
+     * uses: since 5 October 2026 a new filing is submitted with the business
+     * permit alone and BPLO picks the rest here (client: "BPLO decides").
+     */
+    test()->postJson("/api/v1/assignments/{$assignment->id}/approve", [
+        'remarks' => $remarks,
+        'permit_type_ids' => PermitType::whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)->pluck('id')->all(),
+    ])->assertOk();
 }
 
 /**
@@ -207,7 +214,7 @@ function permitCodesOn(int $appId): array
 it('walks a new application from filing to every permit issued', function () {
     $businessId = registerBusiness('Bautista Hardware & Construction Supply', 'DTI-2026-0451233');
 
-    // ── 1. File for the business permit; submission attaches the rest ────
+    // ── 1. File for the business permit; BPLO's approval attaches the rest ─
     authAs('owner@biztrack.local');
     $appId = $this->postJson('/api/v1/applications', [
         'business_id' => $businessId,
@@ -221,11 +228,13 @@ it('walks a new application from filing to every permit issued', function () {
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     expect(Application::find($appId)->permitTypes()->pluck('code')->sort()->values()->all())
-        ->toBe(['BUSINESS', 'CEC', 'FSIC', 'OCCUPANCY', 'SANITARY', 'ZONING']);
+        ->toBe(['BUSINESS']);
 
     // ── 2. BPLO accepts the form; the Tax Order of Payment is raised ─────
     bploAccepts($appId, 'Form complete. Assessed as a simple transaction.');
     expect(Application::find($appId)->status->value)->toBe('pending_payment');
+    expect(Application::find($appId)->permitTypes()->pluck('code')->sort()->values()->all())
+        ->toBe(['BUSINESS', 'CEC', 'FSIC', 'OCCUPANCY', 'SANITARY', 'ZONING']);
 
     // ── 3. Payment opens the clearance stage ─────────────────────────────
     authAs('owner@biztrack.local');

@@ -296,7 +296,15 @@ async function filingAtCpdo(page: Page): Promise<number> {
       method: 'POST',
       body: JSON.stringify({ tier: 'simple' }),
     })
-    await call(`/api/v1/assignments/${bploRow.id}/approve`, bplo, { method: 'POST', body: '{}' })
+    // BPLO ticks the other permits at this approval since 5 October 2026; all five here.
+    await call(`/api/v1/assignments/${bploRow.id}/approve`, bplo, {
+      method: 'POST',
+      body: JSON.stringify({
+        permit_type_ids: types
+          .filter((t) => ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'].includes(t.code))
+          .map((t) => t.id),
+      }),
+    })
     await call(`/api/v1/applications/${app.id}/pay`, owner, {
       method: 'POST',
       body: JSON.stringify({ method: 'gcash' }),

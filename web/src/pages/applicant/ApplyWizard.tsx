@@ -328,23 +328,19 @@ const BASE_PHASES: BasePhase[] = [
  * CPDD's sheet becomes a step between the changes and the documents; one that
  * only corrects how an address is written does not, and never sees it.
  */
-/**
- * Mode of Payment, as MCG-BPLO-FO-002 prints it.
+/*
+ * ── No Mode of Payment question, since 5 October 2026 ───────────────────
  *
- * Three boxes on the paper. Revenue Code Sec. 2N provides for two — annual,
- * in the first twenty days of January, and quarterly, in the first twenty of
- * January, April, July and October. There is no semi-annual instalment in the
- * Code, and it is offered here because the form the city hands out at the
- * counter offers it: an applicant who ticked it on paper has to be able to
- * file the same answer online.
+ * The renewal step asked it as MCG-BPLO-FO-002 prints it: Annually,
+ * Semi-Annually, Quarterly. Revenue Code Sec. 2N allows quarterly tax
+ * instalments, semi-annual was never in the Code, and the system has only
+ * ever billed once — one Tax Order of Payment for the year — so the answer
+ * was stored and read by nothing. The client: *"remove the Annually,
+ * Semi-annually, and Quarterly options in the renewal … every payment is
+ * annually so that the business owner only pays one time"*, and asked about
+ * a one-option box, *"Remove the question entirely."* The server writes
+ * `annual` by default and accepts nothing else.
  */
-const PAYMENT_MODES = [
-  { value: 'annual', label: 'Annually' },
-  { value: 'semi_annual', label: 'Semi-Annually' },
-  { value: 'quarterly', label: 'Quarterly' },
-] as const
-
-type PaymentMode = (typeof PAYMENT_MODES)[number]['value']
 
 const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 'review']
 
@@ -3746,14 +3742,6 @@ export function ApplyWizard() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
   /*
-   * Defaults to annual, which is both the Code's ordinary case and what the
-   * server has always written when the key is absent. A renewal that never
-   * reaches the picker therefore records what it would have recorded before
-   * this existed.
-   */
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('annual')
-
-  /*
    * ── All five at once, not one after another ────────────────────
    *
    * This was an object literal of five `await`s, which JavaScript
@@ -5149,19 +5137,6 @@ export function ApplyWizard() {
               : `${files.length} files attached`,
       }
     })
-
-    /*
-     * Renewal only, because the picker is — MCG-BPLO-FO-002 prints the box and
-     * MCG-BPLO-FO-001 does not. Appended after the uploads so it reads in the
-     * order the paper does: the requirements list, then the payment line at
-     * the foot of it.
-     */
-    if (applicationType === 'renewal') {
-      documents.push({
-        label: 'Mode of Payment',
-        value: PAYMENT_MODES.find((m) => m.value === paymentMode)?.label ?? '',
-      })
-    }
 
     return {
       address: [
@@ -7264,7 +7239,6 @@ export function ApplyWizard() {
       application_type: applicationType,
       title: title.trim() || undefined,
       data_privacy_consent: consent,
-      payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitIds.length > 0 ? { prior_permit_ids: priorPermitIds } : {}),
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
@@ -8248,12 +8222,6 @@ export function ApplyWizard() {
            * otherwise be created with `false` and never corrected.
            */
           data_privacy_consent: consent,
-          /*
-           * On every autosave, for the reason the consent tick is: the picker
-           * is on the documents step, and a draft created before the applicant
-           * reaches it would otherwise keep the default for good.
-           */
-          payment_mode: paymentMode,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -9286,13 +9254,6 @@ export function ApplyWizard() {
         // as the applicant's own words and stop generating over it, even if the
         // text happens to match what we would have produced.
         setTitleEdited(Boolean(app.title?.trim()))
-        /*
-         * Reopened as it was left. Without this the picker resets to annual and
-         * the next autosave writes that over a quarterly election the applicant
-         * made — the draft losing an answer silently, which is the failure the
-         * amendment ticks above were restored to avoid.
-         */
-        if (app.payment_mode) setPaymentMode(app.payment_mode)
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
         /*
@@ -9687,8 +9648,8 @@ export function ApplyWizard() {
               'inspection. No action needed from you right now — nothing is due today, and ' +
               'the fee joins your next business permit renewal in January.'
             : 'BPLO is now reviewing your form. No action needed from you right now — we will ' +
-              'tell you when your Tax Order of Payment is ready, and your five LGU clearances ' +
-              'open once it is paid.'}
+              'tell you when your Tax Order of Payment is ready, and the other permits BPLO ' +
+              'lists open once it is paid.'}
         </p>
         <div className="mt-3 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
@@ -12399,67 +12360,6 @@ export function ApplyWizard() {
             </div>
           )}
 
-          {/*
-            ── Mode of Payment (MCG-BPLO-FO-002, foot of page 1) ─────────────
-
-            Renewal only, because only the renewal paper asks it. FO-001 has no
-            such box, and putting one on a new application would be BizTrack
-            inventing a question.
-
-            ── The sentence under it is the whole point of the design ────────
-
-            This picker existed before and the client had it removed on
-            16 September 2026, because nothing read the answer: the fee engine,
-            the Tax Order of Payment and the payment stage all bill the full
-            year regardless. An applicant could elect quarterly and be handed
-            an annual bill with no explanation.
-
-            None of that has been built since, so the honest way to put the
-            field back is to record the answer AND say what it does. The client
-            chose that over a silent field when asked, 24 September 2026.
-          */}
-          {applicationType === 'renewal' && (
-            <div className="mt-8 border-t border-line pt-6">
-              <FieldLabel>Mode of Payment</FieldLabel>
-              <div
-                role="radiogroup"
-                aria-label="Mode of Payment"
-                aria-describedby="payment-mode-note"
-                className="flex flex-wrap gap-2"
-              >
-                {PAYMENT_MODES.map((opt) => {
-                  const selected = paymentMode === opt.value
-
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setPaymentMode(opt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {opt.label}
-                    </button>
-                  )
-                })}
-              </div>
-              <p id="payment-mode-note" className="mt-2 max-w-prose text-xs text-ink-secondary">
-                Recorded on your filing for BPLO. Your Tax Order of Payment is issued for the
-                full year either way — arrange an instalment with the City Treasurer when you
-                pay.
-              </p>
-            </div>
-          )}
         </div>
       </WizardSection>
 
@@ -13346,9 +13246,13 @@ export function ApplyWizard() {
                 ? `${renewingOffice ?? 'The issuing office'} reviews this and inspects your ` +
                   'premises. Nothing to pay now — the fee joins your next business permit ' +
                   'renewal in January.'
+                : applicationType === 'new'
+                ? 'BPLO reviews this form and lists the other permits you need. You pay one Tax '
+                  + 'Order of Payment; your Business Permit is released and the other permits '
+                  + 'BPLO confirmed open.'
                 : 'BPLO reviews this form first. If they accept it, we raise your Tax Order of '
                   + 'Payment and you pay. Your Business Permit is released as soon as you pay; '
-                  + 'the five clearances are applied for after that, each approved on its own.'}
+                  + 'any other permit you are renewing follows, each approved on its own.'}
             </p>
             {/*
               ── The summary of payment, on the step that asks for a decision ──
@@ -13468,10 +13372,19 @@ export function ApplyWizard() {
                 are still being typed and brackets a clerk may read differently —
                 so it is an estimate, and the applicant is told who decides.
               */}
+              {/*
+                "Including the five other permits every application needs"
+                until 5 October 2026. BPLO now picks a new business's other
+                permits when it approves the form (client: "BPLO decides, no
+                rules"), so the estimate covers the Business Permit and says
+                where the rest of the bill comes from.
+              */}
               <p className="mt-3 text-xs leading-relaxed text-ink-secondary">
-                An estimate from your own answers, including the five other permits every
-                application needs. BPLO assesses the actual amount and issues your Tax Order of
-                Payment after it approves this form.
+                {applicationType === 'new'
+                  ? 'An estimate for your Business Permit. BPLO decides which other permits you '
+                    + 'need when it reads your form; their fees are added to your Tax Order of Payment.'
+                  : 'An estimate from your own answers. BPLO assesses the actual amount and issues '
+                    + 'your Tax Order of Payment after it approves this form.'}
               </p>
             </div>
             )}

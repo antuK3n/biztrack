@@ -56,7 +56,7 @@ function paidFilingForQueue(): Application
     $app->refresh();
 
     classifyAsOfficer($app);
-    $workflow->approveMainForm($app->fresh());
+    $workflow->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
 
     // The payment itself is PaymentTimingTest's subject; this file needs the

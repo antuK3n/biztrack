@@ -61,7 +61,7 @@ function zoningSheetOpen(): array
     $workflow->submit($app);
     $app->refresh();
     classifyAsOfficer($app);
-    $workflow->approveMainForm($app->fresh());
+    $workflow->approveMainForm($app->fresh(), null, allOtherPermitIds());
     $app->refresh();
     $workflow->transition($app, ApplicationStatus::Approved, 'Paid.');
 

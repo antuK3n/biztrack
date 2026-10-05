@@ -216,6 +216,15 @@ function todayISO(): string {
 /** View / Edit, the two ways of being on this screen (checklist item 54). */
 type ReviewMode = 'view' | 'edit'
 
+/** The five clearances BPLO ticks from on a new filing, in the client's words (5 October 2026). */
+const OTHER_PERMIT_CHOICES: [code: string, label: string][] = [
+  ['SANITARY', 'Sanitary Permit'],
+  ['FSIC', 'Fire Safety Inspection Certificate'],
+  ['ZONING', 'Zoning / Locational Clearance'],
+  ['OCCUPANCY', 'Occupancy Permit'],
+  ['CEC', 'City Environmental Certificate'],
+]
+
 const MODE_OPTIONS: { value: ReviewMode; label: string }[] = [
   { value: 'view', label: 'View' },
   { value: 'edit', label: 'Edit' },
@@ -2351,6 +2360,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * composer a third mode that renders none of its own fields.
    */
   const [confirmingApprove, setConfirmingApprove] = useState(false)
+  /**
+   * BPLO's ticks for a new filing's other permits — none to start with.
+   * Client, 5 October 2026: "BPLO decides, no rules — but without
+   * pre-ticked. Do not put reason too."
+   */
+  const [otherPermitIds, setOtherPermitIds] = useState<number[]>([])
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -4130,10 +4145,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
       return
     }
+    // The API's own one-line refusal, said before the request.
+    if (ticksOtherPermits && otherPermitIds.length === 0) {
+      setActionError('Tick the other permits this business needs.')
+
+      return
+    }
     setBusy(true)
     setActionError(null)
     try {
-      await assignments.approve(assignmentId, remarks.trim() || undefined)
+      await assignments.approve(
+        assignmentId,
+        remarks.trim() || undefined,
+        ticksOtherPermits ? otherPermitIds : undefined,
+      )
       /*
        * Raised before the reload, and deliberately not by this component: the
        * reload is what changes this screen out from under the officer, and the
@@ -4578,6 +4603,37 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * cause broke a dozen legitimate callers once already.
    */
   const mayRejectFiling = canReject && !withApplicant && app.status !== 'for_approval'
+
+  /**
+   * ── Which other permits a NEW business needs, ticked by BPLO ─────────────
+   *
+   * Client, 5 October 2026: *"BPLO decides, no rules — but without
+   * pre-ticked. Do not put reason too."* A new filing is submitted carrying
+   * the Business Permit alone; at For Approval BPLO ticks the clearances it
+   * needs and approves, and only those are billed and opened after payment
+   * (`WorkflowService::approveMainForm`). Renewals carry what the applicant
+   * picked and amendments what the move requires, so neither shows this.
+   *
+   * Labels are the client's wording, keyed by code in the order the client
+   * listed them; ids come from the permit-types reference list.
+   */
+  const ticksOtherPermits =
+    data.department.code === 'BPLO' &&
+    app.status === 'for_approval' &&
+    app.application_type === 'new'
+  const otherPermitChoices = OTHER_PERMIT_CHOICES.flatMap(([code, label]) => {
+    const type = (permitTypesRef.data ?? []).find((t) => t.code === code)
+
+    return type ? [{ id: type.id, label }] : []
+  })
+  const tickedOtherPermits = otherPermitChoices.filter((c) => otherPermitIds.includes(c.id))
+  /** After BPLO's approval: the set it chose, read off the filing. */
+  const chosenOtherPermits =
+    data.department.code === 'BPLO' &&
+    app.application_type === 'new' &&
+    !['draft', 'for_approval', 'returned'].includes(app.status)
+      ? (app.permit_types ?? []).filter((pt) => pt.code !== 'BUSINESS').map((pt) => pt.name)
+      : []
 
   const mayRefusePermit = !canReject && data.clearance?.status === 'for_inspection'
   /**
@@ -5090,7 +5146,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                    * it was — it is the API's rule restated, not part of
                    * asking the officer whether they are sure.
                    */
-                  onClick={() => setConfirmingApprove(true)}
+                  onClick={() => {
+                    if (ticksOtherPermits && otherPermitIds.length === 0) {
+                      setActionError('Tick the other permits this business needs.')
+
+                      return
+                    }
+                    setConfirmingApprove(true)
+                  }}
                   disabled={busy}
                   aria-disabled={categoryMissing}
                   aria-describedby={categoryMissing ? 'approve-blocked-why' : undefined}
@@ -5257,6 +5320,43 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             For Office Use Only
           </a>{' '}
           before you can approve.
+        </p>
+      )}
+
+      {/*
+        BPLO's ticks, above the error line so the refusal reads under the
+        boxes it is about. Edit mode only, because Approve is; never on a
+        filing the applicant holds.
+      */}
+      {editing && !withApplicant && ticksOtherPermits && (
+        <fieldset className="mb-4 rounded-lg border border-line bg-white px-4 py-3">
+          <legend className="px-1 text-sm font-bold text-ink">
+            Other permits this business needs
+          </legend>
+          <div className="mt-1 flex flex-wrap gap-x-6 gap-y-2">
+            {otherPermitChoices.map((choice) => (
+              <label key={choice.id} className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-royal"
+                  checked={otherPermitIds.includes(choice.id)}
+                  onChange={(e) => {
+                    setActionError(null)
+                    setOtherPermitIds((ids) =>
+                      e.target.checked ? [...ids, choice.id] : ids.filter((x) => x !== choice.id),
+                    )
+                  }}
+                />
+                {choice.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      {chosenOtherPermits.length > 0 && (
+        <p className="mb-4 text-sm text-ink-secondary">
+          <span className="font-semibold text-ink">Other permits:</span>{' '}
+          {chosenOtherPermits.join(', ')}
         </p>
       )}
 
@@ -7632,8 +7732,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           }}
         >
           <p className="text-sm text-ink-secondary">
-            Confirm that you have reviewed all the details on this application. This cannot be
-            undone.
+            {ticksOtherPermits
+              ? `Approve and ask the applicant to pay. After paying they apply for: ${tickedOtherPermits
+                  .map((c) => c.label)
+                  .join(', ')}.`
+              : 'Confirm that you have reviewed all the details on this application. This cannot be undone.'}
           </p>
         </ProtoModal>
       )}

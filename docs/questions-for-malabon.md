@@ -789,6 +789,37 @@ never beside one, so a carinderia, barber shop or movie house never sees it.
 About 97 of the 135 line-of-business codes reach it, deliberately
 (`TaxClassificationTest`). An answer here changes the rule's conditions, or
 switches it off and puts a question in the wizard instead.
+
+## A31. What does Malabon charge to amend a business permit?
+
+**The question.** BPLO's Amendment Form says "AFTER PAYMENT, PLEASE RETURN
+THIS FORM", so the counter collects something — how much, and under what
+authority? Ordinance A10-2016 as seeded names no amendment fee.
+
+**Why it matters.** Every approved amendment writes this amount onto the
+business's next Business Permit renewal bill (client, 19 September 2026, and
+again 5 October 2026: deferred, never billed on the amendment itself). A wrong
+figure is a wrong charge on a real Tax Order of Payment.
+
+**What we assumed meanwhile.** ₱200 (`config/biztrack.php`,
+`BIZTRACK_AMENDMENT_FEE`), set on 5 October 2026 from comparable LGUs' schedules
+— Manila ₱100, Quezon City ₱200, Makati ₱300. It was ₱0 until then. An answer
+here is one number in that setting; nothing else changes.
+
+## A32. Can a new business need none of the five other permits?
+
+**The question.** Since 5 October 2026 BPLO ticks which of the five other
+permits (Sanitary, FSIC, Zoning, Occupancy, CEC) a new business needs when it
+approves the form — the client's words: *"BPLO decides, no rules — but without
+pre-ticked."* Is there ever a new business that needs none of them?
+
+**Why it matters.** With none ticked, the filing would close at payment with
+the Business Permit alone, and no office would ever see the premises.
+
+**What we assumed meanwhile.** At least one must be ticked; Approve is refused
+with "Tick the other permits this business needs." If BPLO names a case for
+zero, the refusal is lifted (`WorkflowService::refuseUnsetOtherPermits`) and
+the filing closes on payment.
 ---
 
 # B. For MISD — systems, data, hosting, accounts

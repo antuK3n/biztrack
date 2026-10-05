@@ -152,7 +152,7 @@ it('approves the form without anyone choosing a category', function () {
      * is nothing for an officer to choose and nothing to hold the approval
      * for.
      */
-    app(WorkflowService::class)->approveAssignment($assignment);
+    app(WorkflowService::class)->approveAssignment($assignment, null, allOtherPermitIds());
 
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
@@ -164,7 +164,7 @@ it('lets that same approval through once a category is chosen', function () {
 
     app(WorkflowService::class)->classify($app->fresh(), 'complex', $officer);
 
-    app(WorkflowService::class)->approveAssignment($assignment->fresh());
+    app(WorkflowService::class)->approveAssignment($assignment->fresh(), null, allOtherPermitIds());
 
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
@@ -182,7 +182,7 @@ it('approves a filing carrying the category the system assigned', function () {
     $app = automaticallyCategorised();
     $assignment = pendingAssignmentOn($app);
 
-    app(WorkflowService::class)->approveAssignment($assignment);
+    app(WorkflowService::class)->approveAssignment($assignment, null, allOtherPermitIds());
 
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
@@ -218,7 +218,7 @@ it('lets the approval through once an officer confirms the very tier the system 
     // Same tier as before, and now owned — endorsing is not overriding.
     expect($app->fresh()->complexity)->toBe($guess);
 
-    app(WorkflowService::class)->approveAssignment($assignment->fresh());
+    app(WorkflowService::class)->approveAssignment($assignment->fresh(), null, allOtherPermitIds());
 
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });

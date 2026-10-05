@@ -416,8 +416,15 @@ it('stores and returns the lessor and emergency contact block', function () {
  *
  * Nothing acts on the answer either way — see the picker's own note — so this
  * accepts a wider set rather than promising a different bill.
+ *
+ * ── And all three went on 5 October 2026 ─────────────────────────────────
+ *
+ * Client: *"remove the Annually, Semi-annually, and Quarterly options in the
+ * renewal … every payment is annually so that the business owner only pays
+ * one time"*, and on the picker: *"Remove the question entirely."* The
+ * wizard no longer asks; the API accepts `annual` alone.
  */
-it('accepts the three payment modes the renewal paper prints, and nothing else', function () {
+it('accepts only the annual payment mode', function () {
     $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
     $base = [
         'business_id' => $business->id,
@@ -425,22 +432,21 @@ it('accepts the three payment modes the renewal paper prints, and nothing else',
         'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ];
 
-    foreach (['annual', 'semi_annual', 'quarterly'] as $mode) {
-        $this->withHeaders(authAs('owner@biztrack.local'))
-            ->postJson('/api/v1/applications', $base + ['payment_mode' => $mode])
-            ->assertCreated()
-            ->assertJsonPath('data.payment_mode', $mode);
-    }
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'annual'])
+        ->assertCreated()
+        ->assertJsonPath('data.payment_mode', 'annual');
 
     /*
-     * And the list is still a list. Widening it by one is not the same as
-     * opening it, and `payment_mode` reaches a column with no enum behind it —
-     * whatever passes validation is what BPLO reads off the filing.
+     * `payment_mode` reaches a column with no enum behind it — whatever
+     * passes validation is what BPLO reads off the filing.
      */
-    $this->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'monthly'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['payment_mode']);
+    foreach (['semi_annual', 'quarterly', 'monthly'] as $mode) {
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson('/api/v1/applications', $base + ['payment_mode' => $mode])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['payment_mode']);
+    }
 });
 
 it('defaults the payment mode to annual', function () {

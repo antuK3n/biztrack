@@ -193,11 +193,19 @@ class ApplicationController extends Controller
              * applicant can and does tick it, and refusing the answer here
              * would make BizTrack unable to record a paper filing faithfully.
              *
-             * Recorded, not acted on. Nothing downstream splits a bill — see
-             * the note on the picker in ApplyWizard for why that is stated on
-             * the form rather than left for the applicant to discover.
+             * Recorded, not acted on. Nothing downstream splits a bill.
+             *
+             * ── Annual only, since 5 October 2026 ─────────────────────────
+             *
+             * Client: *"remove the Annually, Semi-annually, and Quarterly
+             * options in the renewal … every payment is annually so that the
+             * business owner only pays one time"* — and asked whether to keep
+             * a one-option box: *"Remove the question entirely."* The wizard
+             * no longer asks, so only `annual` is accepted. The column, its
+             * `annual` default and the resource field stay: filings recorded
+             * before this date hold the other two, and reports read them.
              */
-            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
+            'payment_mode' => ['sometimes', 'in:annual'],
             /*
              * RA 10173 consent, kept with the FILING it was given for.
              *
@@ -454,7 +462,8 @@ class ApplicationController extends Controller
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
-            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
+            // Annual only since 5 October 2026 — see the note in store().
+            'payment_mode' => ['sometimes', 'in:annual'],
             // See the note on the same key in store(): `boolean`, not
             // `accepted`, because a draft may legitimately be saved before the
             // applicant has ticked it. submit() is the gate.

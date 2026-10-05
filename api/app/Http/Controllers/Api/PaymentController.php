@@ -119,12 +119,12 @@ class PaymentController extends Controller
         }
 
         /*
-         * The set submission WILL attach, not the one the draft holds. A new
-         * filing carries only the business permit while the wizard is open, so
-         * assessing over that would quote one permit and omit the five
-         * clearances the applicant is about to pay for. Shared with
-         * `attachRequiredPermitTypes` so the estimate and the bill cannot
-         * disagree about which permits are being priced.
+         * The set submission WILL attach, not the one the draft holds. Shared
+         * with `attachRequiredPermitTypes` so the estimate and the bill cannot
+         * disagree about which permits are being priced. Since 5 October 2026
+         * that is the Business Permit alone on a new filing: BPLO picks its
+         * other permits at approval and their fees join the bill then (client:
+         * *"BPLO decides, no rules"*), which the wizard says beside the figure.
          */
         $application->setRelation(
             'permitTypes',

@@ -16,7 +16,7 @@ return [
     /*
      * What BPLO charges to amend a business permit.
      *
-     * ── Zero because it is unknown, not because it is free ─────────────────
+     * ── It was zero because it was unknown, not because it is free ─────────
      *
      * Searched and verified 19 September 2026: none of the 423 seeded fee rules
      * mentions an amendment, and neither does the 4,330-line extract of the
@@ -43,9 +43,18 @@ return [
      *
      * Whatever is set, it is carried to the January business-permit renewal
      * with the deferred clearance fees rather than billed on the spot — client,
-     * 19 September 2026.
+     * 19 September 2026, and confirmed 5 October 2026.
+     *
+     * ── ₱200 since 5 October 2026, as an assumption ─────────────────────────
+     *
+     * The client asked for a figure rather than a zero. The Revenue Code still
+     * names none, so it was set from what comparable LGUs charge to amend a
+     * business permit — Manila ₱100, Quezon City ₱200, Makati ₱300 — taking
+     * the middle one. It is an ASSUMPTION: question A31 in
+     * docs/questions-for-malabon.md still asks BPLO for Malabon's own figure,
+     * and when it comes it is this one number (or the env value) that changes.
      */
-    'amendment_fee' => (float) env('BIZTRACK_AMENDMENT_FEE', 0),
+    'amendment_fee' => (float) env('BIZTRACK_AMENDMENT_FEE', 200),
 
     /*
      * When a CLEARANCE may be renewed — how early, and how late.

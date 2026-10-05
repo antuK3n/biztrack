@@ -76,7 +76,7 @@ function clearanceAwaitingItsOffice(string $code): array
     $app->permitTypes()->sync(PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all());
 
     $workflow->submit($app->fresh());
-    $workflow->approveMainForm($app->fresh());
+    $workflow->approveMainForm($app->fresh(), null, allOtherPermitIds());
 
     $assessment = $app->fresh()->feeAssessment()->firstOrFail();
     $workflow->onPaymentCompleted(Payment::create([

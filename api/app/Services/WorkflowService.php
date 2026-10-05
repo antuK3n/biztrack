@@ -44,6 +44,7 @@ use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -260,9 +261,13 @@ class WorkflowService
      * did not want and cannot proceed without completing four office forms for
      * clearances that are still valid.
      *
-     * So the expansion is for NEW filings only, where it is right: a business
-     * being registered for the first time needs all five, and rule 1 of
-     * docs/application-flow-2026-09.md says so. A renewal keeps exactly the set
+     * So the expansion was for NEW filings only — and since 5 October 2026 a
+     * new filing is not expanded either. It used to attach all five clearances
+     * here (rule 1 of docs/application-flow-2026-09.md); the client then
+     * decided *"BPLO decides, no rules — but without pre-ticked. Do not put
+     * reason too."* So a new filing is submitted carrying the business permit
+     * alone, and BPLO ticks the clearances it needs when it approves the form
+     * (`approveMainForm`), which is also when they are billed. A renewal keeps exactly the set
      * the applicant chose — including, per the same client decision, one that
      * does not carry the Mayor's Permit at all. Every reader of the business
      * permit's pivot row is already null-guarded for that case
@@ -346,6 +351,23 @@ class WorkflowService
      *
      * A renewal keeps the set it chose, so the estimate is right for it
      * already; this only widens a NEW filing to the set submission will attach.
+     *
+     * ── A NEW filing: the business permit, and nothing BPLO has not ticked ──
+     *
+     * This returned the business permit plus all five clearances until
+     * 5 October 2026. The client's decision that day: *"BPLO decides, no
+     * rules — but without pre-ticked."* Which clearances a new business needs
+     * is now chosen by BPLO at For Approval (`approveMainForm`), so at
+     * submission — and in the wizard's estimate — there is nothing to add.
+     * The estimate prices the Business Permit, and the wizard says the other
+     * permits' fees are added to the Tax Order of Payment when BPLO lists them.
+     *
+     * Whatever the draft ALREADY carries is kept in the set, because
+     * `attachRequiredPermitTypes` keeps it too (`syncWithoutDetaching`): a
+     * caller that created the filing with an explicit `permit_type_ids` gets
+     * an estimate over the set it will actually be billed for. The wizard
+     * creates a new draft with the business permit alone, so for it this is
+     * the business permit.
      *
      * @return Collection<int, int>
      */
@@ -436,10 +458,10 @@ class WorkflowService
             return PermitType::whereIn('code', $codes)->pluck('id');
         }
 
-        return PermitType::whereIn('code', array_merge(
-            [PermitType::OUTCOME_CODE],
-            PermitType::REQUIRED_CLEARANCE_CODES,
-        ))->pluck('id');
+        return $app->permitTypes()->pluck('permit_types.id')
+            ->merge(PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id'))
+            ->unique()
+            ->values();
     }
 
     /**
@@ -516,8 +538,10 @@ class WorkflowService
     /**
      * The Tax Order of Payment, from the seeded revenue-code rules (A10-2016).
      *
-     * Called ONCE now, at submission, over every permit the filing will need —
-     * the business permit and all five required clearances, plus Market if the
+     * Called at submission over every permit the filing carries — and, on a
+     * NEW filing, once more when BPLO ticks its other permits at approval
+     * (5 October 2026, see `approveMainForm`), so the bill is drawn over the
+     * business permit and the clearances BPLO listed, plus Market if the
      * applicant opted in. The old service called it twice (once at submit, once
      * per clearance applied for) because clearances were chosen after payment
      * and accrued a balance. There is no balance any more: the client's verified
@@ -1025,14 +1049,43 @@ class WorkflowService
      * that the application is granted — the grant is `approveOverall()`, five
      * approved permits later.
      *
-     * The fee is NOT recomputed and BPLO cannot adjust it (client, 6 September
-     * 2026: system-computed only). It was assessed at submission from the
-     * revenue-code rules — and again at a resubmission, so corrected figures
-     * reach it (see `resubmit`) — and the applicant has been looking at that
-     * figure ever since; changing it at the moment it becomes payable would
-     * move the number under someone who had already decided to pay it.
+     * BPLO cannot adjust the fee (client, 6 September 2026: system-computed
+     * only). It was assessed at submission from the revenue-code rules — and
+     * again at a resubmission, so corrected figures reach it (see `resubmit`).
+     *
+     * ── On a NEW filing, BPLO ticks the other permits here ───────────────
+     *
+     * Client, 5 October 2026, asked how a new business's other permits should
+     * be decided: *"BPLO decides, no rules — but without pre-ticked. Do not
+     * put reason too."* A new filing is submitted with the business permit
+     * alone (`permitTypeIdsAtSubmission`), and `$otherPermitTypeIds` is the
+     * set BPLO ticked: any of the five clearances, none pre-ticked, no reason.
+     * They are attached and the bill RE-ASSESSED in the same transaction, so
+     * the Tax Order of Payment the applicant is about to see carries their
+     * fees — this is the moment it becomes payable, and the figure they saw
+     * at submission was labelled as the Business Permit's alone.
+     *
+     * The ticks REPLACE the clearances on the filing rather than adding to
+     * them: a filing submitted before this date carries all five, and BPLO
+     * deciding it needs two must leave it carrying two. A clearance already
+     * begun is never taken off — before payment none can be, so that refusal
+     * is a guard for a direct caller, not a rule anybody meets.
+     *
+     * Ticks are REQUIRED only when the filing carries no clearance yet. A
+     * filing that already carries some (one submitted before this date, or a
+     * fixture created with an explicit `permit_type_ids`) keeps them when BPLO
+     * approves without ticking — the same rule as before this change, and
+     * nothing is reassessed. The client wants nothing pre-ticked, not nothing
+     * required: no document we hold names a new business needing none of the
+     * five, so zero is refused rather than guessed at.
+     *
+     * Any other filing type refuses the parameter: a renewal carries what the
+     * applicant picked and an amendment what `amendmentNeedsLocationalClearance`
+     * says, and neither is BPLO's to widen here.
+     *
+     * @param  list<int>|null  $otherPermitTypeIds
      */
-    public function approveMainForm(Application $app, ?string $remarks = null): void
+    public function approveMainForm(Application $app, ?string $remarks = null, ?array $otherPermitTypeIds = null): void
     {
         // Suspended or blacklisted: nothing moves toward a permit (refuseWhileOnHold).
         $this->refuseWhileOnHold($app->business);
@@ -1073,10 +1126,20 @@ class WorkflowService
          * the fee is recorded against January. One act, because with no payment
          * to wait for there is nothing to put between two of them.
          */
+        if (($otherPermitTypeIds ?? []) !== [] && $app->application_type !== ApplicationType::New) {
+            throw ValidationException::withMessages([
+                'permit_type_ids' => ['Only a new application takes other permits.'],
+            ]);
+        }
+
         if ($app->application_type === ApplicationType::Amendment) {
             $this->approveAmendment($app, $remarks);
 
             return;
+        }
+
+        if ($app->application_type === ApplicationType::New) {
+            $this->refuseUnsetOtherPermits($app, $otherPermitTypeIds);
         }
 
         if ($app->defersPayment()) {
@@ -1100,22 +1163,120 @@ class WorkflowService
          * only ever costs an officer a click.
          */
 
-        DB::transaction(function () use ($app, $remarks) {
+        DB::transaction(function () use ($app, $remarks, $otherPermitTypeIds) {
             $this->completeAssignment($app, $this->bploDepartmentId(), $remarks);
+
+            if ($app->application_type === ApplicationType::New && ($otherPermitTypeIds ?? []) !== []) {
+                $this->setOtherPermits($app, $otherPermitTypeIds);
+            }
 
             $row = $this->pivotFor($app, PermitType::OUTCOME_CODE);
             if ($row !== null && $row->status === ClearanceStatus::NotStarted) {
                 $this->transitionClearance($row, ClearanceStatus::ForApproval, 'BPLO accepted the form.');
             }
 
+            /*
+             * The applicant's approval notice is this note (see
+             * `NotificationService::applicationStatus`), so naming the
+             * permits here is what tells them, before they pay, which other
+             * permits the bill covers and what they apply for after.
+             */
+            $others = $app->application_type === ApplicationType::New
+                ? $this->otherPermitNames($app)
+                : '';
+
             $this->transition(
                 $app,
                 ApplicationStatus::PendingPayment,
-                'BPLO approved the application form. The Tax Order of Payment is ready.',
+                'BPLO approved the application form. The Tax Order of Payment is ready.'
+                .($others !== '' ? " Other permits you will apply for after paying: {$others}." : ''),
             );
 
             $this->raiseTinRequirement($app);
         });
+    }
+
+    /**
+     * Refuse BPLO's approval of a new filing that names no other permit.
+     *
+     * Before any write, so a refused approval leaves nothing behind (the same
+     * order `AssignmentController::approve` relies on). See `approveMainForm`
+     * for why none ticked is refused only when the filing carries none.
+     *
+     * @param  list<int>|null  $ids
+     */
+    private function refuseUnsetOtherPermits(Application $app, ?array $ids): void
+    {
+        if (($ids ?? []) !== []) {
+            $allowed = PermitType::whereIn('code', PermitType::REQUIRED_CLEARANCE_CODES)->pluck('id')->all();
+            if (array_diff($ids, $allowed) !== [] || count($ids) !== count(array_unique($ids))) {
+                throw ValidationException::withMessages([
+                    'permit_type_ids' => ['Tick only the five other permits, once each.'],
+                ]);
+            }
+
+            return;
+        }
+
+        $carriesOne = $app->permitTypes()
+            ->whereIn('permit_types.code', PermitType::REQUIRED_CLEARANCE_CODES)
+            ->exists();
+
+        if (! $carriesOne) {
+            throw ValidationException::withMessages([
+                'permit_type_ids' => ['Tick the other permits this business needs.'],
+            ]);
+        }
+    }
+
+    /**
+     * Make the filing's clearances exactly the set BPLO ticked, and re-bill.
+     *
+     * Only the five clearances are touched: the business permit is not one of
+     * BPLO's ticks, and is never removed here.
+     *
+     * @param  list<int>  $ids
+     */
+    private function setOtherPermits(Application $app, array $ids): void
+    {
+        $carried = $app->permitTypes()
+            ->whereIn('permit_types.code', PermitType::REQUIRED_CLEARANCE_CODES)
+            ->get();
+
+        foreach ($carried as $type) {
+            if (in_array($type->id, $ids, true)) {
+                continue;
+            }
+            if ($type->pivot->status !== ClearanceStatus::NotStarted) {
+                throw ValidationException::withMessages([
+                    'permit_type_ids' => ["The {$type->name} has already started and stays."],
+                ]);
+            }
+            $app->permitTypes()->detach($type->id);
+        }
+
+        $app->permitTypes()->syncWithoutDetaching(
+            collect($ids)
+                ->reject(fn (int $id) => $carried->contains('id', $id))
+                ->mapWithKeys(fn (int $id) => [$id => ['status' => ClearanceStatus::NotStarted->value]])
+                ->all()
+        );
+
+        Audit::log('application.other_permits_set', $app, ['permit_type_ids' => array_values($ids)]);
+
+        $app->load('permitTypes');
+        $this->assessFees($app);
+    }
+
+    /** The clearances a new filing carries, named in the order the stage lists them. */
+    private function otherPermitNames(Application $app): string
+    {
+        return $app->permitTypes()
+            ->whereIn('permit_types.code', PermitType::REQUIRED_CLEARANCE_CODES)
+            ->get()
+            ->sortBy(fn (PermitType $pt) => array_search($pt->code, PermitType::CLEARANCE_ORDER, true))
+            ->pluck('name')
+            ->implode(', ');
     }
 
     /** The system's key for the automatic "you left your TIN blank" requirement. */
@@ -2099,7 +2260,8 @@ class WorkflowService
          * held this path to since 17 September 2026.
          *
          * It never arose while this was the new filing's path alone: one of
-         * those always carries all five clearances. A renewal carries only
+         * those carries at least one clearance (BPLO must tick one, see
+         * `approveMainForm`). A renewal carries only
          * the permits it is renewing, and the common January filing renews
          * the Mayor's Permit by itself.
          *
@@ -2506,6 +2668,8 @@ class WorkflowService
                     'title' => "DENR {$code} — {$meaning}",
                 ],
                 [
+                    // Keyed so the applicant answers it with an upload slot (5 October 2026).
+                    'system_key' => DenrRequirements::systemKey($code),
                     'requested_by_user_id' => null,
                     'department_id' => $type->issuing_department_id,
                     'request_type' => 'document',
@@ -4571,6 +4735,22 @@ class WorkflowService
         $app->load('permitTypes');
         $outstanding = $this->outstandingClearances($app);
 
+        /*
+         * ── A new filing BPLO has not yet given its other permits ────────────
+         *
+         * Since 5 October 2026 a new filing carries no clearance until BPLO
+         * ticks them at the form approval. Before that, "nothing outstanding"
+         * is true only because nothing has been asked for, and a direct caller
+         * reaching here would mint the Mayor's Permit on an unread, unpaid
+         * filing. Refused rather than inferred.
+         */
+        if ($app->application_type === ApplicationType::New
+            && ! $app->permitTypes->contains(fn (PermitType $pt) => $pt->isRequiredClearance())) {
+            throw ValidationException::withMessages([
+                'permits' => ['BPLO has not listed this business’s other permits yet.'],
+            ]);
+        }
+
         if ($outstanding->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'permits' => [
@@ -5044,7 +5224,9 @@ class WorkflowService
      * A10-2016 as seeded carries no amendment fee: 0 of the revenue-code rules
      * mention one, and neither does the extract of the ordinance itself
      * (both searched 19 September 2026). So `config('biztrack.amendment_fee')`
-     * is ₱0 until BPLO gives a figure, and the row is written anyway.
+     * was ₱0 until BPLO gave a figure, and the row was written anyway. Since
+     * 5 October 2026 it is ₱200, an assumption taken from other LGUs'
+     * schedules while A31 still asks BPLO — see config/biztrack.php.
      *
      * Writing a ₱0 row rather than no row is the deliberate part. The stacking
      * is then real, visible and already correct — the line appears on the
@@ -5098,12 +5280,11 @@ class WorkflowService
                 /*
                  * A SETTING, not a fee rule: `fee_rules` is the ordinance and
                  * every row there carries the section it came from, which this
-                 * fee does not have. Zero until BPLO names a figure — see
-                 * config/biztrack.php for what was searched and why the row is
-                 * written at zero rather than skipped.
-                 *
+                 * fee does not have. ₱200 since 5 October 2026, an assumption
+                 * pending BPLO's answer — see config/biztrack.php for what was
+                 * searched and where the figure came from.
                  */
-                'amount' => (float) config('biztrack.amendment_fee', 0),
+                'amount' => (float) config('biztrack.amendment_fee', 200),
                 'description' => 'Amendment — '.$what,
                 'incurred_at' => now(),
             ],
@@ -5261,9 +5442,24 @@ class WorkflowService
      *  - **Any other office** — they are approving THEIR permit's paperwork,
      *    which sends it to inspection rather than granting it.
      */
-    public function approveAssignment(ApplicationAssignment $assignment, ?string $remarks = null): void
+    /** @param  list<int>|null  $otherPermitTypeIds  BPLO's ticks on a new filing; see approveMainForm */
+    public function approveAssignment(ApplicationAssignment $assignment, ?string $remarks = null, ?array $otherPermitTypeIds = null): void
     {
         $app = $assignment->application;
+
+        /*
+         * The other permits are ticked at one moment only — BPLO reading a
+         * new filing's form. Anywhere else the parameter is refused rather
+         * than ignored, so a caller who sent ticks is told they did nothing.
+         */
+        if (($otherPermitTypeIds ?? []) !== []
+            && ($assignment->department_id !== $this->bploDepartmentId()
+                || $app->status !== ApplicationStatus::ForApproval
+                || $app->application_type !== ApplicationType::New)) {
+            throw ValidationException::withMessages([
+                'permit_type_ids' => ['Only a new application takes other permits.'],
+            ]);
+        }
 
         if ($app->isDecided()) {
             throw ValidationException::withMessages([
@@ -5273,7 +5469,7 @@ class WorkflowService
 
         if ($assignment->department_id === $this->bploDepartmentId()) {
             match ($app->status) {
-                ApplicationStatus::ForApproval => $this->approveMainForm($app, $remarks),
+                ApplicationStatus::ForApproval => $this->approveMainForm($app, $remarks, $otherPermitTypeIds),
                 /*
                  * An AMENDMENT's completion is a different act from a new
                  * filing's or a renewal's, so it gets its own method rather
@@ -5581,31 +5777,64 @@ class WorkflowService
      */
     private function recordDeferredFee(Application $app, PermitType $type): void
     {
-        if ($app->application_type !== ApplicationType::Renewal) {
-            return;
-        }
-
-        $app->loadMissing('permitTypes');
-        $carriesBusinessPermit = $app->permitTypes
-            ->contains(fn (PermitType $pt) => $pt->code === PermitType::OUTCOME_CODE);
-
-        if ($carriesBusinessPermit || $app->business_id === null) {
+        if ($app->business_id === null) {
             return;
         }
 
         /*
-         * Priced from this filing's own assessment line for this permit, not
-         * recomputed. `assessFees` ran at submission over the revenue-code
-         * rules, and re-deriving the number here would let two answers exist
-         * for one fee — the one the applicant was shown and the one they are
-         * eventually billed.
+         * ── An AMENDMENT's clearance defers too ──────────────────────────────
+         *
+         * A move (or a new trade, or a larger area) carries a new Zoning
+         * Clearance on the amendment since 21 September 2026, opened at
+         * submission. Until 5 October 2026 this method returned for anything
+         * that was not a renewal, so CPDO issued that clearance and its fee
+         * was neither billed (an amendment raises no bill) nor deferred — the
+         * city simply never collected it. The client's rule for amendments is
+         * the deferral (19 September 2026: *"All amendment payments will
+         * reflect when a business permit is renewed"*), so the clearance fee
+         * joins the pile the next Business Permit renewal sweeps.
+         *
+         * No late penalty: an amendment is not a renewal and has no term to
+         * be late against. The business permit an amendment carries is never
+         * issued through here, so only a clearance reaches this branch.
          */
-        $amount = $this->deferredAmountFor($app, $type);
+        if ($app->application_type === ApplicationType::Amendment) {
+            if (! $type->isRequiredClearance()) {
+                return;
+            }
+            $amount = $this->amendmentClearanceAmount($app, $type);
+            $penalty = ['surcharge' => 0.0, 'interest' => 0.0, 'months_counted' => 0];
+        } else {
+            if ($app->application_type !== ApplicationType::Renewal) {
+                return;
+            }
+
+            $app->loadMissing('permitTypes');
+            $carriesBusinessPermit = $app->permitTypes
+                ->contains(fn (PermitType $pt) => $pt->code === PermitType::OUTCOME_CODE);
+
+            if ($carriesBusinessPermit) {
+                return;
+            }
+
+            /*
+             * Priced from this filing's own assessment line for this permit, not
+             * recomputed. `assessFees` ran at submission over the revenue-code
+             * rules, and re-deriving the number here would let two answers exist
+             * for one fee — the one the applicant was shown and the one they are
+             * eventually billed.
+             */
+            $amount = $this->deferredAmountFor($app, $type);
+            if ($amount <= 0.0) {
+                return;
+            }
+
+            $penalty = $this->latePenaltyFor($app, $this->priorPermitFor($app, $type), $amount);
+        }
+
         if ($amount <= 0.0) {
             return;
         }
-
-        $penalty = $this->latePenaltyFor($app, $this->priorPermitFor($app, $type), $amount);
 
         $deferred = UnbilledPermitFee::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
@@ -5829,6 +6058,34 @@ class WorkflowService
      * belongs to, which is a schema change worth making when something other
      * than this needs it too.
      */
+    /**
+     * What one clearance on an AMENDMENT costs, for the deferred pile.
+     *
+     * An amendment raises no Tax Order of Payment (`submit` skips
+     * `assessFees` for it), so there is no assessment line to read the way a
+     * renewal's deferral does. The same revenue-code rules are run instead,
+     * over this one permit type alone — `FeeCalculator` gates every rule on
+     * the permit types it is handed — on a copy of the filing, so nothing is
+     * written. Falls back to the flat schedule (`deferredAmountFor`) when no
+     * rule prices it, the same last resort a renewal has.
+     *
+     * The business facts are the register's as they stand when CPDO issues
+     * the clearance, which is before the amendment is applied — so a larger
+     * floor area is priced at the old one. Stated rather than corrected: the
+     * next renewal reassesses the business from scratch.
+     */
+    private function amendmentClearanceAmount(Application $app, PermitType $type): float
+    {
+        $probe = clone $app;
+        $probe->setRelation('permitTypes', new EloquentCollection([$type]));
+
+        $sum = collect(app(FeeCalculator::class)->assess($probe)['items'])
+            ->filter(fn ($i) => in_array($type->code, (array) ($i['permit_codes'] ?? []), true))
+            ->sum(fn ($i) => (float) ($i['amount'] ?? 0));
+
+        return $sum > 0.0 ? round($sum, 2) : $this->deferredAmountFor($app, $type);
+    }
+
     private function deferredAmountFor(Application $app, PermitType $type): float
     {
         $assessment = $app->feeAssessment()->first();
