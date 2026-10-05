@@ -16,7 +16,12 @@ cp api/.env.example api/.env.production
 #   APP_URL=http://<host>          FRONTEND_URL=http://<host>
 #   DB_CONNECTION=pgsql DB_HOST=db DB_PORT=5432 DB_DATABASE=biztrack
 #   DB_USERNAME=biztrack DB_PASSWORD=<strong>
-#   QUEUE_CONNECTION=database  MAIL_MAILER=log  SMS_DRIVER=log
+#   QUEUE_CONNECTION=database  MAIL_MAILER=log
+#   SMS_DRIVER=smsgate  SMS_GATEWAY_USERNAME=  SMS_GATEWAY_PASSWORD=  SMS_GATEWAY_URL=
+#                      Username and password are the ones SMS Gateway for Android shows in
+#                      Cloud Server mode; a blank URL means api.sms-gate.app. SMS_DRIVER=log
+#                      (the default) writes texts to storage/logs/sms.log instead.
+#                      Check it after deploy: php artisan biztrack:sms-check 09XXXXXXXXX
 #   PAYMENT_DRIVER=simulated   DEMO_PASSWORD=<demo pw>
 #   GEMINI_KEY=<key>   optional; blank = the chatbot answers from its rules alone.
 #                      Check it after deploy: php artisan biztrack:chatbot-check

@@ -14,7 +14,7 @@ six-digit code by e-mail at every sign-in, a confirmed address before an owner
 can file, and a code by e-mail before a password change in Settings. Read
 section 7 before changing `MAIL_MAILER`.
 
-SMS is not part of this. The SMS driver still only writes to the log.
+SMS is separate, and only for key moments: see `SMS_DRIVER` in `docs/runbook-deploy.md` §1.
 
 ---
 
@@ -176,7 +176,6 @@ The day's usage is shown in the Brevo dashboard.
 - **"Trust this device for 30 days."** Not built. Every sign-in asks for a code.
 - **Staff e-mail.** Officers get in-app notices only, by design (they are signed
   in all day). Revisit if an office asks for it.
-- **SMS.** Out of scope for now; `SMS_DRIVER=log`.
 
 ## 7. Sign-in, address and password-change codes — on with the mailer
 
