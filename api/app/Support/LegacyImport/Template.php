@@ -12,8 +12,7 @@ namespace App\Support\LegacyImport;
  * spells a barangay. Guessing at an export we have never seen would make the
  * importer quietly wrong the day the real one arrives. Instead BizTrack states
  * what it needs, in plain columns, and whoever holds the old data maps it once —
- * in Excel for a CSV, or with `AS` aliases in the SQL for an ODBC source, which
- * reads through exactly the same columns (OdbcSource).
+ * in Excel.
  *
  * One row is one business and, optionally, one of its permits. A business with
  * three permits is three rows that repeat the business columns; a business with

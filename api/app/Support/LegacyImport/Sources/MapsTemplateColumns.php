@@ -6,8 +6,7 @@ use App\Support\LegacyImport\SourceUnreadable;
 use App\Support\LegacyImport\Template;
 
 /**
- * Turn a source's own header into the template's columns — shared by the CSV
- * and ODBC sources so the two agree on what a usable header is.
+ * Turn a source's own header into the template's columns.
  *
  * Headers are matched case-insensitively with spaces read as underscores, so
  * "Business Name" from a spreadsheet or BUSINESS_NAME from a database both

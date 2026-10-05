@@ -9,11 +9,11 @@ use Carbon\CarbonImmutable;
 /**
  * Check one legacy row and say what importing it would do.
  *
- * Shared by the CSV and ODBC imports and by the dry run and the real run, so
- * the preview the super admin confirms is produced by exactly the code that
- * then writes. It is stateful across one import: it remembers the ACCEPTED
- * rows it has seen, which is how a duplicate inside the file is caught and how
- * row 40 knows the business row 3 is about to create. A rejected row leaves no
+ * Shared by the dry run and the real run, so the preview the super admin
+ * confirms is produced by exactly the code that then writes. It is stateful
+ * across one import: it remembers the ACCEPTED rows it has seen, which is how
+ * a duplicate inside the file is caught and how row 40 knows the business
+ * row 3 is about to create. A rejected row leaves no
  * trace in that memory, so a later, correct row for the same business is not
  * refused as its duplicate.
  *
@@ -252,8 +252,7 @@ class RowValidator
     }
 
     /**
-     * YYYY-MM-DD (a time after it is ignored — ODBC hands dates back as
-     * timestamps) or MM/DD/YYYY, month first, the order a Philippine
+     * YYYY-MM-DD (a time after it is ignored) or MM/DD/YYYY, month first, the order a Philippine
      * spreadsheet uses. A slashed date is ALWAYS read month first: a DD/MM
      * export would have its day-over-12 rows rejected and the rest silently
      * misread, which is why the guide says "month first" and why YYYY-MM-DD is

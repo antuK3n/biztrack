@@ -85,6 +85,15 @@ it('offers a template with a header row, one example row and a guide to every co
         ->and($guide['barangays'])->toContain('Acacia');
 });
 
+it('reads the old register from a CSV only — there is no ODBC source to name', function () {
+    $headers = authAs('admin@biztrack.local');
+
+    $odbc = test()->withHeaders($headers)->postJson('/api/v1/admin/legacy-imports/odbc', ['dsn' => 'OLDBPLS']);
+    expect($odbc->status())->toBeIn([404, 405])
+        ->and(test()->withHeaders($headers)->getJson('/api/v1/admin/legacy-imports/guide')->json('data'))
+        ->not->toHaveKey('odbc');
+});
+
 it('refuses the import screen to anyone but the super admin', function () {
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/admin/legacy-imports/guide')->assertForbidden();

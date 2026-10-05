@@ -115,16 +115,4 @@ return [
         'timeout' => (int) env('GEMINI_TIMEOUT', 8),
     ],
 
-    /*
-     * The account the legacy ODBC import signs in with (docs/odbc.md).
-     *
-     * Read here and nowhere else, so the import screen never asks for a
-     * password and the import row never stores one. Both may be left empty
-     * when MISD embeds the credentials in the DSN itself (odbc.ini).
-     */
-    'legacy_odbc' => [
-        'username' => env('LEGACY_ODBC_USERNAME'),
-        'password' => env('LEGACY_ODBC_PASSWORD'),
-    ],
-
 ];

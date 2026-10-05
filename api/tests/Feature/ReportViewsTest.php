@@ -4,7 +4,7 @@ use App\Models\Business;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Support\LegacyImport\LegacyImporter;
-use App\Support\LegacyImport\Sources\OdbcSource;
+use App\Support\LegacyImport\Sources\CsvSource;
 use App\Support\ReportViews;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
@@ -41,10 +41,11 @@ it('names its columns plainly and leaves out owners’ contact details', functio
 });
 
 it('shows an imported, unclaimed business with the old register’s owner name', function () {
-    $pdo = new PDO('sqlite::memory:');
-    $pdo->exec('CREATE TABLE export (legacy_business_id TEXT, business_name TEXT, owner_first_name TEXT, owner_last_name TEXT, address_line TEXT, barangay TEXT, legacy_permit_id TEXT, permit_type TEXT, permit_number TEXT, valid_from TEXT, valid_until TEXT)');
-    $pdo->exec("INSERT INTO export VALUES ('R-1', 'Report Shop', 'Ana', 'Cruz', '3 Street', 'Longos', 'RP-1', 'BUSINESS', 'OLD-R-1', '2025-01-01', '2099-12-31')");
-    app(LegacyImporter::class)->run(new OdbcSource('X', table: 'export', connect: fn () => $pdo));
+    $path = tempnam(sys_get_temp_dir(), 'report-views');
+    file_put_contents($path, "legacy_business_id,business_name,owner_first_name,owner_last_name,address_line,barangay,legacy_permit_id,permit_type,permit_number,valid_from,valid_until\n"
+        ."R-1,Report Shop,Ana,Cruz,3 Street,Longos,RP-1,BUSINESS,OLD-R-1,2025-01-01,2099-12-31\n");
+    app(LegacyImporter::class)->run(new CsvSource($path, 'export.csv'));
+    unlink($path);
 
     $row = DB::table('report_businesses')->where('old_register_id', 'R-1')->first();
     expect($row->owner_name)->toBe('Ana Cruz')

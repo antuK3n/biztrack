@@ -1,18 +1,16 @@
-# ODBC — reporting out, importing in
+# ODBC — reporting out
 
-BizTrack speaks ODBC in both directions:
-
-- **Out:** Excel, Power BI or any ODBC tool reads three read-only **report
-  views**, through a PostgreSQL login that can see those views and nothing else.
-- **In:** the super admin imports the city's old register straight from an ODBC
-  data source, through the same dry run and validation as a CSV import.
+Excel, Power BI or any ODBC tool reads three read-only **report views**,
+through a PostgreSQL login that can see those views and nothing else. (The old
+register is brought in as a CSV on the super admin's Import Records screen, not
+over ODBC.)
 
 This guide is written for MISD. Production is PostgreSQL 16; the demo runs on
-SQLite (see the note at the end of each half).
+SQLite (see the note at the end).
 
 ---
 
-## Part 1 — Reporting out (Excel, Power BI)
+## Reporting out (Excel, Power BI)
 
 ### What the tools can read
 
@@ -120,104 +118,3 @@ when the run started, plus the role named by `DB_REPORT_ROLE` (default
 `biztrack_report`) whenever it exists. If the role was created under another
 name, set `DB_REPORT_ROLE` to it, or the next deploy that migrates will lock
 the reporting tools out.
-
----
-
-## Part 2 — Importing in (from the old register)
-
-The super admin's **Import** screen (and `php artisan biztrack:import-legacy`)
-accepts a CSV in BizTrack's template, **or** an ODBC source. Both run the same
-dry run first: counts of rows that will create, update or be rejected, and a
-reason for every rejected row. Nothing is written until the import is
-confirmed.
-
-### What MISD installs on the BizTrack server
-
-`pdo_odbc` is not part of the production image yet. Until it is, the screen
-says so in plain words and the CSV route still works. In `infra/php/Dockerfile`:
-
-```dockerfile
-RUN apk add --no-cache unixodbc unixodbc-dev \
-    && docker-php-ext-configure pdo_odbc --with-pdo-odbc=unixODBC,/usr \
-    && docker-php-ext-install pdo_odbc
-```
-
-(Debian/Ubuntu without Docker: `sudo apt install unixodbc php8.4-odbc`.)
-
-Then add the ODBC **driver for the old system's database** (for example
-Microsoft's `msodbcsql18` for SQL Server, `odbc-postgresql` for PostgreSQL,
-the MySQL Connector/ODBC for MySQL) and a DSN in `/etc/odbc.ini`:
-
-```ini
-[OLDBPLS]
-Driver   = ODBC Driver 18 for SQL Server
-Server   = old-bpls.example.local
-Database = BPLS
-Encrypt  = yes
-```
-
-Check it with `isql -v OLDBPLS <user> <password>`.
-
-### Credentials
-
-The login for the old database goes in the server's environment, never in the
-import screen:
-
-```
-LEGACY_ODBC_USERNAME=bpls_readonly
-LEGACY_ODBC_PASSWORD=…
-```
-
-(or embed them in the DSN). Give BizTrack a **read-only** account on the old
-system. BizTrack also refuses anything but a single `SELECT`, but that is a
-second lock, not the first.
-
-### Mapping the old columns
-
-On the screen, give the DSN name and either a table whose columns already use
-the template's names, or a `SELECT` that renames them with `AS`:
-
-```sql
-SELECT biz_no      AS legacy_business_id,
-       biz_name    AS business_name,
-       own_fname   AS owner_first_name,
-       own_lname   AS owner_last_name,
-       street      AS address_line,
-       brgy        AS barangay,
-       permit_id   AS legacy_permit_id,
-       permit_kind AS permit_type,
-       permit_no   AS permit_number,
-       date_issued AS valid_from,
-       date_expiry AS valid_until
-FROM bpls_master
-```
-
-The screen lists every template column and what goes in it; the same list is
-the header row of the downloadable CSV template. Timestamps are fine — the time
-is dropped. A slashed date is read **month first**; ask for `YYYY-MM-DD`
-(questions-for-malabon.md B28).
-
-### From the command line
-
-```bash
-php artisan biztrack:import-legacy --odbc=OLDBPLS --query="SELECT … FROM bpls_master" --dry-run
-php artisan biztrack:import-legacy --odbc=OLDBPLS --table=bizexport            # asks before importing
-php artisan biztrack:import-legacy old-register.csv --dry-run
-```
-
-### Re-running
-
-Every row is keyed on the old system's own ids (`legacy_business_id`,
-`legacy_permit_id`). Running the same source again updates what the first run
-made rather than adding copies, so a failed or partial run is finished by
-running it again. Large imports (over 1,000 rows) run on the queue worker —
-production's `queue` container already runs one.
-
-### Owners
-
-An owner with no BizTrack account is kept as an **unclaimed** record; no
-account is made and no password is set. They claim their businesses at sign-up
-by entering a business account or permit number from before BizTrack, and
-their surname must match the old register's (questions-for-malabon.md B29). An
-owner whose email already belongs to a BizTrack business-owner account is
-linked straight away.

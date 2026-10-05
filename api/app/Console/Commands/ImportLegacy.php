@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 use App\Models\LegacyImport;
 use App\Support\LegacyImport\ImportRunner;
 use App\Support\LegacyImport\Sources\CsvSource;
-use App\Support\LegacyImport\Sources\OdbcSource;
 use App\Support\LegacyImport\Sources\RowSource;
 use App\Support\LegacyImport\SourceUnreadable;
 use Illuminate\Console\Command;
@@ -16,8 +15,6 @@ use Illuminate\Console\Command;
  *
  *   php artisan biztrack:import-legacy businesses.csv --dry-run
  *   php artisan biztrack:import-legacy businesses.csv
- *   php artisan biztrack:import-legacy --odbc=OLDBPLS --table=biz_export --dry-run
- *   php artisan biztrack:import-legacy --odbc=OLDBPLS --query="SELECT … AS legacy_business_id, …"
  *
  * Same pipeline, same `legacy_imports` row and the same audit entries as the
  * screen; the audit rows name the command in place of a user. Runs in the
@@ -30,12 +27,9 @@ class ImportLegacy extends Command
     protected $signature = 'biztrack:import-legacy
         {file? : A CSV in BizTrack\'s import template}
         {--dry-run : Validate and report; write nothing}
-        {--odbc= : Read from this ODBC DSN instead of a file}
-        {--table= : With --odbc: the table to read}
-        {--query= : With --odbc: a SELECT whose columns are aliased to the template\'s names}
         {--force : Import without asking to confirm the dry run}';
 
-    protected $description = 'Import businesses and permits from the old register (CSV or ODBC), with a dry run.';
+    protected $description = 'Import businesses and permits from the old register (CSV), with a dry run.';
 
     public function handle(ImportRunner $runner): int
     {
@@ -87,23 +81,9 @@ class ImportLegacy extends Command
     /** @return array{0: RowSource, 1: LegacyImport} */
     private function source(): array
     {
-        if ($dsn = $this->option('odbc')) {
-            if (! OdbcSource::available()) {
-                throw new SourceUnreadable(OdbcSource::unavailableMessage());
-            }
-            $source = new OdbcSource($dsn, $this->option('table'), $this->option('query'));
-            $source->sql();
-
-            return [$source, LegacyImport::create([
-                'source' => 'odbc',
-                'file_name' => $source->label(),
-                'source_query' => array_filter(['dsn' => $dsn, 'table' => $this->option('table'), 'query' => $this->option('query')]),
-            ])];
-        }
-
         $file = $this->argument('file');
         if (! $file || ! is_file($file)) {
-            throw new SourceUnreadable($file ? "No file at {$file}." : 'Name a CSV file, or give --odbc=DSN.');
+            throw new SourceUnreadable($file ? "No file at {$file}." : 'Name a CSV file.');
         }
 
         return [new CsvSource($file, basename($file)), LegacyImport::create([

@@ -2715,7 +2715,6 @@ export interface LegacyImportGuide {
   columns: { column: string; required: 'always' | 'with a permit' | 'no'; description: string }[]
   barangays: string[]
   permit_types: { code: string; name: string }[]
-  odbc: { available: boolean; message: string | null }
   queue_above: number
 }
 

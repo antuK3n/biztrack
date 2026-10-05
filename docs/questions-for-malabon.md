@@ -1110,8 +1110,7 @@ for 30 days" option yet; every sign-in asks for a code.
 ## B28. What does the old register's export look like — and can dates come as YYYY-MM-DD?
 
 BizTrack can now import the city's existing businesses and permits, from a CSV
-in BizTrack's own template or straight from the old database over ODBC. We
-have never seen the old data (misd-questions.md Q10): its columns, how it
+in BizTrack's own template. We have never seen the old data (misd-questions.md Q10): its columns, how it
 spells barangays, its permit type names, or its date format.
 
 **Why it matters.** Rows whose barangay, permit type or date cannot be read are

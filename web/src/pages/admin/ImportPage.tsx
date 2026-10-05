@@ -7,18 +7,18 @@ import { formatBytes, formatDateTime } from '../../lib/format'
 import type { LegacyImport, LegacyImportReject, LegacyRejectKind } from '../../lib/types'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { FieldLabel, FilterPills, PageTitle, PillButton, ProtoCard, inputCls } from '../../components/ui/Proto'
+import { PageTitle, PillButton, ProtoCard } from '../../components/ui/Proto'
 import { DownloadIcon, UploadIcon } from '../../components/icons'
 
 /*
  * Import Records — the super admin brings the old register into BizTrack.
  *
- * Ken's checklist, 27 September 2026: "Migration 1" (CSV) and the IN half of
- * "Migration 2" (ODBC). The flow is the one the brief sets and the API
- * enforces — upload, DRY RUN, read the verdict, confirm, import — so this screen
- * is three states of one card rather than a wizard:
+ * Ken's checklist, 27 September 2026: "Migration 1" (CSV). The flow is the one
+ * the brief sets and the API enforces — upload, DRY RUN, read the verdict,
+ * confirm, import — so this screen is three states of one card rather than a
+ * wizard:
  *
- *   1. choose a source (a CSV in BizTrack's template, or an ODBC DSN + query)
+ *   1. upload a CSV in BizTrack's template
  *   2. the dry run: what would be created, updated and rejected, and why each
  *      rejected row was refused
  *   3. the run: done, running on the queue (polled), or failed with the reason
@@ -27,8 +27,6 @@ import { DownloadIcon, UploadIcon } from '../../components/icons'
  * once, because the thing a person hesitates over on an import screen is
  * whether pressing the first button already did something.
  */
-
-type Source = 'csv' | 'odbc'
 
 /** The reject kinds in words a BPLO clerk would use. */
 const KIND_LABEL: Record<LegacyRejectKind, string> = {
@@ -46,7 +44,6 @@ function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 export function ImportPage() {
-  const [source, setSource] = useState<Source>('csv')
   const [current, setCurrent] = useState<LegacyImport | null>(null)
   const guide = useAsync(() => legacyImports.guide(), [])
   const history = useAsync(() => legacyImports.history(), [])
@@ -91,25 +88,7 @@ export function ImportPage() {
 
       {current === null ? (
         <>
-          <div className="mb-5">
-            <FilterPills<Source>
-              options={[
-                { value: 'csv', label: 'CSV file' },
-                { value: 'odbc', label: 'ODBC source' },
-              ]}
-              value={source}
-              onChange={setSource}
-            />
-          </div>
-          {source === 'csv' ? (
-            <CsvSourceCard onPreviewed={setCurrent} />
-          ) : (
-            <OdbcSourceCard
-              available={guide.data?.odbc.available ?? true}
-              unavailableMessage={guide.data?.odbc.message ?? null}
-              onPreviewed={setCurrent}
-            />
-          )}
+          <CsvSourceCard onPreviewed={setCurrent} />
           <ColumnGuide guide={guide} />
         </>
       ) : (
@@ -223,88 +202,6 @@ function CsvSourceCard({ onPreviewed }: { onPreviewed: (i: LegacyImport) => void
 
         <PillButton type="submit" aria-disabled={busy}>
           {busy ? 'Checking…' : 'Check the file'}
-        </PillButton>
-      </form>
-    </ProtoCard>
-  )
-}
-
-function OdbcSourceCard({
-  available,
-  unavailableMessage,
-  onPreviewed,
-}: {
-  available: boolean
-  unavailableMessage: string | null
-  onPreviewed: (i: LegacyImport) => void
-}) {
-  const [dsn, setDsn] = useState('')
-  const [table, setTable] = useState('')
-  const [query, setQuery] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!available || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      onPreviewed(
-        await legacyImports.previewOdbc({
-          dsn: dsn.trim(),
-          table: table.trim() || undefined,
-          query: query.trim() || undefined,
-        }),
-      )
-    } catch (err) {
-      const apiError = toApiError(err)
-      setError(apiError.errors.dsn?.[0] ?? apiError.errors.query?.[0] ?? apiError.errors.table?.[0] ?? apiError.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <ProtoCard className="rounded-xl p-5">
-      {!available && (
-        <div className="mb-5">
-          <Alert variant="warning" title="ODBC is not set up on this server">
-            {unavailableMessage}
-          </Alert>
-        </div>
-      )}
-      <form onSubmit={submit} className="max-w-2xl space-y-4">
-        <p className="text-sm text-ink-secondary">
-          Read straight from the old system’s database. MISD configures the data source and its login
-          on the server (docs/odbc.md); you name it here. Give a table whose columns already use the
-          template’s names, or a SELECT that renames them with AS.
-        </p>
-        <label className="block">
-          <FieldLabel required>Data source name (DSN)</FieldLabel>
-          <input className={inputCls} value={dsn} onChange={(e) => setDsn(e.target.value)} placeholder="As MISD named it" readOnly={!available} />
-        </label>
-        <label className="block">
-          <FieldLabel>Table</FieldLabel>
-          <input className={inputCls} value={table} onChange={(e) => setTable(e.target.value)} placeholder="schema.table" readOnly={!available} />
-        </label>
-        <label className="block">
-          <FieldLabel>Or a query</FieldLabel>
-          <textarea
-            className={`${inputCls} min-h-28 font-mono text-xs`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="SELECT old_column AS legacy_business_id, … FROM …"
-            readOnly={!available}
-          />
-        </label>
-        {error && (
-          <p role="alert" className="text-sm font-medium text-s-red">
-            {error}
-          </p>
-        )}
-        <PillButton type="submit" aria-disabled={!available || busy}>
-          {busy ? 'Checking…' : 'Check the source'}
         </PillButton>
       </form>
     </ProtoCard>

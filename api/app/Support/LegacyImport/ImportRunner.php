@@ -5,7 +5,6 @@ namespace App\Support\LegacyImport;
 use App\Models\LegacyImport;
 use App\Support\Audit;
 use App\Support\LegacyImport\Sources\CsvSource;
-use App\Support\LegacyImport\Sources\OdbcSource;
 use App\Support\LegacyImport\Sources\RowSource;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -27,12 +26,6 @@ class ImportRunner
     /** The row source a stored import reads from. */
     public function sourceFor(LegacyImport $import): RowSource
     {
-        if ($import->source === 'odbc') {
-            $q = $import->source_query ?? [];
-
-            return new OdbcSource($q['dsn'] ?? '', $q['table'] ?? null, $q['query'] ?? null);
-        }
-
         return new CsvSource(Storage::disk('local')->path((string) $import->stored_path), (string) $import->file_name);
     }
 

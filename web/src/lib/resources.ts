@@ -1906,9 +1906,8 @@ export const admin = {
 /* ── Importing the old register ───────────────────────────────────────── */
 
 /*
- * The super admin's import (permission `data.import`). Upload or name an ODBC
- * source → dry run → confirm → import. Nothing reaches the register before
- * `run`.
+ * The super admin's import (permission `data.import`). Upload a CSV → dry
+ * run → confirm → import. Nothing reaches the register before `run`.
  */
 export const legacyImports = {
   guide: () => unwrap<LegacyImportGuide>(api.get('/admin/legacy-imports/guide')),
@@ -1923,9 +1922,6 @@ export const legacyImports = {
       api.post('/admin/legacy-imports/csv', form, { headers: { 'Content-Type': 'multipart/form-data' } }),
     )
   },
-  /** Name an ODBC source and dry-run it. The credentials live on the server. */
-  previewOdbc: (body: { dsn: string; table?: string; query?: string }) =>
-    unwrap<LegacyImport>(api.post('/admin/legacy-imports/odbc', body)),
   /** Confirm a dry run. Small imports finish in the call; large ones come back queued. */
   run: (id: number) => unwrap<LegacyImport>(api.post(`/admin/legacy-imports/${id}/run`)),
 }

@@ -718,7 +718,6 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             Route::get('legacy-imports/guide', [LegacyImportController::class, 'guide']);
             Route::get('legacy-imports/template', [LegacyImportController::class, 'template']);
             Route::post('legacy-imports/csv', [LegacyImportController::class, 'previewCsv']);
-            Route::post('legacy-imports/odbc', [LegacyImportController::class, 'previewOdbc']);
             Route::get('legacy-imports/{legacyImport}', [LegacyImportController::class, 'show']);
             Route::post('legacy-imports/{legacyImport}/run', [LegacyImportController::class, 'run']);
         });
