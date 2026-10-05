@@ -2923,7 +2923,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
          * the form" is what ticking nothing already means.
          */
         ...(form.requirements ?? [])
-          .filter((row) => row.source !== 'sheet' && row.code !== null)
+          /*
+           * Not a row carried from the Business Permit application (TCT, tax
+           * declaration, DTI/SEC, sketch …). Those belong to BPLO's form, and
+           * only BPLO returns them. Client, 5 October 2026: *"you SHOULD NOT
+           * BE ABLE TO RETURN ANY FIELDS THAT ARE INCORPORATED FROM THE
+           * BUSINESS PERMIT APPLICATION when you are using the other permits'
+           * office admins."*
+           */
+          .filter((row) => row.source !== 'sheet' && row.source !== 'carried' && row.code !== null)
           .map((row) => ({
             value: row.code as string,
             label: row.label,
