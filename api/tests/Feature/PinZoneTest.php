@@ -288,6 +288,9 @@ it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is un
     $sheets = function (int $id): array {
         attachRequiredDocuments($id);
         $this->postJson("/api/v1/applications/{$id}/submit")->assertOk();
+        // A new filing carries the Zoning Clearance, and so CPDO's sheet, only
+        // once BPLO ticks it at approval (5 October 2026).
+        bploApprovesForm($id);
         $department = assignOffice($id, 'CPDO');
         $assignment = ApplicationAssignment::where('application_id', $id)->where('department_id', $department)->value('id');
         authAs('zoning@biztrack.local');
