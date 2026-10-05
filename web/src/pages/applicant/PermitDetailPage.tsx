@@ -552,50 +552,29 @@ export function PermitDetailPage() {
               </p>
             )}
             {/*
-              ── A suspension says what to DO about it ─────────────────────
+              Suspended, revoked, retired, rejected: the word alone, large,
+              on the face of the certificate [client, 5 October 2026: "paki
+              tanggal na to … gayahin yung sa revoked pero mas lakihan yung
+              font size para mas visible"]. The box and the link that used to
+              sit under a suspension are gone.
 
-              Not just the word. An owner arriving here has been told their
-              Mayor's Permit is suspended and the only question they have is
-              how to get it back — so the route is on the screen rather than
-              in the notification they have already scrolled past.
-
-              The cause IS named now. It was left out while this screen could
-              not know which it was; since 5 October 2026 the permit records
-              it (`suspended_for`, `suspension_reason`), and the client asked
-              for exactly this: *"Show WHY it is suspended and WHICH office
-              caused it."* "Rejected" covers a failed visit too — the client
-              reads the inspection's Reject as the permit being rejected. A
-              suspension that named no permit (a sanctioned business, a
-              rejected filing) shows its reason alone.
-
-              Revoked gets the word and no route, because there is no route:
-              `PermitStatus::Revoked` has no writer and no way back, and
-              offering a button that fixes nothing is worse than silence.
+              The cause stays, as one plain line under the word. Since 5
+              October 2026 the permit records it (`suspended_for`,
+              `suspension_reason`), and the client asked for exactly this:
+              *"Show WHY it is suspended and WHICH office caused it."*
+              "Rejected" covers a failed visit too — the client reads the
+              inspection's Reject as the permit being rejected. A suspension
+              that named no permit (a sanctioned business, a rejected filing)
+              shows its reason alone.
             */}
-            {suspended && (
-              <div className="mx-auto mt-3 max-w-xl rounded-md border border-s-red bg-s-red-tint px-4 py-3 print:hidden">
-                <p className="text-center text-sm font-bold uppercase tracking-wide text-s-red">
-                  Suspended
-                </p>
-                <p className="mt-1.5 text-center text-xs leading-relaxed text-ink-secondary">
-                  {suspensionSentence(permit)}
-                </p>
-                {permit.application !== null && (
-                  <p className="mt-2 text-center">
-                    <Link
-                      to={`/applications/${permit.application.id}/clearances`}
-                      className="text-xs font-semibold text-royal underline underline-offset-2 hover:no-underline"
-                    >
-                      See your other permits on {permit.application.tracking_id}
-                    </Link>
-                  </p>
-                )}
-              </div>
-            )}
-            {/* Revoked, and the two statuses added on 5 October 2026: each is a decision, said on the face. */}
-            {(revoked || permit.status === 'retired' || permit.status === 'rejected') && (
-              <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
+            {(suspended || revoked || permit.status === 'retired' || permit.status === 'rejected') && (
+              <p className="mt-2 text-center text-xl font-bold uppercase tracking-[0.12em] text-s-red sm:text-2xl">
                 {cert?.status_label ?? permit.status}
+              </p>
+            )}
+            {suspended && (
+              <p className="mx-auto mt-1.5 max-w-xl text-center text-xs leading-relaxed text-ink-secondary print:hidden">
+                {suspensionSentence(permit)}
               </p>
             )}
             {superseded && (
