@@ -1675,8 +1675,20 @@ class MessageController extends Controller
         }
 
         $threadIds = $threads->pluck('id')->all();
-        // Opening a conversation is reading it — there is no separate gesture.
-        $this->markThreadsRead($threadIds, $user);
+        /*
+         * Opening a conversation is reading it — there is no separate gesture.
+         *
+         * But only ONE conversation. The screen's first fetch names no office
+         * and asks again a moment later for the office its picker settled on,
+         * so marking every thread read here cleared the unread badge on every
+         * office pill before the reader had opened any of them [client, 5
+         * October 2026: "once read na ang new messages matatanggal"]. A filing
+         * with a single thread is the exception: there is nothing else it
+         * could have been.
+         */
+        if ($requested !== null || count($threadIds) === 1) {
+            $this->markThreadsRead($threadIds, $user);
+        }
         /*
          * Scoped to the READER as well as to the thread.
          *
@@ -1723,7 +1735,15 @@ class MessageController extends Controller
 
         $stats = Message::query()
             ->whereIn('thread_id', $threadIds)
-            ->selectRaw('thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at')
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
+            // `unread_total` on the inbox's definition, so the office pills can
+            // carry a number for what each office wrote that is still unread
+            // [client, 5 October 2026]. Without it every pill read 0.
+            ->selectRaw(
+                'thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at, '
+                .'SUM(CASE WHEN messages.read_at IS NULL AND messages.sender_user_id <> ? THEN 1 ELSE 0 END) as unread_total',
+                [$user->id]
+            )
             ->groupBy('thread_id')
             ->get()
             ->keyBy('thread_id');

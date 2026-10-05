@@ -9,6 +9,12 @@ import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type { Message, MessageOffice, MessageTranscriptMeta } from '../lib/types'
 
+/**
+ * Fired on `window` when opening a conversation has just read it, so the nav
+ * badge can drop its count now rather than on its next 30s poll.
+ */
+export const MESSAGES_READ_EVENT = 'biztrack:messages-read'
+
 function PaperclipIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
     <svg
@@ -309,6 +315,13 @@ function OfficePicker({
       <div role="group" aria-labelledby="message-office-label" className="flex flex-wrap gap-1.5">
         {offices.map((office) => {
           const active = office.department_id === activeId
+          /*
+           * NEW messages, not all of them [client, 5 October 2026: "once di pa
+           * na read … once read na ang new messages matatanggal"]. The count
+           * was `messages_count`, which never went down. Not shown on the office
+           * being read: opening it is what reads them.
+           */
+          const unreadHere = active ? 0 : office.unread_count
           return (
             <button
               key={office.department_id}
@@ -322,9 +335,9 @@ function OfficePicker({
                * number rather than a message count.
                */
               aria-label={
-                office.messages_count > 0
-                  ? `${office.name}, ${office.messages_count} messages`
-                  : `${office.name}, no messages yet`
+                unreadHere > 0
+                  ? `${office.name}, ${unreadHere} new message${unreadHere === 1 ? '' : 's'}`
+                  : office.name
               }
               title={office.name}
               className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
@@ -348,9 +361,12 @@ function OfficePicker({
                 * button nobody can aim at.
                 */}
               {active ? office.name : (office.code ?? office.name)}
-              {office.messages_count > 0 && (
-                <span className={active ? 'ml-1.5 text-white/80' : 'ml-1.5 text-ink-secondary'}>
-                  {office.messages_count}
+              {unreadHere > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="tnum ml-1.5 inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-s-red px-1 text-[10px] font-bold leading-[1.125rem] text-white"
+                >
+                  {unreadHere > 99 ? '99+' : unreadHere}
                 </span>
               )}
             </button>
@@ -404,6 +420,7 @@ export function MessageThreadView({
   className = '',
   scrollClassName = 'max-h-96',
   onSent,
+  onRead,
   initialOfficeId = null,
 }: {
   target: MessageTarget
@@ -417,6 +434,12 @@ export function MessageThreadView({
   className?: string
   scrollClassName?: string
   onSent?: () => void
+  /**
+   * Called once each time a different conversation has been opened, and so
+   * read — the inbox re-asks for its unread marks rather than keep showing a
+   * number for mail the reader is looking at.
+   */
+  onRead?: () => void
   /**
    * The office to open on, when a link names one — My Permits' "Message the
    * office" on a rejected permit [client, 5 October 2026]. Otherwise the
@@ -487,6 +510,28 @@ export function MessageThreadView({
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement | null>(null)
+
+  /*
+   * Opening an office's conversation reads it on the server, so whatever
+   * counts unread elsewhere — the inbox row, the nav badge — is now stale.
+   * Said once per office, not on every 30s poll. A filing's first fetch names
+   * no office and reads nothing, so it is not reported.
+   */
+  const reportedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!data) return
+    // The office the SERVER answered for, not the picker's: on a switch the
+    // previous office's transcript is still in hand until the new one lands.
+    const served = data.meta.department_id ?? null
+    if (target.kind === 'application' && served === null) return
+    const key = String(served)
+    if (reportedFor.current === key) return
+    reportedFor.current = key
+    window.dispatchEvent(new Event(MESSAGES_READ_EVENT))
+    onRead?.()
+    // `onRead` is a fresh closure on every render; listing it would re-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, target.kind])
 
   // 30s polling while mounted — refresh the thread quietly.
   useEffect(() => {
