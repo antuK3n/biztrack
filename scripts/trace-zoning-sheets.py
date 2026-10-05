@@ -71,12 +71,13 @@ files for a location. See BarangayZoningMap.tsx.
    streets, rivers and creeks, the strip where the outline runs past the
    sheet's own bank, dense linework) goes to the zones beside it: a patch
    under MAX_HOLE_M2 to the zone it shares the longest edge with, a bigger one
-   grown into from every side, so a river splits between its two banks. The
-   one exception is ground the sheet paints as a zone the barangay is not
-   listed for (foreign_zones): it stays a hole rather than take a wrong name.
+   grown into from every side, so a river splits between its two banks. That
+   includes ground painted as a zone the barangay is not listed for, which
+   is therefore named wrongly (see fill_gaps for why that was chosen).
 7. Trace and simplify with shared edges. Every boundary between two zones is
    one arc, simplified once, so neighbouring zones cannot open slivers or
-   overlap where they meet. Douglas-Peucker to SIMPLIFY_M. Project through the
+   overlap where they meet. Douglas-Peucker to SIMPLIFY_M, then two Chaikin
+   corner-cutting passes so no edge is a staircase (chaikin). Project through the
    same three-corner affine the (removed) sheet overlay used, in Web Mercator,
    to WGS84; then cut each zone to the outline exactly and give every sliver
    left between the zones and the outline to the zone it shares the longest
@@ -97,7 +98,7 @@ were chasing is the outline: its longitudes are rounded to 0.001° (about
 108 m), and it and the sheets disagree about where some barangays end (the
 sheet's Muzon runs twice as far north-west as the outline's). Warping the
 zones to it would have pulled them off the streets they were traced from.
-The gap was ground nobody had zoned, and step 6 is the fix for that.
+The gap was ground the trace had left unzoned, and step 6 is the fix for that.
 
 A barangay whose result is not credible is left out (see OMIT). Better no
 layer than a confident wrong one.
@@ -116,7 +117,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
-from shapely import make_valid
+from shapely import make_valid, set_precision
 from shapely.geometry import Polygon
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
@@ -138,6 +139,10 @@ ISOLATED_M2 = 1500.0
 #: Douglas-Peucker tolerance on the ground, in metres. The placement is ±10 m,
 #: so a 2 m tolerance loses nothing a reader could trust in the first place.
 SIMPLIFY_M = 2.0
+#: Chaikin passes over every traced edge, and the Douglas-Peucker tolerance
+#: (pixels) that then drops the points a smooth curve does not need.
+SMOOTH_PASSES = 2
+SMOOTH_EPS = 0.35
 #: Half-width of the scoring window, in pixels (7×7).
 WINDOW = 3
 
@@ -668,44 +673,6 @@ def drop_slivers(lab: np.ndarray, min_width_px: float, strict: set[int] = frozen
 
 # ─── filling the barangay ────────────────────────────────────────────────────
 
-#: A sheet zone the barangay is not listed for, kept out of the fill.
-FOREIGN = -2
-
-
-def foreign_zones(frame: np.ndarray, legend: dict, allowed: list[str], tol: int, inside: np.ndarray,
-                  min_px: int, classes: dict) -> np.ndarray:
-    """Ground inside the outline that the sheet paints as a zone this barangay
-    has no row for in `barangay_zoning_classification`.
-
-    Step 2 traces only the listed zones, so such ground comes out unzoned, and
-    filling it from the zones beside it would name it wrongly: Maysilo's sheet
-    paints about 32 ha of it Light Industry (I-1, #df73ff), and its list has
-    no I-1, so a fill would have called a block of factories "Homes and
-    apartments". It stays a hole, the one kind of gap left inside an outline,
-    until the list or the sheet is corrected. Read once per class with the
-    same scoring as the listed zones, and only where it is a solid area at
-    least `min_px` big, so a stray legend-coloured symbol is not one.
-    """
-    codes = [c for c in legend if c in classes]
-    lab, labels = classify(frame, legend, codes, tol)
-    listed_fills = {legend[c]['fill'] for c in allowed if c in legend}
-    ids = []
-    for i, key in enumerate(labels):
-        group = ['R-2-BASIC', 'R-2-MAX'] if key == 'R-2' else [key]
-        if any(c in allowed for c in group) or legend[group[0]]['fill'] in listed_fills:
-            continue
-        ids.append(i + 1)
-    if not ids:
-        return np.zeros(lab.shape, bool)
-    m = np.isin(lab, ids) & inside
-    m = box_mean(box_mean(m, 3) > 0.999, 3) > 0
-    comp, n = components(np.where(m, 1, 0))
-    area = np.bincount(comp.ravel(), minlength=n)
-    comp_on = np.zeros(n, bool)
-    comp_on[comp.ravel()] = m.ravel()
-    return (comp_on & (area >= min_px))[comp]
-
-
 def fill_gaps(lab: np.ndarray, sliver_px: int) -> np.ndarray:
     """Give every unzoned pixel inside the outline to a zone beside it.
 
@@ -718,7 +685,16 @@ def fill_gaps(lab: np.ndarray, sliver_px: int) -> np.ndarray:
     A patch under `sliver_px` goes whole to the zone it shares the longest
     edge with. A bigger one, a river, is grown into from every zone around it
     at once, so it is split along its middle between the zones on each bank
-    instead of all going to one. FOREIGN and OUTSIDE are never filled.
+    instead of all going to one. OUTSIDE is never filled.
+
+    That includes ground the sheet paints as a zone the barangay is not
+    listed for in `barangay_zoning_classification`: about 110 ha of Light
+    Industry (I-1) across Maysilo, Dampalit, Panghulo, Catmon and Tonsuya,
+    and smaller patches in Tañong, Niugan and Muzon. Step 2 cannot name it,
+    so it takes its neighbours' zones like any other gap, and is named
+    wrongly. Ken chose that (6 October 2026: "It's ok if it's a bit wrong,
+    but it should look solid") over leaving holes in the layer. If those
+    lists gain I-1, a re-run traces that ground as I-1 instead.
     """
     comp, n = components(lab)
     area = np.bincount(comp.ravel(), minlength=n)
@@ -762,13 +738,13 @@ def _union(polys: list) -> object:
     return unary_union([make_valid(Polygon(p[0], p[1:])) for p in polys])
 
 
-def fit_to_outline(traced: dict[int, list], gaps: list, rings_ll: list) -> dict[int, list]:
+def fit_to_outline(traced: dict[int, list], rings_ll: list) -> dict[int, list]:
     """Cut every zone to the barangay outline and fill what is left inside it.
 
     The raster clip (step 5) leaves the outer edge a pixel staircase, then
     simplified, so it wanders a metre or two either side of the line the map
     draws. Here each zone is intersected with the outline exactly, and every
-    piece of the outline no zone covers (and that is not a FOREIGN hole) goes
+    piece of the outline no zone covers goes
     to the zone it shares the longest edge with. The zones then tile the
     barangay: nothing outside it, no gap and no overlap inside it.
 
@@ -776,9 +752,18 @@ def fit_to_outline(traced: dict[int, list], gaps: list, rings_ll: list) -> dict[
     decimals (~0.1 m), outer rings anticlockwise (RFC 7946 §3.1.6).
     """
     outline = make_valid(Polygon(rings_ll[0], rings_ll[1:]))
-    zones = {v: _union(p).intersection(outline) for v, p in traced.items() if p}
-    held = _union(gaps).intersection(outline) if gaps else Polygon()
-    residual = outline.difference(unary_union([*zones.values(), held]))
+    # In turn, each zone minus those before it: smoothing (ArcSimplifier) can
+    # pull a shared arc a hair across a third zone's corner, and the zones
+    # must not overlap, or a pin there would read as two zones (PinZone).
+    zones = {}
+    taken = Polygon()
+    for v, p in traced.items():
+        if not p:
+            continue
+        z = _union(p).intersection(outline).difference(taken)
+        taken = unary_union([taken, z])
+        zones[v] = z
+    residual = outline.difference(taken)
     grown = {v: z.buffer(1e-7) for v, z in zones.items()}
     adds: dict[int, list] = defaultdict(list)
     for piece in _polygons(residual):
@@ -791,6 +776,10 @@ def fit_to_outline(traced: dict[int, list], gaps: list, rings_ll: list) -> dict[
     for v, z in zones.items():
         if adds[v]:
             z = unary_union([z, *adds[v]])
+        # Snapped to the six-decimal grid here, by shapely, rather than by
+        # rounding each coordinate on the way out: rounding alone left four
+        # zones with rings touching themselves, which is not a valid polygon.
+        z = set_precision(z, 1e-6)
         polys = []
         for p in _polygons(z):
             # Pieces under a square metre are slivers the cutting made.
@@ -906,6 +895,29 @@ def dp(pts: list[tuple[int, int]], eps: float) -> list[tuple[int, int]]:
     return left[:-1] + dp(pts[i:], eps)
 
 
+def chaikin(pts: list, passes: int) -> list:
+    """Corner-cut an open arc `passes` times, its two ends held fixed.
+
+    A traced edge is a pixel staircase, and after Douglas-Peucker still a run
+    of right angles, which on the map read as jagged (Ken, 6 October 2026).
+    Each pass replaces every corner with two points a quarter of the way
+    along its sides, which converges on a smooth curve inside the original.
+    The ends stay put because they are junctions shared with other arcs, and
+    each arc is smoothed once (ArcSimplifier), so both zones beside an edge
+    get the same curve and still meet without a gap.
+    """
+    for _ in range(passes):
+        if len(pts) < 3:
+            return pts
+        cut = []
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            cut.append((0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1))
+            cut.append((0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1))
+        # The first and last cut points give way to the fixed ends.
+        pts = [pts[0], *cut[1:-1], pts[-1]]
+    return pts
+
+
 class ArcSimplifier:
     """Simplify each shared stretch of boundary once, so both sides agree."""
 
@@ -923,7 +935,7 @@ class ArcSimplifier:
 
     def arc_canon(self, t: tuple) -> list:
         if t not in self.cache:
-            self.cache[t] = dp(list(t), self.eps)
+            self.cache[t] = dp(chaikin(dp(list(t), self.eps), SMOOTH_PASSES), SMOOTH_EPS)
         return self.cache[t]
 
     def ring(self, ring: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -1013,13 +1025,11 @@ def process(name: str, sheet: dict, rings_ll: list, classes: dict, allowed: list
     final = drop_slivers(final, max(3.0, 5.0 / place.m_per_px), grey, 14.0 / place.m_per_px)
     final = clean(final, min_px, hole_px, isolated_px)
 
-    # Fill the barangay: every unzoned pixel inside the outline goes to a zone
-    # beside it, except where the sheet paints a zone this barangay is not
-    # listed for (see foreign_zones), which stays a hole.
-    foreign = foreign_zones(frame, legend, allowed, tol, inside, hole_px, classes)
-    final = fill_gaps(np.where(foreign, FOREIGN, final), hole_px)
+    # Fill the barangay: every unzoned pixel inside the outline goes to a
+    # zone beside it (fill_gaps). Anything no zone can reach is traced as a
+    # gap and handed out by fit_to_outline.
+    final = fill_gaps(final, hole_px)
     gap_label = max(id_codes) + 1
-    final = np.where(final == FOREIGN, gap_label, final)
     final = np.where(inside, np.where(final > 0, final, gap_label), OUTSIDE)
 
     px_area = place.m_per_px ** 2
@@ -1063,8 +1073,8 @@ def process(name: str, sheet: dict, rings_ll: list, classes: dict, allowed: list
 
     # The traced edge along the outline is a pixel staircase a metre or two
     # either side of it; cut and fill it to the outline itself (step 7).
-    gaps = traced.pop(gap_label, [])
-    fitted = fit_to_outline(traced, gaps, rings_ll)
+    traced.pop(gap_label, None)
+    fitted = fit_to_outline(traced, rings_ll)
 
     features = []
     for v in sorted(fitted):
