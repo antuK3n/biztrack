@@ -230,7 +230,8 @@ class ChatbotFacts
 
     /*
      * When each permit expires as WorkflowService::issuePermitFor dates it
-     * (RenewalSeason for the business permit and a clearance's first issue, a
+     * (RenewalSeason for the business permit — 31 December, renewed free to 20
+     * January — and a clearance's first issue, a
      * year from the renewal for a renewed clearance), RenewalWindow (when
      * renewal opens and when it is too late), RenewalScope (one permit per
      * renewal) and the late charges from the penalty rule.
@@ -244,7 +245,7 @@ class ChatbotFacts
 
         $lines = [
             'RENEWAL',
-            "• The {$mayors} always expires on {$closes} of the year after it is issued or renewed. Renew it in the first ".RenewalSeason::CLOSES_DAY.' days of January; renewal opens on 1 January.',
+            "• The {$mayors} always expires on 31 December of the year it is issued or renewed. Renew it from 1 to {$closes} without penalty; it is late after {$closes}. Renewal opens on 1 January.",
             '• The other permits expire on 31 December of the year they are first issued, and a renewal runs one year from the day it is renewed'
                 .($opensBefore !== null ? ". They can be renewed from {$opensBefore} days before they expire." : '.'),
             '• Each permit is renewed on its own application: one permit per renewal.',

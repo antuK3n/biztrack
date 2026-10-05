@@ -302,7 +302,7 @@ it('grounds Gemini in BizTrack\'s own permits, rules and switches, and in nothin
         ->toContain('Monday to Friday, 08:00 to 17:00')
         ->toContain('Online payment is simulated')
         ->toContain('BPLO counter at Malabon City Hall')
-        ->toContain('expires on 20 January of the year after it is issued or renewed')
+        ->toContain('expires on 31 December of the year it is issued or renewed. Renew it from 1 to 20 January without penalty; it is late after 20 January.')
         ->toContain('a renewal runs one year from the day it is renewed')
         ->toContain('Each permit is renewed on its own application')
         ->toContain('sari-sari store')

@@ -97,7 +97,7 @@ it('answers the renewal intent with the January window', function () {
         ->assertCreated()
         ->json('data.body');
 
-    expect($body)->toContain('first 20 days of January');
+    expect($body)->toContain('Business permits expire on 31 December and are renewed from 1 to 20 January without penalty');
 });
 
 it('answers the offices intent with the issuing departments', function () {
@@ -317,10 +317,12 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
         ->not->toContain('Office of the Local Building Official');
 });
 
-it('dates a permit the way it is issued: 20 January for the business permit, 31 December or a year for the rest', function () {
+it('dates a permit the way it is issued: 31 December for the business permit, renewed free to 20 January, and 31 December or a year for the rest', function () {
     /*
-     * WorkflowService::issuePermitFor: the business permit ends on 20 January
-     * of the year after it starts (RenewalSeason::endOfTermFor), a clearance's
+     * WorkflowService::issuePermitFor: the business permit ends on 31 December
+     * of the year it is issued (RenewalSeason::endOfTermFor; 20 January of the
+     * year after until Ken's decision of 5 October 2026) and renews without
+     * penalty from 1 to 20 January, a clearance's
      * first issue ends on 31 December of its year, and a renewed clearance
      * runs one year from the day it is renewed. This test used to pin "365
      * days" and "renew it with your business permit in January", read from
@@ -335,8 +337,9 @@ it('dates a permit the way it is issued: 20 January for the business permit, 31 
         ->not->toContain('first 20 days of January');
 
     $mayors = ask("when does the mayor's permit expire?");
-    expect($mayors)->toContain("Mayor's / Business Permit expires on 20 January of the year after it is issued or renewed")
-        ->toContain('first 20 days of January')
+    expect($mayors)->toContain("Mayor's / Business Permit expires on 31 December of the year it is issued or renewed")
+        ->toContain('Renew it from 1 to 20 January without penalty; after 20 January it is late.')
+        ->not->toContain('expires on 20 January')
         ->not->toContain('365 days');
 });
 

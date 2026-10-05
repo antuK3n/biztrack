@@ -981,8 +981,9 @@ class ChatbotResponder
      * This read `validity_days` ("valid for 365 days from the date it is
      * issued") and told every permit to renew with the business permit in
      * January. Nothing dates a permit with that column any more: the business
-     * permit ends on 20 January of the year after it starts
-     * (RenewalSeason::endOfTermFor), a clearance's first issue on 31 December
+     * permit ends on 31 December of the year it is issued and renews without
+     * penalty from 1 to 20 January (RenewalSeason; Ken, 5 October 2026), a
+     * clearance's first issue on 31 December
      * of its year, and a renewed clearance one year from the day it is
      * renewed. Clearances renew on their own application (RenewalScope) from
      * RenewalWindow::opensDaysBefore() days before they expire.
@@ -990,8 +991,10 @@ class ChatbotResponder
     private function renewal(?PermitType $type): string
     {
         if ($type?->code === PermitType::OUTCOME_CODE) {
-            return "The {$type->name} expires on ".RenewalSeason::CLOSES_DAY." January of the year after it is issued or renewed.\n"
-                .'Renew it during the first '.RenewalSeason::CLOSES_DAY.' days of January. '.$this->penaltyPhrase();
+            $closes = RenewalSeason::CLOSES_DAY.' January';
+
+            return "The {$type->name} expires on 31 December of the year it is issued or renewed.\n"
+                ."Renew it from 1 to {$closes} without penalty; after {$closes} it is late. ".$this->penaltyPhrase();
         }
 
         if ($type) {
@@ -1002,7 +1005,7 @@ class ChatbotResponder
                 .$this->penaltyPhrase();
         }
 
-        return "Business permits are renewed during the first 20 days of January every year.\n"
+        return "Business permits expire on 31 December and are renewed from 1 to 20 January without penalty.\n"
             .$this->penaltyPhrase().' '
             .'You can start a renewal from your business record and BizTrack will prefill last year\'s details.';
     }

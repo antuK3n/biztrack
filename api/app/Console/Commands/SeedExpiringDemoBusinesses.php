@@ -32,7 +32,7 @@ use Illuminate\Console\Command;
  *   2  nothing due at all                      the whole "Still valid" group
  *   3  a clearance lapsed, inside the cap      renewable, surcharged
  *   4  a clearance lapsed past the 36-month cap  refused, New Application
- *   5  Mayor's Permit term ending 20 January   locked until 1 January
+ *   5  Mayor's Permit term ending 31 December  locked until 1 January
  *
  * ── Every business holds the FULL SET, and that is the correction ──────────
  *
@@ -62,9 +62,10 @@ use Illuminate\Console\Command;
  * outside it, 40 months past a 36-month cap — so a run on any day puts each
  * business on the same side of the same line.
  *
- * The Mayor's Permit always ends on a 20 January, because `RenewalSeason`
- * says every business permit does, and a demo one that ended on some other
- * date would be testing a term the system cannot issue.
+ * The Mayor's Permit always ends on a 31 December, because `RenewalSeason`
+ * says every business permit does (20 January until Ken's decision of 5
+ * October 2026), and a demo one that ended on some other date would be
+ * testing a term the system cannot issue.
  *
  * ── It writes to whatever database it is pointed at ────────────────────────
  *
@@ -147,20 +148,21 @@ class SeedExpiringDemoBusinesses extends Command
                  * The one that makes the BUSINESS PERMIT testable at all.
                  *
                  * Every other business here holds a Mayor's Permit running
-                 * to the next 20 January, so for eleven months of the year
+                 * to this 31 December, so for eleven months of the year
                  * none of them can renew it and the whole path — the form,
                  * the Tax Order of Payment, the clearance stage — cannot be
                  * walked by hand until January.
                  *
-                 * This one's term ended at the LAST 20 January, so it is
-                 * already late: renewable today, and surcharged under Secs.
-                 * 8A.04/8A.05 by `WorkflowService::latePenaltyFor`. Lateness
-                 * is the only state of a business permit renewal that can
-                 * be reached outside January, so it is the only one a
-                 * tester can exercise before then.
+                 * This one's term ended on a 31 December whose free window
+                 * (to 20 January) has closed, so it is already late:
+                 * renewable today, and surcharged under Secs. 8A.04/8A.05 by
+                 * `WorkflowService::latePenaltyFor`. Lateness is the only
+                 * state of a business permit renewal that can be reached
+                 * outside January, so it is the only one a tester can
+                 * exercise before then.
                  */
-                'note' => 'Mayor’s Permit term ended last 20 January — renewable NOW, with the late surcharge. The only way to walk the business permit renewal before January.',
-                'due' => [PermitType::OUTCOME_CODE => self::lastTwentiethOfJanuary($now)],
+                'note' => 'Mayor’s Permit term ended last 31 December and the free window to 20 January has closed — renewable NOW, with the late surcharge. The only way to walk the business permit renewal before January.',
+                'due' => [PermitType::OUTCOME_CODE => self::lapsedThirtyFirstOfDecember($now)],
             ],
             [
                 'name' => 'Potrero Carinderia',
@@ -179,11 +181,12 @@ class SeedExpiringDemoBusinesses extends Command
              * Client, 5 October 2026: *"Provide me 2 businesses (dummy data)
              * with ALL OF THEIR PERMITS NEARING EXPIRATION. Don't mind the
              * January lock for this 2."* So the Mayor's Permit here ends in a
-             * couple of weeks rather than on a 20 January — a term the system
+             * couple of weeks rather than on a 31 December — a term the system
              * cannot issue, on purpose. `RenewalWindow` opens a Mayor's Permit
-             * on 1 January of its expiry year, which has already passed, so it
-             * is renewable today alongside the five clearances, all inside the
-             * 30-day window. Nothing in the lock itself is changed.
+             * on the 1 January of the year after the day it expires, which for
+             * this date has already passed, so it is renewable today alongside
+             * the five clearances, all inside the 30-day window. Nothing in
+             * the lock itself is changed.
              */
             [
                 'name' => 'Hulong Duhat Eatery',
@@ -311,7 +314,7 @@ class SeedExpiringDemoBusinesses extends Command
                 $business,
                 $priorApp,
                 PermitType::OUTCOME_CODE,
-                $spec['due'][PermitType::OUTCOME_CODE] ?? self::nextTwentiethOfJanuary($now),
+                $spec['due'][PermitType::OUTCOME_CODE] ?? self::thisThirtyFirstOfDecember($now),
             );
 
             foreach (self::CLEARANCES as $code) {
@@ -410,33 +413,30 @@ class SeedExpiringDemoBusinesses extends Command
     }
 
     /**
-     * The next 20 January strictly after today.
+     * The 31 December ending this year's term.
      *
-     * Matches `RenewalSeason`: a business permit's term always ends on a 20
-     * January, and which one decides the month this business may renew in.
+     * Matches `RenewalSeason`: a business permit's term always ends on 31
+     * December of the year it is issued, and is renewable from the 1 January
+     * after it.
      */
+    private static function thisThirtyFirstOfDecember(CarbonImmutable $from): CarbonImmutable
+    {
+        return CarbonImmutable::create($from->year, 12, 31)->startOfDay();
+    }
+
     /**
-     * The most recent 20 January on or before today.
+     * The most recent 31 December whose penalty-free window (to 20 January)
+     * has already closed.
      *
      * A business permit whose term ended there is LATE, which is the only
      * state of one that can be renewed outside January — and so the only
-     * state a tester can reach for most of the year.
+     * state a tester can reach for most of the year. Between 1 and 20 January
+     * that is the 31 December before last, so the demo stays late then too.
      */
-    private static function lastTwentiethOfJanuary(CarbonImmutable $from): CarbonImmutable
+    private static function lapsedThirtyFirstOfDecember(CarbonImmutable $from): CarbonImmutable
     {
-        $thisYear = CarbonImmutable::create($from->year, 1, 20)->startOfDay();
+        $freeUntil = CarbonImmutable::create($from->year, 1, 20)->endOfDay();
 
-        return $from->greaterThanOrEqualTo($thisYear)
-            ? $thisYear
-            : CarbonImmutable::create($from->year - 1, 1, 20)->startOfDay();
-    }
-
-    private static function nextTwentiethOfJanuary(CarbonImmutable $from): CarbonImmutable
-    {
-        $thisYear = CarbonImmutable::create($from->year, 1, 20)->startOfDay();
-
-        return $from->lessThan($thisYear)
-            ? $thisYear
-            : CarbonImmutable::create($from->year + 1, 1, 20)->startOfDay();
+        return CarbonImmutable::create($from->greaterThan($freeUntil) ? $from->year - 1 : $from->year - 2, 12, 31)->startOfDay();
     }
 }
