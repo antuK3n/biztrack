@@ -8,9 +8,11 @@ use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\ApplicationDocument;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
 use App\Support\QrCode;
@@ -67,6 +69,17 @@ class PermitController extends Controller
         'application.business.lines.psicCode',
         'application.business.address.barangay',
         'application.business.owner',
+        /*
+         * What the applicant uploaded, and which document types each permit
+         * type asks for — together they say which uploads belong to THIS
+         * permit's office [client, 4 October 2026: every requirement
+         * submitted must show on the office's table]. Loaded here, not per
+         * row, so a 25-row page is two queries rather than fifty.
+         */
+        'application.documents.documentType.permitTypes',
+        // The office that asked, for a file sent in answer to a requirement.
+        'application.documents.requestResponses.officerRequest:id,department_id,title',
+        'permitType.documentTypes',
     ];
 
     /**
@@ -473,8 +486,16 @@ class PermitController extends Controller
 
     /**
      * Revoke a permit (checklist item 23). Behind `permit.revoke` on the
-     * route — BPLO and the super admin. See `WorkflowService::revokePermit`
-     * for what may be revoked and what the act writes.
+     * route, which BPLO and the five clearance offices hold. See
+     * `WorkflowService::revokePermit` for what may be revoked and what the act
+     * writes.
+     *
+     * And only by the office that ISSUED it [client, 4 October 2026: "yung
+     * cert na nirerelease ng office na yon sya lang pwede mag revoke, sa side
+     * ng bplo mayors permit lang"]. BPLO reads every office's certificates but
+     * revokes only the Mayor's Permit; CHO revokes its Sanitary Permits, and so
+     * on. The super admin belongs to no office and revokes nothing. Refused
+     * here rather than only hidden on screen, so a direct request is refused too.
      *
      * Answers with the register row rather than the contracted payload, so the
      * table that sent the request can redraw the row with its revocation
@@ -487,6 +508,13 @@ class PermitController extends Controller
         ], [
             'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
         ]);
+
+        $issuer = $permit->permitType?->issuing_department_id;
+        abort_unless(
+            $issuer !== null && (int) $issuer === (int) $request->user()->department_id,
+            403,
+            'Only the office that issued this permit can revoke it.',
+        );
 
         $this->workflow->revokePermit($permit, $data['reason']);
 
@@ -505,6 +533,27 @@ class PermitController extends Controller
         $pdf = Pdf::loadView('pdf.permit', $cert + [
             'qr' => QrCode::svgDataUri($verifyUrl),
         ]);
+
+        /*
+         * The Mayor's Permit prints on US LETTER, landscape — 11 inches wide
+         * by 8.5 tall, which is the pad the City cuts [client, 4 October
+         * 2026]. Its fields are set for that width: three boxes across for the
+         * date, area and headcount, and the fee line in one row. Portrait
+         * wraps them into a column that reads nothing like the paper beside
+         * it, and A4 landscape is 20mm longer and 13mm shorter, so a sheet
+         * printed on it sits wrong in the same folder.
+         *
+         * The clearances stay on portrait A4. They are a single column of
+         * fields, and landscape would strand them in the left third.
+         */
+        // CENRO's certificate is landscape too, as its issued sheet is.
+        if (($cert['is_business_permit'] ?? false) || ($cert['is_cenro_certificate'] ?? false) || ($cert['is_occupancy'] ?? false)) {
+            $pdf->setPaper('letter', 'landscape');
+        } elseif (($cert['is_fsic'] ?? false) || ($cert['is_zoning'] ?? false) || ($cert['is_sanitary'] ?? false)) {
+            // The BFP's FSIC and the CPDO's Zoning Clearance are portrait
+            // Letter sheets, as issued.
+            $pdf->setPaper('letter', 'portrait');
+        }
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
         $file = PdfFile::render($pdf);
@@ -555,7 +604,12 @@ class PermitController extends Controller
             'business.address.barangay',
             'business.owner',
             'business.lines.psicCode',
-            'application',
+            // `payments` for the receipt line the paper forms print, and the
+            // assessment for CENRO's share of it — see the sheet blocks below.
+            'application.payments',
+            'application.feeAssessment',
+            // The FSIC prints its own sheet's answers (occupancy, storeys).
+            'application.officeForms',
             // For the signatory fallback on permits frozen before the face
             // carried one — see PermitFace::forPrinting.
             'issuedBy',
@@ -599,7 +653,392 @@ class PermitController extends Controller
 
         $signatories = [...$block, ...$office];
 
+        /*
+         * ── The Mayor's Permit signs twice, not three times ─────────────────
+         *
+         * The City's form has two ruled lines: the Mayor on the left and the
+         * Licensing Officer, captioned OIC-BPLO, on the right. Our block adds
+         * a third — the per-filing "Officer-in-Charge" frozen at issue — and
+         * on this certificate that is wrong twice over. It is not on the
+         * paper, and the Mayor's Permit is released at PAYMENT, so on most
+         * filings no officer holds it yet and the line printed empty.
+         *
+         * Dropped only where OIC-BPLO is there to take its place. An LGU that
+         * has not named one keeps the per-filing officer rather than losing a
+         * signature altogether.
+         */
+        if ($permit->permitType?->code === PermitType::OUTCOME_CODE) {
+            $hasOic = collect($signatories)
+                ->contains(fn (array $s) => strtolower($s['role']) === 'oic-bplo');
+
+            if ($hasOic) {
+                $signatories = array_values(array_filter(
+                    $signatories,
+                    fn (array $s) => strtolower($s['role']) !== 'officer-in-charge',
+                ));
+            }
+        }
+
+        /*
+         * ── CENRO's certificate signs once ──────────────────────────────────
+         *
+         * The Certificate of Environment Clearance the office issues carries
+         * one signature: the Chief, CENRO [client, 4 October 2026]. Not the
+         * Mayor, not the reviewing officer, not the Evaluator the office also
+         * keeps on file for its application form. So this sheet keeps only
+         * the Chief's row and drops the rest.
+         *
+         * Falls back to whatever the block held when no Chief row exists —
+         * a certificate with no signature line at all is worse than one
+         * signed by the officer who reviewed it.
+         */
+        if ($permit->permitType?->code === 'CEC') {
+            $chief = array_values(array_filter(
+                $signatories,
+                fn (array $s) => str_contains(strtolower($s['role']), 'chief'),
+            ));
+
+            if ($chief !== []) {
+                $signatories = $chief;
+            }
+        }
+
+        /*
+         * ── The Mayor's Permit is a different sheet ─────────────────────────
+         *
+         * The City's own form, photographed at the BPLO counter [client,
+         * 4 October 2026], asks for seven things no clearance does: the
+         * Business Account Number and the Mayor's Permit Number in their own
+         * boxes at the head, the floor AREA and the number of EMPLOYEES beside
+         * the date of issue, and the amount paid with its OR number and date
+         * along the fee line.
+         *
+         * They are gathered only for that permit type. A Sanitary Permit has
+         * no amount paid of its own — the fee is assessed once, against the
+         * filing — so printing "AMOUNT PAID" on a clearance would attach the
+         * business permit's receipt to a document it did not buy.
+         *
+         * Every one is nullable and every one prints blank rather than absent.
+         * The paper has a ruled box for each, and a counter clerk fills what
+         * the system does not know; a certificate that silently drops a row is
+         * harder to read against the paper than one with an empty line.
+         */
+        $code = $permit->permitType?->code;
+        $isBusinessPermit = $code === PermitType::OUTCOME_CODE;
+        $isCenroCertificate = $code === 'CEC';
+        $isFsic = $code === 'FSIC';
+        $isZoning = $code === 'ZONING';
+        $isSanitary = $code === 'SANITARY';
+        $isOccupancy = $code === 'OCCUPANCY';
+
+        /*
+         * ── The Certificate of Occupancy signs as the Building Official ─────
+         *
+         * NBC Form B-13 issues under the Building Official [client, 5 October
+         * 2026, with Malabon's own form]. Name from the OBO's
+         * office_signatories row naming the post; a blank ruled line until it
+         * has one.
+         */
+        if ($isOccupancy) {
+            $official = collect($office)->first(fn (array $s) => str_contains(strtolower($s['role']), 'building official'));
+
+            $signatories = [['role' => 'Building Official', 'name' => $official['name'] ?? null]];
+        }
+
+        /*
+         * ── The Sanitary Permit signs as the CHO's form does ────────────────
+         *
+         * Two lines and no Mayor: Recommending Approval by the Sanitary
+         * Inspector, Approved by the City Health Officer [client, 5 October
+         * 2026, with the issued sheet]. Names from the CHO's office_signatories
+         * rows naming either post; a blank ruled line until it has them.
+         */
+        if ($isSanitary) {
+            $named = fn (string $needle) => collect($office)
+                ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
+
+            $signatories = [
+                ['role' => 'Sanitary Inspector', 'name' => $named('inspector'), 'action' => 'Recommending Approval'],
+                ['role' => 'City Health Officer', 'name' => $named('health officer'), 'action' => 'Approved'],
+            ];
+        }
+
+        /*
+         * ── The Zoning Clearance signs once, as the CPDO's form does ────────
+         *
+         * One line: the City Planning & Development Coordinator / Zoning
+         * Administrator [client, 5 October 2026, with the issued sheet]. The
+         * name is the CPDO's office_signatories row whose role names either
+         * post, and a blank ruled line until the office sets one.
+         */
+        if ($isZoning) {
+            $administrator = collect($office)->first(fn (array $s) => str_contains(strtolower($s['role']), 'zoning administrator')
+                || str_contains(strtolower($s['role']), 'coordinator'));
+
+            $signatories = [[
+                'role' => "City Planning & Dev't Coordinator / Zoning Administrator",
+                'name' => $administrator['name'] ?? null,
+            ]];
+        }
+
+        /*
+         * ── The FSIC signs as the BFP's own form does ───────────────────────
+         *
+         * BFP-QSF-FSED-005 carries two lines and no Mayor: RECOMMEND APPROVAL
+         * by the Chief, Fire Safety Enforcement Section, and APPROVED by the
+         * City Fire Marshal [client, 4 October 2026, with the issued sheet].
+         * Both captions are fixed by the form; the NAMES come from the BFP's
+         * office_signatories rows when it has them, and print as a blank ruled
+         * line until it does — an empty line is honest, a guessed name is not.
+         */
+        if ($isFsic) {
+            $named = fn (string $needle) => collect($office)
+                ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
+
+            $signatories = [
+                ['role' => 'Chief, Fire Safety Enforcement Section', 'name' => $named('enforcement'), 'action' => 'Recommend Approval'],
+                ['role' => 'City Fire Marshal', 'name' => $named('marshal'), 'action' => 'Approved'],
+            ];
+        }
+
+        /*
+         * The settled payment, not the latest. A filing can carry an
+         * abandoned online order beside the one that actually paid, and the
+         * OR number on a certificate has to be the one the money arrived
+         * under. Both office sheets print it, so it is found once.
+         */
+        $paid = $permit->application?->payments
+            ?->whereNotNull('paid_at')
+            ->sortBy('paid_at')
+            ->last();
+
+        $sheetFields = [];
+
+        if ($isBusinessPermit) {
+            $profile = $permit->application?->fee_profile ?? [];
+
+            $sheetFields = [
+                'ban' => $permit->business?->ban,
+                'area_sqm' => isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                    ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+                    : null,
+                'employees' => isset($profile['employees']) && $profile['employees'] !== null
+                    ? (string) (int) $profile['employees']
+                    : null,
+                'amount_paid' => $paid ? '₱'.number_format((float) $paid->amount, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+            ];
+        }
+
+        /*
+         * ── CENRO's Certificate of Environment Clearance ────────────────────
+         *
+         * Laid out from the sheet the office issues [client, 4 October 2026].
+         * Besides the face it prints a receipt block — Official Receipt,
+         * Amount Paid, Date Paid, Application Control No. — and its own
+         * letterhead.
+         *
+         * AMOUNT PAID here is CENRO's share, not the filing's total. The
+         * assessment is one bill across every office on the filing, and each
+         * line carries the office it is charged for; the certificate for one
+         * office should state what that office charged. Summing the CENRO
+         * lines does that. It can be ₱0.00 — the environmental fee schedules
+         * in A10-2016 bill per trip and per unit, and a filing with none of
+         * those owes CENRO nothing — and ₱0.00 is the honest figure, where
+         * the filing total would attribute the business permit's fees to a
+         * clearance that did not charge them.
+         *
+         * Application Control No. is the tracking ID: it is the one number
+         * the applicant, the office and this system all call the filing by.
+         */
+        if ($isCenroCertificate) {
+            $lines = collect($permit->application?->feeAssessment?->line_items ?? []);
+            $cenroShare = $lines
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'CENRO')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'office_amount_paid' => $paid ? '₱'.number_format($cenroShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'letterhead' => config('biztrack.letterheads.CENRO'),
+            ];
+        }
+
+        /*
+         * ── The BFP's Fire Safety Inspection Certificate ────────────────────
+         *
+         * Laid out from the issued certificate [client, 4 October 2026]. What
+         * it needs beyond the face, all from what the system already holds:
+         *
+         *   - which certificate: always For Business Permit (New/Renewal) —
+         *     see the note on `$purpose` below;
+         *   - the description line: occupancy, floor area and storeys, from the
+         *     sheet and the fee profile, printed only as far as they are known;
+         *   - the Fire Code fee: the BFP's own line(s) of the assessment, not
+         *     the filing's total, with the OR number and date it was paid under
+         *     (the same reasoning as CENRO's share above).
+         *
+         * The FSIC NO. is the permit number this system issued, and the
+         * tracking ID stands where the paper prints its control number.
+         */
+        if ($isFsic) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'FSIC', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+
+            /*
+             * Always FOR BUSINESS PERMIT (NEW/RENEWAL) [client, 5 October
+             * 2026: "For Business Permit (New/Renewal) dapat"]. This system
+             * issues the FSIC as a clearance for the Mayor's Permit, so that
+             * is the box it ticks — even on a filing that also carries an
+             * Occupancy Permit, whose sheet's "Certificate Applied For" reads
+             * "FSIC for Certificate of Occupancy".
+             */
+            $purpose = 'business';
+
+            $profile = $application?->fee_profile ?? [];
+            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.')
+                : null;
+            $storeys = trim((string) ($sheet['building_storeys'] ?? ''));
+            $occupancy = trim((string) ($sheet['occupancy_type'] ?? ''));
+
+            $description = collect([
+                $area !== null ? "occupying approx. {$area} sq m floor area" : null,
+                $storeys !== '' ? "of a {$storeys}-storey building" : null,
+                $occupancy !== '' ? "utilized as {$occupancy}" : null,
+            ])->filter()->implode(' ');
+
+            $bfpShare = collect($application?->feeAssessment?->line_items ?? [])
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'BFP')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'fsic_purpose' => $purpose,
+                'fsic_others' => null,
+                'fsic_valid_for' => 'Issuance of FSIC for Business Permit only',
+                'fsic_description' => $description !== '' ? $description : null,
+                'office_amount_paid' => $paid ? '₱'.number_format($bfpShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'letterhead' => config('biztrack.letterheads.BFP'),
+            ];
+        }
+
+        /*
+         * ── The CPDO's Zoning Clearance (For Business Permit) ───────────────
+         *
+         * Laid out from the issued sheet [client, 5 October 2026]: a boxed
+         * block naming the business, its type of establishment, address, the
+         * ZONING PERMIT NO. and date issued, and the DECISION, then the four
+         * standing conditions. The number is this system's permit number and
+         * the type of establishment is the line of business on the face.
+         * Only the office's letterhead is added here; the rest is the face.
+         */
+        if ($isZoning) {
+            $sheetFields = [
+                'letterhead' => config('biztrack.letterheads.ZONING'),
+            ];
+        }
+
+        /*
+         * ── The CHO's Sanitary Permit to Operate ────────────────────────────
+         *
+         * Laid out from the issued sheet [client, 5 October 2026]: issued to
+         * the registered name, the establishment and its type, the address,
+         * the SANITARY PERMIT NO. (this system's number), date issued and
+         * date of expiration, the non-transferable clause, and two
+         * signatures. The type of establishment is the CHO sheet's own
+         * Sanitary Classification (Food / Non-Food Establishment), which is
+         * what the health office classifies a premises by; the line of
+         * business stands in only when the sheet was never answered.
+         */
+        if ($isSanitary) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'SANITARY', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+            $classification = trim((string) ($sheet['sanitary_classification'] ?? ''));
+
+            $sheetFields = [
+                'sanitary_classification' => $classification !== '' ? $classification : null,
+                'letterhead' => config('biztrack.letterheads.SANITARY'),
+            ];
+        }
+
+        /*
+         * ── Malabon's Certificate of Occupancy (NBC Form B-13) ──────────────
+         *
+         * The City's own two-page form [client, 5 October 2026]. Left: what
+         * was submitted and when, the verified requirements, and the building
+         * permit it completes. Right: the certificate — No., fee, OR and date
+         * paid, date issued, owner, project, use, area and location.
+         *
+         * All from what the system holds. The building permit number and date
+         * are the OBO's own entries on its sheet; the project, the use and the
+         * completion date are the applicant's. Of the thirteen requirement
+         * lines, two are certificates this system itself issues on the same
+         * filing, so they print the number: Locational/Zoning carries the
+         * Zoning Clearance, Fire Safety the FSIC (or the FSEC the OBO recorded
+         * when no FSIC was issued). The rest are the inspectors' to initial.
+         * Fee Paid is the OBO's share of the bill, as CENRO's and the BFP's are.
+         */
+        if ($isOccupancy) {
+            $application = $permit->application;
+            $saved = $application?->officeForms?->firstWhere('permit_type_id', $permit->permit_type_id);
+            $sheet = $application
+                ? OfficeFormAnswers::derive($application, 'OCCUPANCY', is_array($saved?->form_data) ? $saved->form_data : [])
+                : [];
+            $answer = fn (string $key) => ($v = trim((string) ($sheet[$key] ?? ''))) !== '' ? $v : null;
+            $date = fn (?string $v) => $v ? Carbon::parse($v)->format('F j, Y') : null;
+
+            $sibling = fn (string $typeCode) => $application
+                ? Permit::where('application_id', $application->id)
+                    ->whereHas('permitType', fn ($t) => $t->where('code', $typeCode))
+                    ->latest('issued_at')
+                    ->value('permit_number')
+                : null;
+
+            $profile = $application?->fee_profile ?? [];
+            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
+                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+                : null;
+
+            $oboShare = collect($application?->feeAssessment?->line_items ?? [])
+                ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'OBO')
+                ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
+
+            $sheetFields = [
+                'date_submitted' => optional($application?->submitted_at)->format('F j, Y'),
+                'occ_project' => $answer('project_name'),
+                'occ_use' => $answer('occupancy_type'),
+                'occ_area' => $area,
+                'occ_completion' => $date($answer('completion_date')),
+                'occ_building_permit_no' => $answer('building_permit_no'),
+                'occ_building_permit_date' => $date($answer('building_permit_date')),
+                'occ_zoning_no' => $sibling('ZONING'),
+                'occ_fire_no' => $sibling('FSIC') ?? $answer('fsec_no'),
+                'office_amount_paid' => $paid ? '₱'.number_format($oboShare, 2) : null,
+                'or_number' => $paid?->reference_number,
+                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+            ];
+        }
+
         return [
+            // Which sheet to draw. The views branch on these rather than on the
+            // permit type's name, which is a label and may be reworded.
+            'is_occupancy' => $isOccupancy,
+            'is_sanitary' => $isSanitary,
+            'is_business_permit' => $isBusinessPermit,
+            'is_cenro_certificate' => $isCenroCertificate,
+            'is_fsic' => $isFsic,
+            'is_zoning' => $isZoning,
+            ...$sheetFields,
             'permit_number' => $permit->permit_number,
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',
             'department_name' => $permit->permitType?->department?->name,

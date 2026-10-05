@@ -44,33 +44,43 @@ function mapPermit(Business $business, PermitStatus $status, string $from, strin
     ]);
 }
 
-it('is BPLO’s and the super admin’s, and refused to every other office', function () {
+it('maps the whole city for BPLO and the super admin, and each office its own certificate', function () {
     /*
-     * The gate, stated as a test because the permission is a stand-in.
-     *
-     * Checklist item 16 put the map on BPLO's Permits page, so BPLO is let in
-     * now — it was refused while the gate was `user.manage`. The gate is
-     * `application.view_any_office`, the permission that lifts the office
-     * boundary, and the five clearance offices do not hold it. They DO hold
-     * `permit.view_all`, the permission whose name fits this screen; if
-     * someone ever "corrects" the middleware to it, the refusals below are
-     * what say no — a city-wide plot is the cross-office read
-     * ApplicationVisibility exists to refuse them (AGENTS.md §10).
+     * Client, 4 October 2026: "maglagay din ng maps tulad sa bplo". The five
+     * clearance offices are let in now, and the cross-office read the old
+     * refusal guarded against is refused by scoping instead: an office gets
+     * the businesses holding ITS certificate, coloured by that certificate,
+     * and nothing of the rest of the city (AGENTS.md §10).
      */
     foreach (['bplo@biztrack.local', 'admin@biztrack.local'] as $email) {
-        test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')->assertOk();
+        test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')
+            ->assertOk()
+            ->assertJsonPath('meta.permit_type.code', 'BUSINESS');
     }
 
     foreach ([
-        'sanitary@biztrack.local',
-        'fire@biztrack.local',
-        'zoning@biztrack.local',
-        'obo@biztrack.local',
-        'cenro@biztrack.local',
-        'owner@biztrack.local',
-    ] as $email) {
-        test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')->assertForbidden();
+        'sanitary@biztrack.local' => 'SANITARY',
+        'fire@biztrack.local' => 'FSIC',
+        'zoning@biztrack.local' => 'ZONING',
+        'obo@biztrack.local' => 'OCCUPANCY',
+        'cenro@biztrack.local' => 'CEC',
+    ] as $email => $code) {
+        $body = test()->withHeaders(authAs($email))->getJson('/api/v1/admin/business-map')
+            ->assertOk()
+            ->assertJsonPath('meta.permit_type.code', $code)
+            ->json();
+
+        $typeId = PermitType::where('code', $code)->value('id');
+        $holders = Permit::where('permit_type_id', $typeId)->distinct()->pluck('business_id')->all();
+
+        foreach ($body['data'] as $row) {
+            expect(in_array($row['id'], $holders), "{$email} was shown business {$row['id']}, which holds no {$code}")->toBeTrue();
+        }
+        // Every business here holds the certificate, so none is "never held one".
+        expect($body['meta']['counts']['none'])->toBe(0);
     }
+
+    test()->withHeaders(authAs('owner@biztrack.local'))->getJson('/api/v1/admin/business-map')->assertForbidden();
 });
 
 it('gives the super admin every business that carries a pin', function () {

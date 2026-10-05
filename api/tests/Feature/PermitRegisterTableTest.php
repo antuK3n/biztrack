@@ -1,8 +1,14 @@
 <?php
 
+use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
+use App\Models\DocumentType;
+use App\Models\OfficerRequest;
+use App\Models\OfficerRequestResponse;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
@@ -646,4 +652,79 @@ it('will not let a sort widen an office past its own permits', function () {
     expect($plain)->not->toBeEmpty();
     expect(collect($sorted)->pluck('id')->sort()->values()->all())
         ->toBe(collect($plain)->pluck('id')->sort()->values()->all());
+});
+
+/**
+ * A file the owner sent in answer to an office's requirement, on a filing,
+ * with the office's verdict on that reply (null = not yet reviewed).
+ */
+function requestedFile(int $applicationId, int $departmentId, string $title, ?OfficerRequestStatus $verdict): ApplicationDocument
+{
+    $ask = OfficerRequest::create([
+        'application_id' => $applicationId,
+        'department_id' => $departmentId,
+        'title' => $title,
+        'request_type' => 'document',
+        'status' => $verdict ?? OfficerRequestStatus::Submitted,
+    ]);
+    $doc = ApplicationDocument::create([
+        'application_id' => $applicationId,
+        'document_type_id' => DocumentType::where('code', 'OTHER')->value('id'),
+        'original_filename' => 'reply.png',
+        'stored_path' => "private/documents/{$applicationId}/reply.png",
+        'mime_type' => 'image/png',
+        'size_bytes' => 1024,
+    ]);
+    OfficerRequestResponse::create([
+        'officer_request_id' => $ask->id,
+        'user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
+        'application_document_id' => $doc->id,
+        'file_name' => 'reply.png',
+        'review_outcome' => $verdict?->value,
+    ]);
+
+    return $doc;
+}
+
+it('files an approved reply to a requirement under the office that asked for it, and that business only', function () {
+    /*
+     * Client, 4 October 2026: "kung ano mang offices ang nanghingi sa other
+     * request, rerefelct din dapat sa requirements submitted", and "make sure
+     * na approved yung mga files submitted bago magreflect … at correct kung
+     * kaninong business". The reply is typed "Other Requirements", which no
+     * permit type lists, so before this it landed on the Mayor's Permit row.
+     */
+    $made = permitPerOffice(['SANITARY', 'BUSINESS']);
+    $app = $made['SANITARY']->application_id;
+    $cho = (int) PermitType::where('code', 'SANITARY')->value('issuing_department_id');
+
+    $approved = requestedFile($app, $cho, 'Health certificates of the food handlers', OfficerRequestStatus::Fulfilled);
+    $unreviewed = requestedFile($app, $cho, 'Pest control contract', null);
+    $refused = requestedFile($app, $cho, 'Water analysis', OfficerRequestStatus::Rejected);
+    $elsewhere = requestedFile(
+        (int) Application::where('id', '!=', $app)->value('id'),
+        $cho,
+        'Another business’s certificate',
+        OfficerRequestStatus::Fulfilled,
+    );
+
+    $rows = collect(registerRows());
+    $docsOn = fn (string $number) => collect($rows->firstWhere('permit_number', $number)['documents'] ?? []);
+
+    // The approved one is on the health office's row, named by what it asked for…
+    expect($docsOn('TEST-SANITARY-0001')->firstWhere('id', $approved->id)['name'] ?? null)
+        ->toBe('Health certificates of the food handlers');
+    // …marked as sent under Other Requirements, which a filing upload is not.
+    expect($docsOn('TEST-SANITARY-0001')->firstWhere('id', $approved->id)['from_request'] ?? null)->toBeTrue();
+    // …and not on the Mayor's Permit, which did not ask.
+    expect($docsOn('TEST-BUSINESS-0001')->pluck('id'))->not->toContain($approved->id);
+
+    // Not approved yet, or refused: on no row at all.
+    foreach (['TEST-SANITARY-0001', 'TEST-BUSINESS-0001'] as $number) {
+        expect($docsOn($number)->pluck('id'))
+            ->not->toContain($unreviewed->id)
+            ->not->toContain($refused->id)
+            // And another business's file never reaches this business's row.
+            ->not->toContain($elsewhere->id);
+    }
 });

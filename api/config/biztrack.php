@@ -139,4 +139,55 @@ return [
      */
     'report_role' => env('DB_REPORT_ROLE', 'biztrack_report'),
 
+    /*
+     * ── Letterheads the certificates print ──────────────────────────────────
+     *
+     * CENRO's Certificate of Environment Clearance heads with the office's
+     * own address, trunkline, e-mail and website, read off the issued sheet
+     * [client, 4 October 2026]. `departments` carries a code, a name and a
+     * description and nothing postal, so the letterhead lives here rather
+     * than as a literal split across the React view and the PDF blade —
+     * one place to correct when the office moves floor or changes its
+     * extension, and both renderings read it.
+     *
+     * Keyed by department code. An office with no entry prints the generic
+     * three-line city block instead.
+     */
+    'letterheads' => [
+        'CENRO' => [
+            'address' => '4/F, Malabon City Hall, F. Sevilla Blvd., Brgy. Tañong, Malabon City, 1470 Philippines',
+            'trunkline' => '8281-4999 loc 1019 / 1013',
+            'email' => 'CENRO@malabon.gov.ph',
+            'website' => 'Malabon.gov.ph',
+        ],
+        /*
+         * The BFP's head, as the FSIC prints it. The station's street address
+         * and lines are left for the station to supply (env) rather than
+         * guessed: a wrong phone number on a certificate is worse than none.
+         * A null line simply does not print.
+         */
+        // The CPDO's head on the Zoning Clearance.
+        'ZONING' => [
+            // Malabon has no province (NCR), so the Republic heads it where
+            // a provincial city's sheet names its province.
+            'republic' => 'Republic of the Philippines',
+            'city' => 'City of Malabon',
+            'office' => 'City Planning & Development Office',
+        ],
+        // The CHO's head on the Sanitary Permit to Operate.
+        'SANITARY' => [
+            'republic' => 'Republic of the Philippines',
+            'city' => 'City of Malabon',
+            'office' => 'City Health Office',
+        ],
+        'BFP' => [
+            'agency' => 'Bureau of Fire Protection',
+            'region' => 'National Capital Region',
+            'district' => env('BFP_FIRE_DISTRICT'),
+            'station' => 'Malabon City Fire Station',
+            'address' => env('BFP_STATION_ADDRESS'),
+            'contact' => env('BFP_STATION_CONTACT'),
+        ],
+    ],
+
 ];

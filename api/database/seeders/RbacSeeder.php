@@ -68,7 +68,10 @@ class RbacSeeder extends Seeder
          */
         $review = ['application.view_all', 'application.review', 'inspection.manage',
             'permit.view_all', 'request.create', 'message.participate', 'compliance.view',
-            'analytics.view'];
+            'analytics.view',
+            // Each office revokes the certificate it issued, and only that one
+            // (PermitController::revoke) [client, 4 October 2026].
+            'permit.revoke'];
 
         $matrix = [
             'business_owner' => [
@@ -112,9 +115,10 @@ class RbacSeeder extends Seeder
                     'message.participate', 'compliance.view', 'zoning.evaluate',
                     'analytics.view',
                     /*
-                     * Taking a permit away. BPLO and the super admin only —
-                     * Ken's decision for checklist item 23; see the migration
-                     * that grants it on the live register and question A26.
+                     * Taking a permit away — the Mayor's Permit only, the one
+                     * BPLO issues (PermitController::revoke). Every office now
+                     * revokes its own certificate the same way; the super
+                     * admin revokes none [client, 4 October 2026].
                      */
                     'permit.revoke',
                 ],
@@ -126,6 +130,8 @@ class RbacSeeder extends Seeder
                     'application.view_all', 'application.review', 'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
                     'compliance.view', 'analytics.view',
+                    // Its own certificate only — see the note on `$review`.
+                    'permit.revoke',
                 ],
             ],
             'fire_inspector' => [
@@ -135,6 +141,8 @@ class RbacSeeder extends Seeder
                     'application.view_all', 'application.review', 'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
                     'compliance.view', 'analytics.view',
+                    // Its own certificate only — see the note on `$review`.
+                    'permit.revoke',
                 ],
             ],
             'obo_staff' => [
@@ -207,8 +215,6 @@ class RbacSeeder extends Seeder
                     'application.view_all', 'application.view_any_office',
                     'application.reject',
                     'fee.adjust', 'permit.view_all', 'permit.issue',
-                    // See the note on bplo_staff's grant.
-                    'permit.revoke',
                     'compliance.view',
                     /*
                      * The super admin holds `analytics.processing_time` AND, since
@@ -262,6 +268,8 @@ class RbacSeeder extends Seeder
                     'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
                     'compliance.view', 'analytics.view',
+                    // Its own certificate only — see the note on `$review`.
+                    'permit.revoke',
                 ],
             ],
         ];

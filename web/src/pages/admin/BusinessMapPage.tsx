@@ -131,6 +131,11 @@ interface MapMeta {
   /** The server's ceiling bit — see BusinessMapController::MAX_POINTS. */
   truncated: boolean
   max_points: number
+  /**
+   * The certificate the colours describe: the Mayor's Permit for BPLO and the
+   * super admin, the office's own certificate for a clearance office.
+   */
+  permit_type?: { code: string; name: string } | null
 }
 
 type PermitState = 'active' | 'expired' | 'suspended' | 'revoked' | 'none'
@@ -176,30 +181,36 @@ type PermitState = 'active' | 'expired' | 'suspended' | 'revoked' | 'none'
  * satellite base layer, and a dark glyph on a dark roof is invisible without
  * one.
  */
-const STATES: Record<PermitState, { label: string; description: string; svg: string }> = {
+/*
+ * The descriptions name the certificate the map is coloured by — the Mayor's
+ * Permit, or an office's own certificate on that office's map [client, 4
+ * October 2026: "maglagay din ng maps tulad sa bplo"].
+ */
+const STATES: Record<PermitState, { label: string; description: (permit: string, mayors: boolean) => string; svg: string }> = {
   active: {
     label: 'Permit active',
-    description: 'Mayor’s Permit is inside its term today.',
+    description: (p) => `${p} is inside its term today.`,
     svg: '<circle cx="9" cy="9" r="5.5" fill="#3242ca" stroke="#fff" stroke-width="2.5" />',
   },
   expired: {
     label: 'Permit expired',
-    description: 'Held a Mayor’s Permit; its term has run out.',
+    description: (p) => `Held a ${p}; its term has run out.`,
     svg: '<path d="M9 2.5 15.5 9 9 15.5 2.5 9Z" fill="#f2a33c" stroke="#8a4a06" stroke-width="1.75" stroke-linejoin="round" />',
   },
   suspended: {
     label: 'Permit suspended',
-    description: 'Inside its term, but suspended because another office refused a permit.',
+    description: (_p, mayors) =>
+      mayors ? 'Inside its term, but suspended because another office refused a permit.' : 'Inside its term, but suspended.',
     svg: '<rect x="3" y="3" width="12" height="12" rx="1.5" fill="#7a4bd0" stroke="#fff" stroke-width="2" /><path d="M7.25 6.5v5M10.75 6.5v5" stroke="#fff" stroke-width="1.75" stroke-linecap="round" />',
   },
   revoked: {
     label: 'Permit revoked',
-    description: 'The City revoked the Mayor’s Permit. The business may not trade on it.',
+    description: (p) => `The issuing office revoked the ${p}. The business may not rely on it.`,
     svg: '<path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#fff" stroke-width="6" stroke-linecap="round" /><path d="M4.5 4.5 13.5 13.5M13.5 4.5 4.5 13.5" stroke="#14171d" stroke-width="3" stroke-linecap="round" />',
   },
   none: {
     label: 'No permit on file',
-    description: 'No Mayor’s Permit has ever been issued to this business.',
+    description: (p) => `No ${p} has ever been issued to this business.`,
     svg: '<circle cx="9" cy="9" r="5" fill="#fff" stroke="#5b6472" stroke-width="2.25" />',
   },
 }
@@ -458,9 +469,14 @@ export function BusinessMapPage({
   if (loading) return <SkeletonList rows={6} />
   if (error || meta === null) return <ErrorState error={error} onRetry={reload} />
 
+  const permitName = meta.permit_type?.name ?? 'Mayor’s Permit'
+  const mayors = (meta.permit_type?.code ?? 'BUSINESS') === 'BUSINESS'
+  // An office maps only businesses holding its certificate, so "never held one" cannot occur there.
+  const order = mayors ? STATE_ORDER : STATE_ORDER.filter((s) => s !== 'none')
+
   const statePills = [
     { value: 'all' as const, label: `All ${meta.plotted}` },
-    ...STATE_ORDER.map((s) => ({ value: s, label: `${STATES[s].label} ${meta.counts[s]}` })),
+    ...order.map((s) => ({ value: s, label: `${STATES[s].label} ${meta.counts[s]}` })),
   ]
 
   return (
@@ -475,8 +491,8 @@ export function BusinessMapPage({
         * writing coordinates, this line is where it shows up.
         */}
       <p className="mt-1 max-w-3xl text-sm text-ink-secondary">
-        {meta.plotted} of the {meta.businesses_total} businesses on file carry a map pin, shown here
-        by the state of their Mayor&rsquo;s Permit on {formatDate(meta.as_of)}.
+        {meta.plotted} of the {meta.businesses_total} businesses {mayors ? 'on file' : `holding a ${permitName}`} carry a
+        map pin, shown here by the state of their {permitName} on {formatDate(meta.as_of)}.
         {meta.unmapped > 0 && (
           <>
             {' '}
@@ -577,7 +593,7 @@ export function BusinessMapPage({
             style={{ height: 560, width: '100%' }}
           >
             <ContainerName
-              label={`Map of Malabon showing ${visible.length} businesses: ${STATE_ORDER.map(
+              label={`Map of Malabon showing ${visible.length} businesses: ${order.map(
                 (s) => `${meta.counts[s]} ${STATES[s].label.toLowerCase()}`,
               ).join(', ')}. The same figures are in the table below the map.`}
             />
@@ -761,7 +777,7 @@ export function BusinessMapPage({
             </tr>
           </thead>
           <tbody>
-            {STATE_ORDER.map((s) => (
+            {order.map((s) => (
               <tr key={s} className="border-t border-line align-top">
                 <th scope="row" className="whitespace-nowrap px-5 py-3.5 font-medium text-ink">
                   <span className="flex items-center gap-2">
@@ -773,7 +789,7 @@ export function BusinessMapPage({
                     {STATES[s].label}
                   </span>
                 </th>
-                <td className="px-5 py-3.5 text-ink-secondary">{STATES[s].description}</td>
+                <td className="px-5 py-3.5 text-ink-secondary">{STATES[s].description(permitName, mayors)}</td>
                 <td className="px-5 py-3.5 text-right text-ink tnum">{meta.counts[s]}</td>
               </tr>
             ))}

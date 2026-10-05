@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 import { admin, applications } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -15,6 +15,7 @@ import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primit
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { BuildingIcon, ClipboardIcon, UsersIcon } from '../../components/icons'
+import { FilingRecord } from './FilingRecord'
 
 /*
  * Records — the super admin's read-only view of the register.
@@ -46,10 +47,19 @@ import { BuildingIcon, ClipboardIcon, UsersIcon } from '../../components/icons'
  *     portal with a 409.
  *   - There is no per-business and no per-owner route anywhere in the app.
  *
- * A read-only oversight detail view is the right answer and is a later slice. A
- * link into the reviewer's screen is not: it would either dead-end the admin or
- * hand the overseer the buttons of the overseen, which is the separation this
- * role exists to hold.
+ * A read-only oversight detail view is the right answer. A link into the
+ * reviewer's screen is not: it would either dead-end the admin or hand the
+ * overseer the buttons of the overseen, which is the separation this role
+ * exists to hold.
+ *
+ * ── That view now exists, for filings ──────────────────────────────────────
+ *
+ * [Client, 4 October 2026.] A filing row expands in place into FilingRecord:
+ * the office sheets filled in, the requirements uploaded, the permits issued.
+ * It is opened by a real button on the tracking ID rather than by making the
+ * row clickable, and it changes nothing — View and Download on uploads, View
+ * on certificates, and that is all. Businesses and Owners stay inert: there is
+ * still no record view for either.
  *
  * ── Where search, sort and paging run ──────────────────────────────────────
  *
@@ -96,6 +106,8 @@ type Tab = 'applications' | 'businesses' | 'owners'
  */
 interface RecordRow {
   key: string
+  /** Set on filings only — what the expanded record is fetched by. */
+  applicationId?: number
   primary: string
   secondary: string
   /*
@@ -125,7 +137,10 @@ function applicationRow(app: ApplicationListItem): RecordRow {
   const meta = filingStatusMeta(app)
   return {
     key: `application-${app.id}`,
-    primary: app.tracking_id,
+    applicationId: app.id,
+    // A draft has no tracking ID until it is submitted. Without a fallback the
+    // expand button had no visible label at all — a lone "▸".
+    primary: app.tracking_id ?? 'Draft — not yet filed',
     // `businessName`, not a dereference: Business soft-deletes and its filings
     // stay, so this is null on 139 rows of the live register and the helper says
     // what happened instead of blanking the cell.
@@ -360,6 +375,10 @@ export function RecordsPage() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort | null>(null)
   const [page, setPage] = useState(1)
+  // The one filing whose record is open. Reset with the tab and page, so a
+  // record never stays open over rows that are no longer the ones it belonged to.
+  const [expanded, setExpanded] = useState<number | null>(null)
+  useEffect(() => setExpanded(null), [tab, page])
 
   // Applications carries no permission of its own, so this can never come back
   // empty and the opening tab is always one of them.
@@ -513,19 +532,57 @@ export function RecordsPage() {
               </thead>
               <tbody>
                 {/*
-                  A plain row, on purpose. No onClick, no hover state, no cursor
-                  change and no chevron — see the note at the top of this file
-                  for why there is nowhere for a row to go, and why wiring one up
-                  is not the fix it looks like.
+                  A filing row now OPENS — in place, read-only. The note at the
+                  top of this file still holds: a row must not link into the
+                  reviewer's screen. What it asked for instead, "a read-only
+                  oversight detail view", is FilingRecord, expanded beneath the
+                  row by a real button (not a clickable row), so the only thing
+                  that looks pressable is the thing that is.
+
+                  Businesses and Owners stay plain rows: there is still no
+                  record view for either, and a control about nothing would
+                  read as a broken screen.
                 */}
-                {rows.map((row) => (
-                  <tr key={row.key} className="border-t border-line">
-                    <td className="px-5 py-3.5 font-bold text-ink">{row.primary}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{row.secondary}</td>
-                    <td className="px-5 py-3.5">{row.status}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{formatDate(row.date)}</td>
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  const open = row.applicationId !== undefined && expanded === row.applicationId
+                  return (
+                    <Fragment key={row.key}>
+                      <tr className="border-t border-line">
+                        <td className="px-5 py-3.5 font-bold text-ink">
+                          {row.applicationId !== undefined ? (
+                            <button
+                              type="button"
+                              onClick={() => setExpanded(open ? null : row.applicationId!)}
+                              aria-expanded={open}
+                              aria-controls={`record-${row.applicationId}`}
+                              className="inline-flex items-center gap-2 rounded text-left hover:text-royal focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                            >
+                              <span aria-hidden="true" className="text-xs text-ink-muted">
+                                {open ? '▾' : '▸'}
+                              </span>
+                              {row.primary}
+                              <span className="sr-only">
+                                {open ? ', hide forms, uploads and permits' : ', show forms, uploads and permits'}
+                              </span>
+                            </button>
+                          ) : (
+                            row.primary
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-ink-secondary">{row.secondary}</td>
+                        <td className="px-5 py-3.5">{row.status}</td>
+                        <td className="px-5 py-3.5 text-ink-secondary">{formatDate(row.date)}</td>
+                      </tr>
+                      {open && (
+                        <tr id={`record-${row.applicationId}`} className="border-t border-line">
+                          <td colSpan={4} className="p-0">
+                            <FilingRecord applicationId={row.applicationId!} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>

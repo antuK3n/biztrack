@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 import { OFFICES } from '../src/pages/admin/permitColumns'
 
-/** Six offices; the picker adds "All offices" and "Other offices" around them. */
+/** Six offices; the tab strip adds ALL in front of them. */
 const OFFICE_COUNT = OFFICES.length
 
 /*
@@ -229,10 +229,44 @@ const openFilter = async (page: Page) => {
 const filterField = (page: Page, label: string) =>
   page.locator('.shadow-overlay label').filter({ hasText: label }).locator('select')
 
+/*
+ * The Office picker is a tab strip above the table now, not a select inside
+ * Filter [client, 4 October 2026: "paki labas na lang sa filter"]. Each tab's
+ * accessible name is the full office and certificate, so the tests address it
+ * the way a screen reader announces it.
+ */
+const officeGroup = (page: Page) => page.getByRole('group', { name: 'Office' })
+
+const officeTab = (page: Page, code: string) => {
+  if (code === '') return officeGroup(page).getByRole('button', { name: 'All offices, every permit' })
+  if (code === 'OTHER') {
+    return officeGroup(page).getByRole('button', { name: 'Other offices, every permit but the Mayor’s' })
+  }
+  const o = OFFICES.find((x) => x.code === code)!
+  return officeGroup(page).getByRole('button', { name: `${o.office} — ${o.name}` })
+}
+
+const chooseOffice = async (page: Page, code: string) => {
+  await officeTab(page, code).click()
+  await expect(officeTab(page, code)).toHaveAttribute('aria-pressed', 'true')
+}
+
 /** Every query string the screen sent, so a narrowing can be pinned to the server. */
 let asked: string[]
 
+/*
+ * The register, as the super admin reads it.
+ *
+ * Moved off the BPLO session [client, 4 October 2026: "sa bplo side, bat
+ * nakikita nya lahat? dapat yung permit nya lang … at mga mismong permit sa
+ * other offices, no need sa ibang fields"]. BPLO no longer gets an ALL tab or
+ * another office's sheet columns, so the tests below — three offices' rows and
+ * every sheet side by side — are the super admin's now. What BPLO does get is
+ * pinned in the nested block at the end.
+ */
 test.describe('the permit register table', () => {
+  test.use({ storageState: sessionFor('admin') })
+
   test.beforeEach(async ({ page }) => {
     asked = []
 
@@ -293,40 +327,20 @@ test.describe('the permit register table', () => {
     await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
 
     /*
-     * Widen to every office before each test in this block.
-     *
-     * These tests are about the REGISTER — three rows from three offices, all
-     * five sheets side by side — and this session is BPLO's, which now opens
-     * on its own office. That default is deliberate and has its own test
-     * below; here it is a starting condition to undo, exactly as a reader
-     * would.
+     * The super admin belongs to no office and opens on ALL. Pressed again
+     * here only where the tab exists — the BPLO block below shares this
+     * stub and has no ALL tab to press.
      */
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('')
-    await page.keyboard.press('Escape')
-    await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+    if ((await officeTab(page, '').count()) > 0) {
+      await chooseOffice(page, '')
+      await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+    }
   })
 
-  test('BPLO opens on its own office, and can widen to the register', async ({ page }) => {
-    /*
-     * Client, 24 September 2026: "bplo admin office, make the office permit
-     * default sa bplo, but still sa filter ganon pa rin meron all offices, at
-     * yung 6 other offices and their permits."
-     *
-     * Asserted on the FIRST request rather than on what is on screen after
-     * the beforeEach has widened it: the point is that BPLO never sees the
-     * whole register unless it asks, and a page that fetched everything and
-     * then narrowed in the browser would look identical here while costing
-     * the request this avoids.
-     */
-    expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
-
-    // And the picker still offers every office, "All" and "Other offices".
-    await openFilter(page)
-    const office = filterField(page, 'Office')
-    await expect(office.locator('option')).toHaveCount(OFFICE_COUNT + 2)
-    await expect(office).toHaveValue('')
-    await page.keyboard.press('Escape')
+  test('the super admin opens on ALL, with every office beside it', async ({ page }) => {
+    expect(asked[0], 'the super admin opened narrowed to one office').not.toContain('permit_type=')
+    await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1)
+    await expect(officeTab(page, '')).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('the table leads with the tracking ID, then the office’s own permit no.', async ({ page }) => {
@@ -486,8 +500,7 @@ test.describe('the permit register table', () => {
      */
     const wide = await page.locator('thead th').count()
 
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('SANITARY')
+    await chooseOffice(page, 'SANITARY')
 
     await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
     await expect(page.locator('tbody tr')).toHaveCount(1)
@@ -707,9 +720,7 @@ test.describe('the permit register table', () => {
     await page.getByRole('option', { name: 'Expiring soonest' }).click()
     await expect.poll(() => asked.at(-1)).toContain('sort=valid_until')
 
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('BUSINESS')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, 'BUSINESS')
     await expect.poll(() => asked.at(-1)).toContain('permit_type=BUSINESS')
 
     for (const gone of [/^Valid until/i, /^Days to expiry/i, /^Permit \/ Certificate/i, /^Office$/i]) {
@@ -731,29 +742,18 @@ test.describe('the permit register table', () => {
     await page.keyboard.press('Escape')
 
     // Another office keeps its expiry — a clearance lapses in any month.
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('SANITARY')
-    await page.keyboard.press('Escape')
+    await chooseOffice(page, 'SANITARY')
     await expect(page.getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
   })
 
-  test('the other offices’ permits are a view of their own', async ({ page }) => {
+  test('there is no "Other offices" tab, and ALL is the first', async ({ page }) => {
     /*
-     * Checklist item 18: "other permits in a separate view". BPLO's table is
-     * the Mayor's Permit; the five clearances other offices issue are one
-     * choice away, asked of the server as "every type but BUSINESS".
+     * Removed on the client's instruction [4 October 2026: "paki remove to
+     * Other offices", and "sa all office gawing ALL lang"]. The tabs are the
+     * six offices and ALL, on one line.
      */
-    await openFilter(page)
-    await filterField(page, 'Office').selectOption('OTHER')
-    await page.keyboard.press('Escape')
-
-    await expect.poll(() => asked.at(-1)).toContain('exclude_permit_type=BUSINESS')
-    expect(asked.at(-1)).not.toContain('permit_type=OTHER')
-
-    const rows = page.locator('tbody tr')
-    await expect(rows).toHaveCount(2)
-    await expect(page.locator('tbody')).not.toContainText('MCB-2026-000001')
-    await expect(page.getByText(/issued by every office but BPLO/)).toBeVisible()
+    await expect(officeGroup(page).getByRole('button', { name: /Other offices/ })).toHaveCount(0)
+    await expect(officeGroup(page).getByRole('button').first()).toHaveText(/^ALL/)
   })
 
   test('retired businesses are hidden until the filter asks for them', async ({ page }) => {
@@ -794,45 +794,9 @@ test.describe('the permit register table', () => {
     await expect.poll(() => asked.at(-1)).toContain('status=revoked')
   })
 
-  test('Revoke is offered only on a permit in force, and asks before it acts', async ({ page }) => {
-    /*
-     * Checklist item 23. Active and suspended rows only — an expired or
-     * superseded certificate has already stopped being valid, and the server
-     * refuses to revoke one. The dialog names the permit AND the business, and
-     * will not send without a reason.
-     */
-    let sent: { url: string; body: unknown } | null = null
-    await page.route('**/api/v1/permits/*/revoke', async (route) => {
-      sent = { url: route.request().url(), body: route.request().postDataJSON() }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ data: { ...PERMITS[0], status: 'revoked', status_label: 'Revoked' } }),
-      })
-    })
-
-    await expect(page.getByRole('button', { name: 'Revoke MCB-2026-000001' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Revoke MCS-2025-000770/ })).toHaveCount(0) // expired
-    await expect(page.getByRole('button', { name: /^Revoke MCZ-2026-000014/ })).toHaveCount(0) // superseded
-
-    await page.getByRole('button', { name: 'Revoke MCB-2026-000001' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Revoke MCB-2026-000001?' })
-    await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('Aling Nena Sari-Sari Store')
-    await expect(dialog).toContainText('notified')
-
-    // No reason, no request.
-    const confirm = dialog.getByRole('button', { name: 'Revoke permit' })
-    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
-
-    await dialog.getByRole('textbox', { name: 'Reason for revoking' }).fill('Closure order from the Mayor.')
-    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
-    await confirm.click()
-
-    await expect(dialog).toHaveCount(0)
-    expect(sent).not.toBeNull()
-    expect(sent!.url).toContain('/permits/901/revoke')
-    expect(sent!.body).toEqual({ reason: 'Closure order from the Mayor.' })
+  test('the super admin is offered no Revoke', async ({ page }) => {
+    // Client, 4 October 2026: "paki tanggal ang revoke sa super admin".
+    await expect(page.getByRole('button', { name: /^Revoke / })).toHaveCount(0)
   })
 
   test('every View button names the permit it opens', async ({ page }) => {
@@ -846,6 +810,87 @@ test.describe('the permit register table', () => {
         page.getByRole('button', { name: `View certificate ${permit.permit_number}` }),
       ).toBeVisible()
     }
+  })
+
+  /*
+   * ── BPLO: its own permit in full, the other offices' permits alone ─────
+   *
+   * [Client, 4 October 2026: "dapat yung permit nya lang 'BPLO Mayor's /
+   * Business Permit' at mga mismong permit sa other offices no need sa ibang
+   * fields".]
+   */
+  test.describe('as BPLO', () => {
+    test.use({ storageState: sessionFor('bplo') })
+
+    test('opens on its own office, with the six offices and no ALL', async ({ page }) => {
+      expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
+      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT)
+      await expect(officeTab(page, '')).toHaveCount(0)
+      await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    test('another office’s tab is the permit, not the office’s sheet or uploads', async ({ page }) => {
+      await chooseOffice(page, 'SANITARY')
+      await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
+      await expect(page.locator('tbody tr')).toHaveCount(1)
+
+      // The permit: who holds it, its number, whether it is in force, and the certificate.
+      for (const kept of [/^Tracking ID/i, /^Permit No/i, /^Business/i, /^Owner/i, /^Status/i, /^Valid until/i]) {
+        await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
+      }
+      await expect(page.getByRole('button', { name: 'View certificate MCS-2025-000770' })).toBeVisible()
+
+      // Not the health office's sheet, its uploads, or the rest of the record.
+      for (const gone of [/Sanitary Classification/i, /Water Source/i, /^Requirements Submitted/i, /^Address/i, /^Issued by/i]) {
+        await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+      }
+    })
+
+    test('Revoke is offered only on a permit in force, and asks before it acts', async ({ page }) => {
+      /*
+       * Checklist item 23, and BPLO's own Mayor's Permit only. Active and suspended rows only — an expired or
+       * superseded certificate has already stopped being valid, and the server
+       * refuses to revoke one. The dialog names the permit AND the business, and
+       * will not send without a reason.
+       */
+      let sent: { url: string; body: unknown } | null = null
+      await page.route('**/api/v1/permits/*/revoke', async (route) => {
+        sent = { url: route.request().url(), body: route.request().postDataJSON() }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { ...PERMITS[0], status: 'revoked', status_label: 'Revoked' } }),
+        })
+      })
+
+      await expect(page.getByRole('button', { name: 'Revoke MCB-2026-000001' })).toBeVisible()
+      await expect(page.getByRole('button', { name: /^Revoke MCS-2025-000770/ })).toHaveCount(0) // expired
+      await expect(page.getByRole('button', { name: /^Revoke MCZ-2026-000014/ })).toHaveCount(0) // superseded
+
+      await page.getByRole('button', { name: 'Revoke MCB-2026-000001' }).click()
+      const dialog = page.getByRole('dialog', { name: 'Revoke MCB-2026-000001?' })
+      await expect(dialog).toBeVisible()
+      await expect(dialog).toContainText('Aling Nena Sari-Sari Store')
+      await expect(dialog).toContainText('notified')
+
+      // No reason, no request.
+      const confirm = dialog.getByRole('button', { name: 'Revoke permit' })
+      await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+
+      await dialog.getByRole('textbox', { name: 'Reason for revoking' }).fill('Closure order from the Mayor.')
+      await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
+      await confirm.click()
+
+      await expect(dialog).toHaveCount(0)
+      expect(sent).not.toBeNull()
+      expect(sent!.url).toContain('/permits/901/revoke')
+      expect(sent!.body).toEqual({ reason: 'Closure order from the Mayor.' })
+    })
+
+    test('its own tab keeps every field and the uploads', async ({ page }) => {
+      await expect(page.getByRole('columnheader', { name: /^Requirements Submitted/i })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: /^Line of Business/i })).toBeVisible()
+    })
   })
 })
 
@@ -959,10 +1004,15 @@ test.describe('the office picker, and whose columns each reader gets', () => {
          * column heading on this table, so a text query would pass while the
          * control was still on screen.
          */
+        // The Office tab strip is not drawn for a single-office reader. Its
+        // group is the thing to look for, not the word "Office", which is
+        // also a column heading on this table.
+        await expect(officeGroup(page)).toHaveCount(0)
+        // The narrowing this office DOES get — status, in the Filter menu —
+        // is still there. (The issue-date range was removed on the client's
+        // instruction; see "the issue-date range is not offered as a filter".)
         await openFilter(page)
-        await expect(filterField(page, 'Office')).toHaveCount(0)
-        // The narrowing this office DOES get is still there.
-        await expect(page.locator('.shadow-overlay input[type=date]')).toHaveCount(2)
+        await expect(page.getByRole('option', { name: 'Active', exact: true })).toBeVisible()
         await page.keyboard.press('Escape')
 
         // Its own sheet is there…
@@ -1053,15 +1103,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await page.goto('/staff/admin/permits')
       await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
 
-      await openFilter(page)
-      const picker = filterField(page, 'Office')
-      await expect(picker).toBeVisible()
-      await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 2) // six offices, "All", "Other offices"
+      await expect(officeGroup(page)).toBeVisible()
+      await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1) // six offices and ALL
       // It opens on BPLO's own office; widen it, which is the whole point of
       // the control being here.
-      await expect(picker).toHaveValue('BUSINESS')
-      await picker.selectOption('')
-      await page.keyboard.press('Escape')
+      await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
+      await chooseOffice(page, '')
 
       /*
        * The BAN is off every reader's table now, BPLO's included — it names

@@ -1307,6 +1307,20 @@ export interface PermitRegisterRow extends Permit {
    * and the table says each of those differently.
    */
   office_form: Record<string, unknown> | null
+  /**
+   * The requirements uploaded on the filing that belong to THIS permit's
+   * office — see PermitRegisterResource::requirementDocuments. Null when not
+   * loaded, [] when loaded and nothing was uploaded.
+   */
+  documents?: {
+    id: number
+    name: string
+    filename: string
+    status: string | null
+    download_url: string
+    /** Sent under Other Requirements, in answer to an office's request. */
+    from_request?: boolean
+  }[] | null
 }
 
 /**

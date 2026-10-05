@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primit
 import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
+import { DocumentActions } from '../../components/DocumentActions'
 import { useAuth } from '../../stores/auth'
 import {
   OFFICES,
@@ -79,8 +80,10 @@ import {
  *
  * ── Revoke ─────────────────────────────────────────────────────────────────
  *
- * On this screen since checklist item 23, for BPLO and the super admin only
- * (`permit.revoke`) — Ken settled question A26's "who". It was held back
+ * On this screen since checklist item 23, for BPLO only (`permit.revoke`), and
+ * on the Mayor's Permit only [client, 4 October 2026: "paki tanggal ang revoke
+ * sa super admin, at bplo, dapat sa bplo ayon lang kaya nyang i revoke"]; the
+ * server refuses the rest (PermitController::revoke). It was held back
  * until then on purpose: a revoked permit means a business is trading
  * unlawfully, and a button with no audit, no notice and no public effect
  * behind it would have documented an act nobody authorised. The server does
@@ -150,8 +153,17 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 ]
 
 /** A permit that is in force — the only kind Revoke is offered on. */
-function revocable(permit: PermitRegisterRow): boolean {
-  return permit.status === 'active' || permit.status === 'suspended'
+/**
+ * Revocable by THIS reader: in force, and issued by the reader's own office —
+ * BPLO the Mayor's Permit, CHO its Sanitary Permits, and so on [client, 4
+ * October 2026]. The server applies the same rule (PermitController::revoke).
+ */
+function revocable(permit: PermitRegisterRow, ownOffice: OfficeCode | null): boolean {
+  return (
+    ownOffice !== null &&
+    permit.permit_type?.code === ownOffice &&
+    (permit.status === 'active' || permit.status === 'suspended')
+  )
 }
 
 /**
@@ -240,6 +252,160 @@ function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
   return value === null || value.trim() === '' ? '—' : value
 }
 
+/*
+ * What BPLO reads on another office's tab: enough to know WHICH permit, for
+ * WHICH business, and whether it is in force — then the certificate itself in
+ * the last column. No office-sheet answers, no uploads, and not the columns
+ * that are constant within one office's tab (its certificate name and office).
+ * Valid-from and issued-on are left off too: on a clearance they are the same
+ * date. Issued-by is left off because it names the OTHER office's officer,
+ * which BPLO has no use for — and without these the certificate column fits.
+ */
+const PERMIT_ONLY_KEYS = new Set([
+  'tracking_id',
+  'permit_number',
+  'business',
+  'owner_name',
+  'status',
+  'valid_until',
+  'days',
+])
+
+/** A permit's uploads: a count that expands into View/Download per file. */
+function UploadsCell({ permit }: { permit: PermitRegisterRow }) {
+  const [open, setOpen] = useState(false)
+  const docs = permit.documents
+
+  if (!docs) return <span className="text-xs text-ink-muted">—</span>
+  if (docs.length === 0) return <span className="text-xs text-ink-muted">None uploaded</span>
+
+  return (
+    <div className="min-w-[13rem]">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`${open ? 'Hide' : 'Show'} ${docs.length} uploaded requirement${docs.length === 1 ? '' : 's'} for ${permit.permit_number}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink hover:border-royal hover:text-royal"
+      >
+        <span aria-hidden="true" className="text-[10px] text-ink-muted">{open ? '▾' : '▸'}</span>
+        {docs.length} file{docs.length === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-2.5">
+          {docs.map((d) => (
+            <li key={d.id}>
+              {/*
+                A file the office asked for after filing, under Other
+                Requirements, says so — otherwise it reads as one of the
+                requirements filed at the start [client, 4 October 2026].
+              */}
+              {d.from_request && (
+                <div className="mb-1">
+                  <StatusChip tone="tint-orange">Other Requirements</StatusChip>
+                </div>
+              )}
+              <p className="text-xs font-semibold text-ink">{d.name}</p>
+              <p className="max-w-[16rem] truncate text-[11px] text-ink-muted" title={d.filename}>
+                {d.filename}
+              </p>
+              {d.from_request && (
+                <p className="mt-0.5 max-w-[16rem] text-[11px] leading-snug text-ink-muted">
+                  Sent by the business owner when the office requested it.
+                </p>
+              )}
+              <div className="mt-1">
+                <DocumentActions id={d.id} filename={d.filename} label={d.name} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Which office's permits — a visible tab strip, not a menu entry.
+ *
+ * One tab per office, named the way staff say it (the department code) with
+ * the certificate under it, so "BPLO" and "Mayor's / Business Permit" are read
+ * together without a 70-character option. The full office name is the tab's
+ * accessible name and its tooltip.
+ *
+ * It scrolls sideways on a narrow screen rather than wrapping into a block of
+ * pills, so the strip stays one line and the table stays where the eye left it.
+ */
+const OFFICE_TAB_CODES: Record<OfficeCode, string> = {
+  BUSINESS: 'BPLO',
+  ZONING: 'Zoning',
+  SANITARY: 'CHO',
+  FSIC: 'BFP',
+  OCCUPANCY: 'OBO',
+  CEC: 'CENRO',
+}
+
+function OfficeTabs({
+  value,
+  onChange,
+  includeAll = true,
+}: {
+  value: OfficeChoice
+  onChange: (v: OfficeChoice) => void
+  /** ALL is the super admin's; BPLO is shown its own office and the five others. */
+  includeAll?: boolean
+}) {
+  const tabs: { value: OfficeChoice; short: string; sub: string; full: string }[] = [
+    // "ALL", and no "Other offices" tab [client, 4 October 2026]. The OTHER
+    // view still exists behind the choice type — a link can open it — but it
+    // is not one of the tabs.
+    { value: '', short: 'ALL', sub: 'Every permit', full: 'All offices, every permit' },
+    ...OFFICES.map((o) => ({ value: o.code as OfficeChoice, short: OFFICE_TAB_CODES[o.code], sub: o.name, full: `${o.office} — ${o.name}` })),
+  ]
+
+  const shown = includeAll ? tabs : tabs.filter((t) => t.value !== '')
+
+  return (
+    // Wraps rather than scrolls: at 1440px a one-line strip cut CENRO in half
+    // and hid "Other offices" off the edge, and a tab nobody can see is a
+    // filter nobody uses.
+    <div role="group" aria-label="Office" className="mb-4 overflow-x-auto pb-1">
+      {/*
+        One straight line [client, 4 October 2026]: seven equal columns. A long
+        certificate name wraps inside its own tab rather than pushing the strip
+        onto a second row, so every tab stays the same width and the row reads
+        as one control. Below `md` it scrolls sideways instead of squeezing
+        seven columns into a phone.
+      */}
+      <div className="grid min-w-[44rem] gap-2" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
+        {shown.map((t) => {
+          const active = t.value === value
+          return (
+            <button
+              key={t.value || 'all'}
+              type="button"
+              aria-pressed={active}
+              aria-label={t.full}
+              title={t.full}
+              onClick={() => onChange(t.value)}
+              className={`flex min-w-0 flex-col items-start justify-center rounded-lg border px-3 py-2 text-left transition-colors ${
+                active
+                  ? 'border-royal bg-royal text-white shadow-card'
+                  : 'border-line bg-white text-ink hover:border-royal'
+              }`}
+            >
+              <span className="text-sm font-bold leading-tight">{t.short}</span>
+              <span className={`text-[11px] leading-tight ${active ? 'text-white/85' : 'text-ink-muted'}`}>
+                {t.sub}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function PermitsPage() {
   /*
    * ── Who is reading, and how many offices they can see ────────────────────
@@ -265,6 +431,22 @@ export function PermitsPage() {
   const department = useAuth((s) => s.user?.department?.code)
 
   const readsEveryOffice = permissions?.includes('application.view_any_office') ?? false
+  /*
+   * ── BPLO reads every office's PERMITS, not every office's files ─────────
+   *
+   * [Client, 4 October 2026: "sa bplo side, bat nakikita nya lahat? dapat yung
+   * permit nya lang … at mga mismong permit sa other offices, no need sa ibang
+   * fields".] BPLO and the super admin both hold `application.view_any_office`,
+   * so this screen treated them alike. They are not alike: the super admin
+   * audits everything; BPLO issues the Mayor's Permit and needs to SEE that the
+   * other offices' permits exist, not to read their sheets and uploads.
+   *
+   * So for BPLO: its own tab carries everything, and another office's tab is
+   * the permits alone — the shared columns and the certificate, no office-sheet
+   * columns, no requirements. `user.manage` is what marks the super admin.
+   */
+  const isSuperAdmin = permissions?.includes('user.manage') ?? false
+  const bploView = readsEveryOffice && !isSuperAdmin
   const canRevoke = permissions?.includes('permit.revoke') ?? false
   const ownOffice = permitCodeForDepartment(department)
 
@@ -443,7 +625,18 @@ export function PermitsPage() {
    * issued first — the menu's first entry, and a true description rather than
    * a selection the page had to invent on arrival.
    */
-  const columns = useMemo(() => columnsFor(office), [office])
+  const permitOnly = bploView && office !== 'BUSINESS'
+  const columns = useMemo(
+    () =>
+      permitOnly
+        ? columnsFor(office).filter(
+            // The certificate type only on the mixed list the Business Map links to
+            // (?office=all); on one office's tab every row is the same type.
+            (c) => PERMIT_ONLY_KEYS.has(c.key) || (office === '' && c.key === 'permit_type'),
+          )
+        : columnsFor(office),
+    [office, permitOnly],
+  )
 
   /*
    * Only the orderings whose column is on screen. BPLO's own table has no
@@ -567,7 +760,7 @@ export function PermitsPage() {
       <PageTitle
         right={
           /* The table's controls; the map carries its own, so none of these would act on it. */
-          mode === 'map' && readsEveryOffice ? undefined : (
+          mode === 'map' ? undefined : (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
             {/*
               A placeholder is not an accessible name — it disappears on the
@@ -624,24 +817,9 @@ export function PermitsPage() {
                 onChange: (v: string) => selectStatus(v as StatusFilter),
               }}
               filterFields={[
-                ...(locked === null
-                  ? [
-                      {
-                        label: 'Office',
-                        value: chosen,
-                        options: [
-                          { value: '', label: 'All offices — every column' },
-                          ...OFFICES.map((o) => ({ value: o.code, label: `${o.office} — ${o.name}` })),
-                          /*
-                           * Last, after the six, because it is a grouping of
-                           * five of them — read after the list it summarises.
-                           */
-                          { value: OTHER_OFFICES, label: 'Other offices — every permit but the Mayor’s' },
-                        ],
-                        onChange: (v: string) => selectOffice(v as OfficeChoice),
-                      },
-                    ]
-                  : []),
+                // Office moved OUT of this menu to the OfficeTabs strip above the
+                // table [client, 4 October 2026: "paki labas na lang sa filter"]:
+                // it decides which columns exist, so it is the first choice made.
                 {
                   label: 'Retired businesses',
                   value: retired,
@@ -678,35 +856,35 @@ export function PermitsPage() {
         style the Analytics screens use, with the selected view marked by
         `aria-pressed` as well as fill, so the choice is not colour alone.
       */}
-      {readsEveryOffice && (
-        <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
-          {(
-            [
-              { value: 'table', label: 'Table' },
-              { value: 'map', label: 'Map' },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              aria-pressed={mode === tab.value}
-              onClick={() => setMode(tab.value)}
-              className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
-                mode === tab.value
-                  ? 'border-royal bg-royal text-white'
-                  : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Every office gets the map now, on its own certificate [client, 4 October 2026]. */}
+      <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
+        {(
+          [
+            { value: 'table', label: 'Table' },
+            { value: 'map', label: 'Map' },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            aria-pressed={mode === tab.value}
+            onClick={() => setMode(tab.value)}
+            className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
+              mode === tab.value
+                ? 'border-royal bg-royal text-white'
+                : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {mode === 'map' && readsEveryOffice ? (
+      {mode === 'map' ? (
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
       ) : (
       <>
+      {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} includeAll={!bploView} />}
 
 
       {/*
@@ -775,7 +953,7 @@ export function PermitsPage() {
             role="region"
             aria-label={`Issued permits for ${officeLabel}, scrolls sideways`}
           >
-            <table className="w-max text-left text-sm">
+            <table className={`${permitOnly ? "w-full" : "w-max"} text-left text-sm`}>
               <thead>
                 <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
                   {columns.map((column) => {
@@ -839,21 +1017,41 @@ export function PermitsPage() {
                     accessible name is announced as blank. The word is there and
                     hidden.
                   */}
-                  <th scope="col" className="px-4 py-3 text-right">
-                    <span className="sr-only">Actions</span>
+                  {/*
+                    ── The office's uploads, then the permit itself, last ──────
+
+                    [Client, 4 October 2026: "lahat ng requirements na pinasa,
+                    inupload lahat makikita rin dapat doon … tas pang last ang
+                    mismong permit nya".] The row now reads in the order the
+                    filing happened: who and what (shared columns), what the
+                    office's own sheet asked, what was uploaded for it, and
+                    finally the certificate it produced.
+
+                    The last heading is visible now. It was a hidden "Actions",
+                    which named the buttons rather than the thing they open.
+                  */}
+                  {!permitOnly && (
+                    <th scope="col" className="whitespace-nowrap px-4 py-3">
+                      Requirements Submitted
+                    </th>
+                  )}
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
+                    Permit
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((permit) => (
-                  <tr key={permit.id} className="border-t border-line">
+                  <tr key={permit.id} className="border-t border-line align-top">
                     {columns.map((column) => {
                       const text = cellFor(permit, column)
                       return (
                         <td
                           key={column.key}
                           className={[
-                            'whitespace-nowrap px-4 py-3.5',
+                            // The permit-only view fits the card: names may wrap there rather than
+                            // push the certificate column off the edge.
+                            permitOnly && (column.key === 'business' || column.key === 'owner_name') ? 'px-4 py-3.5' : 'whitespace-nowrap px-4 py-3.5',
                             column.tnum ? 'tnum' : '',
                             // The lead identifier carries the row, so it is
                             // the one drawn in full ink.
@@ -879,7 +1077,27 @@ export function PermitsPage() {
                         </td>
                       )
                     })}
-                    <td className="px-4 py-3.5 text-right">
+                    {/*
+                      Each upload with its own View and Download, through
+                      DocumentActions — the endpoint is authenticated, so a bare
+                      link would fetch the login page. Named by what the document
+                      IS, not its filename, so a screen reader hears "Barangay
+                      Business Clearance" rather than "scan_003.pdf".
+                    */}
+                    {/*
+                      Collapsed to a count until asked. Listed in full, three
+                      uploads with their View/Download buttons made one row
+                      ~250px tall and pushed the rest of the register down a
+                      screen — the table stopped being something you run your
+                      eye down. The count says there IS something; the toggle
+                      shows it.
+                    */}
+                    {!permitOnly && (
+                      <td className="px-4 py-3.5">
+                        <UploadsCell permit={permit} />
+                      </td>
+                    )}
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right">
                       <button
                         type="button"
                         onClick={() => view(permit)}
@@ -922,7 +1140,7 @@ export function PermitsPage() {
                         destructive act on this row (DESIGN.md, Red Means
                         Stop); the dialog behind it is the confirmation.
                       */}
-                      {canRevoke && revocable(permit) && (
+                      {canRevoke && revocable(permit, ownOffice) && (
                         <button
                           type="button"
                           onClick={() => setRevoking(permit)}
