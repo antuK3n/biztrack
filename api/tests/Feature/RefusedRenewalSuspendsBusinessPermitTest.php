@@ -172,3 +172,41 @@ it('keeps the Business Permit suspended while a second renewal’s refusal stand
 
     expect($businessPermit->fresh()->status)->toBe(PermitStatus::Suspended);
 });
+
+it('never lifts BPLO’s own suspension of a paper Business Permit when a renewal passes', function () {
+    /*
+     * Mike's rule on the paper-permit path: a suspension BPLO made by hand
+     * (`suspended_cause` = manual) is a decision, and an office passing a
+     * renewal is not a review of it. A Business Permit issued on paper has
+     * no filing, so it is reinstated from the renewal's side.
+     */
+    [$businessId, $businessPermit, $sanitary] = rrsBusiness();
+    $businessPermit->update(['application_id' => null]);
+
+    authAs('owner@biztrack.local');
+    $appId = test()->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'renewal',
+        'prior_permit_ids' => [$sanitary->id],
+        'permit_type_ids' => PermitType::where('code', 'SANITARY')->pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+    test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/permits/{$businessPermit->id}/status", ['status' => 'suspended', 'reason' => 'Violations found.'])
+        ->assertOk();
+
+    $app = Application::findOrFail($appId);
+    $cho = $app->assignments()->where('department_id', PermitType::where('code', 'SANITARY')->value('issuing_department_id'))->value('id');
+    authAs('sanitary@biztrack.local');
+    test()->postJson("/api/v1/assignments/{$cho}/approve")->assertOk();
+    $visitId = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+        'scheduled_at' => now()->toDateTimeString(),
+    ])->assertCreated()->json('data.id');
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+
+    expect($app->fresh()->permitTypes->firstWhere('code', 'SANITARY')->pivot->status)->toBe(ClearanceStatus::Approved)
+        ->and($businessPermit->fresh()->status)->toBe(PermitStatus::Suspended)
+        ->and($businessPermit->fresh()->suspended_cause)->toBe('manual');
+});

@@ -3282,7 +3282,9 @@ class WorkflowService
             if ($held !== null && $held->application_id !== $app->id) {
                 if ($held->application !== null) {
                     $this->reconsiderSuspension($held->application);
-                } elseif (! $this->businessPermitHeldByARenewal($app->business, $app)) {
+                } elseif ($held->suspended_cause !== 'manual'
+                    // BPLO's own suspension is not this path's to lift either.
+                    && ! $this->businessPermitHeldByARenewal($app->business, $app)) {
                     $this->reinstate($app, $held);
                 }
             }
