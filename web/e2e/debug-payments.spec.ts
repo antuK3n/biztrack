@@ -52,14 +52,14 @@ test.describe('the super admin', () => {
   }) => {
     const start = await gateway(browser, { charge: 'test' })
     expect(start.ok, start.text).toBe(true)
-    const testLabel = `₱${start.data?.test_amount} test charge`
+    const testLabel = `₱${start.data?.test_amount}`
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/admin/debug')
     await expect(page.getByRole('heading', { name: 'Debug', level: 1 })).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('heading', { name: 'Payments', level: 2 })).toBeVisible()
 
-    const testCharge = page.getByRole('button', { name: testLabel })
+    const testCharge = page.getByRole('button', { name: testLabel, exact: true })
     const fullBill = page.getByRole('button', { name: 'The full bill' })
     await expect(testCharge).toHaveAttribute('aria-pressed', 'true')
     await expect(fullBill).toHaveAttribute('aria-pressed', 'false')
@@ -67,6 +67,8 @@ test.describe('the super admin', () => {
     await expect(
       page.getByText('The bill, the receipt and the records always keep the real assessed amount.'),
     ).toBeVisible()
+    // Nothing on the panel calls payments simulated or a test (Ken, 5 October 2026).
+    await expect(page.getByText(/simulated|test charge|practice kwikpay/i)).toHaveCount(0)
     await shot(page, 'debug-payments-1280')
 
     // Real money is asked about first, and keeping the test charge changes nothing.
@@ -74,7 +76,7 @@ test.describe('the super admin', () => {
     const dialog = page.getByRole('dialog', { name: 'Charge owners the full bill?' })
     await expect(dialog).toContainText('Payments already started keep the amount they were opened with.')
     await shot(page, 'debug-payments-confirm-1280')
-    await dialog.getByRole('button', { name: `Keep the ${testLabel}` }).click()
+    await dialog.getByRole('button', { name: `Keep ${testLabel}` }).click()
     await expect(dialog).toHaveCount(0)
     await expect(testCharge).toHaveAttribute('aria-pressed', 'true')
     expect((await gateway(browser)).data?.charge).toBe('test')
@@ -91,7 +93,7 @@ test.describe('the super admin', () => {
     await expect(page.getByRole('button', { name: 'The full bill' })).toHaveAttribute('aria-pressed', 'true')
 
     // Back to the test charge: no question, because it moves less money.
-    await page.getByRole('button', { name: testLabel }).click()
+    await page.getByRole('button', { name: testLabel, exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(
       page.getByRole('status').filter({ hasText: `Switched: KwikPay now collects ₱${start.data?.test_amount} per bill.` }),

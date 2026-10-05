@@ -188,7 +188,8 @@ it('sends the test e-mail to the super admin only when mail really goes somewher
 
 it('checks the KwikPay connection only when there is one to check, and fails it only while owners use it', function () {
     config(['payments.kwikpay.key' => null]);
-    expect(healthChecks()['gateway'])->toMatchArray(['status' => 'ok']);
+    // Without "payments are simulated" after it (Ken, 5 October 2026).
+    expect(healthChecks()['gateway'])->toMatchArray(['status' => 'ok', 'summary' => 'Not set up, and not needed.']);
 
     config([
         'payments.kwikpay.base_url' => 'https://kwikpay.test',

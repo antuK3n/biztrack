@@ -5,6 +5,8 @@ use App\Enums\AssignmentStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\OfficerRequestStatus;
+use App\Enums\PaymentMethod;
+use App\Enums\PaymentStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
@@ -214,9 +216,13 @@ it('pays the assessed balance as a simulated payment even while owners pay throu
 
     $assessed = (string) $app->fresh()->feeAssessment->total_amount;
 
-    moverStep($app, 'payment')->assertOk()->assertJsonPath('data.result.ok', true);
+    $paid = moverStep($app, 'payment')->assertOk()->assertJsonPath('data.result.ok', true);
 
     $payment = Payment::where('application_id', $app->id)->sole();
+    // The Debug page shows the panel no "simulated" (Ken, 5 October 2026).
+    expect($paid->json('data.result.label'))->toBe('Pay the bill')
+        ->and($paid->json('data.result.changes'))->toContain("Payment {$payment->reference_number} of ₱".number_format((float) $assessed, 2).' recorded.')
+        ->and(strtolower(json_encode($paid->json('data'))))->not->toContain('simulated');
     expect($payment->gateway)->toBe(Payment::GATEWAY_SIMULATED)
         ->and((string) $payment->amount)->toBe($assessed)
         ->and($payment->method->value)->toBe('card')
@@ -236,6 +242,31 @@ it('pays the assessed balance as a simulated payment even while owners pay throu
     expect($audit->action)->toBe('debug.filing.payment')
         ->and($audit->changes['acting_for'])->toBe('applicant')
         ->and($audit->changes['after']['paid'])->toBe(number_format((float) $assessed, 2, '.', ''));
+});
+
+it('names an online payment waiting at KwikPay as what blocks paying here, without calling the other payment simulated', function () {
+    $app = moverFreshFiling();
+    bploApprovesForm($app);
+    moverAsAdmin();
+    $app->refresh();
+    Payment::create([
+        'application_id' => $app->id,
+        'fee_assessment_id' => $app->feeAssessment->id,
+        'reference_number' => 'PAY-MOVER-1',
+        'amount' => $app->feeAssessment->total_amount,
+        'gateway_amount' => 1,
+        'method' => PaymentMethod::Gcash,
+        'status' => PaymentStatus::Pending,
+        'gateway' => Payment::GATEWAY_KWIKPAY,
+        'gateway_order_id' => 'PAY-MOVER-1-ABCDEF',
+        'pay_url' => 'https://kwikpay.test/pay/PAY-MOVER-1-ABCDEF',
+    ]);
+
+    $blockers = collect(test()->getJson("/api/v1/debug/filings/{$app->id}")->assertOk()->json('data.blockers'))->join(' ');
+
+    // It read "A simulated payment is refused …" (Ken, 5 October 2026).
+    expect($blockers)->toContain('An online payment (PAY-MOVER-1) is waiting at KwikPay. Another payment is refused until it is confirmed or set aside')
+        ->and(strtolower($blockers))->not->toContain('simulated');
 });
 
 it('passes the service refusal through, leaves nothing behind, and still audits the attempt', function () {

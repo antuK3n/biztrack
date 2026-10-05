@@ -186,7 +186,7 @@ class SystemHealth
         if (! PaymentMode::kwikPayConfigured()) {
             return $online
                 ? ['fail', 'Owners pay through KwikPay, but these are missing on the server: '.implode(', ', PaymentMode::missingCredentials()).'.']
-                : ['ok', 'Not set up, and not needed: payments are simulated.'];
+                : ['ok', 'Not set up, and not needed.'];
         }
 
         $result = $this->gateway->testConnection();

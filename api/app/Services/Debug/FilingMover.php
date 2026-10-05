@@ -285,7 +285,7 @@ final class FilingMover
 
         if ($status === ApplicationStatus::PendingPayment && ($waiting = $this->onlinePaymentWaiting($app)) !== null) {
             $blockers[] = "An online payment ({$waiting->reference_number}) is waiting at KwikPay. "
-                .'A simulated payment is refused until it is confirmed or set aside, so the owner cannot pay twice.';
+                .'Another payment is refused until it is confirmed or set aside, so the owner cannot pay twice.';
         }
 
         if ($this->inClearanceStage($app)) {
@@ -565,7 +565,7 @@ final class FilingMover
 
         $this->workflow->onPaymentCompleted($payment);
 
-        return "Simulated payment {$payment->reference_number} of ₱".number_format((float) $payment->amount, 2).' recorded.';
+        return "Payment {$payment->reference_number} of ₱".number_format((float) $payment->amount, 2).' recorded.';
     }
 
     // ── the forward path ────────────────────────────────────────────────────
@@ -811,7 +811,7 @@ final class FilingMover
                 ? 'BPLO gives the final approval'
                 : 'BPLO accepts the form',
             self::BPLO_RETURN => 'BPLO returns the form to the applicant',
-            self::PAYMENT => 'Pay the bill, simulated',
+            self::PAYMENT => 'Pay the bill',
             self::PERMIT_APPROVE => "{$office} accepts the {$permit} paperwork",
             self::PERMIT_RETURN => "{$office} returns the {$permit} to the applicant",
             self::INSPECTION_BOOK => "{$office} books the {$permit} inspection for today",

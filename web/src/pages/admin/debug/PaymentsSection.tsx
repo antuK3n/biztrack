@@ -28,6 +28,11 @@ import { Choice, Detail, SubCard } from './parts'
  *      bill from here, and it goes back after [Ken, 2026-10-04].
  *   3. Online payments still waiting, and the ones flagged for staff.
  *
+ * The screen says "simulated" and "test" nowhere, since the panel watches it
+ * [Ken, 2026-10-05]: the simulated mode is labelled "Instant", the test charge
+ * is named by its amount, and the Practice KwikPay row under Connection
+ * details is gone (`kwikpay.fake_available` still says it, in the API).
+ *
  * Neither switch touches a payment already started: an order keeps the
  * amount it was opened with (payments.gateway_amount), and its confirmation
  * is checked against that. The API is GET/PUT /debug/payments and POST
@@ -75,7 +80,7 @@ export function PaymentsSection() {
   const s = status.data
   if (!s) return null
 
-  const testLabel = `${formatMoney(s.test_amount)} test charge`
+  const testLabel = formatMoney(s.test_amount)
 
   return (
     <div className="space-y-5">
@@ -92,11 +97,6 @@ export function PaymentsSection() {
           The bill, the receipt and the records always keep the real assessed amount. Only what
           KwikPay takes from the owner changes.
         </p>
-        {s.mode === 'simulated' && (
-          <p className="mt-2 max-w-[70ch] text-sm text-ink-secondary">
-            Owners pay simulated right now, so nothing is collected either way until KwikPay is on.
-          </p>
-        )}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Choice
             label={testLabel}
@@ -156,7 +156,7 @@ export function PaymentsSection() {
          */
         <ProtoModal
           title="Charge owners the full bill?"
-          cancelLabel={`Keep the ${testLabel}`}
+          cancelLabel={`Keep ${testLabel}`}
           confirmLabel="Charge the full bill"
           onCancel={() => setConfirmingFull(false)}
           onConfirm={() => {
@@ -177,7 +177,7 @@ export function PaymentsSection() {
 function modeSaid(s: PaymentGatewayStatus): string {
   return s.mode === 'kwikpay'
     ? 'Switched: owners now pay through KwikPay.'
-    : 'Switched: payments are simulated now. No money moves.'
+    : 'Switched: KwikPay is off.'
 }
 
 function confirmSaid(s: PaymentGatewayStatus): string {
@@ -233,8 +233,8 @@ function HowOwnersPay({
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Choice
-          label="Simulated"
-          description="Paid the moment the owner presses Pay. No money moves."
+          label="Instant"
+          description="Paid the moment the owner presses Pay."
           on={s.mode === 'simulated'}
           busy={busy}
           onChoose={() => onChoose('simulated')}
@@ -282,7 +282,6 @@ function HowOwnersPay({
           <Detail term="KwikPay address">{s.kwikpay.base_url || '—'}</Detail>
           <Detail term="Payment type">{s.kwikpay.payment_type || '—'}</Detail>
           <Detail term="Where KwikPay confirms payments">{s.kwikpay.callback_url}</Detail>
-          <Detail term="Practice KwikPay">{s.kwikpay.fake_available ? 'On (this server only)' : 'Off'}</Detail>
         </dl>
       </details>
     </SubCard>

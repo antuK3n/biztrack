@@ -145,7 +145,7 @@ test.describe('the super admin', () => {
     // Then "Advance to Paid": the simulated payment, and the permit with it.
     await steps.getByRole('button', { name: 'Advance to Paid' }).click()
     await expect(steps.getByText('Advance to Paid: there, in 1 step.')).toBeVisible({ timeout: 30_000 })
-    await expect(steps.getByText('Pay the bill, simulated: done')).toBeVisible()
+    await expect(steps.getByText('Pay the bill: done')).toBeVisible()
     // The prefix is the register's own (permit_types.permit_number_prefix).
     await expect(card.getByText(/^Issued [A-Z]+-\d{4}-\d+$/)).toBeVisible()
     // The clearances are the applicant's to apply for, and the page says so.
