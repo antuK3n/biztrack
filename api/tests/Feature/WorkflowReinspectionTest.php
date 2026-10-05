@@ -763,3 +763,20 @@ it('refuses to move a visit that already has a result; the failure is answered b
         ->assertOk();
     expect(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 });
+
+it('refuses a second booking while the office’s moved visit is still open', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Booked Twice Bakery');
+    $fire = $visits->firstWhere('department.code', 'BFP');
+    $officer = authAs($deptEmail['BFP']);
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/inspections/{$fire->id}/reschedule", ['scheduled_at' => now()->addDays(6)->toDateTimeString()])
+        ->assertOk();
+
+    test()->withHeaders($officer)
+        ->postJson("/api/v1/applications/{$appId}/permits/FSIC/inspection", ['scheduled_at' => now()->addDays(8)->toDateTimeString()])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This office already has a visit booked for this filing.');
+
+    expect(Inspection::where('application_id', $appId)->where('department_id', $fire->department_id)->count())->toBe(1);
+});

@@ -4064,14 +4064,24 @@ class WorkflowService
         $app = $row->application;
         $departmentId = $row->permitType->issuing_department_id;
 
+        /*
+         * Rescheduled is open too: a moved visit has still not happened. Left
+         * out, the office could book a second visit beside a moved one and the
+         * filing carried two open visits for one office (inspection row 5,
+         * 5 October 2026).
+         */
         $alreadyOpen = $app->inspections()
             ->currentPerDepartment()
             ->where('department_id', $departmentId)
-            ->whereIn('status', [InspectionStatus::Scheduled->value, InspectionStatus::InProgress->value])
+            ->whereIn('status', [
+                InspectionStatus::Scheduled->value,
+                InspectionStatus::Rescheduled->value,
+                InspectionStatus::InProgress->value,
+            ])
             ->exists();
         if ($alreadyOpen) {
             throw ValidationException::withMessages([
-                'scheduled_at' => ['This office already has an inspection booked on this application.'],
+                'scheduled_at' => ['This office already has a visit booked for this filing.'],
             ]);
         }
 
