@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\ApplicationStatus;
 use App\Http\Controllers\Controller;
+use App\Models\Application;
 use App\Models\WizardDraft;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * The wizard's resume point, for answers that cannot be a draft yet.
@@ -66,6 +69,7 @@ class DraftController extends Controller
     {
         $data = $request->validate([
             'application_type' => ['required', 'string', 'max:32'],
+            'visit' => ['nullable', 'string', 'max:64'],
             ...$this->payloadRules(),
         ]);
 
@@ -73,14 +77,51 @@ class DraftController extends Controller
             return $tooBig;
         }
 
-        $draft = WizardDraft::create([
-            'user_id' => $request->user()->id,
+        $userId = $request->user()->id;
+        $create = fn () => WizardDraft::create([
+            'user_id' => $userId,
             'application_type' => $data['application_type'],
-            'title' => self::freeTitle($request->user()->id, $data['title'] ?? null),
+            'title' => self::freeTitle($userId, $data['title'] ?? null),
             'payload' => $data['payload'],
         ]);
 
-        return response()->json(['data' => $this->summary($draft)], 201);
+        if (empty($data['visit'])) {
+            return response()->json(['data' => $this->summary($create())], 201);
+        }
+
+        /*
+         * ── One row per VISIT, whatever the browser sends ───────────────────
+         *
+         * `visit` names one opening of the wizard, and the wizard sends the
+         * same one for as long as that opening lasts, a refresh included.
+         * Six rows for one tester in seven minutes, two of them in the same
+         * second (production, 6 October 2026), were one filing whose first
+         * save was still on its way when the next one left: each found no
+         * row yet and began its own. The wizard now waits for its own first
+         * save, and this is the backstop for what it cannot see — a refresh
+         * while that save was out, which leaves the page without the id.
+         *
+         * A repeat is the same filing's later answers, so they are written to
+         * the row the first one began. The cache rather than a column because
+         * the schema is frozen for the defense, and a key that outlives a day
+         * guards nothing anyone is still typing into.
+         */
+        $key = 'wizard-draft:visit:'.$userId.':'.$data['visit'];
+
+        return Cache::lock($key.':lock', 10)->block(5, function () use ($key, $userId, $data, $create) {
+            $draft = WizardDraft::where('user_id', $userId)->find(Cache::get($key));
+
+            if ($draft !== null) {
+                $draft->update(['payload' => $data['payload']]);
+
+                return response()->json(['data' => $this->summary($draft)]);
+            }
+
+            $draft = $create();
+            Cache::put($key, $draft->id, now()->addDay());
+
+            return response()->json(['data' => $this->summary($draft)], 201);
+        });
     }
 
     /**
@@ -135,8 +176,8 @@ class DraftController extends Controller
             ->when($exceptDraftId !== null, fn ($q) => $q->whereKeyNot($exceptDraftId))
             ->whereNotNull('title')
             ->pluck('title')
-            ->merge(\App\Models\Application::where('applicant_user_id', $userId)
-                ->where('status', \App\Enums\ApplicationStatus::Draft->value)
+            ->merge(Application::where('applicant_user_id', $userId)
+                ->where('status', ApplicationStatus::Draft->value)
                 ->whereNotNull('title')
                 ->pluck('title'))
             ->map(fn ($t) => trim((string) $t))

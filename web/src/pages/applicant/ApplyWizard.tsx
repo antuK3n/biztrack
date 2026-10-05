@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
   GENDERS,
@@ -469,6 +469,70 @@ const AUTOSAVE_DELAY_MS = 1200
  * whichever was reopened first would silently take the other's answers.
  */
 const draftBackupKey = (type: ApplicationType) => `biztrack:apply:pre-draft:${type}`
+
+/*
+ * ── One opening of the wizard, one draft ────────────────────────────────
+ *
+ * Ken, 6 October 2026: "multiple drafts are being created". Production held
+ * six scratch rows for one tester in seven minutes. Two causes, both
+ * reproduced: a refresh opened a blank form whose first answer began a
+ * second row beside the first, and a save that left while the first save's
+ * create was still on its way found no id yet and began a row of its own.
+ *
+ * So each opening is remembered against its HISTORY ENTRY: the router's
+ * `location.key`, which a refresh and Back/Forward keep and a click on New
+ * Business Permit replaces. The same entry reopens the same filing; a new
+ * click is still a blank form. `token` names the opening to the API, which
+ * writes a repeat create to the row the first one began.
+ *
+ * `default` is the key of a page opened straight from the address bar, and
+ * every such opening shares it, so it counts only on a refresh.
+ */
+type WizardVisit = { token: string; scratch: number | null; draft: number | null }
+
+const VISITS_KEY = 'biztrack:apply:visits'
+
+function readVisits(): Record<string, WizardVisit> {
+  try {
+    const all = JSON.parse(sessionStorage.getItem(VISITS_KEY) ?? '{}') as unknown
+    return all !== null && typeof all === 'object' ? (all as Record<string, WizardVisit>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function openVisit(entry: string): WizardVisit {
+  const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  const fresh = { token, scratch: null, draft: null }
+  let refreshed = false
+  try {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    refreshed = nav?.type === 'reload'
+  } catch {
+    /* No timing API: treat it as a fresh opening. */
+  }
+  if (entry === 'default' && !refreshed) return fresh
+  const saved = readVisits()[entry]
+  if (!saved || typeof saved.token !== 'string') return fresh
+
+  return {
+    token: saved.token,
+    scratch: typeof saved.scratch === 'number' ? saved.scratch : null,
+    draft: typeof saved.draft === 'number' ? saved.draft : null,
+  }
+}
+
+/* The last few entries only: a tab's history is short, and a stale one is never matched. */
+function rememberVisit(entry: string, visit: WizardVisit): void {
+  try {
+    const all = readVisits()
+    delete all[entry]
+    const kept = Object.entries(all).slice(-19)
+    sessionStorage.setItem(VISITS_KEY, JSON.stringify(Object.fromEntries([...kept, [entry, visit]])))
+  } catch {
+    /* Storage switched off: a refresh then starts blank, as it always did. */
+  }
+}
 /*
  * Bumped whenever `FormState` or `FeeProfileDraft` changes shape. A backup
  * from an older build would restore fields that have moved or gone, which is
@@ -3061,6 +3125,15 @@ function IdentifyFilingModal({
 export function ApplyWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { key: entryKey } = useLocation()
+  /*
+   * This opening, read once — see `openVisit`. What it held when the page
+   * opened decides what to reopen; the ref is what the saves below keep up
+   * to date for the next refresh.
+   */
+  const [openedVisit] = useState(() => openVisit(entryKey))
+  const visitRef = useRef(openedVisit)
+  const visitEntryRef = useRef(entryKey)
   const rawType = searchParams.get('type')
   // Draft reopening (?draft=ID) may override the type once the draft loads.
   const [applicationType, setApplicationType] = useState<ApplicationType>(
@@ -3526,6 +3599,8 @@ export function ApplyWizard() {
   const rememberApplicationId = (id: number) => {
     applicationIdRef.current = id
     setApplicationId(id)
+    visitRef.current = { ...visitRef.current, draft: id, scratch: null }
+    rememberVisit(visitEntryRef.current, visitRef.current)
   }
   /**
    * The wizard steps a returned filing is allowed to show.
@@ -3820,7 +3895,9 @@ export function ApplyWizard() {
     return { barangays, psic, permitTypes, documentTypes, amendableFields }
   }, [])
 
-  const draftIdParam = searchParams.get('draft')
+  /* A refresh after the real draft exists reopens it, as its card on the Drafts page would. */
+  const draftIdParam =
+    searchParams.get('draft') ?? (openedVisit.draft !== null ? String(openedVisit.draft) : null)
   /*
    * Did the applicant ask to pick an unfinished filing back up?
    *
@@ -3833,7 +3910,9 @@ export function ApplyWizard() {
    * its way out: a link is something people bookmark, share and reload,
    * and it should mean the same thing every time it is opened.
    */
-  const resumeParam = Number(searchParams.get('resume')) || null
+  const resumeFromDrafts = Number(searchParams.get('resume')) || null
+  /* And a refresh before it exists reopens this opening's scratch row, rather than starting a second. */
+  const resumeParam = resumeFromDrafts ?? openedVisit.scratch
   /*
    * The unfinished filing this form is writing to, once it has one.
    *
@@ -3843,6 +3922,19 @@ export function ApplyWizard() {
    * and the applicant would watch one filing split in two.
    */
   const scratchIdRef = useRef<number | null>(null)
+  /*
+   * The create that will fill `scratchIdRef`, while it is on its way.
+   *
+   * The ref above only helps once the create has ANSWERED. A save that left
+   * in the meantime read null and began a row of its own, so a slow
+   * connection split one filing into as many rows as there were pauses in
+   * the typing — two in the same second, in production. Later saves wait on
+   * this and write to the row it begins. Cleared only by a failed create, so
+   * the next save can try again.
+   */
+  const scratchCreateRef = useRef<Promise<number> | null>(null)
+  /* Which save is the newest, so of the saves that waited only the last one writes. */
+  const scratchSaveSeqRef = useRef(0)
   /*
    * ── Item 110 — the entry dialog ────────────────────────────────────────
    *
@@ -4191,7 +4283,7 @@ export function ApplyWizard() {
       return
     }
 
-    const cameFromDrafts = draftIdParam !== null || resumeParam !== null
+    const cameFromDrafts = searchParams.get('draft') !== null || resumeFromDrafts !== null
     navigate(cameFromDrafts ? '/drafts' : '/dashboard')
   }
 
@@ -8634,6 +8726,7 @@ export function ApplyWizard() {
        */
       clearBackup()
       const scratchId = scratchIdRef.current
+      scratchCreateRef.current = null
       if (scratchId !== null) {
         scratchIdRef.current = null
         void wizardDrafts.supersede(scratchId).catch(() => {})
@@ -8757,11 +8850,29 @@ export function ApplyWizard() {
        */
       void (async () => {
         try {
-          const id = scratchIdRef.current
+          /*
+           * The row a create still on its way will begin, if one is — see
+           * `scratchCreateRef`. Asked again after each wait: a create that
+           * failed may already have been retried by a save ahead of this one.
+           */
+          const seq = ++scratchSaveSeqRef.current
+          let id = scratchIdRef.current
+          const waited = id === null && scratchCreateRef.current !== null
+          while (id === null && scratchCreateRef.current !== null) {
+            id = await scratchCreateRef.current.catch(() => null)
+          }
+          // Released together, the waiters' writes could land in any order; the newest has all of it.
+          if (waited && seq !== scratchSaveSeqRef.current) return
           if (id === null) {
-            const created = await wizardDrafts.create({
-              application_type: applicationType,
-              ...body,
+            const visit = visitRef.current
+            rememberVisit(visitEntryRef.current, visit)
+            const creating = wizardDrafts
+              .create({ application_type: applicationType, visit: visit.token, ...body })
+              .then((row) => row.id)
+            scratchCreateRef.current = creating
+            const createdId = await creating.catch((err: unknown) => {
+              if (scratchCreateRef.current === creating) scratchCreateRef.current = null
+              throw err
             })
 
             /*
@@ -8786,13 +8897,17 @@ export function ApplyWizard() {
              * which is exactly the value that is out of date.
              */
             if (applicationIdRef.current !== null) {
-              void wizardDrafts.supersede(created.id).catch(() => {})
+              void wizardDrafts.supersede(createdId).catch(() => {})
 
               return
             }
 
-            scratchIdRef.current = created.id
+            scratchIdRef.current = createdId
+            visitRef.current = { ...visit, scratch: createdId }
+            rememberVisit(visitEntryRef.current, visitRef.current)
           } else {
+            /* A real draft that arrived while this waited has already taken the row's place. */
+            if (applicationIdRef.current !== null) return
             await wizardDrafts.save(id, body)
           }
 

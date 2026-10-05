@@ -369,6 +369,8 @@ export const wizardDrafts = {
     application_type: string
     payload: Record<string, unknown>
     title?: string | null
+    /** Names this opening of the wizard; a repeat writes to the row the first began. */
+    visit?: string
   }) => unwrap<WizardDraftSummary>(api.post('/wizard-drafts', body)),
   save: (id: number, body: { payload: Record<string, unknown>; title?: string | null }) =>
     unwrap<WizardDraftSummary>(api.put(`/wizard-drafts/${id}`, body)),
