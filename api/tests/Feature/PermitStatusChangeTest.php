@@ -182,22 +182,26 @@ it('keeps each office to its own vocabulary and its own certificates', function 
         ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('lets the super admin change any office’s permit with that office’s choices, but never revoke', function () {
-    // Client, 5 October 2026; Revoked stays off the super admin (4 October 2026).
+it('lets the super admin change any office’s permit with that office’s choices, revoking included', function () {
+    // Client, 5 October 2026: the super admin has BPLO's choices on a Mayor's
+    // Permit, Revoked included (reversing the 4 October instruction).
     ['business' => $mp, 'sanitary' => $hc] = statusPair();
 
     $admin = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
     expect($admin['can_change'])->toBeTrue()
-        ->and(array_column($admin['options'], 'label'))->toBe(['Suspended', 'Retired']);
+        ->and(array_column($admin['options'], 'label'))->toBe(['Suspended', 'Retired', 'Revoked']);
 
     $clearance = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/permits/{$hc->id}/status-options")->assertOk()->json('data');
     expect(array_column($clearance['options'], 'label'))->toBe(['Rejected']);
 
-    setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertForbidden();
     setStatus('admin@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
     expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
+
+    setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertOk();
+    expect($mp->fresh()->status)->toBe(PermitStatus::Revoked)
+        ->and($mp->fresh()->revoked_reason)->toBe('Closure order.');
 });
 
 it('asks for a reason', function () {

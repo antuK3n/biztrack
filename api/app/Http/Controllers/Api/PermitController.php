@@ -615,7 +615,7 @@ class PermitController extends Controller
          * And the super admin, on every office's certificates [client, 5
          * October 2026: "sa super admin, permits page, sa actions may Change
          * status … kung ano ano ang mga nasa bplo at other offices"] — with
-         * the issuing office's choices, less Revoked (see isSuperAdmin()).
+         * the issuing office's choices (see isSuperAdmin()).
          */
         if ($this->isSuperAdmin($request)) {
             return true;
@@ -630,9 +630,10 @@ class PermitController extends Controller
      * The super admin: `user.manage`, and no office of its own.
      *
      * It changes any certificate's status with the choices the issuing office
-     * has, EXCEPT Revoked — taken off the super admin on the client's
-     * instruction of 4 October 2026 ("paki tanggal ang revoke sa super
-     * admin"). Revoking stays the issuing office's act.
+     * has — Revoked included on a Mayor's Permit, as BPLO has it [client,
+     * 5 October 2026: "gawing ganto rin sa side ng super admin … na pwede
+     * rin mag revoke tulad sa nagagawa ng bplo admin"]. This reverses the
+     * instruction of 4 October 2026 that took revoking off the super admin.
      */
     private function isSuperAdmin(Request $request): bool
     {
@@ -664,8 +665,6 @@ class PermitController extends Controller
 
         $options = collect($this->workflow->statusOptionsFor($permit))
             ->except($permit->status->value)
-            // Revoking is the issuing office's, never the super admin's.
-            ->when($this->isSuperAdmin($request), fn ($o) => $o->except(PermitStatus::Revoked->value))
             ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
             ->values()
             ->all();
@@ -699,12 +698,6 @@ class PermitController extends Controller
             $this->mayChangeStatus($request, $permit),
             403,
             'Only the office that issued this permit can change its status.',
-        );
-
-        abort_if(
-            $data['status'] === PermitStatus::Revoked->value && $this->isSuperAdmin($request),
-            403,
-            'The super admin does not revoke permits. The office that issued it does.',
         );
 
         $this->workflow->changePermitStatus($permit, PermitStatus::from($data['status']), $data['reason']);

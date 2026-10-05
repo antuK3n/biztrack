@@ -796,8 +796,7 @@ test.describe('the permit register table', () => {
 
   test('the super admin can change any office’s permit status, and read its history', async ({ page }) => {
     // Client, 5 October 2026: Change status for the super admin on every row,
-    // with the issuing office’s choices (Revoked stays the office’s — the server
-    // leaves it out of the super admin’s options).
+    // with the issuing office’s choices — Revoked included on a Mayor’s Permit.
     await expect(page.getByRole('button', { name: 'Change status of MCB-2026-000001' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Status history of MCB-2026-000001' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible()
