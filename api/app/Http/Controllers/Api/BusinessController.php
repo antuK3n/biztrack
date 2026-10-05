@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\ApplicationStatus;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
@@ -225,9 +226,12 @@ class BusinessController extends Controller
      * is what an officer is authorised against: a sanitary officer may read
      * the filings routed to CHO, not every business in the register.
      *
-     * It is allowed at any status the officer can still see. A filing being
-     * reviewed is the case this exists for, and the wizard's Draft-or-
-     * Returned guard is about who may edit rather than about when.
+     * It is allowed while the filing is being reviewed, which is the case
+     * this exists for, and by the officer holding it. Not after a decision:
+     * rewriting the business behind a Rejected or Completed filing changed
+     * the register without an amendment filing (or its fee). And not by an
+     * officer the case is not with, who was refused Approve on the same
+     * filing while being let rewrite its answers [Ken, 5 October 2026].
      *
      * Every changed field is written to `application_corrections` with the
      * officer named. A citizen's declared answer changed by somebody else
@@ -247,6 +251,30 @@ class BusinessController extends Controller
             ApplicationVisibility::canView($user, $application),
             403,
             'This filing is not routed to your office.'
+        );
+
+        /*
+         * "Decided" as Approve reads it, except a filing the owner cancelled:
+         * whether that one stays editable has not been decided, so it is
+         * left as it was.
+         */
+        abort_if(
+            $application->isDecided() && $application->status !== ApplicationStatus::Cancelled,
+            422,
+            "This filing has been decided and can't be edited."
+        );
+
+        /*
+         * The holder rule approve() uses (AssignmentController::authorizeHolder):
+         * an unclaimed case is open to the office, a claimed one to its holder.
+         */
+        $holderId = $application->assignments()
+            ->where('department_id', $user->department_id)
+            ->value('officer_user_id');
+        abort_unless(
+            $holderId === null || $holderId === $user->id,
+            403,
+            'Only the officer handling this filing can edit it.'
         );
 
         $business = $application->business;

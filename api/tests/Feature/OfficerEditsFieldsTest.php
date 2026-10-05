@@ -1,8 +1,11 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\PsicCode;
+use App\Models\User;
+use App\Support\MalabonGeo;
 
 /*
  * An officer corrects the filing's own answers, under the applicant's rules.
@@ -187,7 +190,7 @@ it('records a change of barangay, and keeps the map pin', function () {
      * recorded. Moving it to the pin's own barangay is the correction an
      * officer would actually make, and it still changes the barangay.
      */
-    $pinBarangay = App\Support\MalabonGeo::barangayContaining(14.6600, 120.9600);
+    $pinBarangay = MalabonGeo::barangayContaining(14.6600, 120.9600);
     $elsewhere = Barangay::where('name', $pinBarangay)->firstOrFail();
     if ($elsewhere->id === $address->barangay_id) {
         $address->update(['barangay_id' => Barangay::where('id', '!=', $elsewhere->id)->value('id')]);
@@ -244,4 +247,64 @@ it('refuses the applicant, who has their own door', function () {
             'name' => 'Owner Route',
         ]))
         ->assertForbidden();
+});
+
+/*
+ * ── Not after a decision, and only by the officer holding the case ────────
+ *
+ * Ken, 5 October 2026. A decided filing is a record: rewriting the business
+ * behind a Rejected or Completed filing changed the register without an
+ * amendment filing (or its fee). And every other act on a review — approve,
+ * return, checks, the category — is the holder's, so an officer the case is
+ * not with could change the applicant's answers while being refused Approve.
+ */
+it('refuses an edit once the filing is rejected or completed', function () {
+    $app = filingForOfficerEdit('Officer Edit Decided Co');
+
+    authAs('bplo@biztrack.local');
+    test()->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Fake registration.'])->assertOk();
+
+    authAs('sanitary@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'After Rejection']))
+        ->assertStatus(422)
+        ->assertJsonPath('message', "This filing has been decided and can't be edited.");
+
+    $completed = filingForOfficerEdit('Officer Edit Completed Co');
+    Application::whereKey($completed->id)->update(['status' => 'approved', 'decided_at' => now()]);
+
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$completed->id}/fields", officerFieldsPayload($completed, ['name' => 'After Completion']))
+        ->assertStatus(422)
+        ->assertJsonPath('message', "This filing has been decided and can't be edited.");
+
+    expect($app->fresh()->business->name)->not->toBe('After Rejection')
+        ->and($completed->fresh()->business->name)->not->toBe('After Completion');
+});
+
+it('refuses an officer of the office who does not hold the case', function () {
+    $app = filingForOfficerEdit('Officer Edit Holder Co');
+    $sanitary = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
+    $cho = ApplicationAssignment::where('application_id', $app->id)
+        ->where('department_id', $sanitary->department_id)->firstOrFail();
+
+    authAs('sanitary@biztrack.local');
+    test()->postJson("/api/v1/assignments/{$cho->id}/claim")->assertOk();
+
+    $colleague = User::create([
+        'name' => 'Other Health Officer', 'first_name' => 'Other', 'last_name' => 'Officer', 'gender' => 'F',
+        'email' => 'other.health@biztrack.local', 'password' => 'biztrack1', 'mobile_number' => '09170000088',
+        'department_id' => $sanitary->department_id, 'is_active' => true, 'email_verified_at' => now(),
+    ]);
+    $colleague->roles()->sync($sanitary->roles()->pluck('roles.id'));
+
+    authAs('other.health@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'Not The Holder']))
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Only the officer handling this filing can edit it.');
+
+    // The holder still can.
+    authAs('sanitary@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'By The Holder']))
+        ->assertOk();
+    expect($app->fresh()->business->name)->toBe('By The Holder');
 });
