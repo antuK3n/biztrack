@@ -42,7 +42,7 @@ class Template
         'owner_legacy_id' => [false, 'The old system’s ID for the owner, so one owner of several businesses is one person.'],
         'owner_first_name' => [true, 'Owner’s given name.'],
         'owner_middle_name' => [false, 'Owner’s middle name.'],
-        'owner_last_name' => [true, 'Owner’s surname. The owner quotes it with a business or permit number to claim the business at sign-up.'],
+        'owner_last_name' => [true, 'Owner’s surname.'],
         'owner_suffix' => [false, 'Jr., Sr., III and so on.'],
         'owner_email' => [false, 'Owner’s email. If it belongs to an existing business owner account, the business is linked to that account.'],
         'owner_mobile' => [false, 'Owner’s mobile number.'],

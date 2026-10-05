@@ -78,7 +78,7 @@ class RowValidator
 
         // ── Owner ────────────────────────────────────────────────────────
         if ($raw['owner_first_name'] === null || $raw['owner_last_name'] === null) {
-            $fail('missing_owner', 'The owner’s '.($raw['owner_last_name'] === null ? 'surname' : 'given name').' is empty. BizTrack needs both to let the owner claim the business.');
+            $fail('missing_owner', 'The owner’s '.($raw['owner_last_name'] === null ? 'surname' : 'given name').' is empty.');
         }
         $email = $raw['owner_email'] !== null ? strtolower($raw['owner_email']) : null;
         if ($email !== null && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {

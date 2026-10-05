@@ -102,7 +102,7 @@ class ImportLegacy extends Command
             ['Rejected', $import->rejected],
         ]);
         $this->line(sprintf(
-            'Businesses: %d new, %d updated. Permits: %d new, %d updated. Owners: %d linked to an account, %d left to claim.',
+            'Businesses: %d new, %d updated. Permits: %d new, %d updated. Owners: %d linked to an account, %d with no account yet.',
             $b['businesses_new'] ?? 0, $b['businesses_updated'] ?? 0,
             $b['permits_new'] ?? 0, $b['permits_updated'] ?? 0,
             $b['owners_linked'] ?? 0, $b['owners_unclaimed'] ?? 0,

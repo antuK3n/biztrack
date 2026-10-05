@@ -94,6 +94,16 @@ it('reads the old register from a CSV only — there is no ODBC source to name',
         ->not->toHaveKey('odbc');
 });
 
+it('promises no sign-up claim in the column guide or in a refused row', function () {
+    $headers = authAs('admin@biztrack.local');
+
+    $guide = test()->withHeaders($headers)->getJson('/api/v1/admin/legacy-imports/guide')->json('data');
+    expect(collect($guide['columns'])->firstWhere('column', 'owner_last_name')['description'])->toBe('Owner’s surname.');
+
+    $preview = previewAsAdmin(legacyCsv([legacyRow(['owner_last_name' => ''])]));
+    expect($preview['rejects'][0]['reasons'][0]['message'])->toBe('The owner’s surname is empty.');
+});
+
 it('refuses the import screen to anyone but the super admin', function () {
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/admin/legacy-imports/guide')->assertForbidden();

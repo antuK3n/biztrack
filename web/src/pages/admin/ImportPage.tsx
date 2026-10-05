@@ -82,8 +82,7 @@ export function ImportPage() {
       <p className="mb-5 max-w-[70ch] text-sm leading-relaxed text-ink-secondary">
         Bring businesses and their permits in from the city’s old system. Every import is checked
         first: you see what would be added, updated and refused, and nothing is written until you
-        confirm. Owners without a BizTrack account can claim their business when they sign up, using
-        its account or permit number.
+        confirm.
       </p>
 
       {current === null ? (
@@ -341,8 +340,8 @@ function BreakdownLine({ b }: { b: NonNullable<LegacyImport['breakdown']> }) {
       {parts.join(', ')}.
       {b.owners_unclaimed > 0 &&
         (b.owners_unclaimed === 1
-          ? ' 1 new business has no owner account yet; its owner can claim it at sign-up.'
-          : ` ${b.owners_unclaimed.toLocaleString()} new businesses have no owner account yet; their owners can claim them at sign-up.`)}
+          ? ' 1 new business has no owner account yet.'
+          : ` ${b.owners_unclaimed.toLocaleString()} new businesses have no owner account yet.`)}
       {b.owners_linked > 0 &&
         ` ${plural(b.owners_linked, 'new business', 'new businesses')} will be linked to the owner’s existing account by email.`}
     </p>
