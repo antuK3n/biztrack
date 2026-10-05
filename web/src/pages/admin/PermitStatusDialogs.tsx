@@ -12,13 +12,14 @@ import type { PermitHistoryEntry, PermitRegisterRow, PermitStatusOptions } from 
  * ── Change status and View status history ──────────────────────────────────
  *
  * [Client, 5 October 2026.] The Actions column at the end of the Permits table
- * opens these. Change status is offered only to the office that issued the
- * permit; its choices come from the server (`/status-options`), which knows
- * whether the permit is still movable and whether a rejected clearance is
- * holding a Mayor's Permit suspended:
+ * opens these. Change status is offered to the office that issued the permit
+ * and to the super admin; its choices come from the server (`/status-options`),
+ * which knows whether the permit is still movable and whether a rejected
+ * clearance is holding a Mayor's Permit suspended:
  *
  *   BPLO, on a Mayor's Permit   Active · Suspended · Retired · Revoked
  *   A clearance office          Active · Rejected
+ *   The super admin             the office's, and Revoked on any permit in force
  *
  * A Mayor's Permit held by a rejected clearance opens a modal saying so, and
  * which permits hold it, instead of the choices — BPLO cannot change it until

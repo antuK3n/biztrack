@@ -550,10 +550,10 @@ class PermitController extends Controller
     /**
      * May this reader change this certificate's status?
      *
-     * The issuing office, and nobody else [client, 4–5 October 2026]: BPLO
-     * changes the Mayor's Permit, CHO its Sanitary Permits, and so on. The
-     * super admin belongs to no office and changes none — it reads the
-     * history. `permit.revoke` is the permission every office holds for it.
+     * The issuing office [client, 4–5 October 2026]: BPLO changes the
+     * Mayor's Permit, CHO its Sanitary Permits, and so on, and no office
+     * another's. `permit.revoke` is the permission every office holds for it.
+     * And the super admin, on every office's, below.
      */
     private function mayChangeStatus(Request $request, Permit $permit): bool
     {
@@ -564,7 +564,7 @@ class PermitController extends Controller
          * And the super admin, on every office's certificates [client, 5
          * October 2026: "sa super admin, permits page, sa actions may Change
          * status … kung ano ano ang mga nasa bplo at other offices"] — with
-         * the issuing office's choices, less Revoked (see isSuperAdmin()).
+         * the issuing office's choices, and Revoked (see isSuperAdmin()).
          */
         if ($this->isSuperAdmin($request)) {
             return true;
@@ -579,9 +579,11 @@ class PermitController extends Controller
      * The super admin: `user.manage`, and no office of its own.
      *
      * It changes any certificate's status with the choices the issuing office
-     * has, EXCEPT Revoked — taken off the super admin on the client's
-     * instruction of 4 October 2026 ("paki tanggal ang revoke sa super
-     * admin"). Revoking stays the issuing office's act.
+     * has, AND may revoke any of them. The client asked on 4 October 2026 for
+     * Revoke to be taken off the super admin ("paki tanggal ang revoke sa
+     * super admin"); Ken overrode that on 5 October 2026 — the super admin
+     * revokes any permit, as `revoke()` already lets it. Offices still revoke
+     * and change only their own.
      */
     private function isSuperAdmin(Request $request): bool
     {
@@ -611,10 +613,8 @@ class PermitController extends Controller
         $canChange = $this->mayChangeStatus($request, $permit);
         $final = ! $this->workflow->statusCanMove($permit);
 
-        $options = collect($this->workflow->statusOptionsFor($permit))
+        $options = collect($this->workflow->statusOptionsFor($permit, $this->isSuperAdmin($request)))
             ->except($permit->status->value)
-            // Revoking is the issuing office's, never the super admin's.
-            ->when($this->isSuperAdmin($request), fn ($o) => $o->except(PermitStatus::Revoked->value))
             ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
             ->values()
             ->all();
@@ -650,13 +650,12 @@ class PermitController extends Controller
             'Only the office that issued this permit can change its status.',
         );
 
-        abort_if(
-            $data['status'] === PermitStatus::Revoked->value && $this->isSuperAdmin($request),
-            403,
-            'The super admin does not revoke permits. The office that issued it does.',
+        $this->workflow->changePermitStatus(
+            $permit,
+            PermitStatus::from($data['status']),
+            $data['reason'],
+            $this->isSuperAdmin($request),
         );
-
-        $this->workflow->changePermitStatus($permit, PermitStatus::from($data['status']), $data['reason']);
 
         return response()->json([
             'data' => new PermitRegisterResource($permit->fresh()->load($this->registerEager())),

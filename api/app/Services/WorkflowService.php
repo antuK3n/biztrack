@@ -3710,13 +3710,16 @@ class WorkflowService
      *
      *   Mayor's Permit (BPLO)   Active · Suspended · Retired · Revoked
      *   A clearance (its office) Active · Rejected
+     *   The super admin          the office's choices, and Revoked on any
+     *                            permit in force (Ken, 5 October 2026)
      *
      * Who may act is settled before this runs — PermitController::status lets
-     * only the issuing office through — so this decides WHAT may happen:
+     * only the issuing office and the super admin through — so this decides
+     * WHAT may happen:
      *
      *   - Only a certificate in force can move. Expired and superseded ones
      *     ended on their own; Revoked and Retired are final. A clearance moves
-     *     between Active and Rejected only.
+     *     between Active and Rejected only, unless the super admin revokes it.
      *   - A Mayor's Permit cannot be changed at all while any of the business's
      *     clearances is refused or Rejected: it is held suspended for that, and
      *     only the office that refused can release it (statusLockFor).
@@ -3731,15 +3734,24 @@ class WorkflowService
     /**
      * The statuses this certificate may be set to, as [value => label].
      *
+     * `$superAdmin`: the super admin revokes any permit (Ken, 5 October 2026),
+     * so a clearance in force offers it Revoked as well as its office's two.
+     * The office itself keeps Active and Rejected.
+     *
      * @return array<string, string>
      */
-    public function statusOptionsFor(Permit $permit): array
+    public function statusOptionsFor(Permit $permit, bool $superAdmin = false): array
     {
         $permit->loadMissing('permitType');
 
         $targets = $permit->permitType?->code === PermitType::OUTCOME_CODE
             ? [PermitStatus::Active, PermitStatus::Suspended, PermitStatus::Retired, PermitStatus::Revoked]
             : [PermitStatus::Active, PermitStatus::Rejected];
+
+        if ($superAdmin && ! in_array(PermitStatus::Revoked, $targets, true)
+            && in_array($permit->status, [PermitStatus::Active, PermitStatus::Suspended], true)) {
+            $targets[] = PermitStatus::Revoked;
+        }
 
         return collect($targets)->mapWithKeys(fn (PermitStatus $s) => [$s->value => $s->label()])->all();
     }
@@ -3850,7 +3862,7 @@ class WorkflowService
         }
     }
 
-    public function changePermitStatus(Permit $permit, PermitStatus $to, string $reason): Permit
+    public function changePermitStatus(Permit $permit, PermitStatus $to, string $reason, bool $superAdmin = false): Permit
     {
         $reason = trim($reason);
         if ($reason === '') {
@@ -3863,7 +3875,7 @@ class WorkflowService
         $from = $permit->status;
         $isOutcome = $permit->permitType?->code === PermitType::OUTCOME_CODE;
 
-        if (! array_key_exists($to->value, $this->statusOptionsFor($permit))) {
+        if (! array_key_exists($to->value, $this->statusOptionsFor($permit, $superAdmin))) {
             throw ValidationException::withMessages([
                 'status' => ["{$to->label()} is not a status this permit can be set to."],
             ]);

@@ -19,8 +19,9 @@ use App\Models\User;
  *
  * A clearance set to Rejected suspends the Mayor's Permit at once, and while
  * it stands BPLO cannot change that permit at all; setting it back to Active
- * restores the Mayor's Permit. Only the issuing office changes a permit; the
- * super admin reads the history. Every change tells the owner.
+ * restores the Mayor's Permit. Only the issuing office changes a permit, and
+ * the super admin, who may also revoke any (Ken, 5 October 2026). Every change
+ * tells the owner.
  */
 
 /**
@@ -182,22 +183,34 @@ it('keeps each office to its own vocabulary and its own certificates', function 
         ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('lets the super admin change any office’s permit with that office’s choices, but never revoke', function () {
-    // Client, 5 October 2026; Revoked stays off the super admin (4 October 2026).
+it('lets the super admin change any office’s permit with that office’s choices, and revoke any of them', function () {
+    // Client, 5 October 2026; Ken, 5 October 2026: the super admin revokes any permit.
     ['business' => $mp, 'sanitary' => $hc] = statusPair();
 
     $admin = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
     expect($admin['can_change'])->toBeTrue()
-        ->and(array_column($admin['options'], 'label'))->toBe(['Suspended', 'Retired']);
+        ->and(array_column($admin['options'], 'label'))->toBe(['Suspended', 'Retired', 'Revoked']);
 
     $clearance = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/permits/{$hc->id}/status-options")->assertOk()->json('data');
-    expect(array_column($clearance['options'], 'label'))->toBe(['Rejected']);
+    expect(array_column($clearance['options'], 'label'))->toBe(['Rejected', 'Revoked']);
 
-    setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertForbidden();
     setStatus('admin@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
     expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
+
+    setStatus('admin@biztrack.local', $hc, 'revoked', 'Closure order.')->assertOk();
+    setStatus('admin@biztrack.local', $mp, 'revoked', 'Closure order.')->assertOk();
+    expect($hc->fresh()->status)->toBe(PermitStatus::Revoked)
+        ->and($hc->fresh()->revoked_reason)->toBe('Closure order.')
+        ->and($mp->fresh()->status)->toBe(PermitStatus::Revoked);
+
+    // The health office still has its own two, and no Revoked.
+    ['sanitary' => $other] = statusPair();
+    $office = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson("/api/v1/permits/{$other->id}/status-options")->assertOk()->json('data');
+    expect(array_column($office['options'], 'label'))->toBe(['Rejected']);
+    setStatus('sanitary@biztrack.local', $other, 'revoked', 'Trying anyway.')->assertUnprocessable();
 });
 
 it('asks for a reason', function () {
