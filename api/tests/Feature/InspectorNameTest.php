@@ -37,7 +37,7 @@ beforeEach(fn () => duringOfficeHours());
  *
  * @return array{app: Application, visit: Inspection}
  */
-function filingWithSanitaryVisitBooked(?string $scheduledAt = null): array
+function filingWithSanitaryVisitBooked(?string $scheduledAt = null, ?string $inspectorName = null): array
 {
     $owner = authAs('owner@biztrack.local');
 
@@ -77,9 +77,10 @@ function filingWithSanitaryVisitBooked(?string $scheduledAt = null): array
 
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
-    test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+    test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", array_filter([
         'scheduled_at' => $scheduledAt ?? now()->toDateString(),
-    ])->assertCreated();
+        'inspector_name' => $inspectorName,
+    ]))->assertCreated();
 
     return ['app' => $app->fresh(), 'visit' => $app->inspections()->firstOrFail()];
 }
@@ -98,6 +99,18 @@ it('opens a visit with no inspector named and no account attached', function () 
 
     expect($visit->inspector_name)->toBeNull()
         ->and($visit->inspector_user_id)->toBeNull();
+});
+
+it('takes the inspector’s name with the booking, and audits it as a naming', function () {
+    // Request of 6 October 2026: a permit waiting to be booked had nowhere to
+    // put the name, because the name could only be added to a visit.
+    ['visit' => $visit] = filingWithSanitaryVisitBooked(null, '  Ramon Bautista ');
+
+    expect($visit->inspector_name)->toBe('Ramon Bautista');
+
+    $audits = namingAudits($visit);
+    expect($audits)->toHaveCount(1)
+        ->and($audits[0]->changes)->toBe(['from' => null, 'to' => 'Ramon Bautista']);
 });
 
 it('lets the office type the inspector’s name, and audits it from and to', function () {

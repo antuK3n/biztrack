@@ -1326,10 +1326,17 @@ export const inspections = {
    * Other Permits card prints it with `formatDateTime`, so a bare day would show
    * a visit booked for midnight.
    */
-  schedule: (applicationId: number, code: string, scheduled_at: string) =>
+  /** `inspector_name` is optional: the name can also be added on the card later. */
+  schedule: (
+    applicationId: number,
+    code: string,
+    scheduled_at: string,
+    inspector_name: string | null = null,
+  ) =>
     unwrap<Inspection>(
       api.post(`/applications/${applicationId}/permits/${code}/inspection`, {
         scheduled_at,
+        inspector_name,
       }),
     ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
