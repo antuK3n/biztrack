@@ -116,7 +116,10 @@ class ApplicationController extends Controller
             'business:id,name', 'applicant:id,name', 'permitTypes:id,code,name',
             // The issued certificates, for the Track row to say "Suspended" on
             // a Mayor's Permit whose pivot still reads approved (5 October 2026).
-            'permits:id,application_id,permit_type_id,status',
+            'permits:id,application_id,permit_type_id,status,suspended_for_permit_type_id',
+            // ...and what it is suspended for, named on that row.
+            'permits.suspendedFor:id,name,issuing_department_id',
+            'permits.suspendedFor.department:id,name',
         ]);
 
         // Owners see their own; an office sees the filings routed to it; BPLO

@@ -1860,7 +1860,12 @@ class WorkflowService
              */
             $permit = $this->outcomePermitFor($app);
             if ($permit !== null && $permit->status === PermitStatus::Active) {
-                $permit->update(['status' => PermitStatus::Suspended]);
+                // Dated and explained, naming no permit: BPLO ended the filing.
+                $permit->update([
+                    'status' => PermitStatus::Suspended,
+                    'suspended_at' => now(),
+                    'suspension_reason' => mb_substr($reason, 0, 500),
+                ]);
 
                 /*
                  * Its own audit action, not `permit.suspended`. That one records
@@ -2950,6 +2955,16 @@ class WorkflowService
      * second refusal finds the permit already suspended, changes nothing, and
      * still notifies — the applicant needs to know about the second reason even
      * though the state did not move.
+     *
+     * ── It records its cause on the permit (client, 5 October 2026) ─────────
+     *
+     * *"Show WHY it is suspended and WHICH office caused it."* The date, the
+     * refusal's words and the refused permit go on the row, so the permit page,
+     * the Track row, the QR page and the PDF can say it without reading the
+     * audit trail. The FIRST cause stands: a second refusal on a permit already
+     * suspended for one does not overwrite it. It does fill a cause that was
+     * never recorded — a permit suspended before these columns existed, or by
+     * a cause that names no permit — since a named cause beats none.
      */
     private function suspendOutcomePermit(Application $app, PermitType $refused, string $reason): void
     {
@@ -2958,10 +2973,15 @@ class WorkflowService
             return;
         }
 
+        $cause = [
+            'suspension_reason' => mb_substr($reason, 0, 500),
+            'suspended_for_permit_type_id' => $refused->id,
+        ];
+
         if ($permit->status === PermitStatus::Active) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended]);
+            $permit->update(['status' => PermitStatus::Suspended, 'suspended_at' => now()] + $cause);
 
             Audit::log('permit.suspended', $permit, [
                 'application_id' => $app->id,
@@ -2970,6 +2990,8 @@ class WorkflowService
                 'because_permit_type' => $refused->name,
                 'reason' => $reason,
             ], $snapshot);
+        } elseif ($permit->status === PermitStatus::Suspended && $permit->suspended_for_permit_type_id === null) {
+            $permit->update($cause + ['suspended_at' => $permit->suspended_at ?? now()]);
         }
 
         $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
@@ -3046,7 +3068,8 @@ class WorkflowService
             ->get();
 
         foreach ($suspended as $permit) {
-            $permit->update(['status' => PermitStatus::Active]);
+            // The cause goes with the suspension — see Permit::suspensionCleared.
+            $permit->update(['status' => PermitStatus::Active] + Permit::suspensionCleared());
 
             Audit::log('permit.reinstated', $permit, [
                 'application_id' => $app->id,
@@ -3086,7 +3109,12 @@ class WorkflowService
         foreach ($permits as $permit) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended]);
+            // Dated and explained, naming no permit: the business was sanctioned.
+            $permit->update([
+                'status' => PermitStatus::Suspended,
+                'suspended_at' => now(),
+                'suspension_reason' => mb_substr($reason, 0, 500),
+            ]);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
@@ -3106,6 +3134,11 @@ class WorkflowService
      * It does not need a column, and the reasoning is worth stating because a
      * `suspended_cause` column was the obvious first answer and would have
      * meant a migration against the live register.
+     *
+     * Permits DO carry `suspended_for_permit_type_id` since 5 October 2026, but
+     * to EXPLAIN the suspension, not to decide it. The decision below still
+     * asks the filing, so a stale or missing cause on a row can never keep a
+     * permit suspended or hand one back.
      *
      * A permit is suspended for exactly one of two reasons: this business was
      * sanctioned, or a clearance on its filing was refused. The second is
@@ -3183,7 +3216,7 @@ class WorkflowService
             ]);
         }
 
-        $permit->update(['status' => PermitStatus::Active]);
+        $permit->update(['status' => PermitStatus::Active] + Permit::suspensionCleared());
 
         Audit::log('permit.suspension_lifted', $permit, [
             'application_id' => $app?->id,

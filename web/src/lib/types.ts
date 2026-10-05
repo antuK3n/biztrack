@@ -684,6 +684,8 @@ export interface ApplicationListItem {
     status_label: string | null
     /** The issued certificate's own status (active, suspended, …); null until issued. */
     permit_status?: string | null
+    /** What a suspended certificate waits on: the permit and its office. */
+    suspension?: { for: string; office: string | null } | null
   }[]
   created_at: string
   /**
@@ -1216,6 +1218,13 @@ export interface Inspection {
   particulars: InspectionParticulars | null
 }
 
+/** The permit whose refusal or failed visit suspended a Business Permit. */
+export interface SuspendedFor {
+  code: string
+  name: string
+  office: string | null
+}
+
 export interface Permit {
   id: number
   permit_number: string
@@ -1228,6 +1237,16 @@ export interface Permit {
   business: { id: number; name: string }
   application: { id: number; tracking_id: string }
   verify_url: string
+  /*
+   * Why it is suspended (client, 5 October 2026: "Show WHY it is suspended
+   * and WHICH office caused it"). All null unless `status` is suspended;
+   * `suspended_for` is null too when the cause named no single permit, and
+   * `suspended_at` when the date was never recorded.
+   */
+  suspended_at?: string | null
+  suspended_days?: number | null
+  suspension_reason?: string | null
+  suspended_for?: SuspendedFor | null
   /**
    * Why this permit cannot be renewed today, in the applicant's words, or
    * null if it can.
@@ -3454,6 +3473,9 @@ export interface VerifyResult {
   valid_until: string | null
   /** The date a revoked permit was revoked; null otherwise. */
   revoked_at: string | null
+  /** A suspended permit's date and the permit/office it waits on — never the reason. */
+  suspended_at?: string | null
+  suspended_for?: SuspendedFor | null
   permit_type: { name: string } | null
   business: {
     name: string | null

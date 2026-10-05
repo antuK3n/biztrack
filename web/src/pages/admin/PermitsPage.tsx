@@ -112,13 +112,22 @@ const SEARCH_DEBOUNCE_MS = 300
  * written since the business permit began being suspended when another office
  * refuses — comes with it.
  */
-type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'revoked' | 'superseded'
+type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'suspended_30' | 'revoked' | 'superseded'
+
+/*
+ * `suspended_30` is not a status: it asks `suspended_over_days=30` instead.
+ * Client, 5 October 2026: *"after 30 days unresolved BPLO sees it in a list
+ * and may revoke it with a reason"* — the list is this option, and Revoke on
+ * its rows is the existing action.
+ */
+const SUSPENDED_LONG_DAYS = 30
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'expired', label: 'Expired' },
   { value: 'suspended', label: 'Suspended' },
+  { value: 'suspended_30', label: `Suspended over ${SUSPENDED_LONG_DAYS} days` },
   { value: 'revoked', label: 'Revoked' },
   { value: 'superseded', label: 'Superseded' },
 ]
@@ -373,7 +382,8 @@ export function PermitsPage() {
     () =>
       permits.register({
         q: query || undefined,
-        status: status || undefined,
+        status: status === 'suspended_30' ? undefined : status || undefined,
+        suspended_over_days: status === 'suspended_30' ? SUSPENDED_LONG_DAYS : undefined,
         permit_type: choice === OTHER_OFFICES ? undefined : choice || undefined,
         exclude_permit_type: choice === OTHER_OFFICES ? 'BUSINESS' : undefined,
         retired,
