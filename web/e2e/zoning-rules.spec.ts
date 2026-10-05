@@ -11,7 +11,7 @@ import { mergedStorageState, sessionFor } from './helpers'
  * left to prove in a browser is that it is gone, that a line of business the
  * zone under the pin clearly does not allow stops the owner (the box under the
  * map says so, on a new filing and on an amendment that moves), that CPDO
- * reads the zone at the pin instead, and that the note under the map still
+ * reads the zone at the pin instead, and that the note beside the map still
  * reads a trade against the ordinance's own words.
  *
  * Screenshots go to E2E_SHOTS_DIR when it is set, for review by eye.
@@ -48,7 +48,7 @@ test.describe('the applicant', () => {
     await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
     await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
     await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
-    await expect(page.getByRole('heading', { name: /zones in longos/i })).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('.leaflet-biztrack-zoning-pane path').first()).toBeAttached({ timeout: 20_000 })
 
     await expect(page.getByTestId('zoning-rules-applicant')).toHaveCount(0)
     await expect(page.getByText('What the zoning rules say about this filing')).toHaveCount(0)
@@ -57,13 +57,13 @@ test.describe('the applicant', () => {
 
   /*
    * Ken, 5 October 2026: a line of business the zone under the pin clearly
-   * does not allow stops the owner on Location & Zoning. The box under the
+   * does not allow stops the owner on Location & Zoning. The box beside the
    * map says so, in red, and Next stays held; there is no popup. A pharmacy
    * at the middle of Acacia lands in its Industrial-2 zone, whose list has no
    * drugstore; at the middle of Baritan it lands where the list names one, and
    * the box names that zone.
    */
-  test('a pin where the line of business is not allowed turns the box under the map red and holds Next', async ({
+  test('a pin where the line of business is not allowed turns the box beside the map red and holds Next', async ({
     page,
   }) => {
     await page.getByRole('checkbox').first().check()
@@ -212,7 +212,8 @@ test.describe('the applicant', () => {
     const note = page.getByTestId('zoning-note')
     await expect(note).toHaveAttribute('data-verdict', 'possible', { timeout: 20_000 })
     await expect(note).toContainText('May be on the zoning list')
-    await expect(note).toContainText(/similar clinic/i)
+    // The clause it was matched on is no longer quoted (Ken, 6 October 2026).
+    await expect(note).not.toContainText(/similar clinic|the rules list/i)
     await expect(note).not.toContainText('Allowed here')
     await note.scrollIntoViewIfNeeded()
     await shot(page, 'applicant-possible-match')

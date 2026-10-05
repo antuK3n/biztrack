@@ -1299,15 +1299,15 @@ test('the chosen line of business and Products / Services are shown large and pl
   expect(parseFloat(await products.evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16)
 })
 
-test('the zoning note under the map is loud, green when listed and amber with an appeal when not', async ({
+test('the zoning note beside the map is loud, green when listed and amber when not, and is its label and one sentence', async ({
   page,
 }) => {
   /*
    * Zoning 8: the note was being overlooked — 14px in a pale box, read as a
-   * caption. Zoning 13: when the trade is not on the list, say where the owner
-   * may appeal — the Local Zoning Board of Appeals, which is where City
-   * Ordinance No. 24-2018 Art. IX §16 sends appeals (it said "in person at that
-   * office" until the ordinance was read in full).
+   * caption. Ken, 6 October 2026: the box is its label and its sentence. The
+   * quoted ordinance clause ("The rules list: …") and the CPDO line went, and
+   * with the CPDO line the not-listed box's appeal (Zoning 13), whose "If it
+   * says no" was that office.
    *
    * The verdict comes from the ordinance lookup, which depends on the seeded
    * uses; so the real response is fetched and only its verdict is set, once
@@ -1339,9 +1339,7 @@ test('the zoning note under the map is loud, green when listed and amber with an
   // Said in words, not only in amber.
   await expect(note).toContainText(/not on the zoning list/i)
   await expect(note).toContainText(/not on the zoning rules’ list for longos/i)
-  // Zoning 13, in plain words, and to the body the ordinance names.
-  await expect(note).toContainText(/you may appeal to the local zoning board of appeals/i)
-  await expect(note).toContainText(/the city’s zoning office \(cpdo\)/i)
+  await expect(note).not.toContainText(/zoning office|cpdo|final call|appeal|the rules list/i)
 
   const loud = async () =>
     note.evaluate((el) => {
@@ -1365,14 +1363,15 @@ test('the zoning note under the map is loud, green when listed and amber with an
     expect(amber.colour).not.toBe(red)
   }
 
-  // Listed: a clear positive, and no appeal line.
+  // Listed: a clear positive, and nothing under the sentence.
   verdict = 'listed'
   const box = (await map.boundingBox())!
   await map.click({ position: { x: box.width / 2 + 10, y: box.height / 2 + 10 } })
   await expect(note).toHaveAttribute('data-verdict', 'listed', { timeout: 15_000 })
   await expect(note).toContainText(/allowed here/i)
   await expect(note).toContainText(/your type of business is allowed in longos/i)
-  await expect(note).not.toContainText(/appeal/i)
+  await expect(note).not.toContainText(/zoning office|cpdo|final call|appeal|the rules list/i)
+  await expect(note.locator('p')).toHaveCount(2)
   const green = await loud()
   expect(green.border).toBe('2px')
   expect(green.size).toBeGreaterThanOrEqual(18)
@@ -1512,8 +1511,8 @@ test('the chosen barangay’s zones are a layer named in plain words, with a fol
    *    alone. No "traced" or "approximate" caveat: the public does not care
    *    how the layer was made (client's lead, 24 September 2026).
    * 3. A zone names itself in the same plain words on hover, and nothing
-   *    anywhere names the applicant's lot. The step's one caution — the zoning
-   *    office checks the exact spot — is said once, under the ordinance note.
+   *    anywhere names the applicant's lot. No caution line follows the zoning
+   *    note any more (Ken, 6 October 2026).
    * 4. The zones are interactive (for the tooltip) yet a click on one still
    *    drops the pin: Leaflet bubbles path clicks to the map. If someone sets
    *    bubblingMouseEvents: false, zoned ground stops taking pins, and this
@@ -1581,14 +1580,12 @@ test('the chosen barangay’s zones are a layer named in plain words, with a fol
   await expect(page.getByText(/pin placed/i)).toBeVisible()
 
   /*
-   * The caution, said once for the whole step: the zoning office (spelled out,
-   * with the acronym once) checks the exact spot. It sits as the last line of
-   * the ordinance note, which is the one sentence on the step that says what is
-   * allowed; nowhere else repeats it.
+   * No caution line anywhere on the step. "The City's zoning office (CPDO)
+   * checks your exact spot and makes the final call." was the zoning note's
+   * last line, said once for the step, until Ken took it out (6 October 2026).
    */
-  const caution = page.getByText(/the city’s zoning office \(cpdo\) checks your exact spot/i)
-  await expect(caution).toHaveCount(1, { timeout: 15_000 })
-  await expect(page.getByText(/final determination|cpdo confirms|original sheet/i)).toHaveCount(0)
+  await expect(page.getByTestId('zoning-note')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/checks your exact spot|makes the final call|final determination|cpdo confirms|original sheet/i)).toHaveCount(0)
 
   // 1. The overlay in the layers control, on by default; off takes the key too.
   await page.locator('.leaflet-control-layers').hover()
@@ -1630,112 +1627,53 @@ test('the city border and the barangay the applicant chose are drawn on the map'
   await expect(filled).toHaveCount(1)
 })
 
-test('the barangay’s zoning card lists the zones in plain words, links the City’s map, and never gives a verdict', async ({
+test('the zoning note takes the place of the zones card: beside the map when wide, under it on a phone', async ({
   page,
 }) => {
   /*
-   * The zones are drawn on the map now, traced and approximate, so this card
-   * lists what the barangay's sheet contains and links the original — and
-   * says nothing narrower. The negative assertions are the point of the test:
-   * the moment somebody derives "your lot is C-2" from the tracing, this goes
-   * red.
+   * Ken, 6 October 2026: the "Zones in <barangay>" card beside the map (zone
+   * chips, "Areas with extra rules", "What these mean", the link to the City's
+   * zoning map) is gone, and the green or red box sits where it was. On a
+   * phone the columns stack, and the box still comes straight under the map.
+   * The verdict is set on the real response so the box always shows.
    */
-  await page.getByRole('checkbox').first().check()
-  await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: WIZARD_PAINT_MS })
+  await page.route('**/location-insights**', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    const zones = (body.data.zoning?.zones ?? []) as { listed: boolean }[]
+    body.data.zoning = {
+      ...(body.data.zoning ?? {}),
+      verdict: 'listed',
+      zones: zones.length > 0 ? zones.map((z, i) => ({ ...z, listed: i === 0 })) : [{ code: 'C-1', name: 'C-1', listed: true, matched_use: null }],
+    }
+    await route.fulfill({ response, json: body })
+  })
 
-  // Nothing to show before a barangay is chosen — twenty-one maps and no
-  // selection is a gallery, not an answer.
-  const card = page.getByRole('region', { name: /^zones in /i })
-  await expect(card).toBeHidden()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+  const note = page.getByTestId('zoning-note')
+  await expect(note).toBeVisible({ timeout: 15_000 })
 
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Dampalit' })
-  await expect(card).toBeVisible()
+  await expect(page.getByRole('region', { name: /^zones in /i })).toHaveCount(0)
+  await expect(page.getByText(/areas with extra rules|what these mean|official zoning map/i)).toHaveCount(0)
+  // The map's own Zones layer stays.
+  await expect(page.locator('.leaflet-biztrack-zoning-pane path').first()).toBeAttached()
 
-  /*
-   * The right sheet for the barangay picked, as a link to the original rather
-   * than a picture: the map beside the card draws the zones, and the sheet
-   * shown a second time here was too small to read. Fetched, so a link to a
-   * 404 fails rather than passing on its href alone.
-   */
-  const sheetLink = card.getByRole('link', { name: /see the city’s official zoning map/i })
-  await expect(sheetLink).toHaveAttribute('href', '/zoning-maps/dampalit.png')
-  await expect(sheetLink).toHaveAttribute('target', '_blank')
-  const sheet = await page.request.get('/zoning-maps/dampalit.png')
-  expect(sheet.ok()).toBe(true)
-  expect(sheet.headers()['content-type']).toContain('image/png')
-  await expect(card.getByRole('img')).toHaveCount(0)
+  const wide = { map: (await map.boundingBox())!, note: (await note.boundingBox())! }
+  expect(wide.note.x).toBeGreaterThanOrEqual(wide.map.x + wide.map.width)
+  expect(wide.note.y).toBeLessThan(wide.map.y + wide.map.height)
 
-  /*
-   * Read off Dampalit's own sheet: the fishpond belt is what the barangay is,
-   * and Fishpond and Mangrove appear on no other sheet but Muzon's. If this
-   * list ever shows Dampalit's neighbours' zones, the seeder has stopped
-   * distinguishing the subject barangay from the washed-out surround.
-   */
-  /*
-   * The two lists are addressed separately, by their own accessible names,
-   * which is the assertion as much as it is the plumbing: a base zone found in
-   * the overlay list, or an overlay in the zone list, fails here. Scoping also
-   * keeps a description that happens to mention fishponds from answering a
-   * question about the Fishpond classification.
-   */
-  /*
-   * Both headings dropped the barangay name when the card was trimmed — it was
-   * already in the card's own heading two lines above, and saying it three
-   * times is what made this read as a document rather than a form field. The
-   * names still distinguish the two lists, which is all these selectors need.
-   */
-  /*
-   * Renamed with the plain-language pass (client's lead, 24 September 2026):
-   * the zones are "Zones in <barangay>", the overlays "Areas with extra rules",
-   * and every name says what the zone is for rather than the sheet's code.
-   */
-  const zoneList = card.getByRole('list', { name: /^zones in dampalit$/i })
-  const overlayList = card.getByRole('list', { name: /areas with extra rules/i })
-
-  await expect(zoneList.getByRole('listitem').filter({ hasText: /^Fishponds$/ })).toBeVisible()
-  await expect(zoneList.getByRole('listitem').filter({ hasText: /^Mangroves$/ })).toBeVisible()
-  await expect(zoneList).not.toContainText(/\b(R-[123]|C-[123]|I-[12]|CBD|CMP)\b/)
-
-  /*
-   * Dampalit is the one barangay carrying two overlays — Flood, which the
-   * ordinance puts over all 21, and Eco-Tourism over its fishponds — so it is
-   * where a merged list would be visible.
-   */
-  await expect(overlayList.getByRole('listitem')).toHaveCount(2)
-  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Flood-prone areas$/ })).toBeVisible()
-  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Eco-tourism fishponds$/ })).toBeVisible()
-  // Heritage is not designated over Dampalit, so it must not appear on it.
-  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Heritage' })).toBeHidden()
-  // And no overlay leaks into the classification list, which is the whole point
-  // of their being separate rows in a separate table.
-  await expect(zoneList.getByRole('listitem').filter({ hasText: /flood|eco-tourism|heritage|overlay/i })).toBeHidden()
-
-  // Switching barangay switches the sheet — the card answers the picker.
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
-  await expect(sheetLink).toHaveAttribute('href', '/zoning-maps/acacia.png')
-  const acaciaZones = card.getByRole('list', { name: /^zones in acacia$/i })
-  await expect(acaciaZones.getByRole('listitem').filter({ hasText: /^Fishponds$/ })).toBeHidden()
-  // Acacia carries Flood alone — the overlay block answers the picker too.
-  await expect(overlayList.getByRole('listitem')).toHaveCount(1)
-  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Flood-prone areas$/ })).toBeVisible()
-
-  /*
-   * Who decides is said once for the step, as the last line of the ordinance
-   * note under the map (asserted in the zoning-layer test above), and so NOT
-   * here. It used to be on this card as well — "CPDO confirms what applies to
-   * your exact location" — which, with the map key's "approximate" line and
-   * the note's own, made three (client's lead, 24 September 2026). The card
-   * lists the zones and stops.
-   */
-  await expect(card).not.toContainText(/cpdo|zoning office|approximate|traced/i)
-
-  // And it never claims to have decided anything itself. The overlays bring one
-  // more thing it must not say: Flood is a designation over an area, so any
-  // wording that turns it into a finding about this applicant's lot is the same
-  // invented verdict in a more frightening register.
-  await expect(card).not.toContainText(/conforming|non-conforming|allowed use|your zone is/i)
-  await expect(card).not.toContainText(/your (property|lot|site) (is|may be) (at risk|prone|in a flood)/i)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(async () => {
+    const narrow = { map: (await map.boundingBox())!, note: (await note.boundingBox())! }
+    expect(narrow.note.y).toBeGreaterThanOrEqual(narrow.map.y + narrow.map.height)
+    expect(Math.abs(narrow.note.x - narrow.map.x)).toBeLessThan(2)
+  }).toPass({ timeout: 5_000 })
 })
 
 /**

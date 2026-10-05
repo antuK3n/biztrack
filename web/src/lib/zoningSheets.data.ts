@@ -15,8 +15,8 @@
  *
  * A placement for a PICTURE, and so a placement for whatever is traced from
  * it. Tracing makes zones drawable and nameable on hover, as "approximate"; it
- * does not make a verdict honest. `BarangayZoningMap.tsx` sets out why no
- * verdict can be derived, and a better placement changes none of it.
+ * does not make a verdict honest. `docs/zoning-ordinance/README.md` sets out
+ * why no verdict can be derived, and a better placement changes none of it.
  *
  * ## How each placement was derived (2026-09-23)
  *
@@ -69,7 +69,7 @@
  */
 
 export interface ZoningSheetPlacement {
-  /** Same file `BarangayZoningMap` links to; placement is tied to these pixels. */
+  /** The barangay's CPDO sheet under the web root; placement is tied to these pixels. */
   url: string
   /** Image size in pixels, [width, height]. */
   size: [number, number]

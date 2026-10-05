@@ -12,7 +12,7 @@ import { sessionFor } from './helpers'
  * BARANGAY still clears the pin; that is apply-wizard's, and by design.
  *
  * Acacia's middle is Industrial-2: a warehouse is listed there and a pharmacy
- * is not, so the box under the map has to change its answer when the trade
+ * is not, so the box beside the map has to change its answer when the trade
  * changes under a pin that did not move.
  *
  * Screenshots go to E2E_SHOTS_DIR when it is set, for review by eye.

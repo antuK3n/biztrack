@@ -507,17 +507,13 @@ export function LocationInsightsPanel({
            * CONGRATULATIONS, where anything on screen reads as the verdict.
            *
            * That dialog is gone (23 September 2026). The zoning answer is now
-           * ZoningConformanceNote beside this panel, which says what the
-           * zoning rules list and that the zoning office checks the exact
-           * spot and makes the final call — the step's one caution, said once
-           * (client's lead, 24 September 2026). So the step still names who
-           * decides, and the sentence stays out.
-           *
-           * It has to come back if EITHER:
-           *   - this panel is rendered on any surface that announces a
-           *     conformity outcome without saying CPDO decides; or
-           *   - the step stops naming CPDO as the office that decides (the
-           *     last line of ZoningConformanceNote removed).
+           * ZoningConformanceNote beside this panel. It ended on "The City's
+           * zoning office (CPDO) checks your exact spot and makes the final
+           * call." until Ken took that line out (6 October 2026), so the step
+           * no longer names who decides. That was this comment's condition for
+           * bringing the sentence back; it stays out because the same
+           * instruction allows no new text on the step. Ken's call whether
+           * either line returns.
            */}
         </>
       )}
@@ -543,15 +539,16 @@ export function LocationInsightsPanel({
  * the list is not prohibition. Every word below is chosen so that a reader who
  * takes it at face value is not misled: a type of business is "allowed in"
  * a named zone (the ordinance's own heading for these lists) or it is "not on
- * the list", which is said not to be a refusal, and the last line says the
- * zoning office checks the exact spot and decides either way. On screen it is
+ * the list", which is said not to be a refusal. On screen it is
  * in plain words — no "ordinance", no "use", no zone codes (client's lead,
  * 24 September 2026).
  *
- * `matched_use` is quoted rather than summarised on purpose. The match is a
- * text heuristic and it can be wrong — a dairy MANUFACTURER can match a clause
- * about dairy SHOPS — so the clause is put in front of the applicant, who knows
- * their own trade and can see the mismatch. A bare "conforming" would hide it.
+ * `matched_use` was quoted under the sentence, because the match is a text
+ * heuristic and can be wrong — a dairy MANUFACTURER can match a clause about
+ * dairy SHOPS. Ken took the quote out on 6 October 2026, with the line naming
+ * CPDO as the office that decides: the box is its label and one sentence. The
+ * API still sends `matched_use`; bring the quote back if wrong matches start
+ * reaching CPDO.
  *
  * ── Colour, size, and why it is loud now ──────────────────────────────────
  *
@@ -571,14 +568,12 @@ export function LocationInsightsPanel({
  *
  * ── Not listed: the way forward (Zoning 13) ───────────────────────────────
  *
- * An amber "not on the list" with nothing after it leaves the owner holding a
- * worry and no next step. So the last line, which already names the City's
- * zoning office as the one that decides, also says where an appeal goes. It
- * said "in person at that office" until the ordinance was read in full: City
- * Ordinance No. 24-2018 Art. IX §16(2) sends appeals from the Zoning
- * Administrator's grant or denial to the Local Zoning Board of Appeals, and a
- * use the zone does not list goes there as an exception (Art. VIII §1.2).
- * questions-for-malabon C12 records it.
+ * The amber box used to end on the City's zoning office deciding and, if it
+ * said no, an appeal to the Local Zoning Board of Appeals (City Ordinance No.
+ * 24-2018 Art. IX §16(2); questions-for-malabon C12). Both went with the CPDO
+ * line on 6 October 2026, since the appeal's "it" was that office. What is
+ * left after the sentence is that a business not on the list can still be
+ * approved.
  *
  * ── It follows the pin now (Ken, 5 October 2026) ──────────────────────────
  *
@@ -668,8 +663,16 @@ export function ZoningConformanceNote({
         * an applicant cannot read: "ordinance", "use", and the code. Now it
         * names the zone the rule is in, in words, and says "allowed", which is
         * the ordinance's own heading for these lists ("Allowed uses",
-        * Art. V §2). It is a statement about the zone, not about the pin —
-        * whether their exact spot is in that zone is the last line's point.
+        * Art. V §2). It is a statement about the zone, not about the pin.
+        *
+        * Two lines under it went (Ken, 6 October 2026: the label and this
+        * sentence are the box): "The rules list: “…”", the ordinance clause
+        * the match was made on, quoted so an applicant could see a wrong
+        * match; and "The City's zoning office (CPDO) checks your exact spot
+        * and makes the final call.", with the not-listed box's appeal to the
+        * Local Zoning Board of Appeals, which hung on that sentence ("If it
+        * says no…") and could not stand without it. Both are in git history
+        * if either is wanted back.
         */}
       <p className="mt-1.5 text-lg font-bold leading-snug text-ink">
         {listed
@@ -683,22 +686,6 @@ export function ZoningConformanceNote({
             : `Your type of business is not on the zoning rules’ list for ${where}.`}
       </p>
 
-      {(listed || possible) && matched?.matched_use && (
-        /*
-         * The clause that matched, quoted, because the match is a text
-         * heuristic and can be wrong — a dairy MANUFACTURER can match a clause
-         * about dairy SHOPS — and the applicant, who knows their own trade, is
-         * the one who can see that. Cut to its first breath (see `firstClause`)
-         * and stripped of the list heading it sits under ("Retail Shops like:"),
-         * which is the ordinance's filing, not the activity. `title` keeps the
-         * full text one hover away.
-         */
-        <p className="mt-2 text-base text-ink-secondary" title={matched.matched_use}>
-          The rules list: “{firstClause(matched.matched_use)}”
-          {possible && ', which may or may not take in yours.'}
-        </p>
-      )}
-
       {!listed && !possible && zoneNames.length > 0 && (
         /*
          * Not alarming, because it is not a refusal: Annex A leaves the lists
@@ -710,57 +697,6 @@ export function ZoningConformanceNote({
           be approved.
         </p>
       )}
-
-      {/*
-        * The step's one caution. It keeps this note from reading as a
-        * clearance, and it is the only place on the step that says it: the map
-        * key's "Traced from CPDO's sheet, so approximate." and the barangay
-        * card's "CPDO confirms what applies to your exact location" went so it
-        * is said once (client's lead, 24 September 2026). Here, because this is
-        * the one sentence on the step that says what is allowed. "CPDO" is
-        * spelled out as the City's zoning office because the public does not
-        * know the acronym, and kept in brackets so they can match it on the
-        * clearance later. Do not trim it; if it moves, move it whole.
-        *
-        * Not listed adds the appeal (Zoning 13) to the same sentence, so the
-        * office is still named once.
-        */}
-      <p className="mt-3 text-sm text-ink">
-        The City&rsquo;s zoning office (CPDO) checks your exact spot and makes the final call.
-        {!listed && !possible && (
-          <>
-            {' '}
-            <strong className="font-semibold">
-              If it says no, you may appeal to the Local Zoning Board of Appeals.
-            </strong>
-          </>
-        )}
-      </p>
     </section>
   )
-}
-
-/**
- * The head of an ordinance clause — everything before its first proviso.
- *
- * The ordinance's uses are single sentences carrying their conditions inline
- * ("…, provided that the number of persons engaged shall not exceed five (5),
- * inclusive of owner; there shall be no change in…"). The head names the
- * activity, which is what the applicant is checking; the tail is CPDO's to
- * apply. Cut at the first proviso marker, then hard-capped, then trimmed back
- * to a word boundary so the quote never ends mid-word.
- */
-function firstClause(use: string): string {
-  /*
-   * The extraction files each use under the list heading it was printed in,
-   * "Retail Shops like: Sari-sari store", "Personal Service Shops: Gym". The
-   * heading is the ordinance's grouping, not the activity, so it is dropped —
-   * only when it is a short heading ending in a colon, never from the middle
-   * of a clause.
-   */
-  const bare = use.replace(/^[A-Za-z/ ]{3,50}?(?:\s+like)?:\s+/, '')
-  const head = bare.split(/,?\s*provided\s+that\b|;/i)[0]?.trim() ?? bare
-  if (head.length <= 150) return head === bare ? head : `${head}…`
-  const cut = head.slice(0, 150)
-  return `${cut.slice(0, cut.lastIndexOf(' '))}…`
 }

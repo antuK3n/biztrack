@@ -87,7 +87,6 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * for that one code. Widening this to the other five would be the move the
  * paragraph above warns about.
  */
-import BarangayZoningMap from './BarangayZoningMap'
 import { useZoneAtPin, type ZoneAtPinQuery } from '../../lib/zoneAtPin'
 import { RequestedChanges } from '../../components/RequestedChanges'
 import {
@@ -5042,7 +5041,7 @@ export function ApplyWizard() {
    * Submit on Review is held for both. Moving the pin or changing the line
    * asks again.
    *
-   * What says why is the box under the map (ZoningConformanceNote), which
+   * What says why is the box beside the map (ZoningConformanceNote), which
    * answers for the same pin with the same sentence. There is no popup: the
    * one built first was a misreading — "the popup" Ken asked for was always
    * that box.
@@ -5053,7 +5052,7 @@ export function ApplyWizard() {
    *
    * Held while the question is in flight, too, so a quick press cannot slip
    * past a refusal that has not landed yet. A failed lookup holds only what
-   * the box under the map already shows red (see `zoneRefusal`, below).
+   * the box beside the map already shows red (see `zoneRefusal`, below).
    */
   const amendZonePlace = useMemo(() => {
     if (applicationType !== 'amendment') return null
@@ -5114,7 +5113,7 @@ export function ApplyWizard() {
    * draft on it; Next is held on it and on every step after it. Back is never
    * held — the pin and the line are fixed on that step.
    *
-   * Red is red when either answer says so. The box under the map reads the
+   * Red is red when either answer says so. The box beside the map reads the
    * location insights; Next reads `zone-at-pin`. A failed `zone-at-pin` used
    * to open Next under a box already red, so the box's own verdict holds too.
    * An unknown zone still refuses nothing (PinZone).
@@ -10151,7 +10150,7 @@ export function ApplyWizard() {
        * checks against the city and barangay polygons, `lib/malabonGeo.ts`;
        * and, since 5 October 2026 (Ken), a line of business the traced zone
        * under the pin CLEARLY does not allow holds the step, and the note
-       * under the map says so (`zoneAtPinQuery`, above). Anything less than
+       * beside the map says so (`zoneAtPinQuery`, above). Anything less than
        * clear is left to CPDO, as before.
        */}
       <WizardSection
@@ -10358,15 +10357,21 @@ export function ApplyWizard() {
                 application disapproved, and any fees you paid will be forfeited.
               </p>
               {/*
-               * The map with what it answers directly under it, and what the
-               * barangay is zoned for beside it.
+               * The map, and what it answers beside it.
                *
-               * Left: the map, its pin line, then the zoning note (Zoning 8
-               * wants that note where the eye already is after placing the
-               * pin). Right on a wide screen, below on a phone: the "Zones in
-               * <barangay>" card and Location Insights. Both describe the place
-               * the map shows, so they sit beside it rather than further down
-               * among the address fields.
+               * Left: the map and its pin line. Right on a wide screen, below
+               * on a phone: the zoning note, then Location Insights. Both
+               * describe the place the map shows, so they sit beside it rather
+               * than further down among the address fields. The note is first
+               * so that on a phone it still comes straight under the map,
+               * where the eye already is after placing the pin (Zoning 8).
+               *
+               * The "Zones in <barangay>" card stood where the note is now: the
+               * barangay's zones as chips, its overlays ("Areas with extra
+               * rules", with a "What these mean" fold) and a link to the City's
+               * zoning sheet. Ken removed it on 6 October 2026; the map's own
+               * Zones layer and key name the same zones where they are. It is
+               * in git history (BarangayZoningMap.tsx).
                *
                * `self-start` on both columns: a grid item stretches to its row
                * by default, and a transparent column then showed the page
@@ -10562,10 +10567,12 @@ export function ApplyWizard() {
                 {/*
                  * "CPDO checks the actual site during processing." stood here.
                  * It went with the rest of the step's explanatory copy
-                 * (client, 23 September 2026); CPDO's final say is now stated
-                 * once, as the last line of the zoning note under the map.
+                 * (client, 23 September 2026), and its later home, the last
+                 * line of the zoning note, went on 6 October 2026.
                  */}
               </div>
+                </div>
+                <div className="min-w-0 space-y-4 self-start">
                   {/*
                    * The zoning answer, inline and live (client, 23 September
                    * 2026: "Zoning must not be a popup"). It reads the ordinance
@@ -10580,16 +10587,6 @@ export function ApplyWizard() {
                       barangayName={barangayName ?? null}
                     />
                   )}
-                </div>
-                <div className="min-w-0 space-y-4 self-start">
-                  {/*
-                   * The zones on CPDO's sheet for the barangay chosen in step 2,
-                   * in plain names, and a link to the sheet. Gated on a
-                   * selection: twenty-one maps and no barangay chosen is a
-                   * gallery, not an answer. It shows and lists; it does not
-                   * decide.
-                   */}
-                  {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
                 </div>
               </div>
             </LocationStep>
@@ -13799,10 +13796,10 @@ export function ApplyWizard() {
         under the `?zoning=deny` debug parameter, and it said the same thing
         whatever the ordinance said. The client asked for it inline instead
         (23 September 2026: "Zoning must not be a popup"), so the live
-        ZoningConformanceNote under the map carries the answer and Next just
-        moves on. CPDO's final say — the line this dialog existed to keep — is
-        in that note. A refusal at the pin is said in that note too, and the
-        step is held (see `zoneAtPinQuery`).
+        ZoningConformanceNote beside the map carries the answer and Next just
+        moves on. CPDO's final say, the line this dialog existed to keep, was
+        that note's last line until 6 October 2026. A refusal at the pin is
+        said in that note, and the step is held (see `zoneAtPinQuery`).
       */}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}

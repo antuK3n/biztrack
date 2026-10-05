@@ -8,10 +8,10 @@
  * Basic or R-2 Max", "C-1", "CMP". The client's lead, looking at the applicant's
  * zoning step (24 September 2026): "do the public know what R2 R1 is?" They do
  * not, and the step is for the public. So every surface an applicant reads —
- * the map key, the zone tooltip, the zone chips on the barangay card, the
- * ordinance note — names a zone by what the ordinance says it is for, through
- * `plainZoneName` and nothing else, so the four can never name one zone two
- * ways.
+ * the map key, the zone tooltip, the zoning note — names a zone by what the
+ * ordinance says it is for, through `plainZoneName` and nothing else, so the
+ * three can never name one zone two ways. (The barangay card's zone chips were
+ * a fourth until the card went, 6 October 2026.)
  *
  * Codes survive only where an officer reads them (`zoneLabel` with
  * `withCode`): the officer's review map, where "R-2" is the working vocabulary
@@ -53,7 +53,8 @@
  * — rather than claiming shops for the Basic half.
  *
  * A code not in this table (the ordinance can add one; see the note on
- * `ZoningClassification`) falls back to the name the database holds for it.
+ * `zoning_classifications` in the API) falls back to the name the database
+ * holds for it.
  * A wrong plain name would be worse than an unexplained one.
  */
 
@@ -107,42 +108,4 @@ export function zoneLabel(
 ): string {
   const plain = plainZoneName(codes, sheetName)
   return withCode && plain !== sheetName ? `${plain} (${sheetName})` : plain
-}
-
-/*
- * The overlays, in the same spirit (Ordinance 24-2018 Art. V §4). An overlay
- * is a "transparent zone" laid over the base zones that adds rules; it is not
- * a zone of its own, and the card keeps it apart from the list above.
- *
- * Flood is the one to word carefully. It is a designation the ordinance makes
- * over areas "identified as prone to flooding" (§4.1), not a finding about any
- * applicant's lot, and it adds building rules and no use restrictions. So the
- * name is the ordinance's own description, "flood-prone areas", plural and
- * about areas; the meaning says what the rule asks of a building and stops.
- */
-const OVERLAY_PLAIN: Record<string, { name: string; meaning: string }> = {
-  'FLD-OZ': {
-    name: 'Flood-prone areas',
-    meaning:
-      'Parts of the city the zoning rules mark as prone to flooding. New buildings there need the ground floor raised above the expected flood level. It does not change what a place may be used for.',
-  },
-  'HTG-OZ': {
-    name: 'Heritage houses',
-    meaning:
-      'Areas with declared heritage houses. Those houses must keep their original look and size, and their uses are limited. New buildings near them must match their style and not stand taller.',
-  },
-  'ETM-OZ': {
-    name: 'Eco-tourism fishponds',
-    meaning:
-      'The fishponds of Dampalit. Tourism businesses such as restaurants and souvenir shops are also allowed there, with a limit on how much of a lot can be built on.',
-  },
-}
-
-/** An overlay's plain name and meaning; the database's wording for one this table does not know. */
-export function plainOverlay(
-  code: string,
-  name: string,
-  description: string | null,
-): { name: string; meaning: string | null } {
-  return OVERLAY_PLAIN[code] ?? { name, meaning: description }
 }

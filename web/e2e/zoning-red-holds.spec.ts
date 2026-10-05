@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
- * A red box under the map holds the owner on Location & Zoning, by every road
+ * A red box beside the map holds the owner on Location & Zoning, by every road
  * out of it — not only Next.
  *
  * Ken, testing production: "Non-conformance in the zoning should not allow the
