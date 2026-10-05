@@ -17,6 +17,7 @@ use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\RenewalScope;
 use App\Support\RenewalWindow;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
@@ -112,7 +113,8 @@ class ApplicationController extends Controller
         // it ApplicationListResource emits a null recipient and the request
         // composer cannot name who it is writing to (item 89).
         $query = Application::with([
-            'business:id,name', 'applicant:id,name', 'permitTypes:id,code,name',
+            // `ban` for the Records table's Business Account No. column.
+            'business:id,name,ban', 'applicant:id,name', 'permitTypes:id,code,name',
         ]);
 
         // Owners see their own; an office sees the filings routed to it; BPLO
@@ -151,7 +153,7 @@ class ApplicationController extends Controller
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
                 $sub->whereLike('tracking_id', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%")->orWhereLike('ban', "%{$q}%"));
             });
         }
 
@@ -287,7 +289,7 @@ class ApplicationController extends Controller
          * rule and the reason; `PriorPermitController` asks the same
          * question on the other door to this answer.
          */
-        if ($refusal = \App\Support\RenewalScope::refusal($priorIds)) {
+        if ($refusal = RenewalScope::refusal($priorIds)) {
             abort(422, $refusal);
         }
 

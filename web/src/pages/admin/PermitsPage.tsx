@@ -214,6 +214,7 @@ const SORT_OPTIONS: { value: string; label: string; key: PermitSort; dir: 'asc' 
   { value: 'valid_until:desc', label: 'Expiring latest', key: 'valid_until', dir: 'desc' },
   { value: 'tracking_id:asc', label: 'Tracking ID (A–Z)', key: 'tracking_id', dir: 'asc' },
   { value: 'permit_number:asc', label: 'Permit no. (A–Z)', key: 'permit_number', dir: 'asc' },
+  { value: 'ban:asc', label: 'Business Account No. (A–Z)', key: 'ban', dir: 'asc' },
   { value: 'business:asc', label: 'Business (A–Z)', key: 'business', dir: 'asc' },
   { value: 'permit_type:asc', label: 'Certificate (A–Z)', key: 'permit_type', dir: 'asc' },
   { value: 'status:asc', label: 'Status (A–Z)', key: 'status', dir: 'asc' },
@@ -252,11 +253,11 @@ function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
 const PERMIT_ONLY_KEYS = new Set([
   'tracking_id',
   'permit_number',
+  'ban',
   'business',
   'owner_name',
   'status',
   'valid_until',
-  'days',
 ])
 
 /** A permit's uploads: a count that expands into View/Download per file. */
@@ -602,16 +603,24 @@ export function PermitsPage() {
    * a selection the page had to invent on arrival.
    */
   const permitOnly = bploView && office !== 'BUSINESS'
+  /*
+   * The tracking ID is the super admin's column only [client, 5 October 2026:
+   * "sa super admin gawin mong una ang Tracking ID, Business Account No.,
+   * Permit No. pero sa other admin/staff offices na Business Account No.,
+   * Permit No. lang meron"]. Every office, BPLO included, leads with the
+   * Business Account No.
+   */
   const columns = useMemo(
     () =>
-      permitOnly
+      (permitOnly
         ? columnsFor(office).filter(
             // The certificate type only on the mixed list the Business Map links to
             // (?office=all); on one office's tab every row is the same type.
             (c) => PERMIT_ONLY_KEYS.has(c.key) || (office === '' && c.key === 'permit_type'),
           )
-        : columnsFor(office),
-    [office, permitOnly],
+        : columnsFor(office)
+      ).filter((c) => isSuperAdmin || c.key !== 'tracking_id'),
+    [office, permitOnly, isSuperAdmin],
   )
 
   /*
@@ -931,7 +940,9 @@ export function PermitsPage() {
                                 : 'descending'
                               : 'none'
                         }
-                        className="whitespace-nowrap px-4 py-3"
+                        // The permit-only view lets a long heading take two lines
+                        // ("Business Account No.") so the certificate stays on screen.
+                        className={permitOnly ? 'px-4 py-3 align-bottom' : 'whitespace-nowrap px-4 py-3'}
                       >
                         {column.sort === undefined ? (
                           /*
@@ -1015,7 +1026,7 @@ export function PermitsPage() {
                             column.tnum ? 'tnum' : '',
                             // The lead identifier carries the row, so it is
                             // the one drawn in full ink.
-                            column.key === 'tracking_id' ? 'font-bold text-ink' : 'text-ink-secondary',
+                            column.key === columns[0]?.key ? 'font-bold text-ink' : 'text-ink-secondary',
                           ]
                             .filter(Boolean)
                             .join(' ')}

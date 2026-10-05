@@ -21,6 +21,8 @@ class ApplicationListResource extends JsonResource
             'business' => $this->relationLoaded('business') && $this->business ? [
                 'id' => $this->business->id,
                 'name' => $this->business->name,
+                // The Business Account Number, when the list loaded it.
+                'ban' => $this->business->ban,
             ] : null,
             /*
              * Who filed it. The officer request composer has to name the person

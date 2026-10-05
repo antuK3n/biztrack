@@ -193,6 +193,21 @@ export const SHARED_COLUMNS: PermitColumn[] = [
     value: (r) => r.application?.tracking_id ?? null,
   },
   {
+    key: 'ban',
+    label: 'Business Account No.',
+    sort: 'ban',
+    tnum: true,
+    /*
+     * Back on the table [client, 5 October 2026: "isama rin ang Business
+     * Account Number sa column"], between the filing and the certificate:
+     * Tracking ID, Business Account No., Permit No. for the super admin, and
+     * Business Account No., Permit No. for every office, which does not see
+     * the tracking ID (PermitsPage). The BUSINESS's own number (BP-YYYY-NNNN)
+     * — the same on every certificate it holds and every year it renews.
+     */
+    value: (r) => r.ban ?? null,
+  },
+  {
     key: 'permit_number',
     label: 'Permit No.',
     sort: 'permit_number',

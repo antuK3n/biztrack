@@ -355,12 +355,16 @@ test.describe('the permit register table', () => {
      * first cut shipped with the BAN in front for a day.
      */
     const headers = page.locator('thead th')
+    // The super admin's order [client, 5 October 2026]: Tracking ID, Business
+    // Account No., Permit No.
     await expect(headers.nth(0)).toContainText('Tracking ID')
-    await expect(headers.nth(1)).toContainText('Permit No.')
+    await expect(headers.nth(1)).toContainText('Business Account No.')
+    await expect(headers.nth(2)).toContainText('Permit No.')
 
     // The identifiers, then the face, then the record — in that order.
     const order = [
       'Tracking ID',
+      'Business Account No.',
       'Permit No.',
       'Permit / Certificate',
       'Office',
@@ -392,14 +396,8 @@ test.describe('the permit register table', () => {
     const first = rows.first()
     await expect(first.locator('td').first()).toHaveText('BIZ-2026-00473')
     await expect(first).toContainText('MCB-2026-000001')
-    /*
-     * And NOT the BAN. It names the business, and a row here names a
-     * certificate; the business is already on the row in words. It stays
-     * searchable — see the search test — which is the right way round: a value
-     * the box matches but the table does not show, rather than a column nobody
-     * looks up.
-     */
-    await expect(first).not.toContainText('BP-2026-0001')
+    // And the BAN, back as a column [client, 5 October 2026].
+    await expect(first).toContainText('BP-2026-0001')
     await expect(first).toContainText('Nena Makiling')
     await expect(first).toContainText('Longos')
     await expect(first).toContainText('Liza Reyes')
@@ -838,9 +836,13 @@ test.describe('the permit register table', () => {
       await expect(page.locator('tbody tr')).toHaveCount(1)
 
       // The permit: who holds it, its number, whether it is in force, and the certificate.
-      for (const kept of [/^Tracking ID/i, /^Permit No/i, /^Business/i, /^Owner/i, /^Status/i, /^Valid until/i]) {
+      for (const kept of [/^Business Account No/i, /^Permit No/i, /^Business$/i, /^Owner/i, /^Status/i, /^Valid until/i]) {
         await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
       }
+      // An office leads with the Business Account No.; the tracking ID is the
+      // super admin's column [client, 5 October 2026].
+      await expect(page.getByRole('columnheader', { name: /^Tracking ID/i })).toHaveCount(0)
+      await expect(page.locator('thead th').first()).toContainText('Business Account No.')
       await expect(page.getByRole('button', { name: 'View certificate MCS-2025-000770' })).toBeVisible()
 
       // Not the health office's sheet, its uploads, or the rest of the record.
@@ -1043,7 +1045,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         await expect(page.getByText(`These are ${office}’s certificates`)).toBeVisible()
       })
 
-      test(`${office} is shown no BAN column and no expiry filter`, async ({ page }) => {
+      test(`${office} is shown the Business Account No. column and no expiry filter`, async ({ page }) => {
         /*
          * Client, 24 September 2026: "paki remove muna ang BAN sa permits page
          * ng mga offices."
@@ -1060,11 +1062,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         await page.goto('/staff/admin/permits')
         await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
 
-        await expect(page.getByRole('columnheader', { name: /^BAN/ })).toHaveCount(0)
+        // Back on every office's table [client, 5 October 2026].
+        await expect(page.getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
 
         await page.getByRole('button', { name: /^Sort/ }).click()
         await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
-        await expect(page.getByRole('option', { name: /^BAN/ })).toHaveCount(0)
+        await expect(page.getByRole('option', { name: 'Business Account No. (A–Z)' })).toBeVisible()
         // The orderings that DO name a visible column are still there.
         await expect(page.getByRole('option', { name: 'Expiring soonest' })).toBeVisible()
         await page.keyboard.press('Escape')
@@ -1128,11 +1131,8 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await expect(officeTab(page, 'BUSINESS')).toHaveAttribute('aria-pressed', 'true')
       await chooseOffice(page, '')
 
-      /*
-       * The BAN is off every reader's table now, BPLO's included — it names
-       * the business and a row here names a certificate. It stays searchable.
-       */
-      await expect(page.getByRole('columnheader', { name: /^BAN/ })).toHaveCount(0)
+      // The Business Account No. is a column again [client, 5 October 2026].
+      await expect(page.getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
 
       // With nothing picked it carries every office's sheet.
       await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()

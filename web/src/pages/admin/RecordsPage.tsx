@@ -109,6 +109,8 @@ interface RecordRow {
   /** Set on filings only — what the expanded record is fetched by. */
   applicationId?: number
   primary: string
+  /** The Business Account Number, on the tabs that show one. */
+  ban?: string | null
   secondary: string
   /*
    * The chip, and separately the words inside it.
@@ -140,6 +142,7 @@ function applicationRow(app: ApplicationListItem): RecordRow {
     // A draft has no tracking ID until it is submitted. Without a fallback the
     // expand button had no visible label at all — a lone "▸".
     primary: app.tracking_id ?? 'Draft — not yet filed',
+    ban: app.business?.ban ?? null,
     // `businessName`, not a dereference: Business soft-deletes and its filings
     // stay, so this is null on 139 rows of the live register and the helper says
     // what happened instead of blanking the cell.
@@ -160,6 +163,7 @@ function businessRow(business: AdminBusiness): RecordRow {
   return {
     key: `business-${business.id}`,
     primary: business.name,
+    ban: business.ban ?? null,
     secondary: business.owner?.name ?? '—',
     status: (
       <StatusChip tone={BUSINESS_STATUS[business.status]?.tone ?? 'tint-gray'}>
@@ -194,6 +198,8 @@ function ownerRow(user: AdminUser): RecordRow {
 interface TabConfig {
   value: Tab
   label: string
+  /** Which row field each column shows, in order; defaults to SORT_KEYS. */
+  sortKeys?: SortKey[]
   /**
    * What this tab needs on top of reaching the screen at all.
    *
@@ -220,8 +226,8 @@ interface TabConfig {
    * on it.
    */
   permission?: string
-  /** Column headings in row order: primary, secondary, status, date. */
-  columns: [string, string, string, string]
+  /** Column headings, in the order `sortKeys` (or SORT_KEYS) names their fields. */
+  columns: string[]
   /** The search box's real label — and, said exactly, what `q` matches. */
   searchLabel: string
   searchPlaceholder: string
@@ -238,15 +244,20 @@ const TABS: TabConfig[] = [
   {
     value: 'applications',
     label: 'Applications',
-    columns: ['Tracking ID', 'Business', 'Status', 'Filed'],
+    /*
+     * Business Account No. beside the tracking ID [client, 5 October 2026]:
+     * the filing's number, then the business's, then the business.
+     */
+    columns: ['Tracking ID', 'Business Account No.', 'Business', 'Status', 'Filed'],
+    sortKeys: ['primary', 'ban', 'secondary', 'status', 'date'],
     /*
      * Named exactly, because `q` on /applications matches the tracking ID and
      * the business name and nothing else. An owner's own name will not find
      * their filing here, and a label promising "search filings" would make that
      * look like missing data rather than the wrong box.
      */
-    searchLabel: 'Search filings by tracking ID or business name',
-    searchPlaceholder: 'Tracking ID or business…',
+    searchLabel: 'Search filings by tracking ID, Business Account No. or business name',
+    searchPlaceholder: 'Tracking ID, BAN or business…',
     noun: 'filings',
     serverOrder: 'newest first',
     icon: ClipboardIcon,
@@ -257,7 +268,9 @@ const TABS: TabConfig[] = [
     value: 'businesses',
     label: 'Businesses',
     permission: 'owner.manage_status',
-    columns: ['Business', 'Owner', 'Status', 'Registered'],
+    // The business's own number leads its row.
+    columns: ['Business Account No.', 'Business', 'Owner', 'Status', 'Registered'],
+    sortKeys: ['ban', 'primary', 'secondary', 'status', 'date'],
     searchLabel: 'Search businesses by business or owner name',
     searchPlaceholder: 'Business or owner…',
     noun: 'businesses',
@@ -332,14 +345,19 @@ async function loadTab(tab: Tab, q: string, page: number): Promise<RecordPage> {
 }
 
 /** Which of the four columns a sort is on. */
-type SortKey = 'primary' | 'secondary' | 'status' | 'date'
+type SortKey = 'primary' | 'ban' | 'secondary' | 'status' | 'date'
 
 interface Sort {
   key: SortKey
   dir: 'asc' | 'desc'
 }
 
+/** The default column order; a tab with a Business Account No. names its own. */
 const SORT_KEYS: SortKey[] = ['primary', 'secondary', 'status', 'date']
+
+function keysOf(config: TabConfig): SortKey[] {
+  return config.sortKeys ?? SORT_KEYS
+}
 
 function sortRows(rows: RecordRow[], sort: Sort): RecordRow[] {
   const { key } = sort
@@ -360,8 +378,9 @@ function sortRows(rows: RecordRow[], sort: Sort): RecordRow[] {
       }
       return dir * (at - bt)
     }
-    const av = key === 'status' ? a.statusLabel : a[key]
-    const bv = key === 'status' ? b.statusLabel : b[key]
+    // `?? ''`: a business with no BAN yet has none to compare.
+    const av = (key === 'status' ? a.statusLabel : a[key]) ?? ''
+    const bv = (key === 'status' ? b.statusLabel : b[key]) ?? ''
     return dir * av.localeCompare(bv)
   })
 }
@@ -436,7 +455,7 @@ export function RecordsPage() {
 
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
-  const sortedColumn = sort ? config.columns[SORT_KEYS.indexOf(sort.key)] : null
+  const sortedColumn = sort ? config.columns[keysOf(config).indexOf(sort.key)] : null
 
   return (
     <div>
@@ -502,7 +521,7 @@ export function RecordsPage() {
               <thead>
                 <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
                   {config.columns.map((label, i) => {
-                    const key = SORT_KEYS[i]
+                    const key = keysOf(config)[i]
                     const active = sort?.key === key
                     return (
                       <th
@@ -547,6 +566,11 @@ export function RecordsPage() {
                   return (
                     <Fragment key={row.key}>
                       <tr className="border-t border-line">
+                        {keysOf(config)[0] === 'ban' ? (
+                          <td className="tnum whitespace-nowrap px-5 py-3.5 font-bold text-ink">
+                            {row.ban ?? <span className="font-normal italic text-ink-muted">None yet</span>}
+                          </td>
+                        ) : (
                         <td className="px-5 py-3.5 font-bold text-ink">
                           {row.applicationId !== undefined ? (
                             <button
@@ -568,13 +592,26 @@ export function RecordsPage() {
                             row.primary
                           )}
                         </td>
-                        <td className="px-5 py-3.5 text-ink-secondary">{row.secondary}</td>
-                        <td className="px-5 py-3.5">{row.status}</td>
-                        <td className="px-5 py-3.5 text-ink-secondary">{formatDate(row.date)}</td>
+                        )}
+                        {keysOf(config).slice(1).map((k) =>
+                          k === 'ban' ? (
+                            <td key={k} className="tnum whitespace-nowrap px-5 py-3.5 text-ink-secondary">
+                              {row.ban ?? <span className="italic text-ink-muted">None yet</span>}
+                            </td>
+                          ) : k === 'secondary' ? (
+                            <td key={k} className="px-5 py-3.5 text-ink-secondary">{row.secondary}</td>
+                          ) : k === 'status' ? (
+                            <td key={k} className="px-5 py-3.5">{row.status}</td>
+                          ) : k === 'primary' ? (
+                            <td key={k} className="px-5 py-3.5 font-semibold text-ink">{row.primary}</td>
+                          ) : (
+                            <td key={k} className="px-5 py-3.5 text-ink-secondary">{formatDate(row.date)}</td>
+                          ),
+                        )}
                       </tr>
                       {open && (
                         <tr id={`record-${row.applicationId}`} className="border-t border-line">
-                          <td colSpan={4} className="p-0">
+                          <td colSpan={keysOf(config).length} className="p-0">
                             <FilingRecord applicationId={row.applicationId!} />
                           </td>
                         </tr>
