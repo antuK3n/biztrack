@@ -54,7 +54,7 @@ async function loadAllPermits(): Promise<{
   let unbilled: PageMeta['unbilled_fees']
 
   for (let page = 1; page <= MAX_PERMIT_PAGES; page++) {
-    const { data, meta } = await permitsApi.page({ page, per_page: 200 })
+    const { data, meta } = await permitsApi.page({ page, per_page: 200, with_requirements: 1 })
     all.push(...data)
     // The same on every page; taken from the first and not re-read.
     if (page === 1) unbilled = meta.unbilled_fees
@@ -425,6 +425,7 @@ function PermitExtras({ permit }: { permit: Permit }) {
   const [error, setError] = useState<string | null>(null)
   const office = permit.permit_type?.office ?? 'the issuing office'
   const rejected = permit.status === 'rejected'
+  const count = permit.requirements_count ?? 0
   const messageTo =
     permit.application && permit.permit_type?.department_id
       ? `/messages?application=${permit.application.id}&office=${permit.permit_type.department_id}`
@@ -440,6 +441,14 @@ function PermitExtras({ permit }: { permit: Permit }) {
         .catch((err) => setError(toApiError(err).message))
     }
   }
+
+  /*
+   * Only when there is something to say [client, 5 October 2026]: the toggle
+   * shows when a requirement is on record, with the count already in it, and
+   * the strip is not drawn at all for a permit with neither requirements nor a
+   * rejection — an empty disclosure is a click that finds nothing.
+   */
+  if (!rejected && count === 0) return null
 
   return (
     <div className="space-y-2.5 border-t border-royal/20 bg-white px-4 py-2.5 sm:px-5">
@@ -457,15 +466,18 @@ function PermitExtras({ permit }: { permit: Permit }) {
           </Link>
         </div>
       )}
+      {count > 0 && (
+      <>
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         aria-controls={panelId}
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-royal hover:underline"
+        className="inline-flex items-center gap-2 rounded-full border border-line px-3 py-1 text-xs font-semibold text-ink hover:border-royal hover:text-royal"
       >
-        <span aria-hidden="true" className="text-[10px]">{open ? '▾' : '▸'}</span>
-        Requirements submitted{docs ? ` (${docs.length})` : ''}
+        <span aria-hidden="true" className="text-[10px] text-ink-muted">{open ? '▾' : '▸'}</span>
+        Requirements submitted
+        <span className="tnum rounded-full bg-royal px-1.5 py-px text-[10px] font-bold text-white">{count}</span>
       </button>
       <div id={panelId} hidden={!open}>
         {error ? (
@@ -497,6 +509,8 @@ function PermitExtras({ permit }: { permit: Permit }) {
           </ul>
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }

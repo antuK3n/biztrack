@@ -252,3 +252,23 @@ it('gives the owner the requirements submitted for their permit, as the office s
     test()->withHeaders(authAs('juan@biztrack.local'))
         ->getJson("/api/v1/permits/{$mp->id}/requirements")->assertForbidden();
 });
+
+it('counts each permit’s requirements in the owner’s list, matching the list itself', function () {
+    // Client, 5 October 2026: My Permits shows "Requirements submitted (N)" only where N > 0.
+    ['business' => $mp] = statusPair();
+
+    $rows = collect(test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/permits?with_requirements=1&per_page=200')->assertOk()->json('data'));
+    $row = $rows->firstWhere('id', $mp->id);
+
+    $list = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/requirements")->assertOk()->json('data');
+
+    expect($row)->toHaveKey('requirements_count')
+        ->and($row['requirements_count'])->toBe(count($list));
+
+    // Not asked for, not sent — a missing count must not read as zero.
+    $plain = collect(test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/permits?per_page=200')->assertOk()->json('data'))->firstWhere('id', $mp->id);
+    expect($plain)->not->toHaveKey('requirements_count');
+});

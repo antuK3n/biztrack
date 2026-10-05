@@ -1253,6 +1253,8 @@ export interface Permit {
   suspended_days?: number | null
   suspension_reason?: string | null
   suspended_for?: SuspendedFor | null
+  /** Requirements submitted for it, when the list was asked `with_requirements`. */
+  requirements_count?: number
   /**
    * Why this permit cannot be renewed today, in the applicant's words, or
    * null if it can.

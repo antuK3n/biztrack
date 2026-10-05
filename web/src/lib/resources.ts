@@ -1370,6 +1370,12 @@ export interface PermitFilters extends PageParams {
   q?: string
   status?: string
   /**
+   * Add each permit's `requirements_count` (the owner's My Permits). `1`, not
+   * `true`: a query string carries "true" as text, which Laravel's boolean
+   * rule refuses with a 422.
+   */
+  with_requirements?: 1
+  /**
    * One office, named by the permit type it issues (`CEC`, `FSIC`, …).
    *
    * An office is named by its CERTIFICATE rather than by a department id
