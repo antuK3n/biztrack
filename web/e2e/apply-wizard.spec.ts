@@ -1307,7 +1307,8 @@ test('the zoning note beside the map is loud, green when listed and amber when n
    * caption. Ken, 6 October 2026: the box is its label and its sentence. The
    * quoted ordinance clause ("The rules list: …") and the CPDO line went, and
    * with the CPDO line the not-listed box's appeal (Zoning 13), whose "If it
-   * says no" was that office.
+   * says no" was that office. Amber lost its zones line too ("A business not
+   * on the list can still be approved."): it is label and sentence, like green.
    *
    * The verdict comes from the ordinance lookup, which depends on the seeded
    * uses; so the real response is fetched and only its verdict is set, once
@@ -1339,7 +1340,8 @@ test('the zoning note beside the map is loud, green when listed and amber when n
   // Said in words, not only in amber.
   await expect(note).toContainText(/not on the zoning list/i)
   await expect(note).toContainText(/not on the zoning rules’ list for longos/i)
-  await expect(note).not.toContainText(/zoning office|cpdo|final call|appeal|the rules list/i)
+  await expect(note).not.toContainText(/zoning office|cpdo|final call|appeal|the rules list|has these zones|can still be approved/i)
+  await expect(note.locator('p')).toHaveCount(2)
 
   const loud = async () =>
     note.evaluate((el) => {

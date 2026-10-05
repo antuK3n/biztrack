@@ -571,9 +571,11 @@ export function LocationInsightsPanel({
  * The amber box used to end on the City's zoning office deciding and, if it
  * said no, an appeal to the Local Zoning Board of Appeals (City Ordinance No.
  * 24-2018 Art. IX §16(2); questions-for-malabon C12). Both went with the CPDO
- * line on 6 October 2026, since the appeal's "it" was that office. What is
- * left after the sentence is that a business not on the list can still be
- * approved.
+ * line on 6 October 2026, since the appeal's "it" was that office. The line
+ * naming the barangay's zones and saying "A business not on the list can
+ * still be approved." went the same day: amber is its label and sentence,
+ * like green (Ken). Annex A still leaves the lists open, so absence from one
+ * is not prohibition, which is why amber stays amber and never red.
  *
  * ── It follows the pin now (Ken, 5 October 2026) ──────────────────────────
  *
@@ -618,12 +620,6 @@ export function ZoningConformanceNote({
   const governing = zoning.zones.filter((z) => z.governing !== false)
   const matched = governing.find((z) => (possible ? z.possible : z.listed))
   const where = barangayName ?? 'this barangay'
-  /*
-   * Zone names are the plain ones (lib/zoningNames.ts), never the codes: this
-   * note said "R-2 Max — …" to business owners who do not read "R-2".
-   * Deduplicated because the plain table can give two codes one name.
-   */
-  const zoneNames = [...new Set(governing.map((z) => plainZoneName(z.code, z.name)))]
 
   return (
     <section
@@ -685,18 +681,6 @@ export function ZoningConformanceNote({
               : `Your type of business may fit a zone in ${where}.`
             : `Your type of business is not on the zoning rules’ list for ${where}.`}
       </p>
-
-      {!listed && !possible && zoneNames.length > 0 && (
-        /*
-         * Not alarming, because it is not a refusal: Annex A leaves the lists
-         * open, so absence from one is not prohibition. The zones are named so
-         * the applicant can see what the barangay is for.
-         */
-        <p className="mt-2 text-base text-ink-secondary">
-          {where} has these zones: {zoneNames.join('; ')}. A business not on the list can still
-          be approved.
-        </p>
-      )}
     </section>
   )
 }
