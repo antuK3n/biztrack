@@ -13,6 +13,7 @@ use App\Models\PsicCode;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Five businesses whose permits sit at the five renewal states.
@@ -71,10 +72,21 @@ use Illuminate\Console\Command;
  *
  * Deliberately, unlike `SeedRenewalUiFixtures`, which refuses anything but
  * the E2E copy: the client tests by hand on the dev register, so that is
- * where the rows have to land. The safeguards are that every row carries the
- * same prefix so it can be found again, that `--fresh` removes only rows
- * carrying it, and that the counts are printed either side — "nothing was
- * lost" is a measurement (AGENTS.md §2.2).
+ * where the rows have to land. The safeguards are that every business can be
+ * found again — its owner, one of the names below and the TIN they all
+ * carry, all three at once — that `--fresh` removes only those, and that the
+ * counts are printed either side — "nothing was lost" is a measurement
+ * (AGENTS.md §2.2).
+ *
+ * ── Nothing on screen says "demo" ──────────────────────────────────────────
+ *
+ * Until 5 October 2026 every name began "[DEMO] ", the address read "Demo
+ * address" / "12 Demo Street" and each permit was numbered "DEMO-…". All of
+ * it shows on screen like any other business, and Ken asked for every "demo"
+ * on screen to go before the defense, where BizTrack is presented as a
+ * working system. The marker moved off the screen and into the match above.
+ * `--fresh` still removes the "[DEMO] " rows written before, so one run
+ * replaces them.
  */
 class SeedExpiringDemoBusinesses extends Command
 {
@@ -84,8 +96,14 @@ class SeedExpiringDemoBusinesses extends Command
 
     protected $description = 'Seed five businesses, each holding all six permits, at the five renewal-window states.';
 
-    /** Every row this command writes carries it, so they can all be found again. */
-    private const PREFIX = '[DEMO] ';
+    /**
+     * The TIN every business here carries: with the owner and the name, how
+     * this command finds its own rows again.
+     */
+    private const TIN = '123-456-789-000';
+
+    /** What every name began with before 5 October 2026; `--fresh` still removes those. */
+    private const LEGACY_PREFIX = '[DEMO] ';
 
     /** The five clearances, in the order the picker lists them. */
     private const CLEARANCES = ['SANITARY', 'FSIC', 'OCCUPANCY', 'CEC', 'ZONING'];
@@ -108,10 +126,6 @@ class SeedExpiringDemoBusinesses extends Command
 
         $before = ['businesses' => Business::count(), 'permits' => Permit::count()];
         $this->line("Before: {$before['businesses']} businesses, {$before['permits']} permits");
-
-        if ($this->option('fresh')) {
-            $this->removeOwnRows();
-        }
 
         $now = CarbonImmutable::now();
 
@@ -214,11 +228,16 @@ class SeedExpiringDemoBusinesses extends Command
             ],
         ];
 
+        $names = array_column($plan, 'name');
+        if ($this->option('fresh')) {
+            $this->removeOwnRows($owner, $names);
+        }
+
         $made = 0;
         foreach ($plan as $spec) {
-            $name = self::PREFIX.$spec['name'];
+            $name = $spec['name'];
 
-            if (Business::where('name', $name)->exists()) {
+            if ($this->ownRows($owner, [$name])->exists()) {
                 $this->line("  skip   {$name} (already present — use --fresh to rebuild)");
 
                 continue;
@@ -235,9 +254,9 @@ class SeedExpiringDemoBusinesses extends Command
                  * draft and Submit then did nothing at all.
                  */
                 'registration_number' => 'DTI-2026-'.random_int(100000, 999999),
-                'tin' => '123-456-789-000',
+                'tin' => self::TIN,
                 'barangay_id' => $barangayId,
-                'address_line' => 'Demo address, Malabon',
+                'address_line' => '12 Main Street, Malabon',
                 'status' => 'active',
             ]);
 
@@ -259,8 +278,8 @@ class SeedExpiringDemoBusinesses extends Command
             BusinessAddress::create([
                 'business_id' => $business->id,
                 'house_bldg_no' => '12',
-                'street' => 'Demo Street',
-                'line1' => '12 Demo Street',
+                'street' => 'Main Street',
+                'line1' => '12 Main Street',
                 'barangay_id' => $barangayId,
                 'city' => 'Malabon',
                 'province' => 'Metro Manila',
@@ -342,7 +361,7 @@ class SeedExpiringDemoBusinesses extends Command
             $made,
         ));
         $this->newLine();
-        $this->line('All named "'.self::PREFIX.'…" and owned by '.$owner->email.'.');
+        $this->line('All owned by '.$owner->email.', with TIN '.self::TIN.'.');
 
         return self::SUCCESS;
     }
@@ -365,7 +384,7 @@ class SeedExpiringDemoBusinesses extends Command
             'application_id' => $application->id,
             'business_id' => $business->id,
             'permit_type_id' => $type->id,
-            'permit_number' => 'DEMO-'.$code.'-'.$business->id,
+            'permit_number' => $code.'-'.$business->id,
             'issued_at' => $validUntil->subYear(),
             'valid_from' => $validUntil->subYear(),
             'valid_until' => $validUntil,
@@ -380,16 +399,37 @@ class SeedExpiringDemoBusinesses extends Command
     }
 
     /**
+     * The businesses this command made under these names: the owner's, by
+     * exact name and the shared TIN — a real business would have to match
+     * all three to be caught — and any written before 5 October 2026, which
+     * carried "[DEMO] " in front of the name.
+     *
+     * @param  list<string>  $names
+     * @return Builder<Business>
+     */
+    private function ownRows(User $owner, array $names): Builder
+    {
+        return Business::query()
+            ->where(fn (Builder $q) => $q->where('owner_user_id', $owner->id)->where('tin', self::TIN)->whereIn('name', $names))
+            ->orWhereIn('name', array_map(fn (string $name) => self::LEGACY_PREFIX.$name, $names));
+    }
+
+    /**
      * Delete the businesses this command made, and nothing else.
      *
-     * Matched on the prefix alone, so a real business can never be caught by
-     * it. Permits and the carrier application go with the business, in that
-     * order, because `permits.application_id` and `permits.business_id` are
-     * both NOT NULL and a half-deleted set is worse than either state.
+     * The plan's names as `ownRows` matches them, and every "[DEMO] " row —
+     * matched on that prefix alone, as it always was. Permits and the carrier
+     * application go with the business, in that order, because
+     * `permits.application_id` and `permits.business_id` are both NOT NULL
+     * and a half-deleted set is worse than either state.
+     *
+     * @param  list<string>  $names
      */
-    private function removeOwnRows(): void
+    private function removeOwnRows(User $owner, array $names): void
     {
-        $mine = Business::where('name', 'like', self::PREFIX.'%')->get();
+        $mine = $this->ownRows($owner, $names)
+            ->orWhere('name', 'like', self::LEGACY_PREFIX.'%')
+            ->get();
 
         if ($mine->isEmpty()) {
             $this->line('  fresh  nothing of mine to remove');
