@@ -1448,7 +1448,7 @@ it('refuses a second amendment while one is open, naming it', function () {
         'application_type' => 'amendment',
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
         'prior_permit_id' => $prior,
-    ])->assertStatus(422)->assertJsonPath('errors.application_type.0', "An amendment is already open ({$tracking}).");
+    ])->assertStatus(422)->assertJsonPath('errors.application_type.0', "This business already has an amendment under review ({$tracking}).");
 
     // A draft started before the first was submitted is stopped at submit.
     $draft = Application::create([
@@ -1464,7 +1464,7 @@ it('refuses a second amendment while one is open, naming it', function () {
 
     attachRequiredDocuments($draft->id);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$draft->id}/submit")
-        ->assertStatus(422)->assertJsonPath('errors.application_type.0', "An amendment is already open ({$tracking}).");
+        ->assertStatus(422)->assertJsonPath('errors.application_type.0', "This business already has an amendment under review ({$tracking}).");
 });
 
 it('refuses to submit an amendment without its affidavit', function () {

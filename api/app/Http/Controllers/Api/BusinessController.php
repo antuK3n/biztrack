@@ -108,7 +108,7 @@ class BusinessController extends Controller
              */
             // Named in the amendment chooser, so it must arrive with the
             // list rather than a request per row. One constant query.
-            ->with('currentBusinessPermit')
+            ->with(['currentBusinessPermit', 'openAmendment:id,business_id,tracking_id,status,decided_at,application_type'])
             ->orderByRaw('CASE WHEN EXISTS (SELECT 1 FROM permits WHERE permits.business_id = businesses.id) THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')

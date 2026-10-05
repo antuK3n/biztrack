@@ -90,6 +90,6 @@ final class AmendmentScope
             return null;
         }
 
-        return sprintf('An amendment is already open (%s).', $open->tracking_id ?? '#'.$open->id);
+        return sprintf('This business already has an amendment under review (%s).', $open->tracking_id ?? '#'.$open->id);
     }
 }
