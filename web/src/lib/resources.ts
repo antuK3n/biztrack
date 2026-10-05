@@ -1370,6 +1370,11 @@ export interface PermitFilters extends PageParams {
    * force, so neither is work waiting on a renewal.
    */
   expiring_within?: number
+  /**
+   * Suspended at least this many days — BPLO's chase list (client,
+   * 5 October 2026: "after 30 days unresolved BPLO sees it in a list").
+   */
+  suspended_over_days?: number
   /** Issued on or after this date (inclusive). */
   issued_from?: string
   /** Issued on or before this date — the whole of that day, inclusive. */

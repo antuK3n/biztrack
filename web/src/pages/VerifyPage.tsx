@@ -42,7 +42,8 @@ import type { VerifyResult } from '../lib/types'
  * fill: white on the register's green measures about 2.5:1, which fails the AA
  * contrast this page owes a reader squinting at a phone outdoors.
  *
- * What is NOT here, deliberately: the owner's name and the revocation reason.
+ * What is NOT here, deliberately: the owner's name, and the revocation or
+ * suspension reason (a suspension names its permit and office, not the words).
  * See VerifyController for why.
  */
 
@@ -76,7 +77,7 @@ function verdictFor(data: VerifyResult): Verdict {
     case 'suspended':
       return {
         word: 'Suspended',
-        sentence: 'This permit is suspended and not valid while the suspension lasts.',
+        sentence: suspendedSentence(data),
         icon: AlertTriangleIcon,
         tone: 'bg-s-purple-tint',
         iconTone: 'text-s-purple',
@@ -98,6 +99,18 @@ function verdictFor(data: VerifyResult): Verdict {
         iconTone: 'text-s-yellow-ink',
       }
   }
+}
+
+/*
+ * Since when, and what it waits on — client, 5 October 2026: show WHICH
+ * office caused it on the QR page. Never the office's own words; the API
+ * does not send them. Falls back to the plain sentence when either is unknown.
+ */
+function suspendedSentence(data: VerifyResult): string {
+  const since = data.suspended_at ? `Suspended since ${formatDate(data.suspended_at)}` : 'Suspended'
+  const f = data.suspended_for
+  const waits = f ? ` — ${f.name} pending${f.office ? ` with ${f.office}` : ''}` : ''
+  return `${since}${waits}. Not valid until it is resolved.`
 }
 
 /** One label/value pair. A missing value is a dash, never a blank or an invented one. */

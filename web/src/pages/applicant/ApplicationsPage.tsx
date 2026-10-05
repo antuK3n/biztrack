@@ -1757,6 +1757,18 @@ function ApplicationRow({
                     </div>
                   )}
 
+                  {/*
+                    What a Suspended chip is waiting on, in one line — client,
+                    5 October 2026: show WHICH office caused it on the Track
+                    row. Same indent and z-order as the returned note below.
+                  */}
+                  {pt.permit_status === 'suspended' && pt.suspension && (
+                    <p className="relative z-20 mt-2 pl-[7rem] text-xs leading-relaxed text-ink-secondary">
+                      Waiting on your {pt.suspension.for}
+                      {pt.suspension.office ? ` with ${pt.suspension.office}` : ''}.
+                    </p>
+                  )}
+
                   {returned && (
                     /*
                      * Indented to the badge's right edge (`w-24` + `gap-4`), so

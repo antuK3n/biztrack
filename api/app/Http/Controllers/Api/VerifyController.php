@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\PermitResource;
 use App\Models\Permit;
 use App\Support\PermitFace;
 use Illuminate\Http\JsonResponse;
@@ -47,6 +48,7 @@ class VerifyController extends Controller
             // permit had never existed.
             'business' => fn ($b) => $b->withTrashed(),
             'business.address.barangay',
+            'suspendedFor.department:id,name',
         ])
             ->where('permit_number', $permitNumber)
             ->first();
@@ -73,6 +75,7 @@ class VerifyController extends Controller
         $state = ($permit->status === PermitStatus::Active && ! $inTerm)
             ? PermitStatus::Expired
             : $permit->status;
+        $suspended = $permit->status === PermitStatus::Suspended;
 
         return response()->json([
             'data' => [
@@ -83,6 +86,14 @@ class VerifyController extends Controller
                 'valid_until' => optional($permit->valid_until)->toDateString(),
                 // Only a date, never the reason — see the class note.
                 'revoked_at' => optional($permit->revoked_at)->toDateString(),
+                /*
+                 * A suspension, likewise: since when, and which permit is
+                 * pending with which office — never the office's free-text
+                 * reason, which is between the City and the owner. Client,
+                 * 5 October 2026: show WHICH office caused it on the QR page.
+                 */
+                'suspended_at' => $suspended ? optional($permit->suspended_at)->toDateString() : null,
+                'suspended_for' => $suspended ? PermitResource::suspendedFor($permit) : null,
                 'permit_type' => $permit->permitType ? ['name' => $permit->permitType->name] : null,
                 'business' => [
                     'name' => $face['business_name'] ?? $permit->business?->name,

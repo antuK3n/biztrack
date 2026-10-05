@@ -386,6 +386,41 @@ class NotificationService
     }
 
     /**
+     * The 7-day chase on a suspension nobody has settled.
+     *
+     * Client, 5 October 2026: *"remind the owner every 7 days."* Same channels
+     * as the suspension itself, to the business's owner (the reminder is about
+     * the certificate, like the expiry reminders). Names the permit and office
+     * it waits on when the cause was one; otherwise repeats the recorded reason.
+     */
+    public function outcomePermitStillSuspended(Permit $permit, int $days): void
+    {
+        $owner = $this->permitOwner($permit);
+        if (! $owner) {
+            return;
+        }
+        $permit->loadMissing('suspendedFor.department');
+        $for = $permit->suspendedFor;
+        $office = $for?->department?->name;
+        $why = $for !== null
+            ? "{$for->name} is still pending".($office ? " with {$office}" : '').'.'
+            : ($permit->suspension_reason ? "Reason: {$permit->suspension_reason}" : '');
+        $tail = $why !== '' ? " — {$why}" : '.';
+
+        $this->push(
+            $owner,
+            'decision',
+            'Business Permit still suspended',
+            "Your Business Permit {$permit->permit_number} has been suspended for {$days} days{$tail}",
+            "/permits/{$permit->id}",
+        );
+        $this->fanOut(
+            $owner,
+            "BizTrack: Business Permit {$permit->permit_number} suspended for {$days} days{$tail}",
+        );
+    }
+
+    /**
      * The suspension is over, either by itself or by BPLO lifting it.
      *
      * One method for both, because to the owner it is one event — their permit

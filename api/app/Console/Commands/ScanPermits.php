@@ -7,6 +7,7 @@ use App\Enums\ApplicationType;
 use App\Enums\PermitStatus;
 use App\Models\Permit;
 use App\Models\PermitExpiryNotice;
+use App\Models\PermitType;
 use App\Services\NotificationService;
 use App\Support\Audit;
 use Carbon\Carbon;
@@ -20,6 +21,12 @@ use Illuminate\Support\Facades\DB;
  *   1. Renewal reminders at 30 / 15 / 7 / 1 day before `valid_until`.
  *   2. Flip past-due active permits → expired (+ notify).
  *   3. Renewal-due nudge for permits that lapsed within the last 30 days.
+ *   4. A reminder every 7 days on a Business Permit still suspended (client,
+ *      5 October 2026: *"remind the owner every 7 days"*). Not on the ledger
+ *      below, which allows one row per kind: it repeats, so it is keyed on
+ *      `permits.suspension_reminded_at` instead — a send only when that is
+ *      null or 7+ days old, stamped as it goes. Cleared when the permit is
+ *      Active again, so a later suspension starts its own count.
  *
  * Two properties this command has to hold, because it runs unattended every
  * night against a register of thousands of permits:
@@ -83,6 +90,9 @@ class ScanPermits extends Command
      * renewed — instead of a duplicate.
      */
     private const RENEWAL_NUDGE_AFTER_DAYS = 7;
+
+    /** Days between suspension reminders, and before the first. */
+    private const SUSPENSION_REMINDER_DAYS = 7;
 
     public function handle(NotificationService $notify): int
     {
@@ -184,7 +194,27 @@ class ScanPermits extends Command
             }
         }
 
-        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s).");
+        // --- 4. Still suspended, every 7 days --------------------------------
+        // Whole days, like the rest of this scan: suspended on the 1st, first
+        // reminder on the 8th, next on the 15th — never on the 9th.
+        $due = $today->copy()->subDays(self::SUSPENSION_REMINDER_DAYS)->endOfDay();
+        $stillSuspended = $this->notifiable()
+            ->where('status', PermitStatus::Suspended->value)
+            ->whereHas('permitType', fn ($t) => $t->where('code', PermitType::OUTCOME_CODE))
+            ->whereNotNull('suspended_at')
+            ->where('suspended_at', '<=', $due)
+            ->where(fn ($q) => $q->whereNull('suspension_reminded_at')
+                ->orWhere('suspension_reminded_at', '<=', $due))
+            ->get();
+
+        $suspensionReminders = 0;
+        foreach ($stillSuspended as $permit) {
+            $permit->update(['suspension_reminded_at' => now()]);
+            $notify->outcomePermitStillSuspended($permit, (int) $permit->daysSuspended());
+            $suspensionReminders++;
+        }
+
+        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s), {$suspensionReminders} suspension reminder(s).");
 
         return self::SUCCESS;
     }
