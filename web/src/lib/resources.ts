@@ -1384,6 +1384,12 @@ export interface PermitFilters extends PageParams {
    * 5 October 2026: "after 30 days unresolved BPLO sees it in a list").
    */
   suspended_over_days?: number
+  /**
+   * Business Permits expired more than this many days with no renewal issued,
+   * no later permit and no renewal filed — BPLO's "not renewed" list [Ken,
+   * 5 October 2026].
+   */
+  not_renewed_over_days?: number
   /** Issued on or after this date (inclusive). */
   issued_from?: string
   /** Issued on or before this date — the whole of that day, inclusive. */

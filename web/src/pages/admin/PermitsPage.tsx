@@ -18,6 +18,7 @@ import {
   columnsFor,
   officeOf,
   permitCodeForDepartment,
+  withNotRenewedColumns,
   type OfficeCode,
   type PermitColumn,
 } from './permitColumns'
@@ -115,7 +116,17 @@ const SEARCH_DEBOUNCE_MS = 300
  * written since the business permit began being suspended when another office
  * refuses — comes with it.
  */
-type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'suspended_30' | 'revoked' | 'retired' | 'rejected' | 'superseded'
+type StatusFilter =
+  | ''
+  | 'active'
+  | 'expired'
+  | 'not_renewed_30'
+  | 'suspended'
+  | 'suspended_30'
+  | 'revoked'
+  | 'retired'
+  | 'rejected'
+  | 'superseded'
 
 /*
  * `suspended_30` is not a status: it asks `suspended_over_days=30` instead.
@@ -125,10 +136,19 @@ type StatusFilter = '' | 'active' | 'expired' | 'suspended' | 'suspended_30' | '
  */
 const SUSPENDED_LONG_DAYS = 30
 
+/*
+ * `not_renewed_30` is not a status either: it asks `not_renewed_over_days=30`,
+ * Business Permits expired over 30 days with no renewal [Ken, 5 October 2026].
+ * The owner's notices stop at 30 days, so this is where BPLO picks it up, with
+ * the actions it already has on each row (Change status).
+ */
+const NOT_RENEWED_DAYS = 30
+
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'expired', label: 'Expired' },
+  { value: 'not_renewed_30', label: `Not renewed over ${NOT_RENEWED_DAYS} days` },
   { value: 'suspended', label: 'Suspended' },
   { value: 'suspended_30', label: `Suspended over ${SUSPENDED_LONG_DAYS} days` },
   { value: 'revoked', label: 'Revoked' },
@@ -541,8 +561,9 @@ export function PermitsPage() {
     () =>
       permits.register({
         q: query || undefined,
-        status: status === 'suspended_30' ? undefined : status || undefined,
+        status: status === 'suspended_30' || status === 'not_renewed_30' ? undefined : status || undefined,
         suspended_over_days: status === 'suspended_30' ? SUSPENDED_LONG_DAYS : undefined,
+        not_renewed_over_days: status === 'not_renewed_30' ? NOT_RENEWED_DAYS : undefined,
         permit_type: choice === OTHER_OFFICES ? undefined : choice || undefined,
         exclude_permit_type: choice === OTHER_OFFICES ? 'BUSINESS' : undefined,
         retired,
@@ -613,17 +634,17 @@ export function PermitsPage() {
    * a selection the page had to invent on arrival.
    */
   const permitOnly = bploView && office !== 'BUSINESS'
-  const columns = useMemo(
-    () =>
-      permitOnly
-        ? columnsFor(office).filter(
-            // The certificate type only on the mixed list the Business Map links to
-            // (?office=all); on one office's tab every row is the same type.
-            (c) => PERMIT_ONLY_KEYS.has(c.key) || (office === '' && c.key === 'permit_type'),
-          )
-        : columnsFor(office),
-    [office, permitOnly],
-  )
+  const notRenewed = status === 'not_renewed_30'
+  const columns = useMemo(() => {
+    const base = permitOnly
+      ? columnsFor(office).filter(
+          // The certificate type only on the mixed list the Business Map links to
+          // (?office=all); on one office's tab every row is the same type.
+          (c) => PERMIT_ONLY_KEYS.has(c.key) || (office === '' && c.key === 'permit_type'),
+        )
+      : columnsFor(office)
+    return notRenewed ? withNotRenewedColumns(base) : base
+  }, [office, permitOnly, notRenewed])
 
   /*
    * Only the orderings whose column is on screen. BPLO's own table has no
@@ -780,7 +801,11 @@ export function PermitsPage() {
               }}
               filter={{
                 value: status,
-                options: STATUS_FILTERS.map(({ value, label }) => ({ value, label })),
+                // The not-renewed list is of Business Permits, so only for a
+                // reader who sees them: BPLO and the super admin.
+                options: STATUS_FILTERS.filter(
+                  (f) => f.value !== 'not_renewed_30' || locked === null || locked === 'BUSINESS',
+                ).map(({ value, label }) => ({ value, label })),
                 onChange: (v: string) => selectStatus(v as StatusFilter),
               }}
               filterFields={[
@@ -884,11 +909,13 @@ export function PermitsPage() {
           title={
             query
               ? 'No permits match your search'
-              : status
-                ? `No ${filterLabel.toLowerCase()} permits`
-                : narrowed > 0
-                  ? 'No permits match these filters'
-                  : 'No permits yet'
+              : notRenewed
+                ? `No permits not renewed over ${NOT_RENEWED_DAYS} days`
+                : status
+                  ? `No ${filterLabel.toLowerCase()} permits`
+                  : narrowed > 0
+                    ? 'No permits match these filters'
+                    : 'No permits yet'
           }
           description={
             query

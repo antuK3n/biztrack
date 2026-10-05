@@ -307,6 +307,32 @@ export const SHARED_COLUMNS: PermitColumn[] = [
 ]
 
 /*
+ * ── The "not renewed" list's two columns ───────────────────────────────────
+ *
+ * When it expired and how long ago [Ken, 5 October 2026]. They stand in for
+ * Valid until and Days to expiry while that list is open, including on BPLO's
+ * own table, which otherwise drops both (checklist item 17): on a list of
+ * lapsed permits the date and the days since ARE the row.
+ */
+export const NOT_RENEWED_COLUMNS: PermitColumn[] = [
+  { key: 'expired_on', label: 'Expired on', sort: 'valid_until', tnum: true, value: (r) => formatDate(r.valid_until) },
+  {
+    key: 'days_since_expiry',
+    label: 'Days since expiry',
+    tnum: true,
+    value: (r) =>
+      typeof r.days_until_expiry === 'number' && r.days_until_expiry < 0 ? String(-r.days_until_expiry) : null,
+  },
+]
+
+/** The columns with the list's two in place of the expiry pair, right after Status. */
+export function withNotRenewedColumns(columns: PermitColumn[]): PermitColumn[] {
+  const kept = columns.filter((c) => c.key !== 'valid_until' && c.key !== 'days')
+  const at = kept.findIndex((c) => c.key === 'status') + 1
+  return [...kept.slice(0, at), ...NOT_RENEWED_COLUMNS, ...kept.slice(at)]
+}
+
+/*
  * ── The office sheets ──────────────────────────────────────────────────────
  *
  * The part the client asked for by name: "mga finill outan kada offices

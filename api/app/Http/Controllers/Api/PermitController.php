@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
@@ -12,6 +14,7 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
+use App\Support\BusinessDate;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
@@ -212,6 +215,13 @@ class PermitController extends Controller
              */
             'suspended_over_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
             /*
+             * Business Permits expired more than N days with no renewal —
+             * BPLO's "not renewed" list [Ken, 5 October 2026]. The owner is
+             * sent notices for 30 days after expiry and then nothing, so
+             * after that it is BPLO's to chase.
+             */
+            'not_renewed_over_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
+            /*
              * Issuance window, for the report an office is asked for at the
              * end of a month. Both ends optional — "everything since March" is
              * as ordinary a question as a closed range.
@@ -284,6 +294,50 @@ class PermitController extends Controller
             $query->where('status', PermitStatus::Suspended->value)
                 ->whereNotNull('suspended_at')
                 ->where('suspended_at', '<=', now()->startOfDay()->subDays($over)->endOfDay());
+        }
+
+        /*
+         * Not renewed: a Business Permit that lapsed more than N days ago and
+         * has nothing after it. Four things count as "something after it", and
+         * any one takes the permit off the list:
+         *
+         *  - a permit issued as its renewal (`prior_permit_id`);
+         *  - a later Business Permit for the same business, however it was
+         *    filed — a business that came back on a New Application is not
+         *    trading without one;
+         *  - a renewal filing naming it that was submitted and not refused or
+         *    cancelled — ScanPermits' rule for "filed", which also stops the
+         *    owner's notices. A draft is not a filing;
+         *  - the business being retired: it is off the register.
+         *
+         * Expired only. Retired, revoked and superseded are final words on a
+         * permit already; this list is the ones nobody has had the last word on.
+         * Days are counted from BusinessDate's today, as `days_until_expiry` is,
+         * so the list and the row's own count agree.
+         */
+        if ($over = $request->integer('not_renewed_over_days')) {
+            $query->where('status', PermitStatus::Expired->value)
+                ->whereHas('permitType', fn ($t) => $t->where('code', PermitType::OUTCOME_CODE))
+                ->whereHas('business')
+                ->whereDate('valid_until', '<', BusinessDate::today()->subDays($over)->toDateString())
+                ->whereDoesntHave('renewals')
+                ->whereNotExists(fn ($later) => $later->selectRaw('1')
+                    ->from('permits as later')
+                    ->whereColumn('later.business_id', 'permits.business_id')
+                    ->whereColumn('later.permit_type_id', 'permits.permit_type_id')
+                    ->whereColumn('later.valid_until', '>', 'permits.valid_until'))
+                ->whereNotExists(fn ($filed) => $filed->selectRaw('1')
+                    ->from('applications')
+                    ->whereNull('applications.deleted_at')
+                    ->where('applications.application_type', ApplicationType::Renewal->value)
+                    ->whereNotNull('applications.submitted_at')
+                    ->whereNotIn('applications.status', [ApplicationStatus::Rejected->value, ApplicationStatus::Cancelled->value])
+                    ->where(fn ($names) => $names
+                        ->whereColumn('applications.prior_permit_id', 'permits.id')
+                        ->orWhereExists(fn ($pivot) => $pivot->selectRaw('1')
+                            ->from('application_prior_permits')
+                            ->whereColumn('application_prior_permits.application_id', 'applications.id')
+                            ->whereColumn('application_prior_permits.permit_id', 'permits.id'))));
         }
 
         /*
