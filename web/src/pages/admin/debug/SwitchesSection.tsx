@@ -209,12 +209,12 @@ function PretendDate({
   function submit(event: FormEvent) {
     event.preventDefault()
     if (!value) return
-    onSet(value, `Renewal dates are now simulated as ${formatCalendarDate(value)}.`)
+    onSet(value, `Renewal dates are now set to ${formatCalendarDate(value)}.`)
   }
 
   return (
     <SubCard
-      title="Pretend date for renewals"
+      title="Date for renewals"
       action={
         current ? (
           <button
@@ -240,7 +240,7 @@ function PretendDate({
       <p className="mt-3 text-sm text-ink">
         {current ? (
           <>
-            <span className="font-semibold">Simulated as {formatCalendarDate(current)}.</span>{' '}
+            <span className="font-semibold">Set to {formatCalendarDate(current)}.</span>{' '}
             <span className="text-ink-muted">
               The server&apos;s real date is {formatCalendarDate(s.pretend_date.real_today)}.
             </span>
@@ -254,7 +254,7 @@ function PretendDate({
       <form onSubmit={submit} className="mt-3 flex flex-wrap items-end gap-3">
         <div>
           <label htmlFor={inputId} className="mb-1 block text-xs font-semibold text-ink">
-            Pretend today is
+            Today is
           </label>
           <input
             id={inputId}

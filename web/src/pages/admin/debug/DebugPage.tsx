@@ -66,7 +66,7 @@ const SECTIONS: DebugSection[] = [
     id: 'switches',
     title: 'System switches',
     summary:
-      'Sign-in codes, the captcha, the office-hours notice and a pretend date for renewals. Each overrides the server’s own setting from the next request on.',
+      'Sign-in codes, the captcha, the office-hours notice and a date for renewals. Each overrides the server’s own setting from the next request on.',
     body: () => <SwitchesSection />,
   },
   {

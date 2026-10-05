@@ -107,12 +107,12 @@ test('a pretend date puts a banner over every signed-in screen until it is clear
   await page.setViewportSize({ width: 1280, height: 900 })
   await openSwitches(page)
 
-  await page.getByLabel('Pretend today is').fill('2027-01-25')
+  await page.getByLabel('Today is').fill('2027-01-25')
   await page.getByRole('button', { name: 'Use this date' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'Renewal dates are now simulated as January 25, 2027.' }))
+  await expect(page.getByRole('status').filter({ hasText: 'Renewal dates are now set to January 25, 2027.' }))
     .toBeVisible()
   // The Debug page's own screen says it at once, without waiting for a poll.
-  const banner = page.getByRole('status').filter({ hasText: 'Renewal dates are being simulated as January 25, 2027.' })
+  const banner = page.getByRole('status').filter({ hasText: 'Renewal dates are set to January 25, 2027.' })
   await expect(banner).toBeVisible()
 
   // So does an owner's, and an office's.
@@ -122,7 +122,7 @@ test('a pretend date puts a banner over every signed-in screen until it is clear
     await other.setViewportSize({ width: account === 'owner' ? 390 : 1280, height: 844 })
     await other.goto(account === 'owner' ? '/permits' : '/staff/dashboard')
     await expect(
-      other.getByRole('status').filter({ hasText: 'Renewal dates are being simulated as January 25, 2027.' }),
+      other.getByRole('status').filter({ hasText: 'Renewal dates are set to January 25, 2027.' }),
     ).toBeVisible({ timeout: 30_000 })
     await shot(other, `pretend-date-banner-${account}`)
     await context.close()

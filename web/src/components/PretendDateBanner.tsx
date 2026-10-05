@@ -4,8 +4,9 @@ import { formatCalendarDate } from '../lib/format'
 import { CalendarIcon } from './icons'
 
 /*
- * "Renewal dates are being simulated as …", over every signed-in screen while
- * the Debug page's pretend date is set [Ken, 2026-10-04].
+ * "Renewal dates are set to …", over every signed-in screen while the Debug
+ * page's pretend date is set [Ken, 2026-10-04]. It read "are being simulated
+ * as" until Ken asked for every "simulated" on screen to go [2026-10-05].
  *
  * The pretend date changes what a renewal costs — a late surcharge appears, a
  * permit shows as expired — so nobody looking at a screen may mistake it for
@@ -55,7 +56,7 @@ export function PretendDateBanner({ className = '' }: { className?: string }) {
     >
       <CalendarIcon size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-amber-800" />
       <p>
-        <span className="font-semibold">Renewal dates are being simulated as {formatCalendarDate(date)}.</span>{' '}
+        <span className="font-semibold">Renewal dates are set to {formatCalendarDate(date)}.</span>{' '}
         Renewal deadlines, late surcharges and the days left on permits use that date; everything
         else is real.
       </p>
