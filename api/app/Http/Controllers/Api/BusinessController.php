@@ -11,6 +11,7 @@ use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessOwner;
+use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
@@ -442,6 +443,23 @@ class BusinessController extends Controller
         if (! $renamed && ! $relined) {
             return;
         }
+
+        /*
+         * A business holding a live Business Permit changes its name or line
+         * by an amendment filing, which is reviewed and charged, and not by
+         * rewriting the register in place [Ken, 5 October 2026]. Suspended
+         * counts as live: it comes back. Except while a filing is RETURNED
+         * to the owner — a renewal sent back about the name is corrected
+         * here, and that path has to keep working. An amendment never comes
+         * through this door; approveAmendment() writes the register itself.
+         */
+        $returned = $business->applications()->where('status', ApplicationStatus::Returned)->exists();
+        $holdsPermit = $business->permits()
+            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->whereIn('status', [PermitStatus::Active, PermitStatus::Suspended])
+            ->exists();
+
+        abort_if($holdsPermit && ! $returned, 422, 'Use an amendment to change this.');
 
         $underReview = $business->applications()
             ->whereNotIn('status', [ApplicationStatus::Draft, ApplicationStatus::Returned])

@@ -64,6 +64,7 @@ function lockedFiling(): Application
 }
 
 const LOCKED_SENTENCE = 'You can change this once the filing is returned to you.';
+const AMEND_SENTENCE = 'Use an amendment to change this.';
 
 it('refuses a rename or a new line of business while BPLO reads the filing', function () {
     $app = lockedFiling();
@@ -85,8 +86,43 @@ it('refuses a rename after payment, while the offices hold the filing', function
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
+    // Paying released the Business Permit, so the amendment is the way now.
     test()->putJson("/api/v1/businesses/{$app->business_id}", lockedPayload($app->business, ['name' => 'Renamed After Payment']))
-        ->assertStatus(422)->assertJsonPath('message', LOCKED_SENTENCE);
+        ->assertStatus(422)->assertJsonPath('message', AMEND_SENTENCE);
+});
+
+/*
+ * A business holding a live Business Permit is renamed, or moves line, by an
+ * amendment filing - which is reviewed and charged - and not by rewriting
+ * the register in place [Ken, 5 October 2026].
+ */
+it('refuses a rename or a new line while the business holds an active or suspended permit', function () {
+    $app = lockedFiling();
+    bploApprovesForm($app);
+    authAs('owner@biztrack.local');
+    test()->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+    // Completed: nothing is under review any more.
+    Application::whereKey($app->id)->update(['status' => 'approved', 'decided_at' => now()]);
+    $business = $app->business->fresh();
+    $permit = $business->permits()->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))->firstOrFail();
+    expect($permit->status->value)->toBe('active');
+    $otherLine = PsicCode::whereKeyNot($business->lines()->value('psic_code_id'))->firstOrFail();
+
+    test()->putJson("/api/v1/businesses/{$business->id}", lockedPayload($business, ['name' => 'Renamed Without Amendment']))
+        ->assertStatus(422)->assertJsonPath('message', AMEND_SENTENCE);
+    test()->putJson("/api/v1/businesses/{$business->id}", lockedPayload($business, [
+        'lines' => [['psic_code_id' => $otherLine->id, 'capitalization' => 100000]],
+    ]))->assertStatus(422)->assertJsonPath('message', AMEND_SENTENCE);
+
+    $permit->forceFill(['status' => 'suspended'])->save();
+    test()->putJson("/api/v1/businesses/{$business->id}", lockedPayload($business, ['name' => 'Renamed While Suspended']))
+        ->assertStatus(422)->assertJsonPath('message', AMEND_SENTENCE);
+
+    // The unchanged business still saves, and a permit that has ended frees the name.
+    test()->putJson("/api/v1/businesses/{$business->id}", lockedPayload($business))->assertOk();
+    $permit->forceFill(['status' => 'expired'])->save();
+    test()->putJson("/api/v1/businesses/{$business->id}", lockedPayload($business, ['name' => 'Renamed After Expiry']))
+        ->assertOk();
 });
 
 it('still saves the unchanged business under review, and a rename once it is returned', function () {

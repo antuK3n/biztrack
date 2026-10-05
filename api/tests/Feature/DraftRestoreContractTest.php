@@ -113,14 +113,29 @@ it('keeps the permit selection on a reopened draft so its office form still appe
 });
 
 it('restores the free-text line of business typed against "Other (not listed)"', function () {
-    $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
+    /*
+     * A business of the owner's with no permit yet. Nena's store holds a live
+     * Business Permit, and a change of line there is refused in favour of an
+     * amendment (BusinessLockedUnderReviewTest); what is under test here is
+     * the round trip of the free text, on a business the owner may re-line.
+     */
+    $owned = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
+    $business = Business::findOrFail($this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', [
+            'name' => 'Bamboo Weavers',
+            'registration_type' => 'DTI',
+            'registration_number' => 'DTI-2026-0991',
+            'tin' => '123456789',
+            'address' => ['line1' => '12 Rizal Ave', 'barangay_id' => $owned->address->barangay_id],
+            'lines' => [['psic_code_id' => PsicCode::where('code', '!=', '00000')->firstOrFail()->id, 'capitalization' => 100000]],
+        ])->assertCreated()->json('data.id'));
     $otherPsic = PsicCode::where('code', '00000')->firstOrFail();
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->putJson("/api/v1/businesses/{$business->id}", [
             'name' => $business->name,
             'registration_type' => 'sole_proprietorship',
-            'registration_number' => 'DTI-2026-0001',
+            'registration_number' => 'DTI-2026-0991',
             'tin' => '123456789',
             'is_rented' => false,
             'address' => [
