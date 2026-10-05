@@ -22,6 +22,8 @@ cp api/.env.example api/.env.production
 #                      Cloud Server mode; a blank URL means api.sms-gate.app. SMS_DRIVER=log
 #                      (the default) writes texts to storage/logs/sms.log instead.
 #                      Check it after deploy: php artisan biztrack:sms-check 09XXXXXXXXX
+#                      Keep SMS_DRIVER=log on a box seeded with the demo storyline: its
+#                      accounts share one real-looking number (09171234567).
 #   PAYMENT_DRIVER=simulated   DEMO_PASSWORD=<demo pw>
 #   GEMINI_KEY=<key>   optional; blank = the chatbot answers from its rules alone.
 #                      Check it after deploy: php artisan biztrack:chatbot-check

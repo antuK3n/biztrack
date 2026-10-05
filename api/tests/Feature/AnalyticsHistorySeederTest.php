@@ -8,6 +8,7 @@ use App\Models\Permit;
 use App\Support\Spc;
 use Database\Seeders\AnalyticsHistorySeeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
 /*
@@ -404,4 +405,15 @@ it('gives every office enough completed reviews per week to be charted', functio
     );
 
     AnalyticsHistorySeeder::purge();
+});
+
+it('leaves no text or e-mail on the queue for its invented owners', function () {
+    // A database queue, as on a server: anything queued here a worker would
+    // later send for real, to random 09 numbers.
+    config(['queue.default' => 'database']);
+    Http::preventStrayRequests();
+
+    shortHistorySeeder()->run();
+
+    expect(DB::table('jobs')->count())->toBe(0);
 });

@@ -792,10 +792,16 @@ class AnalyticsHistorySeeder extends Seeder
      * fans out on every transition, so a run of this size would append tens of
      * thousands of lines to laravel.log for no one's benefit. The in-app
      * notification rows are still written — those are register history.
+     *
+     * The queue is made `sync` as well, because texts and owner e-mails are
+     * queued jobs: on a database queue the worker would send them later with
+     * the real drivers, and these invented owners carry random 09 numbers,
+     * any of which may be somebody's phone once SMS_DRIVER is smsgate. Run
+     * here, the jobs meet the array mailer and the silent channel below.
      */
     private function quietOutboundChannels(): void
     {
-        config(['mail.default' => 'array']);
+        config(['mail.default' => 'array', 'queue.default' => 'sync']);
         app()->bind(SmsChannel::class, fn () => new class implements SmsChannel
         {
             public function send(string $to, string $message): void {}
