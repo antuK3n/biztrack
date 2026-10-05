@@ -3,6 +3,7 @@
 use App\Enums\AssignmentStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -61,6 +62,34 @@ it('closes the other offices’ open reviews when BPLO rejects the filing', func
         // BPLO's own review was completed before the rejection and stays so.
         ->and(ApplicationAssignment::where('application_id', $appId)
             ->where('status', AssignmentStatus::Completed->value)->count())->toBe(1);
+});
+
+/*
+ * Approve and reject already refused a decided filing; return did not, so CHO
+ * could flip its row to Returned on a rejected filing and the owner was told
+ * to revise a permit on a filing that is over [Ken, 5 October 2026].
+ */
+it('refuses an office’s return once BPLO has rejected the filing', function () {
+    $appId = scopedAssignmentFiling('Returned After Rejection'); // BPLO done, CHO open
+    $cho = ApplicationAssignment::findOrFail(choAssignmentId($appId));
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/reject", ['reason' => 'Fake registration.'])
+        ->assertOk();
+    $noticesBefore = AppNotification::where('user_id', Application::find($appId)->applicant_user_id)->count();
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$cho->id}/return", ['remarks' => 'Fix the sanitary sheet.'])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This application has been decided. Its permits can no longer be acted on.');
+
+    $row = DB::table('application_permit_types')
+        ->where('application_id', $appId)
+        ->where('permit_type_id', PermitType::where('code', 'SANITARY')->value('id'))
+        ->first();
+    expect($row->status)->not->toBe('returned')
+        ->and(AppNotification::where('user_id', Application::find($appId)->applicant_user_id)->count())
+        ->toBe($noticesBefore);
 });
 
 it('closes BPLO’s open review when the applicant cancels', function () {

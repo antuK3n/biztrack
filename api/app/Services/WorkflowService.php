@@ -5460,6 +5460,19 @@ class WorkflowService
         array $notes = [],
     ): void {
         $app = $assignment->application;
+
+        /*
+         * Approve and reject refuse a decided filing; return did not, so an
+         * office could flip its row to Returned on a filing BPLO had rejected,
+         * and the owner was told to revise a permit on a filing that is over
+         * [Ken, 5 October 2026]. Rejected only: that is the case Ken ruled on.
+         */
+        if ($app->status === ApplicationStatus::Rejected) {
+            throw ValidationException::withMessages([
+                'status' => ['This application has been decided. Its permits can no longer be acted on.'],
+            ]);
+        }
+
         // The BPLO branch below looks a permit up by code on this collection;
         // `loadMissing` so a caller that did not eager-load gets the rows rather
         // than a silent miss that falls through to a whole-form return.
