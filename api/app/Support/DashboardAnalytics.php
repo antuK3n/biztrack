@@ -9,6 +9,7 @@ use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Models\Business;
+use App\Models\PermitType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -247,6 +248,15 @@ final class DashboardAnalytics
             'officer_activity' => self::officerActivityFacts($windowStart, $now, $scope),
             'map' => self::mapFacts($today, $scope),
             'business_movement' => self::movementFacts($windowStart, $now, $scope),
+            /*
+             * The coming January's Business Permit renewals (RenewalForecast).
+             * Null for an office that does not issue the Business Permit: its
+             * renewals are BPLO's, and AnalyticsOffice counts an office's
+             * permits as the types it issues.
+             */
+            'renewal_forecast' => $scope === null || in_array(self::businessPermitTypeId(), $scope['permit_type_ids'], true)
+                ? RenewalForecast::dataset($today)
+                : null,
         ];
     }
 
@@ -307,6 +317,14 @@ final class DashboardAnalytics
             ->orWhereIn($businessIdColumn, DB::table('permits')
                 ->select('permits.business_id')
                 ->whereIn('permits.permit_type_id', $scope['permit_type_ids'] === [] ? [0] : $scope['permit_type_ids'])));
+    }
+
+    /** The Business Permit's type id, or null on a register without one. */
+    private static function businessPermitTypeId(): ?int
+    {
+        $id = DB::table('permit_types')->where('code', PermitType::OUTCOME_CODE)->value('id');
+
+        return $id === null ? null : (int) $id;
     }
 
     /**
@@ -373,6 +391,11 @@ final class DashboardAnalytics
             // Absent from snapshots stored before the panel moved here; an empty
             // series renders as "nothing on record" until the next refresh.
             'business_movement' => self::computeMovement($dataset['business_movement'] ?? []),
+            // Null out of BPLO's scope, and on a fixture or snapshot written
+            // before the panel existed.
+            'renewal_forecast' => isset($dataset['renewal_forecast'])
+                ? RenewalForecast::compute($dataset['renewal_forecast'])
+                : null,
         ];
     }
 

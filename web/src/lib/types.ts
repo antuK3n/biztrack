@@ -2335,6 +2335,26 @@ export interface MapPoint {
   permit_state: 'active' | 'lapsed'
 }
 
+export type RenewalOutcome = 'on_time' | 'late' | 'not_renewed'
+
+export interface RenewalForecast {
+  /** The 31 December the permits expire on, and the last penalty-free day after it. */
+  expires_on: string
+  on_time_until: string
+  horizon_days: number
+  /** Business Permits expiring on `expires_on`. */
+  permits: number
+  /** Past terms the estimate learned from. */
+  history: number
+  history_outcomes: Record<RenewalOutcome, number>
+  /** Why there is no estimate, or null when there is one. */
+  unavailable: 'no_permits' | 'thin_history' | null
+  /** Expected permits per outcome, whole numbers that add up to `permits`. */
+  expected: Record<RenewalOutcome, number> | null
+  shares: Record<RenewalOutcome, number> | null
+  barangays: { barangay: string; not_renewed: number; permits: number }[]
+}
+
 export interface DashboardReport {
   generated_at: string
   window_months: number
@@ -2385,6 +2405,12 @@ export interface DashboardReport {
     registered: number
     closed: number
   }
+  /*
+   * The coming January's Business Permit renewals, estimated
+   * (App\Support\RenewalForecast). Null for an office that does not issue the
+   * Business Permit; absent on a snapshot stored before the panel existed.
+   */
+  renewal_forecast?: RenewalForecast | null
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
   top_lines_of_business: {
     rows: LineOfBusinessRow[]

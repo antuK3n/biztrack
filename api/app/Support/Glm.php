@@ -8,10 +8,10 @@ namespace App\Support;
  * The fitted half of Renewal Risk used to be computed elsewhere, by a statistics
  * runtime this project shelled out to over HTTP, and then here, read by
  * RenewalModelAnalytics. That screen and its model were removed (checklist
- * 2026-09-27, item 6), so nothing in the app calls this class today. It is kept
- * with its unit tests, as Des is, because it is a general, tested library rather
- * than part of the removed screen; delete it with RenewalModelGlmTest if nothing
- * has picked it up by the next clean-up.
+ * 2026-09-27, item 6) and this class was kept with its unit tests, as Des is,
+ * because it is a general, tested library rather than part of the removed
+ * screen. RenewalForecast picked it up again (5 October 2026): the dashboard's
+ * renewal estimate is two of these fits.
  *
  * ── WHY THIS IS SMALL, AND WHY IT IS ALLOWED TO BE ──────────────────────────
  *
@@ -36,8 +36,9 @@ namespace App\Support;
  * No rank-deficiency recovery. If two columns are collinear the normal equations
  * are singular and binomial() returns null rather than silently dropping a column
  * and reporting a table with a term missing from it. The caller's job is to not
- * ask: RenewalModelAnalytics folds thin factor levels and drops constant terms
- * BEFORE it gets here, and names what it dropped in the payload. A fit that
+ * ask: RenewalForecast drops a fact that never varies BEFORE it gets here, as
+ * the removed RenewalModelAnalytics folded thin levels and dropped constant
+ * terms and named what it dropped. A fit that
  * quietly repaired its own design matrix would produce a coefficient table that
  * is complete-looking and wrong, which is the failure mode this whole feature is
  * arranged to avoid.

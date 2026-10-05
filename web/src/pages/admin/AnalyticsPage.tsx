@@ -34,6 +34,7 @@ import type {
   LineOfBusinessRow,
   MapPoint,
   RankedShareRow,
+  RenewalForecast,
   StageRow,
 } from '../../lib/types'
 import { AnalyticsError } from './AnalyticsError'
@@ -957,6 +958,83 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
   )
 }
 
+/* ── Renewal Estimate ──────────────────────────────────────────────────── */
+
+/*
+ * The coming January's Business Permit renewals: each permit's chance of
+ * renewing on time, late or not at all, summed (App\Support\RenewalForecast).
+ * An estimate, and labelled as one; the arithmetic and what it learns from are
+ * on the server. Nothing is drawn when the history is too thin to learn from —
+ * a made-up number would look exactly like a real one.
+ */
+function RenewalForecastPanel({ forecast }: { forecast: RenewalForecast }) {
+  const { expected, shares } = forecast
+
+  if (forecast.unavailable !== null || expected === null || shares === null) {
+    return (
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
+        {forecast.unavailable === 'no_permits'
+          ? `No Business Permit expires on ${dateLabel(forecast.expires_on)}.`
+          : 'Not enough renewal history yet to estimate this.'}
+      </ProtoCard>
+    )
+  }
+
+  return (
+    <>
+      <div
+        className={`grid items-start gap-4 ${forecast.barangays.length > 0 ? 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}`}
+      >
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard
+            value={num(expected.on_time)}
+            label={`On time (by ${dateLabel(forecast.on_time_until)})`}
+            detail={pct(shares.on_time)}
+          />
+          <StatCard value={num(expected.late)} label="Late" detail={pct(shares.late)} />
+          <StatCard value={num(expected.not_renewed)} label="Not renewed" detail={pct(shares.not_renewed)} />
+        </div>
+
+        {forecast.barangays.length > 0 && (
+          <ProtoCard className="overflow-hidden">
+            <table className="w-full text-left">
+              <caption className="px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                Most expected non-renewals
+              </caption>
+              <thead>
+                <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+                  <th scope="col" className="px-4 py-2 font-semibold">Barangay</th>
+                  <th scope="col" className="px-3 py-2 text-right font-semibold">Expected not renewed</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Permits due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecast.barangays.map((row) => (
+                  <tr key={row.barangay} className="border-b border-line/60 last:border-0">
+                    <th scope="row" className="px-4 py-1.5 text-[14px] font-normal text-ink">
+                      {row.barangay}
+                    </th>
+                    <td className="tnum px-3 py-1.5 text-right text-[14px] font-semibold text-ink">
+                      {num(row.not_renewed)}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-right text-[14px] text-ink-secondary">
+                      {num(row.permits)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ProtoCard>
+        )}
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
+        Estimated from how {num(forecast.history)} past permits were renewed, by the business’s years with a
+        permit and whether its last renewal was late.
+      </p>
+    </>
+  )
+}
+
 /* ── New and Closed Businesses ─────────────────────────────────────────── */
 
 /*
@@ -1802,6 +1880,26 @@ export function AnalyticsPage() {
               </SectionHeading>
               <ExpiryPanel report={data} />
             </section>
+
+            {/*
+              BPLO's and the whole city's only: the Business Permit is BPLO's,
+              so an office that does not issue it is sent null and gets no
+              section [Ken, 5 October 2026: one panel, no new page].
+            */}
+            {data.renewal_forecast && (
+              <section>
+                <SectionHeading
+                  note={
+                    data.renewal_forecast.permits > 0
+                      ? `${num(data.renewal_forecast.permits)} Business Permit${data.renewal_forecast.permits === 1 ? '' : 's'} expiring ${dateLabel(data.renewal_forecast.expires_on)}`
+                      : undefined
+                  }
+                >
+                  Renewal Estimate
+                </SectionHeading>
+                <RenewalForecastPanel forecast={data.renewal_forecast} />
+              </section>
+            )}
 
             <section>
               <SectionHeading note={trailing} metric="business_movement">
