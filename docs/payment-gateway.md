@@ -9,7 +9,7 @@ BizTrack takes a permit payment one of two ways. A switch picks which one
 | `kwikpay` | Chooses GCash, Maya, QR Ph or GoTyme. They are sent to the payment page, or shown a QR code to scan, and finish paying in their own app. The pay screen waits and shows **Paid** once the payment is confirmed. If the payment fails, it says so and offers **Try again**. | KwikPay (merchant docs: `merchant-api-docs-en.md`). Deposits only: no payouts, no USDT. |
 
 A second switch decides **what KwikPay collects** for a new payment: a
-**test charge** (₱1.00 unless `KWIKPAY_CHARGE_OVERRIDE` names another amount)
+**test charge** (₱50.00 unless `KWIKPAY_CHARGE_OVERRIDE` names another amount)
 or **the full bill**. The bill, the payment record and the receipt always keep
 the real assessed amount; only the figure sent to KwikPay changes. The thesis
 defense runs on the test charge, and the super admin switches to the full bill
@@ -20,7 +20,7 @@ payment opened while the switch was on is still confirmed after it is turned
 off: its callback is still accepted and reconciliation still asks about it.
 Each payment records the path that made it in `payments.gateway`, and what
 KwikPay was asked to collect in `payments.gateway_amount`. A confirmation is
-checked against that amount, so a ₱1.00 order still settles for ₱1.00 after
+checked against that amount, so a ₱50.00 order still settles for ₱50.00 after
 the charge is switched to the full bill, and a full-bill order still needs the
 full bill after it is switched back.
 
@@ -41,7 +41,7 @@ All are listed in `api/.env.example` with empty values.
 | `KWIKPAY_CALLBACK_IPS` | Optional comma-separated allowlist for callbacks. KwikPay's docs give `34.21.238.122`. Leave it empty unless trusted proxies are set up (see §6). The signature is always checked either way. | empty (not enforced) |
 | `KWIKPAY_TIMEOUT` | Seconds to wait for KwikPay. | `15` |
 | `KWIKPAY_FAKE` | Turns on the practice KwikPay (§4). Only works when `APP_ENV` is `local` or `testing`. | `false` |
-| `KWIKPAY_CHARGE_OVERRIDE` | Two jobs. It is the **test amount**: what KwikPay collects while the charge switch says "test charge" (₱1.00 when it is empty or not a positive number). And until somebody sets the charge switch, it is the **default**: a positive amount means the test charge, empty means the full bill, exactly as before the switch existed. Once the switch is set (Debug page, API or artisan), the switch decides. The bill, the payment record and the receipt keep the real assessed amount either way. | empty (full bill; test amount ₱1.00) |
+| `KWIKPAY_CHARGE_OVERRIDE` | Two jobs. It is the **test amount**: what KwikPay collects while the charge switch says "test charge" (₱50.00 when it is empty or not a positive number). And until somebody sets the charge switch, it is the **default**: a positive amount means the test charge, empty means the full bill, exactly as before the switch existed. Once the switch is set (Debug page, API or artisan), the switch decides. The bill, the payment record and the receipt keep the real assessed amount either way. | empty (full bill; test amount ₱50.00) |
 
 The two switches themselves are not env settings. They live in the `settings`
 table (`payment_gateway` and `kwikpay_charge`), so they change on a running
@@ -72,7 +72,7 @@ shows the switches as pairs of cards:
 - **How owners pay:** Simulated or KwikPay. When KwikPay cannot be turned on,
   the page lists the settings missing on the server. **Test connection**
   makes one signed call to KwikPay and shows the answer.
-- **What KwikPay collects:** "₱1.00 test charge" or "The full bill". Switching
+- **What KwikPay collects:** "₱50.00 test charge" or "The full bill". Switching
   to the full bill asks for confirmation first, because owners are then
   charged real money. Switching back to the test charge asks nothing.
 - **What marks a payment paid:** "Only the signed confirmation" (the
@@ -125,7 +125,7 @@ php artisan biztrack:payment-gateway status       # mode, charge, config check, 
 php artisan biztrack:payment-gateway test         # one signed call to KwikPay /api/me
 php artisan biztrack:payment-gateway on           # → kwikpay (refused if credentials are missing)
 php artisan biztrack:payment-gateway off          # → simulated
-php artisan biztrack:payment-gateway test-charge  # KwikPay collects the test amount (₱1.00)
+php artisan biztrack:payment-gateway test-charge  # KwikPay collects the test amount (₱50.00)
 php artisan biztrack:payment-gateway full-charge  # KwikPay collects the full bill
 php artisan biztrack:payment-gateway callback-only  # only the signed callback marks a payment paid (default)
 php artisan biztrack:payment-gateway trust-query  # KwikPay's /api/query answer settles payments too
@@ -147,7 +147,7 @@ same way, behind the Debug page's gate instead.
 ### What the owner sees
 
 While payments go through KwikPay and the test charge is on, the pay screen
-says before the owner pays: "Test charge. You will be charged ₱1.00 for this
+says before the owner pays: "Test charge. You will be charged ₱50.00 for this
 bill instead of ₱3,596.00. The bill and your receipt keep the full amount."
 The waiting screen shows the amount the payment was opened for, with "Test
 charge. Your bill of ₱3,596.00 is recorded in full." The owner's API gets
@@ -305,7 +305,7 @@ Ask the KwikPay account manager for these before switching on:
 
 ## 6. Presentation checklist
 
-The defense takes real payments through KwikPay at ₱1. Run these on the
+The defense takes real payments through KwikPay at ₱50. Run these on the
 **server being presented** (for the tunnel, in `biztrack-demo/api`), because
 both switches and the Debug page's flag are stored in that server's database.
 
@@ -313,12 +313,12 @@ both switches and the Debug page's flag are stored in that server's database.
       defense, so the super admin has the Debug page. It closes by itself;
       `off` closes it sooner.
 - [ ] On the Debug page, under **Payments**: **KwikPay** is on, and
-      **₱1.00 test charge** is on. (Or from a terminal:
+      **₱50.00 test charge** is on. (Or from a terminal:
       `biztrack:payment-gateway on` and `biztrack:payment-gateway test-charge`,
-      then `status` says **KwikPay collects: a ₱1.00 test charge**.)
+      then `status` says **KwikPay collects: a ₱50.00 test charge**.)
 - [ ] **Test connection** says "Connected".
 - [ ] The owner's pay screen shows **GCash, Maya, QR Ph, GoTyme** and the
-      "Test charge" note naming ₱1.00.
+      "Test charge" note naming ₱50.00.
 - [ ] "Online payments still waiting" is 0, or each waiting one is
       understood. Switching does not cancel them.
 - [ ] `KWIKPAY_FAKE` is not set on the presented server unless the practice
@@ -326,7 +326,7 @@ both switches and the Debug page's flag are stored in that server's database.
 
 If a panelist asks to see the real amount: Debug page → **The full bill** →
 **Charge the full bill**. The next payment collects the whole bill; one
-already started still asks for ₱1.00. Switch back to **₱1.00 test charge**
+already started still asks for ₱50.00. Switch back to **₱50.00 test charge**
 afterwards.
 
 To show the old no-money flow instead, switch **How owners pay** to

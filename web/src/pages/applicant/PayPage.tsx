@@ -38,7 +38,7 @@ import type { FeeAssessment, Payment, PaymentMethod, PaymentOptions } from '../.
  * ── The test charge ───────────────────────────────────────────────────────
  *
  * While the super admin's charge switch says `test`, the payment service
- * collects ₱1.00 however large the bill (docs/payment-gateway.md). The page
+ * collects ₱50.00 however large the bill (docs/payment-gateway.md). The page
  * does not say so: it behaves as in production (Ken, 6 October 2026). Once a
  * payment is open, the waiting screen shows what that payment asks for
  * (`gateway_amount`), which a later switch does not change.

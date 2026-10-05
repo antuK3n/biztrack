@@ -20,7 +20,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * what KwikPay was asked to collect from them for this payment. It differs
  * from `amount` only while the super admin's charge switch says `test`, and
  * the waiting screen shows it so "pay ₱2,000.00" is not on screen while the
- * owner's app asks for ₱1.00. Null on a simulated payment, which collects
+ * owner's app asks for ₱50.00. Null on a simulated payment, which collects
  * nothing.
  */
 class PaymentResource extends JsonResource

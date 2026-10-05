@@ -13,7 +13,7 @@ use Illuminate\Console\Command;
  *                whether KwikPay is configured
  *   on           switch to KwikPay — refused while its credentials are missing
  *   off          switch to simulated
- *   test-charge  KwikPay collects the test amount (₱1.00 unless
+ *   test-charge  KwikPay collects the test amount (₱50.00 unless
  *                KWIKPAY_CHARGE_OVERRIDE names another); the bill, receipt and
  *                records keep the real amount
  *   full-charge  KwikPay collects the full bill

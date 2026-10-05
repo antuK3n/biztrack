@@ -1064,22 +1064,22 @@ it('allows at most three set-asides per application per hour', function () {
  */
 
 it('asks KwikPay for the override amount while the bill and payment keep the real amount', function () {
-    config(['payments.kwikpay.charge_override' => '1.00']);
+    config(['payments.kwikpay.charge_override' => '50.00']);
     $app = kpFiling();
     $payment = kpOpen($app);
 
-    expect((float) $payment->amount)->toBeGreaterThan(1.0)
-        ->and((float) $payment->gateway_amount)->toBe(1.0);
-    Http::assertSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/transfer') && $r['amount'] === '1.00');
+    expect((float) $payment->amount)->toBeGreaterThan(50.0)
+        ->and((float) $payment->gateway_amount)->toBe(50.0);
+    Http::assertSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/transfer') && $r['amount'] === '50.00');
 });
 
 it('completes the full bill on a signed callback for the override amount', function () {
-    config(['payments.kwikpay.charge_override' => '1.00']);
+    config(['payments.kwikpay.charge_override' => '50.00']);
     $app = kpFiling();
     $payment = kpOpen($app);
     $billed = (float) $payment->amount;
 
-    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+    kpPostCallback(kpCallback($payment, ['amount' => '50.000000']))->assertOk();
 
     $payment->refresh();
     expect($payment->status)->toBe(PaymentStatus::Completed)
@@ -1088,7 +1088,7 @@ it('completes the full bill on a signed callback for the override amount', funct
 });
 
 it('refuses a callback for the full bill when KwikPay was only asked for the override', function () {
-    config(['payments.kwikpay.charge_override' => '1.00']);
+    config(['payments.kwikpay.charge_override' => '50.00']);
     $payment = kpOpen(kpFiling());
 
     kpPostCallback(kpCallback($payment, ['amount' => number_format((float) $payment->amount, 6, '.', '')]));
@@ -1097,11 +1097,11 @@ it('refuses a callback for the full bill when KwikPay was only asked for the ove
 });
 
 it('keeps checking an order against what was asked even after the override is removed', function () {
-    config(['payments.kwikpay.charge_override' => '1.00']);
+    config(['payments.kwikpay.charge_override' => '50.00']);
     $payment = kpOpen(kpFiling());
     config(['payments.kwikpay.charge_override' => null]);
 
-    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+    kpPostCallback(kpCallback($payment, ['amount' => '50.000000']))->assertOk();
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Completed);
 });
@@ -1116,7 +1116,7 @@ it('asks for the full bill when no override is set', function () {
 
 /*
  * The super admin's second switch (PaymentMode::charge). The defense takes
- * real payments through KwikPay at ₱1, and a panelist may ask to see the real
+ * real payments through KwikPay at ₱50, and a panelist may ask to see the real
  * amount, so it flips on a running server from the Online Payments screen
  * [Ken, 2026-10-04]. The bill, the payment and the receipt keep the assessed
  * amount whichever way it points.
@@ -1130,27 +1130,27 @@ it('falls back to the env when no charge is stored: a positive override is a tes
         ->and(PaymentMode::testAmount())->toBe($testAmount)
         ->and(KwikPayGateway::chargeFor(2500.0))->toBe($charge === 'test' ? $testAmount : 2500.0);
 })->with([
-    'no override' => [null, 'full', 1.0],
-    'an empty override' => ['', 'full', 1.0],
-    'one peso' => ['1.00', 'test', 1.0],
+    'no override' => [null, 'full', 50.0],
+    'an empty override' => ['', 'full', 50.0],
+    'fifty pesos' => ['50.00', 'test', 50.0],
     'another amount, rounded to centavos' => ['2.499', 'test', 2.5],
-    'zero is not an amount' => ['0', 'full', 1.0],
-    'a negative is not an amount' => ['-5', 'full', 1.0],
-    'words are not an amount' => ['one peso', 'full', 1.0],
+    'zero is not an amount' => ['0', 'full', 50.0],
+    'a negative is not an amount' => ['-5', 'full', 50.0],
+    'words are not an amount' => ['fifty pesos', 'full', 50.0],
 ]);
 
 it('lets a stored charge beat the env in both directions, and ignores a stored value it does not know', function () {
     // Env says test; the switch says full, and wins.
-    config(['payments.kwikpay.charge_override' => '1.00']);
+    config(['payments.kwikpay.charge_override' => '50.00']);
     PaymentMode::switchCharge('full', 'api');
     expect(PaymentMode::charge())->toBe('full')
         ->and(KwikPayGateway::chargeFor(2500.0))->toBe(2500.0);
 
-    // Env says nothing; the switch says test, and ₱1.00 is what test means.
+    // Env says nothing; the switch says test, and ₱50.00 is what test means.
     config(['payments.kwikpay.charge_override' => null]);
     PaymentMode::switchCharge('test', 'api');
     expect(PaymentMode::charge())->toBe('test')
-        ->and(KwikPayGateway::chargeFor(2500.0))->toBe(1.0);
+        ->and(KwikPayGateway::chargeFor(2500.0))->toBe(50.0);
 
     // The override is still the test AMOUNT while the switch decides WHETHER.
     config(['payments.kwikpay.charge_override' => '5']);
@@ -1168,10 +1168,10 @@ it('lets a stored charge beat the env in both directions, and ignores a stored v
 it('asks KwikPay for what the switch says when the payment is opened', function () {
     PaymentMode::switchCharge('test', 'api');
     $test = kpOpen(kpFiling());
-    expect((float) $test->gateway_amount)->toBe(1.0)
-        ->and((float) $test->amount)->toBeGreaterThan(1.0);
+    expect((float) $test->gateway_amount)->toBe(50.0)
+        ->and((float) $test->amount)->toBeGreaterThan(50.0);
     Http::assertSent(fn (HttpRequest $r) => str_ends_with($r->url(), '/api/transfer')
-        && $r['order_id'] === $test->gateway_order_id && $r['amount'] === '1.00');
+        && $r['order_id'] === $test->gateway_order_id && $r['amount'] === '50.00');
 
     PaymentMode::switchCharge('full', 'api');
     $full = kpOpen(kpFiling());
@@ -1193,7 +1193,7 @@ it('lets only the super admin switch the charge, and audits who, how, from and t
     $shown = $this->withHeaders($admin)->getJson('/api/v1/admin/payment-gateway')->assertOk();
     expect($shown->json('data.charge'))->toBe('full')
         ->and($shown->json('data.default_charge'))->toBe('full')
-        ->and($shown->json('data.test_amount'))->toBe('1.00');
+        ->and($shown->json('data.test_amount'))->toBe('50.00');
 
     $res = $this->withHeaders($admin)
         ->putJson('/api/v1/admin/payment-gateway', ['charge' => 'test'])
@@ -1208,7 +1208,7 @@ it('lets only the super admin switch the charge, and audits who, how, from and t
     $flips = AuditLog::where('action', 'payment_gateway.charge_switched')->orderBy('id')->get();
     $adminId = User::where('email', 'admin@biztrack.local')->value('id');
     expect($flips)->toHaveCount(2)
-        ->and($flips[0]->changes)->toMatchArray(['from' => 'full', 'to' => 'test', 'via' => 'api', 'test_amount' => '1.00'])
+        ->and($flips[0]->changes)->toMatchArray(['from' => 'full', 'to' => 'test', 'via' => 'api', 'test_amount' => '50.00'])
         ->and($flips[0]->user_id)->toBe($adminId)
         ->and($flips[1]->changes)->toMatchArray(['from' => 'test', 'to' => 'full', 'via' => 'api'])
         ->and($flips[1]->user_id)->toBe($adminId);
@@ -1259,12 +1259,12 @@ it('switches the charge from a terminal too, and says so in status', function ()
         ->assertSuccessful();
 
     $this->artisan('biztrack:payment-gateway test-charge')
-        ->expectsOutputToContain('KwikPay collects: the full bill → a ₱1.00 test charge.')
+        ->expectsOutputToContain('KwikPay collects: the full bill → a ₱50.00 test charge.')
         ->assertSuccessful();
     expect(PaymentMode::charge())->toBe('test');
 
     $this->artisan('biztrack:payment-gateway status')
-        ->expectsOutputToContain('KwikPay collects: a ₱1.00 test charge (the bill, receipt and records keep the real amount)')
+        ->expectsOutputToContain('KwikPay collects: a ₱50.00 test charge (the bill, receipt and records keep the real amount)')
         ->assertSuccessful();
 
     $this->artisan('biztrack:payment-gateway full-charge')->assertSuccessful();
@@ -1279,7 +1279,7 @@ it('switches the charge from a terminal too, and says so in status', function ()
     $this->artisan('biztrack:payment-gateway half-charge')->assertFailed();
 });
 
-it('still confirms a test-charge payment for ₱1 after the switch moves to the full bill', function () {
+it('still confirms a test-charge payment for ₱50 after the switch moves to the full bill', function () {
     PaymentMode::switchCharge('test', 'api');
     $app = kpFiling();
     $payment = kpOpen($app);
@@ -1294,12 +1294,12 @@ it('still confirms a test-charge payment for ₱1 after the switch moves to the 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
         ->and($payment->fresh()->flagged_at)->not->toBeNull();
 
-    // …₱1 is, and it settles the whole bill.
-    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+    // …₱50 is, and it settles the whole bill.
+    kpPostCallback(kpCallback($payment, ['amount' => '50.000000']))->assertOk();
     $payment->refresh();
     expect($payment->status)->toBe(PaymentStatus::Completed)
         ->and((float) $payment->amount)->toBe($billed)
-        ->and((float) $payment->gateway_amount)->toBe(1.0);
+        ->and((float) $payment->gateway_amount)->toBe(50.0);
     expect($app->fresh()->status)->not->toBe(ApplicationStatus::PendingPayment);
 });
 
@@ -1315,8 +1315,8 @@ it('still confirms a full-bill payment for the full bill after the switch moves 
         ->putJson('/api/v1/admin/payment-gateway', ['charge' => 'test'])
         ->assertOk();
 
-    // Reconciliation hears ₱1 for a full-bill order: not credited.
-    kpQueryAnswers('5', 1.0);
+    // Reconciliation hears ₱50 for a full-bill order: not credited.
+    kpQueryAnswers('5', 50.0);
     $this->travel(3)->minutes();
     $this->artisan('biztrack:reconcile-payments')->assertSuccessful();
     expect($payment->fresh()->status)->toBe(PaymentStatus::Pending)
@@ -1342,7 +1342,7 @@ it('tells the owner\'s pay screen the test charge only while it applies, and not
 
     PaymentMode::set(PaymentMode::KWIKPAY);
     $on = $options();
-    expect($on->json('data.test_charge'))->toBe('1.00')
+    expect($on->json('data.test_charge'))->toBe('50.00')
         ->and(array_keys($on->json('data')))->toBe(['mode', 'methods', 'in_progress', 'test_charge']);
     // The switch's own payload is the super admin's, not the owner's.
     expect($on->getContent())->not->toContain('default_charge')
@@ -1370,14 +1370,14 @@ it('shows the owner what the gateway was asked to collect for their own payment'
     $shown = $this->withHeaders(authAs('owner@biztrack.local'))
         ->getJson("/api/v1/payments/{$payment->id}")
         ->assertOk();
-    expect($shown->json('data.gateway_amount'))->toBe('1.00')
+    expect($shown->json('data.gateway_amount'))->toBe('50.00')
         ->and((float) $shown->json('data.amount'))->toBe((float) $payment->amount);
 
     // In flight, the pay screen resumes it with the same figure.
     $resumed = $this->withHeaders(authAs('owner@biztrack.local'))
         ->getJson("/api/v1/applications/{$app->id}/payment-options")
         ->assertOk();
-    expect($resumed->json('data.in_progress.gateway_amount'))->toBe('1.00');
+    expect($resumed->json('data.in_progress.gateway_amount'))->toBe('50.00');
 
     // A simulated payment collects nothing through a gateway.
     PaymentMode::set(PaymentMode::SIMULATED);
@@ -1388,11 +1388,11 @@ it('shows the owner what the gateway was asked to collect for their own payment'
     expect($paid->json('data.gateway_amount'))->toBeNull();
 });
 
-it('counts the assessed amount in the collections report, never the ₱1 the gateway took', function () {
+it('counts the assessed amount in the collections report, never the ₱50 the gateway took', function () {
     PaymentMode::switchCharge('test', 'api');
     $payment = kpOpen(kpFiling());
     $billed = (float) $payment->amount;
-    expect($billed)->toBeGreaterThan(1.0);
+    expect($billed)->toBeGreaterThan(50.0);
 
     $today = ManilaCalendar::today()->toDateString();
     $collected = fn () => (float) $this->withHeaders(authAs('admin@biztrack.local'))
@@ -1401,9 +1401,9 @@ it('counts the assessed amount in the collections report, never the ₱1 the gat
         ->json('data.sections.2.total.amount');
 
     $before = $collected();
-    kpPostCallback(kpCallback($payment, ['amount' => '1.000000']))->assertOk();
+    kpPostCallback(kpCallback($payment, ['amount' => '50.000000']))->assertOk();
     expect($payment->fresh()->status)->toBe(PaymentStatus::Completed);
 
-    // The whole bill is what the City collected on paper; ₱1 is only what the test took.
+    // The whole bill is what the City collected on paper; ₱50 is only what the test took.
     expect(round($collected() - $before, 2))->toBe(round($billed, 2));
 });

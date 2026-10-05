@@ -47,7 +47,7 @@ return [
         'payment_type' => env('KWIKPAY_PAYMENT_TYPE') ?: '1',
 
         /*
-         * The test charge's amount (e.g. "1.00"; ₱1.00 when empty), and the
+         * The test charge's amount (e.g. "50.00"; ₱50.00 when empty), and the
          * charge switch's DEFAULT: until somebody sets `kwikpay_charge` in
          * `settings`, a positive amount here means KwikPay collects it instead
          * of the bill, and empty means the full bill. Once the switch is set —

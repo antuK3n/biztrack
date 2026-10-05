@@ -827,7 +827,7 @@ export interface Payment {
   reference_number: string
   amount: string
   /**
-   * What the payment service was asked to collect for this payment ("1.00").
+   * What the payment service was asked to collect for this payment ("50.00").
    * The same as `amount` unless the super admin's test charge was on when it
    * was opened; `amount` is still the bill. Null on a simulated payment.
    */
@@ -862,7 +862,7 @@ export interface PaymentOptions {
   in_progress: Payment | null
   /**
    * What the payment service will collect for this bill while the super
-   * admin's test charge is on ("1.00"). Null when it collects the full bill,
+   * admin's test charge is on ("50.00"). Null when it collects the full bill,
    * and in simulated mode, where nothing is collected.
    */
   test_charge: string | null
@@ -887,7 +887,7 @@ export interface PaymentGatewayStatus {
   charge: PaymentGatewayCharge
   /** What the env says the charge is, used until somebody flips it. */
   default_charge: PaymentGatewayCharge
-  /** What the test charge collects, "1.00". */
+  /** What the test charge collects, "50.00". */
   test_amount: string
   confirm: PaymentGatewayConfirm
   kwikpay: {

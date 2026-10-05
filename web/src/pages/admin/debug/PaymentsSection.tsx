@@ -23,8 +23,8 @@ import { Choice, Detail, SubCard } from './parts'
  *   1. How owners pay: simulated (paid on the press, no money moves) or
  *      KwikPay (real money, confirmed by KwikPay). What is missing on the
  *      server when KwikPay cannot be turned on, and a Test connection button.
- *   2. What KwikPay collects: a ₱1 test charge or the full bill. The defense
- *      runs on ₱1; a panelist who asks to see the real amount gets the full
+ *   2. What KwikPay collects: a ₱50 test charge or the full bill. The defense
+ *      runs on ₱50; a panelist who asks to see the real amount gets the full
  *      bill from here, and it goes back after [Ken, 2026-10-04].
  *   3. Online payments still waiting, and the ones flagged for staff.
  *

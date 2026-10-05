@@ -162,7 +162,7 @@ it('switches how owners pay and what KwikPay collects from the panel, audited as
     $res = $this->putJson('/api/v1/debug/payments', ['mode' => 'kwikpay', 'charge' => 'test'])->assertOk();
     expect($res->json('data.mode'))->toBe('kwikpay')
         ->and($res->json('data.charge'))->toBe('test')
-        ->and($res->json('data.test_amount'))->toBe('1.00');
+        ->and($res->json('data.test_amount'))->toBe('50.00');
     expect(PaymentMode::current())->toBe('kwikpay')->and(PaymentMode::charge())->toBe('test');
 
     $this->putJson('/api/v1/debug/payments', ['charge' => 'full'])->assertOk();
@@ -173,7 +173,7 @@ it('switches how owners pay and what KwikPay collects from the panel, audited as
     expect($rows)->toHaveCount(2)
         ->and($rows[0]->user_id)->toBe($admin)
         ->and($rows[0]->changes['before'])->toMatchArray(['mode' => 'simulated', 'charge' => 'full'])
-        ->and($rows[0]->changes['after'])->toMatchArray(['mode' => 'kwikpay', 'charge' => 'test', 'test_amount' => '1.00'])
+        ->and($rows[0]->changes['after'])->toMatchArray(['mode' => 'kwikpay', 'charge' => 'test', 'test_amount' => '50.00'])
         ->and($rows[1]->changes['before'])->toMatchArray(['mode' => 'kwikpay', 'charge' => 'test'])
         ->and($rows[1]->changes['after'])->toMatchArray(['mode' => 'kwikpay', 'charge' => 'full']);
     // One trail: the panel's door does not also write the admin API's rows.

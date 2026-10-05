@@ -6,7 +6,7 @@ import { gateway, makeBilledApplication, type GatewayState } from './payments'
  * The Debug page's Payments section, and what the owner is told about it
  * (docs/payment-gateway.md).
  *
- * At the defense the gateway takes real payments at ₱1. If a panelist asks to
+ * At the defense the gateway takes real payments at ₱50. If a panelist asks to
  * see the real amount, the super admin flips the charge to the full bill from
  * /admin/debug and flips it back after [Ken, 2026-10-04]. These prove the
  * flip happens on screen and on the server, and that the owner's pay screen
@@ -162,7 +162,7 @@ test.describe('the owner', () => {
     await expect(note).toHaveCount(0)
   })
 
-  test('with the practice KwikPay, a payment opened at ₱1 still asks for ₱1 after the switch moves', async ({
+  test('with the practice KwikPay, a payment opened at ₱50 still asks for ₱50 after the switch moves', async ({
     page,
     browser,
   }) => {
@@ -188,7 +188,7 @@ test.describe('the owner', () => {
     await page.reload()
     await expect(page.getByRole('img', { name: `QR code to pay ${amount}` })).toBeVisible({ timeout: 30_000 })
 
-    // Paid at the practice gateway for what it asked: ₱1, and the bill is settled.
+    // Paid at the practice gateway for what it asked: ₱50, and the bill is settled.
     const phone = await page.context().newPage()
     await phone.goto(((await qr.getAttribute('src')) ?? '').replace('/qr/', '/pay/'))
     await expect(phone.getByRole('button', { name: `Pay ${amount}` })).toBeVisible()

@@ -221,7 +221,7 @@ it('fails the payment checks when online payments wait and nothing has asked abo
         'fee_assessment_id' => $application->feeAssessment->id,
         'reference_number' => 'PAY-HEALTH-1',
         'amount' => 100,
-        'gateway_amount' => 1,
+        'gateway_amount' => 50,
         'method' => PaymentMethod::Gcash,
         'status' => PaymentStatus::Pending,
         'gateway' => Payment::GATEWAY_KWIKPAY,

@@ -274,7 +274,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
   /*
    * Debug — the super admin's on-the-fly controls for the defense: which way
-   * owners pay, and whether KwikPay collects ₱1 or the full bill [Ken,
+   * owners pay, and whether KwikPay collects ₱50 or the full bill [Ken,
    * 2026-10-04]. Last on the rail, because it is for the presentation and not
    * for the day's work. Shown only while the server says the panel is open to
    * this account (pages/admin/debug/access.ts), which is never outside the

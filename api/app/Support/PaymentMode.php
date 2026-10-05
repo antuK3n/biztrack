@@ -43,7 +43,7 @@ use Illuminate\Database\QueryException;
  * kept in `payments.gateway_amount` so the confirmation is checked against it.
  *
  * It has to be switchable on a running server for the same reason the mode
- * is. The thesis defense takes real payments through KwikPay at ₱1; if a
+ * is. The thesis defense takes real payments through KwikPay at ₱50; if a
  * panelist asks to see the actual amount, the super admin flips it to the
  * full bill from the Online Payments screen, and flips it back after [Ken,
  * 2026-10-04]. KWIKPAY_CHARGE_OVERRIDE could only do that with an env edit
@@ -52,7 +52,7 @@ use Illuminate\Database\QueryException;
  * Until somebody sets the row, the env decides, exactly as it did before the
  * row existed: a positive KWIKPAY_CHARGE_OVERRIDE means `test`, anything else
  * `full`. The test amount is that override when it is a positive number, and
- * ₱1.00 when it is not — so switching to `test` on a server with no override
+ * ₱50.00 when it is not — so switching to `test` on a server with no override
  * still collects a token amount rather than nothing.
  *
  * Like the mode, it decides only what NEW payments ask for. A payment opened
@@ -78,7 +78,7 @@ class PaymentMode
     public const CHARGES = [self::CHARGE_TEST, self::CHARGE_FULL];
 
     /** What `test` collects when KWIKPAY_CHARGE_OVERRIDE names no amount. */
-    public const DEFAULT_TEST_AMOUNT = 1.00;
+    public const DEFAULT_TEST_AMOUNT = 50.00;
 
     private const CHARGE_KEY = 'kwikpay_charge';
 
@@ -267,7 +267,7 @@ class PaymentMode
         return self::charge() === self::CHARGE_TEST;
     }
 
-    /** What `test` collects: KWIKPAY_CHARGE_OVERRIDE when it is a positive number, else ₱1.00. */
+    /** What `test` collects: KWIKPAY_CHARGE_OVERRIDE when it is a positive number, else ₱50.00. */
     public static function testAmount(): float
     {
         return self::envTestAmount() ?? self::DEFAULT_TEST_AMOUNT;
@@ -305,7 +305,7 @@ class PaymentMode
     /**
      * Change what KwikPay collects and write it to the audit log, the same way
      * switchTo() does for the mode. The test amount is recorded with it, so the
-     * trail says "₱1.00", not merely "test".
+     * trail says "₱50.00", not merely "test".
      *
      * @return array{from: string, to: string}
      *
@@ -328,7 +328,7 @@ class PaymentMode
      * What the owner's pay screen is told about the charge: the amount KwikPay
      * will collect when that is a test charge on online payments, and null
      * otherwise. Null in simulated mode as well, because nothing is collected
-     * there and a "₱1.00" line would be a claim about money that never moves.
+     * there and a "₱50.00" line would be a claim about money that never moves.
      */
     public static function ownerTestCharge(): ?string
     {
@@ -393,7 +393,7 @@ class PaymentMode
         return is_numeric($override) && (float) $override > 0 ? round((float) $override, 2) : null;
     }
 
-    /** "1.00": two decimals, no separator, the way amounts travel in this API. */
+    /** "50.00": two decimals, no separator, the way amounts travel in this API. */
     private static function money(float $amount): string
     {
         return number_format($amount, 2, '.', '');

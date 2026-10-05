@@ -257,7 +257,7 @@ it('names an online payment waiting at KwikPay as what blocks paying here, witho
         'fee_assessment_id' => $app->feeAssessment->id,
         'reference_number' => 'PAY-MOVER-1',
         'amount' => $app->feeAssessment->total_amount,
-        'gateway_amount' => 1,
+        'gateway_amount' => 50,
         'method' => PaymentMethod::Gcash,
         'status' => PaymentStatus::Pending,
         'gateway' => Payment::GATEWAY_KWIKPAY,
