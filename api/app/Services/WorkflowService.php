@@ -15,6 +15,8 @@ use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationCorrection;
+use App\Models\ApplicationDocument;
+use App\Models\ApplicationOfficeForm;
 use App\Models\ApplicationPermitType;
 use App\Models\ApplicationReturnNote;
 use App\Models\ApplicationStatusHistory;
@@ -42,12 +44,14 @@ use App\Support\RenewablePermit;
 use App\Support\RenewalSeason;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
+use App\Support\ZoningRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -540,6 +544,79 @@ class WorkflowService
         }
 
         return $why;
+    }
+
+    /**
+     * Put ZONING on an amendment DRAFT exactly when submitting it would.
+     *
+     * The wizard's Zoning Clearance step is CPDD's own sheet, and its answers
+     * and documents attach to the filing's ZONING row — which only
+     * `attachRequiredPermitTypes` created, at submission. So the step showed a
+     * sheet whose answers could not be saved and whose document list was
+     * empty: `OfficeFormController` refuses a permit the filing does not
+     * carry. Ken, 6 October 2026: attach it on the draft.
+     *
+     * Called whenever a requested change is saved or withdrawn, on the same
+     * rule submission uses (`amendmentNeedsLocationalClearance`), so the
+     * draft and the submitted filing cannot disagree. Submission then finds
+     * the row already there; its `syncWithoutDetaching` keeps it, sheet and
+     * files included, and attaches nothing twice.
+     *
+     * Withdrawing the change takes ZONING off again, and with it the sheet's
+     * saved answers and its checklist files (stored copies deleted, each
+     * logged as `document.removed`). Left behind they would describe a
+     * clearance the filing no longer applies for: the sheet list merges every
+     * stored sheet in, so CPDD's form would still show on the filing. Asking
+     * for the change again starts the sheet afresh.
+     *
+     * Draft only. A returned amendment's ZONING was attached at submission
+     * and CPDO may be working on it; `resubmit` adds what is missing there.
+     */
+    public static function syncDraftAmendmentZoning(Application $app): void
+    {
+        if ($app->application_type !== ApplicationType::Amendment
+            || $app->status !== ApplicationStatus::Draft) {
+            return;
+        }
+
+        $zoning = PermitType::where('code', 'ZONING')->first();
+        if ($zoning === null) {
+            return;
+        }
+
+        $carried = $app->permitTypes()->where('permit_types.id', $zoning->id)->exists();
+        $needed = self::amendmentNeedsLocationalClearance($app) !== [];
+
+        if ($needed && ! $carried) {
+            $app->permitTypes()->attach($zoning->id, ['status' => ClearanceStatus::NotStarted->value]);
+
+            return;
+        }
+
+        if (! $needed && $carried) {
+            DB::transaction(function () use ($app, $zoning) {
+                $app->permitTypes()->detach($zoning->id);
+
+                ApplicationOfficeForm::where('application_id', $app->id)
+                    ->where('permit_type_id', $zoning->id)
+                    ->delete();
+
+                $files = ApplicationDocument::where('application_id', $app->id)
+                    ->where(fn ($q) => $q
+                        ->where('permit_type_id', $zoning->id)
+                        ->orWhereHas('documentType', fn ($t) => $t
+                            ->where('code', 'like', ZoningRequirements::CODE_PREFIX.'%')))
+                    ->get();
+
+                foreach ($files as $file) {
+                    if ($file->stored_path && Storage::disk('local')->exists($file->stored_path)) {
+                        Storage::disk('local')->delete($file->stored_path);
+                    }
+                    Audit::removed('document.removed', $file);
+                    $file->delete();
+                }
+            });
+        }
     }
 
     /**
@@ -2402,6 +2479,20 @@ class WorkflowService
      */
     private function refuseBeforePayment(Application $app): void
     {
+        /*
+         * An amendment DRAFT carries ZONING since 6 October 2026, so the
+         * wizard can fill CPDD's sheet (`syncDraftAmendmentZoning`). It defers
+         * payment, so without this the clearance could be applied for, and
+         * CPDO routed, for an amendment nobody has submitted. Submission
+         * applies for it (`submit`).
+         */
+        if ($app->application_type === ApplicationType::Amendment
+            && $app->status === ApplicationStatus::Draft) {
+            throw ValidationException::withMessages([
+                'status' => ['The Zoning Clearance opens once this amendment is submitted.'],
+            ]);
+        }
+
         if (! $app->status?->isPaid() && ! $app->defersPayment()) {
             throw ValidationException::withMessages([
                 'status' => ['The other permits open once this application is paid.'],

@@ -5,6 +5,8 @@ use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAmendment;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
+use App\Models\ApplicationOfficeForm;
 use App\Models\ApplicationPermitType;
 use App\Models\AppNotification;
 use App\Models\Barangay;
@@ -19,6 +21,8 @@ use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\AmendableFields;
 use App\Support\PermitFace;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 // Visits are booked on a weekday in office hours (manage item 4).
 beforeEach(fn () => duringOfficeHours());
@@ -1596,4 +1600,107 @@ it('lists the owner’s businesses with the amendment still under review', funct
         ->getJson('/api/v1/businesses?per_page=100')
         ->assertOk()
         ->assertJsonStructure(['data' => [['id', 'name', 'open_amendment']]]);
+});
+
+/*
+ * ── The Zoning step works on the DRAFT ────────────────────────────────────
+ *
+ * The wizard's Zoning Clearance step is CPDD's sheet, and its answers and
+ * files attach to the filing's ZONING row. That row used to appear only at
+ * submission, so on a draft the sheet could not be saved and its document
+ * list was empty. Ken, 6 October 2026: a change of address puts ZONING on the
+ * draft; withdrawing it takes ZONING off again.
+ */
+it('puts the zoning clearance on the draft when the address changes, so its sheet saves and takes files', function () {
+    Storage::fake('local');
+    [$appId] = amendmentFiling(['address_street' => 'Rizal Avenue']);
+    $owner = authAs('owner@biztrack.local');
+    $app = Application::findOrFail($appId);
+
+    expect($app->status)->toBe(ApplicationStatus::Draft)
+        ->and($app->permitTypes()->pluck('code')->sort()->values()->all())->toBe(['BUSINESS', 'ZONING']);
+
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
+            'form_data' => ['project_description' => 'Sari-sari store, ground floor'],
+        ])->assertOk();
+
+    $upload = test()->withHeaders($owner)->post(
+        "/api/v1/applications/{$appId}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
+        ['file' => UploadedFile::fake()->create('tax-declaration.pdf', 40, 'application/pdf')],
+    )->assertCreated();
+    expect(collect($upload->json('data.requirements'))->firstWhere('key', 'TAX_DECLARATION')['satisfied'])->toBeTrue();
+
+    // A trade-name change alone puts nothing on the draft.
+    [$nameId] = amendmentFiling(['trade_name' => 'Nena Store']);
+    expect(Application::findOrFail($nameId)->permitTypes()->pluck('code')->all())
+        ->toBe([PermitType::OUTCOME_CODE]);
+});
+
+it('takes the zoning clearance off the draft when the address change is withdrawn, with its sheet and files', function () {
+    Storage::fake('local');
+    [$appId] = amendmentFiling(['address_street' => 'Rizal Avenue']);
+    $owner = authAs('owner@biztrack.local');
+    $zoning = PermitType::where('code', 'ZONING')->firstOrFail();
+
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", ['form_data' => []])
+        ->assertOk();
+    test()->withHeaders($owner)->post(
+        "/api/v1/applications/{$appId}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
+        ['file' => UploadedFile::fake()->create('tax-declaration.pdf', 40, 'application/pdf')],
+    )->assertCreated();
+    $file = ApplicationDocument::where('application_id', $appId)
+        ->whereHas('documentType', fn ($q) => $q->where('code', 'ZONING_REQ_TAX_DECLARATION'))
+        ->firstOrFail();
+
+    test()->withHeaders($owner)
+        ->deleteJson("/api/v1/applications/{$appId}/amendments/address_street")
+        ->assertOk();
+
+    $app = Application::findOrFail($appId);
+    expect($app->permitTypes()->pluck('code')->all())->toBe([PermitType::OUTCOME_CODE])
+        ->and(ApplicationOfficeForm::where('application_id', $appId)->where('permit_type_id', $zoning->id)->exists())
+        ->toBeFalse()
+        ->and(ApplicationDocument::whereKey($file->id)->exists())->toBeFalse();
+    Storage::disk('local')->assertMissing($file->stored_path);
+
+    // The sheet list no longer offers CPDD's form, and the filing still submits.
+    $sheets = test()->withHeaders($owner)->getJson("/api/v1/applications/{$appId}/office-forms")->assertOk();
+    expect(collect($sheets->json('data'))->pluck('permit_type_code'))->not->toContain('ZONING');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/amendments", [
+        'changes' => [['field' => 'trade_name', 'new_value' => 'Nena Store']],
+    ])->assertOk();
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    expect(Application::findOrFail($appId)->permitTypes()->pluck('code')->all())->toBe([PermitType::OUTCOME_CODE]);
+});
+
+it('submits a draft that already carries the zoning clearance once, keeping its sheet', function () {
+    [$appId] = amendmentFiling(['address_street' => 'Rizal Avenue']);
+    $owner = authAs('owner@biztrack.local');
+    $zoning = PermitType::where('code', 'ZONING')->firstOrFail();
+
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
+            'form_data' => ['project_description' => 'Sari-sari store, ground floor'],
+        ])->assertOk();
+
+    // Applying for it is submission's job, not the draft's.
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
+            'form_data' => ['project_description' => 'Sari-sari store, ground floor'],
+            'submit' => true,
+        ])->assertStatus(422);
+    expect(Application::findOrFail($appId)->assignments()->count())->toBe(0);
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $app = Application::findOrFail($appId);
+    expect(ApplicationPermitType::where('application_id', $appId)->where('permit_type_id', $zoning->id)->count())->toBe(1)
+        ->and($app->permitTypes()->where('code', 'ZONING')->first()->pivot->mode)->toBe(ApplicationPermitType::MODE_APPLY)
+        ->and(ApplicationOfficeForm::where('application_id', $appId)->where('permit_type_id', $zoning->id)
+            ->value('form_data')['project_description'] ?? null)->toBe('Sari-sari store, ground floor');
 });

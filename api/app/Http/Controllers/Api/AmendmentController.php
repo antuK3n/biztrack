@@ -6,6 +6,7 @@ use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
+use App\Services\WorkflowService;
 use App\Support\AmendableFields;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -190,6 +191,10 @@ class AmendmentController extends Controller
             'fields' => collect($data['changes'])->pluck('field')->all(),
         ]);
 
+        // A change of address (or trade, or a larger area) puts CPDD's sheet
+        // on the draft now, so the wizard's Zoning step can save it.
+        WorkflowService::syncDraftAmendmentZoning($application);
+
         return $this->index($request, $application->fresh());
     }
 
@@ -212,6 +217,9 @@ class AmendmentController extends Controller
             ]);
             $change->delete();
         }
+
+        // And the last such change withdrawn takes it off again.
+        WorkflowService::syncDraftAmendmentZoning($application);
 
         return $this->index($request, $application->fresh());
     }

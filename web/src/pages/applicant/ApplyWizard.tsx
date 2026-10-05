@@ -7542,9 +7542,11 @@ export function ApplyWizard() {
    * Load CPDD's sheet when the Zoning step opens.
    *
    * The clearance has to exist first — the pivot row is what an upload
-   * attaches to — and it does: the draft carries ZONING from the moment the
-   * pin moves (see the permit-type effect), and the wizard's own autosave
-   * pushes `permit_type_ids` to the server.
+   * attaches to. The SERVER puts it there: saving a change that needs a
+   * Zoning Clearance attaches ZONING to the draft, and withdrawing it takes
+   * it off (`WorkflowService::syncDraftAmendmentZoning`, 6 October 2026).
+   * This used to claim the wizard's autosave pushed `permit_type_ids`; it
+   * never did, so the sheet could not save and its document list was empty.
    *
    * Empty answers are a fine starting point. MCG-CPDD-FO-003 derives most of
    * itself from the BPLO form, so a blank sheet renders complete.
@@ -13120,8 +13122,9 @@ export function ApplyWizard() {
         the register would show the officer the premises being left behind.
 
         The uploads work because the draft already carries the ZONING
-        clearance — see the permit-type effect — so there is a pivot row for a
-        file to attach to.
+        clearance — the server attaches it when the change is saved
+        (`WorkflowService::syncDraftAmendmentZoning`) — so there is a pivot
+        row for a file to attach to.
       */}
       {phase === 'zoning' && officeSheetBusiness !== null && (
         <>
