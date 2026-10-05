@@ -1938,7 +1938,14 @@ function PermitHistory({
       label: clearanceStatusMeta(h.to_status).label,
       at: h.created_at,
     })),
-  ]
+    /*
+     * One line per change the reader can see. The Business Permit's history is
+     * the filing's submit (draft → for_approval) merged with the permit's own
+     * not_started → for_approval when BPLO accepts the form, so "For Approval"
+     * printed twice in a row. The earlier one is when it started; the later says
+     * nothing new.
+     */
+  ].filter((e, i, all) => i === 0 || e.label !== all[i - 1].label)
 
   if (entries.length === 0) {
     return (

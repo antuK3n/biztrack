@@ -3,18 +3,21 @@ import { mergedStorageState } from './helpers'
 import { makeBilledApplication } from './payments'
 
 /*
- * The owner's Track card, opened: the Mayor's Permit leads.
+ * The owner's Track card, opened: the Mayor's Permit leads, and its history
+ * says each status once.
  *
  * The filing attaches BUSINESS at submit, after the clearances, so the API
  * hands it back last and the card listed the permit the filing is for at the
- * bottom.
+ * bottom. Its history merges the filing's submit (→ For Approval) with BPLO
+ * accepting the form (→ For Approval), which printed "For Approval" twice.
  *
- * A real filing, with only the permit order rearranged on the way in.
+ * A real filing rather than a stub, because the duplicate comes from how the
+ * two histories are written, not from anything a stub would think to contain.
  * Writes one filing of the owner's, so it belongs on the throwaway stack only.
  */
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
 
-test('the Business Permit is the first row', async ({ page }) => {
+test('the Business Permit is the first row and its history never repeats a status', async ({ page }) => {
   const id = await makeBilledApplication(page)
   const trackingId = await page.evaluate(async (appId) => {
     const headers = {
@@ -58,4 +61,12 @@ test('the Business Permit is the first row', async ({ page }) => {
   expect(await permitRows.count()).toBeGreaterThan(1)
   await expect(permitRows.first()).toHaveAttribute('aria-controls', `history-${id}-BUSINESS`)
 
+  await permitRows.first().click()
+  const history = page.locator(`#history-${id}-BUSINESS ol > li`)
+  await expect(history.first()).toContainText('Application submitted')
+  await expect(history.last()).toContainText('Approved')
+
+  const labels = await history.locator('span.font-medium').allInnerTexts()
+  expect(labels.filter((l) => l === 'For Approval')).toHaveLength(1)
+  labels.slice(1).forEach((label, i) => expect(label).not.toBe(labels[i]))
 })
