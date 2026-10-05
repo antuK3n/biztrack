@@ -1926,17 +1926,6 @@ function ReviewSkeleton() {
   )
 }
 
-/**
- * ["a", "b", "c"] → "a, b and c". Used by the Edit-mode banner, which has to
- * NAME the controls it is talking about rather than gesture at "the office
- * fields" — for most offices that plural resolves to exactly one control.
- */
-function listPhrase(items: string[]): string {
-  if (items.length === 0) return ''
-  if (items.length === 1) return items[0]
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-}
-
 /** "floor_area_sqm" / "floorAreaSqm" → "Floor Area Sqm". */
 function humanizeKey(key: string): string {
   return key
@@ -3108,7 +3097,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             className={buttonCls}
           >
             <span
-              className={`mt-0.5 shrink-0 text-royal transition-transform ${taxOpen ? 'rotate-180' : ''}`}
+              className={`shrink-0 text-royal transition-transform ${taxOpen ? 'rotate-180' : ''}`}
               aria-hidden="true"
             >
               <ChevronDownIcon size={18} />
@@ -3118,16 +3107,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 {taxOpen ? 'Hide the Tax Order of Payment' : 'Show the Tax Order of Payment'}
               </span>
               {/*
-                The total names what is inside, the way the application's
-                summary does — and it is the one number an officer opens
-                this for. Inside the button, so a screen reader hears it
-                with the control rather than after it.
+                The line under this label — "Every office's fees on this
+                filing, itemised against the Revenue Code — ₱X in total.
+                Nothing in here is editable." — went on 6 October 2026 (Ken:
+                no descriptions on Manage Applications). The total is the
+                Assessed Fee in For Office Use Only.
               */}
-              <span className="mt-0.5 block text-xs text-ink-secondary">
-                Every office's fees on this filing, itemised against the Revenue Code —{' '}
-                {formatMoney(app.fee_assessment?.total_amount)} in total. Nothing in here is
-                editable.
-              </span>
             </span>
           </button>
         </div>
@@ -3137,47 +3122,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       </>
     )
 
-  /**
-   * What is behind the disclosure, named rather than implied.
-   *
-   * A collapsed region labelled "Show more" is a mystery box: the officer who
-   * needs the barangay, or the floor area, or the uploaded requirements has
-   * nothing telling them that THIS is where those live, so they either never
-   * open it or they open every collapsed thing on the page hunting.
-   *
-   * Built from the payload rather than written as a fixed sentence, so it
-   * cannot describe a sheet that is not there. Counted where a count exists:
-   * "8 uploaded requirements" is a claim the officer can check against Section
-   * C the moment it opens, "documents" is not, and a filing with none of them
-   * would otherwise be described as having some.
-   *
-   * ── Two entries are gone since this was first written ─────────────────────
-   *
-   * "The fee declaration" went with Section E, which the client removed on
-   * 17 September 2026 — *"Why did you invent a section? This DOES NOT EXIST in
-   * the application form itself."* A summary promising a section that no longer
-   * renders would send an officer looking for it.
-   *
-   * "The other offices' form answers" went with Section D on 17 September
-   * 2026 (issue #95). It was conditional for a while, because the server had
-   * already filtered that section down to nothing for a clearance office and
-   * promising it to a sanitary officer would have advertised a section that
-   * opens empty. Nothing carries it now, for any reader, and a summary naming
-   * a section the sheet no longer has would read as a leak to a client who
-   * has already reported one here twice.
-   */
-  const filedSheetParts = [
-    app.application_type === 'amendment' ? 'what is being amended' : null,
-    'business registration and address',
-    'line of business',
-    app.documents.length === 0
-      ? 'no uploaded requirements'
-      : app.documents.length === 1
-        ? '1 uploaded requirement'
-        : `${app.documents.length} uploaded requirements`,
-    'the signed data-privacy consent',
-  ].filter((part): part is string => part !== null)
-  const filedSheetSummary = listPhrase(filedSheetParts)
   /**
    * Every sheet this reader holds, own office first.
    *
@@ -4422,47 +4366,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   )
 
   /*
-   * ── What Edit mode actually turns on, for THIS reader, on THIS filing ─────
-   *
-   * The banner used to say "fill in the office fields at the bottom of the
-   * sheet", and the client asked what it meant (SEP-5). Three things were wrong
-   * with it at once:
-   *
-   *  - the plural. For a sanitary officer on a filing with no occupancy permit
-   *    the entire editable surface of Edit mode is ONE text input, Evaluator
-   *    Remarks. "The office fields" promised a panel of work and delivered a
-   *    single box.
-   *  - the location instead of the name. "At the bottom of the sheet" is about
-   *    1,200 lines below the banner with no anchor (SEP-7), so the instruction
-   *    was a scavenger hunt.
-   *  - it never said WHY the applicant's answers are locked, which is the
-   *    question actually asked ("Can't I edit the form itself since I am on
-   *    edit mode?"), nor what to do instead.
-   *
-   * So the list is built from the same gates the controls themselves are drawn
-   * behind — one source, so a control that appears or disappears cannot leave
-   * the banner describing a screen that is not there. Read against the JSX
-   * below: Evaluator Remarks is `editing` alone, an issuance-date group exists per sheet in `issuedGroups`,
-   * and Assign officer-in-charge is `canAssign && editing` with at least one
-   * officer in the department to pick.
-   *
-   * Evaluator Remarks is unconditional because Edit mode always draws it. If
-   * that ever stops being true, this list has to stop asserting it.
+   * The banner's list of what Edit mode turns on ("Edit mode. Your office
+   * fills in N fields.") was built here from the controls' own gates (SEP-5).
+   * It went on 6 October 2026 with the View-mode paragraph (Ken: no
+   * descriptions on Manage Applications); the fields are on the page under
+   * For Office Use Only, and the Edit pill says which mode is on.
    */
-  const liveFields: string[] = []
-  liveFields.push('Evaluator Remarks')
-  /*
-   * Named in the banner because it is the one field on this panel that changes
-   * a STATUTORY deadline, and an officer who never scrolls to For Office Use
-   * Only would otherwise never learn they were allowed to touch it. Gated on
-   * the same `canSetTier` the control is drawn behind, so the banner cannot
-   * promise a field that is not there — a decided filing has neither.
-   */
-  if (canSetTier) liveFields.push('the RA 11032 category')
-  for (const group of issuedGroups) liveFields.push(`the ${group.name} issuance dates`)
-  if (canAssign && canListUsers && deptOfficers.length > 0) {
-    liveFields.push('Assign officer-in-charge')
-  }
 
   /*
    * Why the rest is locked, and what to do about it — the two sentences the
@@ -4711,21 +4620,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       : 'A permit can only be refused after its inspection.'
 
   /*
-   * Named, and no claim about WHERE beyond what is true: most of these live in
-   * For Office Use Only, but Assign officer-in-charge is its own panel below
-   * it. The anchor after this sentence is what answers "where", so the sentence
-   * does not have to guess.
+   * What is left of the mode banner: a closed review's status, and in Edit
+   * mode the two things a button cannot say about itself — that changed
+   * answers wait for Save, and the consequence of this seat's decision. View
+   * mode says nothing (6 October 2026, Ken); the old paragraph explained the
+   * page's layout.
    */
-  /*
-   * A count, not a list. The fields are on the page under their own
-   * heading, and the link at the end of the banner goes straight to them —
-   * so naming all four here was a table of contents for one section.
-   */
-  const fieldsNote =
-    liveFields.length === 1
-      ? 'Edit mode. Your office fills in one field.'
-      : `Edit mode. Your office fills in ${liveFields.length} fields.`
-
   const modeNote = decided
     ? 'This review is closed. The page is a record of the application and the decision made on it.'
     : editing
@@ -4734,16 +4634,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
        * BPLO reading a filing — does not get a trailing space inside the
        * banner.
        */
-      ? [fieldsNote, lockedNote, decisionNote].filter(Boolean).join(' ')
-      : /*
-         * This used to open "Everything below is the application exactly as
-         * the applicant submitted it", which stopped being true when that
-         * sheet went behind a closed disclosure — what is below now is this
-         * office's clearance and the panel it fills in.
-         */
-        `View mode. Below are your office’s clearance and the panel it records into; the applicant’s filed sheet is below them. Switch to Edit to fill in ${
-          liveFields.length === 1 ? liveFields[0] : `your office’s ${liveFields.length} fields`
-        } and record a decision.`
+      ? [lockedNote, decisionNote].filter(Boolean).join(' ')
+      : ''
 
   /*
    * ── A summary of the filed sheet used to live here ──────────────────────
@@ -5253,10 +5145,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           </ul>
         </section>
       )}
-      {/* What each mode means, said plainly so nobody has to infer it (item 54). */}
+      {/*
+        Drawn only when it has something left to say (see `modeNote`), but
+        always mounted: a live region announces changes to text it already
+        owns, so one mounted on the switch to Edit would stay silent.
+      */}
       <p
         aria-live="polite"
-        className="mb-4 flex items-start gap-2.5 rounded-lg bg-white px-4 py-3 text-sm text-ink-secondary shadow-card"
+        className={
+          modeNote === ''
+            ? 'sr-only'
+            : 'mb-4 flex items-start gap-2.5 rounded-lg bg-white px-4 py-3 text-sm text-ink-secondary shadow-card'
+        }
       >
         <span className={`mt-0.5 shrink-0 ${editing ? 'text-royal' : 'text-ink-muted'}`}>
           {editing ? <PencilIcon /> : <EyeIcon size={16} />}
@@ -5593,11 +5493,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 </p>
               ) : (
                 <>
-                  <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-                    {app.status === 'approved'
-                      ? 'Applied to the business record. What each detail replaced is kept beside it.'
-                      : 'Approving this filing writes these values to the business record — you are not asked to retype anything. Read the affidavit and the supporting documents first.'}
-                  </p>
+                  {app.status === 'approved' && (
+                    <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                      Applied to the business record. What each detail replaced is kept beside it.
+                    </p>
+                  )}
 
                   <ul className="mt-4 space-y-3">
                     {app.requested_changes.map((row) => {
@@ -5900,9 +5800,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 )}
                 {form.form_saved === false && (
                   <p className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-3 py-2 text-sm leading-relaxed text-ink">
-                    <span className="font-semibold">Not filled in yet.</span> The applicant has
-                    applied for this clearance but has not saved any answers on your form. What is
-                    below is what the system already knows about the filing.
+                    <span className="font-semibold">Not filled in yet.</span>
                   </p>
                 )}
                 {entries.length === 0 ? (
@@ -5996,12 +5894,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     {zoneLabel(form.zone_at_pin.codes, form.zone_at_pin.name, { withCode: true })}
                   </p>
                 )}
-                <p className="mt-3 text-xs text-ink-muted">
-                  The applicant’s own filing — address, line of business, uploaded requirements and
-                  fee declaration — is folded away below, under{' '}
-                  <span className="font-semibold">Show the application as filed</span>. Open it when
-                  you need it to decide this clearance.
-                </p>
               </section>
             )
           })}
@@ -6115,10 +6007,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 onClick={() => setSheetOpen((open) => !open)}
                 aria-expanded={sheetOpen}
                 aria-controls="application-as-filed"
-                className="flex w-full items-start gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                className="flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
               >
                 <span
-                  className={`mt-0.5 shrink-0 text-royal transition-transform ${sheetOpen ? 'rotate-180' : ''}`}
+                  className={`shrink-0 text-royal transition-transform ${sheetOpen ? 'rotate-180' : ''}`}
                   aria-hidden="true"
                 >
                   <ChevronDownIcon size={18} />
@@ -6136,14 +6028,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       : 'Show the business permit application'}
                   </span>
                   {/*
-                    Inside the button on purpose: it becomes part of the
-                    accessible name, so the summary is announced with the
-                    control rather than being visual-only detail beside it.
+                    The summary under this label ("The applicant's own filing,
+                    exactly as submitted — … Nothing in here is editable.") went
+                    on 6 October 2026 with the page's other descriptions (Ken).
+                    It was built by `filedSheetSummary`, removed with it.
                   */}
-                  <span className="mt-0.5 block text-xs text-ink-secondary">
-                    The applicant’s own filing, exactly as submitted — {filedSheetSummary}. Nothing
-                    in here is editable.
-                  </span>
                 </span>
               </button>
             </div>
@@ -7274,7 +7163,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           */}
           {foldsApplication &&
             taxOrderFold(
-              'flex w-full items-start gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
+              'flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
             )}
 
           {/*
@@ -7312,15 +7201,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               top, which is written nowhere else and is the thing an officer
               gets wrong.
             */}
-            {(decided || editing) && (
-              <p className="mt-1 text-xs text-ink-secondary">
-                {decided
-                  ? 'What this office recorded during its review.'
-                  : issuedGroups.length > 0 || canSetTier
-                    ? 'This panel is the only part of the sheet you can change. Evaluator Remarks travels with the decision you make at the top of the page; the other fields here each save with their own button.'
-                    : 'This panel is the only part of the sheet you can change. Evaluator Remarks is the only field in it, and it travels with the decision you make at the top of the page.'}
-              </p>
-            )}
 
             <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-amber-800">
               Taken from the record
@@ -7375,10 +7255,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                    * confirming — nothing is sent behind their back, and nothing
                    * they typed is thrown away.
                    */}
-                  <span className="mt-1.5 block text-xs text-ink-secondary">
-                    Sent with the application when you approve. On Return or Reject it fills in the
-                    reason box for you to check before it goes.
-                  </span>
                 </label>
               ) : (
                 <OfficeReadout label="Evaluator Remarks" value={data.remarks ?? ''} />
@@ -7545,7 +7421,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           */}
           {!foldsApplication &&
             taxOrderFold(
-              'flex w-full items-start gap-3 rounded-lg border border-officeuse-border bg-white/70 px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
+              'flex w-full items-center gap-3 rounded-lg border border-officeuse-border bg-white/70 px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
             )}
 
           {/* Assign officer (oic.assign) — v2. Editing only: it changes the file. */}

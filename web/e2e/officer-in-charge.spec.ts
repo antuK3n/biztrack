@@ -234,13 +234,13 @@ test.describe('the office Track page', () => {
      */
     const stages = ['For Approval', 'Pending Payment', 'Awaiting Other Permits', 'For Final Approval']
 
-    const hints: Record<string, RegExp> = {
-      Unassigned: /for approval — filings nobody has taken yet/i,
-      'My assigned': /for approval — the filings you are officer in charge of/i,
-      'Assigned to others': /for approval — filings a colleague is holding/i,
-    }
-
-    for (const section of Object.keys(hints)) {
+    /*
+     * Each section's one-line hint under the filter ("filings nobody has
+     * taken yet", …) was asserted here too; it went on 6 October 2026 (Ken: no
+     * descriptions on Manage Applications), and the radio's own label is what
+     * names the section in force.
+     */
+    for (const section of ['Unassigned', 'My assigned', 'Assigned to others']) {
       await page.getByRole('button', { name: section, exact: true }).click()
 
       for (const stage of stages) {
@@ -249,15 +249,6 @@ test.describe('the office Track page', () => {
           `${stage} vanished when ${section} was chosen`,
         ).toBeVisible()
       }
-
-      /*
-       * Checked per section rather than once at the end, which is where this
-       * first went wrong: after the loop the live section is the LAST one, so
-       * a single assertion about "My assigned" was reading a screen showing
-       * "Assigned to others". The line names both halves of the pair in force,
-       * so the reader is not left inferring it from two highlighted pills.
-       */
-      await expect(page.getByText(hints[section])).toBeVisible()
     }
   })
 

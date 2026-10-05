@@ -461,21 +461,11 @@ test('the application as filed starts collapsed and opens on one click', async (
   await expect(toggle).not.toHaveAttribute('disabled', /.*/)
 
   /*
-   * 3. It says what is inside. A collapsed region whose label is "Show more"
-   * is a mystery box, and an officer hunting for the barangay or the uploaded
-   * requirements has no reason to think this is where they are. The summary is
-   * built from the payload, so this checks the shape rather than a literal.
+   * 3. It used to say what is inside ("The applicant's own filing, exactly as
+   * submitted — … uploaded requirements …"), and that line was asserted here.
+   * It went on 6 October 2026 (Ken: no descriptions on Manage Applications);
+   * the label names the sheet it opens.
    */
-  /*
-   * "Sections A–E" was asserted here and the sheet has no Section E: the Fee
-   * Declaration was removed on 17 September 2026 — *"Why did you invent a
-   * section? This DOES NOT EXIST in the application form itself."* — so the
-   * summary would have been naming a section that cannot open. It now
-   * describes the CONTENT rather than counting lettered sections, which is
-   * also the thing an officer is hunting for when they open this.
-   */
-  await expect(toggle).toContainText('exactly as submitted')
-  await expect(toggle).toContainText(/uploaded requirement/)
 
   /*
    * 4. One click opens it — the actual sheet, not just a state flip. The
@@ -754,27 +744,13 @@ test('Save category is never `disabled` — it says what is missing instead', as
   await expectSaveState(true)
 })
 
-test('the Edit-mode banner names the category as one of the fields it turns on', async ({
-  page,
-}) => {
-  /*
-   * SEP-5's rule, applied to the new field: the banner is built from the same
-   * gates the controls are drawn behind, so it cannot describe a screen that is
-   * not there. An officer who never scrolls to For Office Use Only would
-   * otherwise never learn they are allowed to change a statutory deadline.
-   */
-  const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no working filing with an open review for this office')
-
-  await page.getByRole('button', { name: 'Edit', exact: true }).click()
-  /*
-   * `.first()` because the banner nests a span inside a <p> and both match the
-   * text — strict mode would fail on the ambiguity rather than on the product.
-   */
-  await expect(
-    page.getByText(/Edit mode\. On this filing your office fills in/).first(),
-  ).toContainText('the RA 11032 category')
-})
+/*
+ * 'the Edit-mode banner names the category as one of the fields it turns on'
+ * was here. The banner's list of fields ("Edit mode. Your office fills in …")
+ * went on 6 October 2026 (Ken: no descriptions on Manage Applications), so
+ * there is no sentence left to name it in; the category's own control is
+ * covered by the Edit-mode tests above.
+ */
 
 test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
   const assignmentId = await openForInspectionFiling(page)

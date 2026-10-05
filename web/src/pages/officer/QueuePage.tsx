@@ -67,12 +67,6 @@ const HOLDER_PILLS: { value: '' | 'unassigned' | 'mine' | 'others'; label: strin
 ]
 
 /** What each section is a list OF, said under the pills while it is chosen. */
-const HOLDER_HINT: Record<'unassigned' | 'mine' | 'others', string> = {
-  unassigned: 'filings nobody has taken yet',
-  mine: 'the filings you are officer in charge of',
-  others: 'filings a colleague is holding, read-only for you',
-}
-
 /*
  * ── Five entries, and no officer is shown all five ───────────────────────
  *
@@ -1083,7 +1077,12 @@ const TYPE_LABEL: Record<string, string> = {
  * shapes. `flex-col` makes the holder footer sit at the bottom of every card
  * whatever the body above it holds.
  */
-const CARD = 'flex h-full flex-col overflow-hidden rounded-lg bg-white shadow-card'
+/*
+ * The row's link (or plain box) inside the card. The CARD itself is the <li>
+ * — see `QueueRow` — so the holder strip under it shares one border, one
+ * radius and one shadow with it instead of being a second slab butted on.
+ */
+const CARD = 'flex flex-1 flex-col bg-white'
 
 /**
  * The visit this row is about, when the office's permit is AT its visit.
@@ -1249,22 +1248,12 @@ function QueueRow({
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
         </p>
         {/*
-          * Why this row does not open, said on the row.
-          *
-          * Every other row on this screen is a link to a review sheet, so one
-          * that is not needs to explain itself rather than read as broken. And
-          * the explanation is the answer to the question the tab raises: there
-          * is no review sheet because there is no assignment, and there is no
-          * assignment because nobody has been routed the filing yet. Nothing
-          * here is an officer's to act on — the applicant settles the Tax Order
-          * of Payment and WorkflowService routes it on the way through.
+          * A Pending Payment row does not open, and used to say why in a
+          * sentence here ("Waiting on the applicant's payment. It reaches an
+          * office for review once BPLO has approved the form and the fees are
+          * settled."). Removed 6 October 2026 (Ken: no descriptions on Manage
+          * Applications); the Pending Payment badge across the top says it.
           */}
-        {!item.href && (
-          <p className="mt-1 text-sm text-ink-muted">
-            Waiting on the applicant’s payment. It reaches an office for review once BPLO has
-            approved the form and the fees are settled.
-          </p>
-        )}
         {/*
           * Which permit this row is, and where it has got to.
           *
@@ -1334,9 +1323,12 @@ function QueueRow({
      * the footer would sit wherever the card's own height left it and three
      * cards in a row would end with their footers at three different heights.
      */
-    <li className="flex flex-col">
+    <li className="flex flex-col overflow-hidden rounded-lg bg-white shadow-card transition-shadow has-[>a:hover]:shadow-raised">
       {item.href ? (
-        <Link to={item.href} className={`${CARD} transition-shadow hover:shadow-raised`}>
+        <Link
+          to={item.href}
+          className={`${CARD} focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal`}
+        >
           {body}
         </Link>
       ) : (
@@ -1354,7 +1346,7 @@ function QueueRow({
         * would read as work waiting to be taken.
         */}
       {item.assignmentId !== null && (
-        <div className="-mt-px flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-line bg-white px-6 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-line px-5 py-3">
           <p className="text-sm text-ink-secondary">
             {holder.name ? (
               <>
@@ -1371,7 +1363,7 @@ function QueueRow({
               type="button"
               onClick={() => onClaim(item)}
               aria-disabled={claiming || undefined}
-              className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className="ml-auto rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {claiming ? 'Assigning…' : 'Assign to Me'}
             </button>
@@ -1394,7 +1386,7 @@ function QueueRow({
               type="button"
               onClick={() => onRelease(item)}
               aria-disabled={claiming || undefined}
-              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className="ml-auto rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
               {claiming ? 'Releasing…' : 'Unassign from me'}
             </button>
@@ -1428,7 +1420,7 @@ function QueueRow({
         * one the super admin and BPLO both see on this tab.
         */}
       {item.assignmentId === null && onMarkPaid && (
-        <div className="-mt-px flex items-center justify-end rounded-b-xl border-t border-line bg-white px-6 py-2.5">
+        <div className="flex items-center justify-end border-t border-line px-5 py-3">
           <button
             type="button"
             onClick={() => onMarkPaid(item)}
@@ -2341,9 +2333,6 @@ export function QueuePage() {
                   </label>
                 ))}
               </div>
-              {holder !== '' && (
-                <p className="mt-2 text-xs text-ink-muted">{HOLDER_HINT[holder]}.</p>
-              )}
             </fieldset>
           )}
         </aside>
@@ -2394,7 +2383,16 @@ export function QueuePage() {
         * one that is unmounted whenever the list is empty stays silent on the
         * single result that matters most — the search that found nothing.
         */}
-      <p role="status" aria-live="polite" className={summary ? 'mb-3 text-sm text-ink-muted' : ''}>
+      {/*
+        Kept for screen readers when the list is empty, but not drawn: the
+        empty state below says the same thing in its title, and two lines
+        saying "nothing here" one above the other is the same fact twice.
+      */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={!summary ? '' : nothingToShow && !firstLoad && !error ? 'sr-only' : 'mb-3 text-sm text-ink-muted'}
+      >
         {summary}
       </p>
 
@@ -2438,54 +2436,27 @@ export function QueuePage() {
                 filingType !== ''
                 ? `No ${TYPE_PLURAL[filingType]} are at this stage right now. Other types may be — try All filings.`
                 : 'No application in this queue matches every filter set above. Try widening one.'
-              : tab === 'all'
+              : tab === 'approval'
                 ? /*
-                   * The widest stage there is, so there is no "try another
-                   * stage" to offer — this one already looked everywhere.
-                   * What is left to widen is one of the other two groups.
+                   * Points at the holder filter, because this is where the
+                   * screen misleads. A tab is a STAGE, and an office can own
+                   * live filings while owing nothing at this one — BPLO's
+                   * assignment is marked done the moment it approves the main
+                   * form, months before the filing is decided. An officer
+                   * holding four live filings was landing on "Your queue is
+                   * clear" and reasonably concluding the feature was broken.
                    */
-                  'Nothing is on your desk at any stage right now.'
-                : tab === 'payment'
-                  ? 'No filing is waiting on payment right now.'
-                : tab === 'approval'
-                  ? /*
-                     * Points at the sections, because this is where the screen
-                     * misleads. A tab is a STAGE, and an office can own live
-                     * filings while owing nothing at this one — BPLO's
-                     * assignment is marked done the moment it approves the main
-                     * form, months before the filing is decided. An officer
-                     * holding four live filings was landing on "Your queue is
-                     * clear" and reasonably concluding the feature was broken.
-                     */
-                    'Nothing is waiting on your department’s review at this stage. Unassigned and My assigned above cover every stage.'
-                  : tab === 'final'
-                      ? /*
-                         * ── Say WHY this tab is usually empty ─────────────────
-                         *
-                         * It shared the inspection tab's line — "Nothing your
-                         * office has approved is still in progress" — which
-                         * since 18 September 2026 reads as a system that has
-                         * stopped working. A new application no longer stops
-                         * here at all: the fifth clearance issues the Mayor's
-                         * Permit outright, so the only filings that reach this
-                         * stage are renewals, whose uploaded certificates BPLO
-                         * genuinely does read.
-                         *
-                         * An empty destructive-looking queue makes people go
-                         * looking for the filings they think they have lost, so
-                         * the emptiness was explained rather than merely stated.
-                         *
-                         * Cut to one line on 5 October 2026. The Business
-                         * Permit is released at payment and the BPLO closing
-                         * step is going — a filing completes by itself when its
-                         * last clearance is issued — so "issued as soon as the
-                         * last clearance is approved" described a step that no
-                         * longer exists (tester).
-                         */
-                        'Nothing is waiting on BPLO here.'
-                      : // Both halves of what this tab now holds: filings this
-                        // office has signed off and that have not finished.
-                        'Nothing your office has approved is still in progress.'
+                  'Nothing is waiting on your department’s review at this stage. Unassigned and My assigned above cover every stage.'
+                : /*
+                   * Every other stage says nothing under the title. Their lines
+                   * — "Nothing is on your desk at any stage right now.", "No
+                   * filing is waiting on payment right now.", "Nothing is
+                   * waiting on BPLO here." and "Nothing your office has
+                   * approved is still in progress." — restated "Your queue is
+                   * clear" and went on 6 October 2026 (Ken: no descriptions on
+                   * Manage Applications).
+                   */
+                  undefined
           }
         />
       ) : nothingToShow ? (

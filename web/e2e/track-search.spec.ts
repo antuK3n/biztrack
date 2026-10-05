@@ -525,12 +525,12 @@ test.describe('officer queue', () => {
     await expect(page.getByText('Roberto’s Laundry Shop')).toBeVisible()
 
     /*
-     * Nothing on this tab is an officer's to open, and the rows say so rather
-     * than looking broken: there is no assignment, so there is no review sheet,
-     * so there is no `/staff/queue/:id` to link to.
+     * Nothing on this tab is an officer's to open: there is no assignment, so
+     * there is no review sheet, so there is no `/staff/queue/:id` to link to.
+     * The row's sentence saying so ("Waiting on the applicant's payment…") was
+     * asserted here and went on 6 October 2026; the badge says Pending Payment.
      */
     await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(0)
-    await expect(page.getByText(/Waiting on the applicant’s payment/).first()).toBeVisible()
   })
 
   test('Pending Payment searches on the server, not over the loaded rows', async ({ page }) => {

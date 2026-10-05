@@ -751,12 +751,6 @@ export function ApplicationProgress({
   const own = buildClearanceSteps
   const filing = buildSteps
   const clearance = ownPermit ? own(ownPermit) : null
-  // The same rail `buildSteps` walks — through `railFor`, not RAIL, or the nodes
-  // drawn here and the steps computed there would disagree by one on a new
-  // filing and every node after the gap would be labelled from the wrong step.
-  const rail: (ApplicationStatus | ServerClearanceStatus)[] = clearance
-    ? clearance.rail
-    : railFor(app)
   const { steps, terminal } = clearance ?? filing(app)
 
   /*
@@ -794,36 +788,24 @@ export function ApplicationProgress({
             */}
             {ownPermit ? `${ownPermit.name} progress` : 'Application progress'}
           </h2>
-          <p className="text-xs text-ink-muted">
-            {terminal
-              ? `This filing ended during ${stoppedStage}. Nothing further will happen to it.`
-              : notStarted
-                ? /*
+          {/*
+            Status lines only. A live filing's subtitle was the rail spelled
+            out ("For Approval → Pending Payment → Completed") directly above
+            the rail itself, and went on 6 October 2026 (Ken: no descriptions
+            on Manage Applications).
+          */}
+          {(terminal || notStarted) && (
+            <p className="text-xs text-ink-muted">
+              {terminal
+                ? `This filing ended during ${stoppedStage}. Nothing further will happen to it.`
+                : /*
                    * A draft, or a status this build has no node for. Said out
                    * loud rather than left as five grey circles an admin has to
                    * interpret.
                    */
-                  'This filing has not entered the process yet.'
-                : /*
-                   * Built from the rail, not typed out. It WAS a hardcoded
-                   * sentence and it went stale the moment a status was
-                   * renamed: it still read "For Approval" after that state
-                   * became "For Initial Approval" everywhere else, so the
-                   * subtitle and the node directly beneath it disagreed about
-                   * the name of the stage the filing was in.
-                   *
-                   * Same labels as the nodes, the badges and the applicant's
-                   * status guide, because they all come from
-                   * `applicationStatusMeta`.
-                   */
-                  rail
-                    .map((status) =>
-                      clearance
-                        ? clearanceStatusMeta(status).label
-                        : applicationStatusMeta(status as ApplicationStatus).label,
-                    )
-                    .join(' → ')}
-          </p>
+                  'This filing has not entered the process yet.'}
+            </p>
+          )}
         </div>
         <StatusBadge tone={meta.tone} label={meta.label} icon={meta.icon} />
       </div>
