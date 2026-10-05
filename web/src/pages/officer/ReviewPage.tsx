@@ -3995,7 +3995,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             inspections={app.inspections ?? []}
             filingStatus={app.status}
             onChanged={reload}
-            book={bookFirstInspection}
+            book={heldByAnother ? undefined : bookFirstInspection}
+            holderMayAct={!heldByAnother}
           />
 
           {/* The rail the client asked to keep: "but the progress thingy is cool". */}

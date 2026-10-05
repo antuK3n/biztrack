@@ -6,6 +6,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\CaseHolder;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 
@@ -27,6 +28,13 @@ use Laravel\Sanctum\Sanctum;
  * The client's rule: the first authorised officer to claim an unassigned
  * filing becomes its OIC; once held, only that officer may act on it, and only
  * the super admin may move it to somebody else.
+ *
+ * And since the request of 6 October 2026, for every office but BPLO, the
+ * claim comes FIRST: "The officer must click 'Assign to Me' before they can
+ * access and process the application." An unheld CHO case is neither opened
+ * nor worked (`App\Support\CaseHolder::UNCLAIMED`); BPLO keeps the older
+ * rule that acting on an unheld case claims it. ClaimBeforeWorkTest pins the
+ * rule door by door; the cases here that changed say so where they stand.
  *
  * Each office is answered separately, because each office is a separate
  * assignment row: one filing carrying BUSINESS and SANITARY has two, and BPLO
@@ -73,10 +81,20 @@ it('hands an unclaimed filing to the first officer who claims it', function () {
     $appId = scopedAssignmentFiling('OIC First Claim Cafe');
     $id = choAssignmentId($appId);
 
-    // Nobody holds it yet, and the payload says so rather than staying silent.
-    $before = test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/assignments/{$id}")->assertOk()->json('data');
-    expect($before['officer'])->toBeNull();
+    /*
+     * Nobody holds it yet, and the queue row says so rather than staying
+     * silent. The queue, because since the request of 6 October 2026 the case
+     * itself cannot be opened until it is claimed — that refusal is the other
+     * half of what is asserted here; the row read the review sheet until then.
+     */
+    $before = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/assignments?per_page=200')->assertOk()->json('data'))
+        ->firstWhere('id', $id);
+    expect($before)->not->toBeNull()
+        ->and($before['officer'])->toBeNull();
+    test()->getJson("/api/v1/assignments/{$id}")
+        ->assertForbidden()
+        ->assertJsonPath('message', CaseHolder::UNCLAIMED);
 
     $claimed = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$id}/claim")
@@ -158,24 +176,48 @@ it('lets the officer holding it do the work', function () {
         ->assertOk();
 });
 
-it('still lets an unclaimed filing be worked, and records who worked it', function () {
+it('still lets an unclaimed BPLO filing be worked, and records who worked it', function () {
     /*
-     * Not every office wants a claim step, and an office of one should not have
-     * to press a button to be allowed to do its job. Acting on an UNHELD
-     * assignment therefore claims it — the same rule approve() has always had,
-     * kept deliberately rather than replaced by a hard "claim first".
+     * An office of one should not have to press a button to be allowed to do
+     * its job, so acting on an UNHELD assignment claims it — the rule approve()
+     * has always had. Since the request of 6 October 2026 that is BPLO's
+     * alone, the office the request did not name; this case ran on City Health
+     * until then (the case below is City Health now).
+     *
+     * On a filing BPLO is still reading (For Approval), because BPLO's return
+     * is of the main form and the paid fixture the City Health cases use is
+     * past it.
      */
-    $appId = scopedAssignmentFiling('OIC Implicit Claim Cafe');
+    $appId = filingWithoutTin('123-456-789-000')->id;
+    $id = bploAssignmentId($appId);
+    expect(ApplicationAssignment::find($id)->officer_user_id)->toBeNull();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/return", ['remarks' => 'Send the lease contract.'])
+        ->assertOk();
+
+    $liza = User::where('email', 'bplo@biztrack.local')->first();
+    $row = ApplicationAssignment::find($id);
+    expect($row->officer_user_id)->toBe($liza->id)
+        ->and($row->assigned_at)->not->toBeNull();
+});
+
+it('refuses work on an unclaimed filing outside BPLO until an officer claims it', function () {
+    /*
+     * Request of 6 October 2026: "The officer must click 'Assign to Me'
+     * before they can access and process the application." Until then this
+     * return claimed the case on the way past (the case above, on City Health).
+     */
+    $appId = scopedAssignmentFiling('OIC Claim First Cafe');
     $id = choAssignmentId($appId);
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$id}/return", ['remarks' => 'Send the potability result.'])
-        ->assertOk();
+        ->assertForbidden()
+        ->assertJsonPath('message', CaseHolder::UNCLAIMED);
 
-    $carlos = User::where('email', 'sanitary@biztrack.local')->first();
-    $row = ApplicationAssignment::find($id);
-    expect($row->officer_user_id)->toBe($carlos->id)
-        ->and($row->assigned_at)->not->toBeNull();
+    // Refused, and nothing was claimed by the attempt.
+    expect(ApplicationAssignment::find($id)->officer_user_id)->toBeNull();
 });
 
 /* ── Giving it back ──────────────────────────────────────────────────────── */
@@ -318,12 +360,23 @@ it('tells an officer which rows are theirs to act on', function () {
     $appId = scopedAssignmentFiling('OIC Can Act Cafe');
     $id = choAssignmentId($appId);
 
-    $free = test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/assignments/{$id}")->assertOk()->json('data');
-    expect($free['can_claim'])->toBeTrue()->and($free['can_act'])->toBeTrue();
+    /*
+     * Unheld, the row offers Assign to Me and nothing else: `can_act` is false
+     * outside BPLO since the request of 6 October 2026 (it was true until
+     * then, when acting claimed the case). Read off the queue, because the
+     * case itself does not open until it is claimed.
+     */
+    $free = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/assignments?per_page=200')->assertOk()->json('data'))
+        ->firstWhere('id', $id);
+    expect($free['can_claim'])->toBeTrue()->and($free['can_act'])->toBeFalse();
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/assignments/{$id}/claim")->assertOk();
+
+    // Held, it is the holder's to work.
+    $mine = test()->getJson("/api/v1/assignments/{$id}")->assertOk()->json('data');
+    expect($mine['can_claim'])->toBeFalse()->and($mine['can_act'])->toBeTrue();
 
     $second = colleagueIn('CHO', 'sanitary_officer', 'Readonly Health');
     actAs($second);

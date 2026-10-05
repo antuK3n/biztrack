@@ -136,6 +136,11 @@ function approveOfficePaperwork(Application $app, string $code): void
 
     expect($assignmentId)->not->toBeNull("{$deptCode} has no assignment on this filing");
 
+    // Assign to Me first: outside BPLO an unheld case is not worked (request
+    // of 6 October 2026; claimAs in Pest.php). The same account then books
+    // and conducts the visit, as the holder.
+    claimAs($email, $app->id);
+
     test()->withHeaders(authAs($email))
         ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'Cleared.'])
         ->assertOk();

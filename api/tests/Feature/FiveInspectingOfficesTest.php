@@ -145,7 +145,10 @@ function filingWithEveryClearance(): Application
         if ($code === 'BPLO') {
             continue;
         }
-        authAs(OFFICE_INSPECTOR[$code][1]);
+        // Assign to Me before approving: outside BPLO an unheld case is not
+        // worked (request of 6 October 2026; claimAs in Pest.php). The same
+        // account books and closes the visit below, as the holder.
+        claimAs(OFFICE_INSPECTOR[$code][1], $app->id);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     }
 

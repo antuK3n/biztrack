@@ -75,6 +75,13 @@ function requirementApplication(string $businessName, string $registrationNumber
         'department_id' => Department::where('code', 'CHO')->value('id'),
     ]);
 
+    /*
+     * And CHO's officer takes it. Since the request of 6 October 2026 an
+     * officer outside BPLO raises and rules on requirements only on a case
+     * they hold (CaseHolder) — see claimAs() in Pest.php.
+     */
+    claimAs('sanitary@biztrack.local', $appId);
+
     return $appId;
 }
 

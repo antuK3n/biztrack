@@ -79,6 +79,18 @@ function requirementFiling(string $businessName, string $registrationNumber, arr
             'application_id' => $appId,
             'department_id' => Department::where('code', $code)->value('id'),
         ]);
+
+        /*
+         * And the office's officer takes the case. Since the request of 6
+         * October 2026 an officer outside BPLO raises or rules on a
+         * requirement only on a case they hold (CaseHolder), so a routed but
+         * unheld filing would refuse every request below with a 403 that has
+         * nothing to do with Other Requirements. BPLO is left unheld on
+         * purpose: it still works an unheld case, and claims it by doing so.
+         */
+        if ($code !== 'BPLO') {
+            claimAs(officerEmail($code), $appId);
+        }
     }
 
     return $appId;

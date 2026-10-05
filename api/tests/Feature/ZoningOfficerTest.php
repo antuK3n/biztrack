@@ -87,6 +87,12 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
     expect(collect($queue)->pluck('id'))->toContain($zoningAssignment->id)
         ->and(collect($queue)->pluck('department.code')->unique()->all())->toBe(['CPDO']);
 
+    /*
+     * And opens it — after Assign to Me, which since the request of 6 October
+     * 2026 comes before CPDO may open a case at all (claimAs in Pest.php). The
+     * queue above is what the officer sees first, as it always was.
+     */
+    claimAs('zoning@biztrack.local', $appId);
     $this->withHeaders($zoning)
         ->getJson("/api/v1/assignments/{$zoningAssignment->id}")
         ->assertOk()
@@ -150,6 +156,8 @@ it('lets the zoning officer clear its own assignment but not end the application
         ->where('department_id', $cpdoId)
         ->firstOrFail();
 
+    // CPDO's officer takes the case first (request of 6 October 2026).
+    claimAs('zoning@biztrack.local', $appId);
     $zoning = authAs('zoning@biztrack.local');
     $this->withHeaders($zoning)
         ->postJson("/api/v1/assignments/{$assignment->id}/approve", ['remarks' => 'Conforms to the zoning ordinance.'])
