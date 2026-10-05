@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\DocumentType;
+
 /**
  * Which DENR permits a business has to obtain, by what it does.
  *
@@ -535,5 +537,80 @@ final class DenrRequirements
     public static function psicMappedCategories(): array
     {
         return array_values(array_unique(array_values(self::PSIC_TO_CATEGORY)));
+    }
+
+    /*
+     * ── Each DENR requirement as a field, not a conversation ─────────────
+     *
+     * Client, 5 October 2026: *"make it like the Returned function where the
+     * applicant sees a field only on that specific Other Requirement for them
+     * to put the specified DENR requirements."* Until then a DENR follow-up
+     * was answered through the free reply box — a message, a paperclip, and
+     * the upload filed under the catch-all "Other Requirements" type, so
+     * CENRO could not tell a Waste Water Discharge Permit from a stray photo
+     * without opening it.
+     *
+     * The requirement now carries `system_key = denr.<code>` and the upload
+     * is filed under that permit's own document type. The key, not the
+     * title, is what the answer route switches on: a title is prose an
+     * officer could type by hand (see the migration that added
+     * `system_key`).
+     */
+
+    /** The prefix every DENR requirement's `system_key` starts with. */
+    public const KEY_PREFIX = 'denr.';
+
+    /**
+     * What the applicant uploads for each code — the DOCUMENT, where the
+     * glossary names the requirement. They differ on two: the glossary's PTO
+     * carries its generator caveat, which is not part of a file's name, and
+     * PCO names a person while the thing handed in is their accreditation.
+     */
+    public const DOCUMENT_NAMES = [
+        'ECC' => 'Environmental Compliance Certificate',
+        'CNC' => 'Certificate on Non-Coverage',
+        'WDP' => 'Waste Water Discharge Permit',
+        'HWP' => 'Hazardous Waste Permit',
+        'PTO' => 'Permit to Operate (Air Pollution)',
+        'PCO' => 'Pollution Control Officer Accreditation',
+    ];
+
+    /** The `system_key` a DENR requirement is stored under: `denr.WDP`. */
+    public static function systemKey(string $code): string
+    {
+        return self::KEY_PREFIX.$code;
+    }
+
+    /** `denr.WDP` → `WDP`; null for any key that is not a known DENR one. */
+    public static function codeFromSystemKey(?string $key): ?string
+    {
+        if ($key === null || ! str_starts_with($key, self::KEY_PREFIX)) {
+            return null;
+        }
+        $code = substr($key, strlen(self::KEY_PREFIX));
+
+        return isset(self::DOCUMENT_NAMES[$code]) ? $code : null;
+    }
+
+    /**
+     * The document type an upload for `$code` is filed under, created on
+     * demand — the same pattern as CecRequirements::documentType.
+     *
+     * Deliberately NOT attached to the CEC's `permit_type_requirements`. That
+     * pivot is the list demanded WITH the application, and these are due six
+     * months AFTER the certificate issues; listing them there would refuse the
+     * applicant a CEC the City is willing to give — the opposite of the
+     * form's own footnote. CENRO finds them through the requirement, which
+     * carries CENRO's `department_id`.
+     */
+    public static function documentType(string $code): DocumentType
+    {
+        return DocumentType::firstOrCreate(
+            ['code' => 'DENR_'.$code],
+            [
+                'name' => self::DOCUMENT_NAMES[$code],
+                'help_text' => 'Issued by the DENR. Due to CENRO within six months of your City Environmental Certificate.',
+            ],
+        );
     }
 }

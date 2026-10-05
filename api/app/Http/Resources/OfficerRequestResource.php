@@ -3,6 +3,8 @@
 namespace App\Http\Resources;
 
 use App\Enums\OfficerRequestStatus;
+use App\Services\WorkflowService;
+use App\Support\DenrRequirements;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,6 +18,28 @@ class OfficerRequestResource extends JsonResource
         return [
             'id' => $this->id,
             'request_type' => $this->request_type,
+            /*
+             * Which rule raised this, and what single field answers it.
+             *
+             * Client, 5 October 2026: the TIN and DENR requirements show "a
+             * field instead of a 'Response' thingy". `answer_field` is the
+             * browser's switch — the kind of control and its label — decided
+             * here so the DENR permit names live in one place
+             * (DenrRequirements::DOCUMENT_NAMES), not copied into TypeScript.
+             * Null for every other requirement, which keeps the free reply.
+             */
+            'system_key' => $this->system_key,
+            'answer_field' => match (true) {
+                $this->system_key === WorkflowService::TIN_REQUIREMENT_KEY => [
+                    'kind' => 'tin',
+                    'label' => 'Tax Identification Number (TIN)',
+                ],
+                ($code = DenrRequirements::codeFromSystemKey($this->system_key)) !== null => [
+                    'kind' => 'document',
+                    'label' => DenrRequirements::DOCUMENT_NAMES[$code],
+                ],
+                default => null,
+            },
             // Emit BOTH the paper names (title/description) and the client-facing
             // legacy names (subject/body) so web/mobile keep working.
             'title' => $this->title,

@@ -1484,6 +1484,10 @@ export interface Application extends ApplicationListItem {
    *
    * Recorded, never acted on: the Tax Order of Payment bills the full year
    * whatever this says, and the form tells the applicant so.
+   *
+   * No longer asked (client, 5 October 2026: "Remove the question
+   * entirely"); the API accepts `annual` alone. The other two stay in the
+   * type because filings recorded before then still hold them.
    */
   payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
   /**
@@ -2887,6 +2891,13 @@ export interface OfficerRequestResponse {
 export interface OfficerRequest {
   id: number
   request_type: RequestType
+  /** Which rule raised it (`business.tin`, `denr.WDP`, `rule.*`); null when an officer wrote it. */
+  system_key: string | null
+  /**
+   * The one field that answers it, or null for the free reply.
+   * Client, 5 October 2026: TIN and DENR show "a field instead of a 'Response' thingy".
+   */
+  answer_field: { kind: 'tin' | 'document'; label: string } | null
   subject: string
   body: string
   status: RequestStatus

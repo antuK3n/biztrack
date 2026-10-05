@@ -418,7 +418,7 @@ export const applications = {
       /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
       fee_profile?: FeeProfile
       /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
-      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
+      payment_mode?: 'annual'
       /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
       data_privacy_consent?: boolean
     } & AmendmentAnswers,
@@ -430,7 +430,7 @@ export const applications = {
       title?: string
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
-      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
+      payment_mode?: 'annual'
       data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
@@ -936,6 +936,17 @@ export const requests = {
     }
     return unwrap<OfficerRequest>(api.post(`/requests/${id}/respond`, { body }))
   },
+  /** Owner fills in a system requirement's own field: the TIN (stored at once). */
+  answerTin: (id: number, tin: string) =>
+    unwrap<OfficerRequest>(api.post(`/requests/${id}/answer`, { tin })),
+  /** Owner uploads the one DENR permit a requirement asks for. */
+  answerDocument: (id: number, document: File) => {
+    const form = new FormData()
+    form.append('document', document)
+    return unwrap<OfficerRequest>(
+      api.post(`/requests/${id}/answer`, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    )
+  },
   /** Officer closes a submitted request. */
   /**
    * The office rules on a submission.
@@ -1116,8 +1127,18 @@ export const assignments = {
     unwrapPaged<Assignment, AssignmentPageMeta>(api.get('/assignments', { params: filters })),
   get: (id: number) =>
     unwrap<Assignment & { application: Application }>(api.get(`/assignments/${id}`)),
-  approve: (id: number, remarks?: string) =>
-    unwrap<Assignment>(api.post(`/assignments/${id}/approve`, { remarks })),
+  /**
+   * `permitTypeIds`: BPLO's ticks on a NEW filing at For Approval — which of
+   * the five clearances this business needs (client, 5 October 2026: "BPLO
+   * decides, no rules"). Omitted everywhere else; the API refuses it there.
+   */
+  approve: (id: number, remarks?: string, permitTypeIds?: number[]) =>
+    unwrap<Assignment>(
+      api.post(`/assignments/${id}/approve`, {
+        remarks,
+        ...(permitTypeIds ? { permit_type_ids: permitTypeIds } : {}),
+      }),
+    ),
   /**
    * Refuse this office's permit outright. Not a correction — a refusal.
    *

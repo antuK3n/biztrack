@@ -13,6 +13,7 @@ use App\Services\NotificationService;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DenrRequirements;
 use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -460,6 +461,132 @@ class OfficerRequestController extends Controller
     }
 
     /**
+     * The applicant fills in the ONE field a system requirement asks for.
+     *
+     * Client, 5 October 2026: *"Remember the sending of TIN and DENR in Other
+     * Requirements? Can you make them show a field instead of a 'Response'
+     * thingy? So that submitting them will transport them directly to the
+     * database (just like a field in the Return function)."*
+     *
+     * `respond()` is a conversation — free text, any file, filed under the
+     * catch-all type — which is right for an office's hand-written request
+     * and wrong for these two, whose answer has exactly one shape and one
+     * place to go:
+     *
+     *  - `business.tin`: a TIN, validated by App\Support\Tin and written to
+     *    `businesses.tin` NOW (picker answer: "saved to the business right
+     *    away when the applicant submits; BPLO can still send it back if
+     *    wrong"). Sending it back leaves the stored TIN alone; the next
+     *    answer overwrites it.
+     *  - `denr.<code>`: one file, filed under that DENR permit's own document
+     *    type so CENRO's document list names it.
+     *
+     * Either way the answer is also recorded as a submission on the
+     * requirement, so the office reviews it exactly as it reviews any other
+     * reply and the status moves to For Review. Every other requirement is
+     * refused here and keeps `respond()`.
+     */
+    public function answer(Request $request, OfficerRequest $officerRequest): JsonResponse
+    {
+        $officerRequest->loadMissing('application.applicant', 'application.business');
+        abort_unless($officerRequest->application, 404, 'The application behind this request no longer exists.');
+        abort_unless(
+            $officerRequest->application->applicant_user_id === $request->user()->id,
+            403,
+            'This request is not yours to respond to.'
+        );
+        if (! $officerRequest->status?->acceptsResponse()) {
+            throw ValidationException::withMessages(['status' => ['This request is closed.']]);
+        }
+
+        $isTin = $officerRequest->system_key === WorkflowService::TIN_REQUIREMENT_KEY;
+        $denrCode = DenrRequirements::codeFromSystemKey($officerRequest->system_key);
+        if (! $isTin && $denrCode === null) {
+            throw ValidationException::withMessages(['request' => ['This requirement takes a written reply.']]);
+        }
+
+        $app = $officerRequest->application;
+
+        if ($isTin) {
+            $business = $app->business;
+            if ($business === null) {
+                throw ValidationException::withMessages(['tin' => ['This business is no longer on the register.']]);
+            }
+            $request->validate(['tin' => ['required', 'string', 'max:40']], ['tin.required' => 'Enter your TIN.']);
+            $tin = Tin::normalize((string) $request->input('tin'));
+            if (! Tin::isValid($tin)) {
+                // The web form's own words (lib/fieldRules TIN_ERROR), so the
+                // two doors refuse a bad TIN alike.
+                throw ValidationException::withMessages(['tin' => ['Enter a valid TIN.']]);
+            }
+
+            DB::transaction(function () use ($request, $officerRequest, $business, $app, $tin) {
+                $from = $business->tin;
+                $business->update(['tin' => $tin]);
+                Audit::log('business.tin_supplied', $business, [
+                    'from' => $from,
+                    'to' => $tin,
+                    'application_id' => $app->id,
+                    'officer_request_id' => $officerRequest->id,
+                ]);
+
+                // The TIN itself is the reply, so the office reads what was sent.
+                $officerRequest->responses()->create(['user_id' => $request->user()->id, 'body' => $tin]);
+                $officerRequest->update([
+                    'status' => OfficerRequestStatus::Submitted,
+                    'applicant_response' => $tin,
+                    'submitted_at' => now(),
+                ]);
+            });
+        } else {
+            $request->validate([
+                'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            ], [
+                'document.required' => 'Choose a file to upload.',
+                'document.mimes' => 'Upload a PDF, JPG or PNG.',
+                'document.max' => 'The file must be 10 MB or smaller.',
+            ]);
+            $file = $request->file('document');
+            $type = DenrRequirements::documentType($denrCode);
+
+            DB::transaction(function () use ($request, $officerRequest, $app, $file, $type) {
+                $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+                $dir = "private/documents/{$app->id}";
+                $filename = Str::uuid()->toString().'.'.$ext;
+                Storage::disk('local')->putFileAs($dir, $file, $filename);
+
+                $doc = ApplicationDocument::create([
+                    'application_id' => $app->id,
+                    'document_type_id' => $type->id,
+                    'original_filename' => $file->getClientOriginalName(),
+                    'stored_path' => "{$dir}/{$filename}",
+                    'mime_type' => $file->getClientMimeType(),
+                    'size_bytes' => $file->getSize(),
+                ]);
+                Audit::log('document.uploaded', $doc);
+
+                $link = [
+                    'application_document_id' => $doc->id,
+                    'file_name' => $doc->original_filename,
+                    'file_path' => $doc->stored_path,
+                ];
+                $officerRequest->responses()->create(['user_id' => $request->user()->id] + $link);
+                $officerRequest->update($link + [
+                    'status' => OfficerRequestStatus::Submitted,
+                    'applicant_response' => null,
+                    'submitted_at' => now(),
+                ]);
+            });
+        }
+
+        Audit::log('request.responded', $officerRequest);
+
+        return response()->json([
+            'data' => new OfficerRequestResource($officerRequest->fresh()->load($this->eager())),
+        ]);
+    }
+
+    /**
      * The office sets the requirement's status (request.create gate).
      *
      * Named `close` because that is what it used to be and what the route is
@@ -555,11 +682,22 @@ class OfficerRequestController extends Controller
          * Checked BEFORE the transaction opens, so a reply that is not a TIN
          * refuses the acceptance without having written anything — the same
          * rule the workflow guards follow. See App\Support\Tin.
+         *
+         * Since 5 October 2026 the TIN is normally ALREADY on the business by
+         * the time this runs: the applicant types it into the requirement's
+         * own field, and `answer()` validates and stores it there and then
+         * (client: "saved to the business right away when the applicant
+         * submits; BPLO can still send it back if wrong"). Approval then only
+         * closes the requirement — nothing to re-check, nothing to write
+         * twice. The reply-parsing below survives for a requirement answered
+         * through the free reply box before the field existed.
          */
         $tinToStore = null;
+        $storedTin = Tin::normalize((string) ($officerRequest->application->business?->tin ?? ''));
         if (
             $outcome === OfficerRequestStatus::Fulfilled
             && $officerRequest->system_key === WorkflowService::TIN_REQUIREMENT_KEY
+            && ! Tin::isValid($storedTin)
         ) {
             $reply = (string) ($officerRequest->responses()->latest('id')->first()?->body ?? '');
             $tinToStore = Tin::normalize($reply);
