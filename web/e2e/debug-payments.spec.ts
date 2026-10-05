@@ -67,8 +67,11 @@ test.describe('the super admin', () => {
     await expect(
       page.getByText('The bill, the receipt and the records always keep the real assessed amount.'),
     ).toBeVisible()
-    // Nothing on the panel calls payments simulated or a test (Ken, 5 October 2026).
-    await expect(page.getByText(/simulated|test charge|practice kwikpay/i)).toHaveCount(0)
+    // Nothing in Payments calls payments simulated or a test (Ken, 5 October
+    // 2026). Scoped to the section: Health prints the build's branch name.
+    await expect(
+      page.getByRole('region', { name: 'Payments' }).getByText(/simulated|test charge|practice kwikpay/i),
+    ).toHaveCount(0)
     await shot(page, 'debug-payments-1280')
 
     // Real money is asked about first, and keeping the test charge changes nothing.
