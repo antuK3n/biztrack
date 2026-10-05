@@ -1400,6 +1400,40 @@ it('refuses a second amendment while one is open, naming it', function () {
         ->assertStatus(422)->assertJsonPath('errors.application_type.0', "An amendment is already open ({$tracking}).");
 });
 
+/*
+ * ── An amendment needs a live permit ────────────────────────────────────────
+ *
+ * Ken, 5 October 2026 (scenario run: owner-amend rows 9 and 10, expiry row
+ * 18). An amendment of an EXPIRED permit was approved: the register was
+ * rewritten, nothing was reprinted, and the owner was told "Your permit has
+ * been issued". One of a REVOKED permit rewrote the register of a business
+ * that holds no permit at all. Refused at create, and again at submit for a
+ * draft whose permit lapsed or was revoked while it sat.
+ */
+it('refuses an amendment of an expired or revoked permit, at create and at submit', function (string $status, string $message) {
+    [$appId, $businessId] = amendmentFiling(['trade_name' => 'After The Term']);
+    $owner = authAs('owner@biztrack.local');
+    $prior = Permit::findOrFail(Application::findOrFail($appId)->prior_permit_id);
+    $prior->update(['status' => $status]);
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonPath('message', $message);
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::Draft);
+
+    test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+        'prior_permit_id' => $prior->id,
+    ])->assertStatus(422)->assertJsonPath('message', $message);
+})->with([
+    'expired' => ['expired', 'Renew this permit before amending it.'],
+    'revoked' => ['revoked', 'This permit has been revoked.'],
+]);
+
 it('refuses to submit an amendment without its affidavit', function () {
     // The submit gate's amendment list (`RequiredDocuments`): FO-003's own.
     [$appId] = amendmentFiling();

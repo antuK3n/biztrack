@@ -15,12 +15,13 @@ use App\Models\Business;
 use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
-use App\Support\ApplicationVisibility;
 use App\Support\AmendmentScope;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\RenewablePermit;
 use App\Support\RenewalScope;
 use App\Support\RenewalWindow;
+use App\Support\RequiredDocuments;
 use App\Support\ReturnTargets;
 use App\Support\Tin;
 use App\Support\Zoning\PinZone;
@@ -328,6 +329,7 @@ class ApplicationController extends Controller
          */
         if ($data['application_type'] === ApplicationType::Amendment->value) {
             $refusal = AmendmentScope::refusal($priorIds, $data['permit_type_ids'] ?? null)
+                ?? AmendmentScope::standingRefusal($priorIds)
                 ?? AmendmentScope::openRefusal($business->id);
             if ($refusal !== null) {
                 throw ValidationException::withMessages(['application_type' => [$refusal]]);
@@ -700,7 +702,8 @@ class ApplicationController extends Controller
             $refusal = AmendmentScope::refusal(
                 [$application->prior_permit_id, ...$application->priorPermits->pluck('id')->all()],
                 $application->permitTypes()->pluck('permit_types.id')->all(),
-            ) ?? AmendmentScope::openRefusal($application->business_id, $application);
+            ) ?? AmendmentScope::standingRefusal([$application->prior_permit_id, ...$application->priorPermits->pluck('id')->all()])
+                ?? AmendmentScope::openRefusal($application->business_id, $application);
             if ($refusal !== null) {
                 throw ValidationException::withMessages(['application_type' => [$refusal]]);
             }
@@ -763,7 +766,7 @@ class ApplicationController extends Controller
          * documents at all was submitted through the API; see
          * `RequiredDocuments` for why it reads the wizard's own list.
          */
-        $missing = \App\Support\RequiredDocuments::missingFor($application);
+        $missing = RequiredDocuments::missingFor($application);
         if ($missing->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'documents' => ['Upload: '.$missing->pluck('name')->implode(', ').'.'],

@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -67,6 +68,32 @@ final class AmendmentScope
             if ($stray) {
                 return 'Only the Business Permit can be amended.';
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why the permit this amendment names is not one that can be amended, or
+     * null. An amendment alters a live permit: one that has expired is renewed
+     * first, and one that was revoked is gone (Ken, 5 October 2026 — the
+     * scenario run approved both, rewriting the register and reprinting
+     * nothing). Under the 31 December rule every Business Permit is Expired
+     * from 1 January until renewed, so January amendments land here.
+     *
+     * @param  array<int, int|null>  $priorPermitIds
+     */
+    public static function standingRefusal(array $priorPermitIds): ?string
+    {
+        $statuses = Permit::query()
+            ->whereKey(array_values(array_filter(array_map('intval', $priorPermitIds))))
+            ->pluck('status');
+
+        if ($statuses->contains(PermitStatus::Revoked)) {
+            return 'This permit has been revoked.';
+        }
+        if ($statuses->contains(PermitStatus::Expired)) {
+            return 'Renew this permit before amending it.';
         }
 
         return null;
