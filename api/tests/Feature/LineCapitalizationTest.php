@@ -63,6 +63,7 @@ it('lands the capital declared on the fee profile in business_lines', function (
     $owner = authAs('owner@biztrack.local');
     $ids = fileWithCapital($owner, 425000);
 
+    attachRequiredDocuments($ids['application_id']);
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$ids['application_id']}/submit")
         ->assertOk();

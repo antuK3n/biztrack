@@ -261,6 +261,7 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
      * assessment below is written at submission either way, which is what lets
      * this case assert the fee without paying it.
      */
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/submit")
         ->assertOk()
@@ -288,6 +289,7 @@ it('routes the zoning clearance to the Planning/Zoning Office when the applicant
         ->assertCreated()
         ->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);

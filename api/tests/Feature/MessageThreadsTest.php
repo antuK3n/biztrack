@@ -69,6 +69,7 @@ function requirementFilingForInbox(): int
     ])->assertCreated()->json('data.id');
 
     // Filed, so it carries a tracking number and an office can see it at all.
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return $appId;
@@ -185,6 +186,7 @@ it('offers the applicant a way in before anyone has said anything', function () 
     $appId = ownerApplicationId();
 
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
@@ -206,6 +208,7 @@ it('names the offices an applicant may talk to on each inbox row', function () {
     $appId = ownerApplicationId();
 
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*
@@ -277,6 +280,7 @@ it('shows an officer which filing and which office a conversation belongs to', f
     authAs('owner@biztrack.local');
     // Filed, so it has a tracking number — the officer identifies the filing by
     // that, not by the internal id.
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
         ->assertCreated();
@@ -319,6 +323,7 @@ it('counts what the other side wrote as unread until the conversation is opened'
     $appId = ownerApplicationId();
 
     authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
         ->assertCreated();

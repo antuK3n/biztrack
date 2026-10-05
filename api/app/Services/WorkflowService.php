@@ -839,9 +839,8 @@ class WorkflowService
             /*
              * The tier decides the deadline. `complexity_set_by_user_id` stays
              * null: null means "classified automatically", which is what this
-             * is. `Ra11032::tierFor()` is our rule, not the LGU's published one
-             * (open question A10), and BPLO is required to confirm or change it
-             * before they can approve — see requireProcessingCategory().
+             * is. Nothing waits on an officer confirming it any more: the gate
+             * that did was retired on 5 October 2026 (see `refreshReadiness`).
              */
             $submittedAt = now();
             $tier = Ra11032::tierFor($app);
@@ -917,18 +916,46 @@ class WorkflowService
             $bploReads = $app->application_type !== ApplicationType::Renewal
                 || ! $deferred;
 
+            /*
+             * ── A move opens its Zoning Clearance now ────────────────────
+             *
+             * An amendment carrying ZONING (a move, a new trade, a larger
+             * floor area) cannot be approved until CPDO has issued it — and
+             * until 5 October 2026 nothing told the applicant to apply, or
+             * gave CPDO anything: they had to find the clearances page on
+             * their own while BPLO's approve refused. The client: *"As soon
+             * as the move is submitted."*
+             *
+             * So the clearance is applied for here (the stage is already
+             * open — an amendment defers payment, see `ClearanceService::
+             * isUnlocked`) and the applicant is told to hand in the sheet.
+             * Applied, not submitted: the Zoning sheet has its own
+             * requirements, and CPDO is routed by `submitClearanceForm` when
+             * the applicant hands it in, as for every other clearance.
+             */
+            $zoning = $app->application_type === ApplicationType::Amendment
+                ? $app->permitTypes()->where('permit_types.code', 'ZONING')->first()
+                : null;
+
             $this->transition(
                 $app,
                 ApplicationStatus::ForApproval,
-                $bploReads
-                    ? 'Submitted. Waiting for BPLO to review the form.'
-                    : 'Submitted. Apply for the permit below and its office will review it.',
+                match (true) {
+                    $zoning !== null => 'Submitted. Apply for the Zoning Clearance now: BPLO approves '
+                        .'this amendment once it is issued.',
+                    $bploReads => 'Submitted. Waiting for BPLO to review the form.',
+                    default => 'Submitted. Apply for the permit below and its office will review it.',
+                },
             );
 
             if ($bploReads) {
                 $this->routeTo($app, $this->bploDepartmentId());
             } else {
                 $this->handCarriedClearancesToTheirOffices($app);
+            }
+
+            if ($zoning !== null) {
+                $this->startClearance($app->fresh(), $zoning, ApplicationPermitType::MODE_APPLY);
             }
 
             return $app->fresh();
@@ -1888,7 +1915,13 @@ class WorkflowService
              */
             $permit = $this->outcomePermitFor($app);
             if ($permit !== null && $permit->status === PermitStatus::Active) {
-                $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'filing']);
+                // Dated and explained, naming no permit: BPLO ended the filing.
+                $permit->update([
+                    'status' => PermitStatus::Suspended,
+                    'suspended_cause' => 'filing',
+                    'suspended_at' => now(),
+                    'suspension_reason' => mb_substr($reason, 0, 500),
+                ]);
 
                 /*
                  * Its own audit action, not `permit.suspended`. That one records
@@ -3056,6 +3089,16 @@ class WorkflowService
      * second refusal finds the permit already suspended, changes nothing, and
      * still notifies — the applicant needs to know about the second reason even
      * though the state did not move.
+     *
+     * ── It records its cause on the permit (client, 5 October 2026) ─────────
+     *
+     * *"Show WHY it is suspended and WHICH office caused it."* The date, the
+     * refusal's words and the refused permit go on the row, so the permit page,
+     * the Track row, the QR page and the PDF can say it without reading the
+     * audit trail. The FIRST cause stands: a second refusal on a permit already
+     * suspended for one does not overwrite it. It does fill a cause that was
+     * never recorded — a permit suspended before these columns existed, or by
+     * a cause that names no permit — since a named cause beats none.
      */
     private function suspendOutcomePermit(Application $app, PermitType $refused, string $reason): void
     {
@@ -3075,10 +3118,15 @@ class WorkflowService
             return;
         }
 
+        $cause = [
+            'suspension_reason' => mb_substr($reason, 0, 500),
+            'suspended_for_permit_type_id' => $refused->id,
+        ];
+
         if ($permit->status === PermitStatus::Active) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
+            $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal', 'suspended_at' => now()] + $cause);
 
             Audit::log('permit.suspended', $permit, [
                 'application_id' => $app->id,
@@ -3087,6 +3135,8 @@ class WorkflowService
                 'because_permit_type' => $refused->name,
                 'reason' => $reason,
             ], $snapshot);
+        } elseif ($permit->status === PermitStatus::Suspended && $permit->suspended_for_permit_type_id === null) {
+            $permit->update($cause + ['suspended_at' => $permit->suspended_at ?? now()]);
         }
 
         $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
@@ -3135,11 +3185,37 @@ class WorkflowService
             return;
         }
 
+        $app->load('permitTypes');
+
+        /*
+         * A failed inspection counts as a refusal too, since 5 October 2026
+         * (see recordInspection): the client reads the visit's Reject as the
+         * permit being rejected. Per office, the LATEST CONDUCTED visit — a
+         * re-inspection that is booked but not yet done answers nothing, so
+         * it must not let another office's approval lift the suspension.
+         * Settled when that office's clearance is Approved, which a passing
+         * re-inspection does.
+         */
+        $failedOffices = Inspection::where('application_id', $app->id)
+            ->where('status', InspectionStatus::Completed->value)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('department_id')
+            ->map(fn ($visits) => $visits->last())
+            ->filter(fn (Inspection $visit) => $visit->failed())
+            ->keys();
+
+        $stillRefused = $app->permitTypes->contains(
+            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected
+                || ($pt->pivot->status !== ClearanceStatus::Approved
+                    && $failedOffices->contains($pt->issuing_department_id)),
+        );
+
         /*
          * "Still refused" now also counts an ISSUED certificate its office set
          * to Rejected [client, 5 October 2026] — see refusalsHolding().
          */
-        if ($this->refusalsHolding($app) !== []) {
+        if ($stillRefused || $this->refusalsHolding($app) !== []) {
             return;
         }
 
@@ -3216,7 +3292,8 @@ class WorkflowService
     /** Put a suspended certificate back in force, and tell its owner. */
     private function reinstate(Application $app, Permit $permit): void
     {
-        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null]);
+        // The cause goes with the suspension — see Permit::suspensionCleared.
+        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null] + Permit::suspensionCleared());
 
         Audit::log('permit.reinstated', $permit, [
             'application_id' => $app->id,
@@ -3318,7 +3395,13 @@ class WorkflowService
         foreach ($permits as $permit) {
             // Suspension retires the certificate; keep it as it stood (Audit Log 1).
             $snapshot = Audit::snapshot($permit);
-            $permit->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'business']);
+            // Dated and explained, naming no permit: the business was sanctioned.
+            $permit->update([
+                'status' => PermitStatus::Suspended,
+                'suspended_cause' => 'business',
+                'suspended_at' => now(),
+                'suspension_reason' => mb_substr($reason, 0, 500),
+            ]);
 
             Audit::log('permit.suspended', $permit, [
                 'business_id' => $business->id,
@@ -3335,9 +3418,15 @@ class WorkflowService
      *
      * ── How it knows which those were, without storing it ────────────────────
      *
-     * It does not need a column, and the reasoning is worth stating because a
-     * `suspended_cause` column was the obvious first answer and would have
-     * meant a migration against the live register.
+     * It does not need a column to decide, and the reasoning is worth stating
+     * because a cause column was the obvious first answer.
+     *
+     * Permits DO carry `suspended_cause` and `suspended_for_permit_type_id`
+     * since 5 October 2026 — the first so that no condition lifts BPLO's own
+     * suspension (`manual`, see reconsiderSuspension), the second to EXPLAIN
+     * the suspension — but neither decides this. The decision below still
+     * asks the filing, so a stale or missing cause on a row can never keep a
+     * permit suspended or hand one back.
      *
      * A permit is suspended for one of three reasons: this business was
      * sanctioned, a clearance on its filing was refused, or BPLO rejected the
@@ -3489,7 +3578,7 @@ class WorkflowService
 
         $this->assertNotHeldByRefusal($permit);
 
-        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null]);
+        $permit->update(['status' => PermitStatus::Active, 'suspended_cause' => null] + Permit::suspensionCleared());
 
         Audit::log('permit.suspension_lifted', $permit, [
             'application_id' => $app?->id,
@@ -3925,8 +4014,8 @@ class WorkflowService
      * the office says when. An automatic date is a promise made to the applicant
      * by a scheduler that does not know whether anyone is free.
      *
-     * The least-loaded inspector is still assigned, because somebody has to be
-     * named on the visit and the office has not been asked to pick one.
+     * Nobody is named on the visit any more: since 5 October 2026 the office
+     * types the inspector's name for the record (openInspection).
      *
      * Refuses a second CURRENT visit for the same office. A failed visit is kept
      * forever (see recordInspection), and `currentPerDepartment()` is what stops
@@ -3964,6 +4053,9 @@ class WorkflowService
                 'scheduled_at' => ['This office already has an inspection booked on this application.'],
             ]);
         }
+
+        $scheduledAt = $this->visitInstant($scheduledAt);
+        $this->refusePastVisitDate($scheduledAt);
 
         return DB::transaction(function () use ($app, $departmentId, $scheduledAt, $row) {
             $visit = $this->openInspection($app, $departmentId, $scheduledAt);
@@ -4030,6 +4122,23 @@ class WorkflowService
             $this->refuseWhileOnHold($inspection->application?->business);
         }
 
+        /*
+         * ── Not before the day it is booked for ──────────────────────────
+         *
+         * Browser testing, 5 October 2026: a visit booked for 6 October was
+         * recorded as conducted on the 4th. A result is what the inspector
+         * found ON the visit, so it cannot exist before the visit's day —
+         * an office that went early reschedules to today first. Start of the
+         * booked day in Manila (config/app.php), so a visit booked for 14:00
+         * today can be recorded at 09:00.
+         */
+        if ($inspection->scheduled_at !== null
+            && now()->lessThan($inspection->scheduled_at->copy()->startOfDay())) {
+            throw ValidationException::withMessages([
+                'scheduled_at' => ['The visit is booked for '.$inspection->scheduled_at->format('d M Y').'.'],
+            ]);
+        }
+
         $inspection->update([
             'status' => InspectionStatus::Completed,
             'result' => $result,
@@ -4058,12 +4167,36 @@ class WorkflowService
              * through it put the failure back into the silence the note above
              * records being fixed.
              */
+            /*
+             * ── A failed visit suspends the business permit ──────────────
+             *
+             * The client, 5 October 2026: *"I thought when a permit was
+             * Rejected (which was done through For Inspection), the business
+             * permit is automatically Suspended? We already built that right,
+             * so where is that? Kindly FIX."* Only `rejectClearance` — the
+             * office formally refusing — suspended, and the client reads the
+             * inspection's Reject as the refusal. So a failure suspends the
+             * same way, through the same method (it does nothing when no
+             * Mayor's Permit is active). The way back is the passing
+             * re-inspection: grantClearance → reconsiderSuspension, which now
+             * counts an unanswered failure as still refused.
+             */
+            $permit = $this->outcomePermitFor($app);
+            $suspends = $permit !== null
+                && in_array($permit->status, [PermitStatus::Active, PermitStatus::Suspended], true);
+
             $this->notify->inspectionFailed(
                 $app,
                 "{$office} inspection did not pass."
                 .($findings ? " Findings: {$findings}" : '')
-                .' The office will schedule a re-inspection.',
+                .' The office will schedule a re-inspection.'
+                .($suspends ? ' Your Business Permit is suspended until this is settled.' : ''),
             );
+
+            $refused = $this->pivotForDepartment($app, $inspection->department_id)?->permitType;
+            if ($refused !== null) {
+                $this->suspendOutcomePermit($app, $refused, $findings ?: 'Inspection did not pass.');
+            }
 
             return;
         }
@@ -4087,6 +4220,8 @@ class WorkflowService
     {
         // Suspended or blacklisted: no visit is booked either (refuseWhileOnHold).
         $this->refuseWhileOnHold($failed->application?->business);
+        $scheduledAt = $this->visitInstant($scheduledAt);
+        $this->refusePastVisitDate($scheduledAt);
 
         return DB::transaction(function () use ($failed, $scheduledAt) {
             $app = $failed->application;
@@ -4301,7 +4436,12 @@ class WorkflowService
 
         $ready = $outstanding->isEmpty() && $openRequirements === 0;
 
-        if ($ready && ! $held && $app->status === ApplicationStatus::Approved) {
+        /*
+         * For Final Approval as well as Approved: a filing the retired
+         * category branch below parked there closes on its next refresh
+         * rather than waiting for a press the UI no longer offers.
+         */
+        if ($ready && ! $held && in_array($app->status, [ApplicationStatus::Approved, ApplicationStatus::ForFinalApproval], true)) {
             /*
              * ── No filing type stops for BPLO to re-read the permits ─────────
              *
@@ -4320,45 +4460,25 @@ class WorkflowService
              * office here, no evidence to weigh that the register does not
              * already hold, and the RA 11032 clock running while it waited.
              *
-             * NOT removed: the processing-category branch below. It is not
-             * about uploads — it holds a filing nobody has classified so that
-             * an officer sets the RA 11032 tier before a permit is issued
-             * against its deadline — and it applies to every filing type. That
-             * is the only route to For Final Approval left.
+             * ── Nor for BPLO to "confirm the processing category" ───────────
+             *
+             * That branch stood here until 5 October 2026: a filing whose tier
+             * no officer had put their name to went to For Final Approval when
+             * its last clearance was issued, with the note "BPLO must confirm
+             * this filing's processing category before the business permit
+             * can be issued". The business permit had in fact been released
+             * at payment, the tier is read from Malabon's Citizen's Charter
+             * (27 September 2026), and BPLO's screen no longer offers a way to
+             * set it — so a tester's filing sat there with nothing anybody
+             * could press. Asked, the client said: *"No, close it
+             * automatically."*
+             *
+             * So the last clearance closes the filing: `approveOverall` below
+             * stamps `decided_at` (the status stays Approved, read as
+             * "Completed"), writes the history row and tells the applicant
+             * every permit is issued. For Final Approval is left to the one
+             * filing type that reaches it as BPLO's own act, the amendment.
              */
-
-            /*
-             * ── The one case where BPLO still has something real to do ───────
-             *
-             * Tested rather than required, because this runs inside the
-             * CLEARANCE OFFICE's Approve press: `requireProcessingCategory()`
-             * throws, and a filing missing its tier would fail CENRO's own
-             * approval with an error about a category CENRO cannot set.
-             *
-             * It falls back to For Final Approval, and that is not the stage
-             * creeping back in. The stage was removed from this path because it
-             * had no work in it; here it has work — a named officer must confirm
-             * the RA 11032 category against the Citizen's Charter before a
-             * permit is issued against its deadline, and then approve. That is a
-             * decision, not a rubber stamp.
-             *
-             * It should be unreachable: `approveMainForm()` already refuses
-             * BPLO's first act without a confirmed tier. One filing in the
-             * register is past that guard without one, written before it
-             * existed, and it is currently at this very status — so this branch
-             * is live today rather than defensive.
-             */
-            if (! $this->hasProcessingCategory($app)) {
-                $this->transition(
-                    $app,
-                    ApplicationStatus::ForFinalApproval,
-                    'Every other permit has been approved. BPLO must confirm this filing’s '
-                    .'processing category before the business permit can be issued.',
-                );
-
-                return;
-            }
-
             /*
              * The remark says what CLOSING the filing means, not that a
              * permit was minted here. It said "business permit issued", which
@@ -5381,8 +5501,14 @@ class WorkflowService
         $this->recordDeferredFee($app, $row->permitType);
         $this->raiseDenrRequirements($app, $row->permitType);
 
-        // `applicationNote` for the same reason as at the re-inspection: a
-        // permit is granted on a filing that already stands at Approved.
+        /*
+         * A note, not a status notice. This passed `$app->status` as the
+         * status the filing had MOVED to, which it had not: the applicant read
+         * "BIZ-… is now 'For Approval'. Sanitary Permit has been approved and
+         * issued." on a filing that had moved on (browser testing, 5 October
+         * 2026) — and on a gathering filing, which stands at Approved,
+         * `applicationStatus` swallows the notice altogether.
+         */
         $this->notify->applicationNote(
             $app,
             $row->permitType->name.' has been approved and issued.',
@@ -5891,7 +6017,18 @@ class WorkflowService
                 'valid_from' => $validFrom->toDateString(),
                 'valid_until' => $validUntil->toDateString(),
                 'issued_at' => now(),
-                'issued_by_user_id' => Auth::id(),
+                /*
+                 * Whoever pressed, unless that is the APPLICANT. The Business
+                 * Permit is released by the applicant's payment, so the
+                 * session there is the payer, and `Auth::id()` named the
+                 * business owner as the officer who issued their own permit
+                 * (5 October 2026). Then it is the office's officer in charge
+                 * — the BPLO officer holding or classifying the filing — or
+                 * nobody, which is honest; never the payer.
+                 */
+                'issued_by_user_id' => $acting !== null && $acting->id !== $app->applicant_user_id
+                    ? $acting->id
+                    : $officer?->id,
                 /*
                  * ── The face, frozen at signature ────────────────────────────
                  *
@@ -5945,6 +6082,34 @@ class WorkflowService
         if ($prior !== null && $prior->status?->isLive()) {
             $prior->update(['status' => PermitStatus::Superseded]);
             Audit::log('permit.superseded', $prior);
+        }
+
+        /*
+         * ── An amendment's Zoning Clearance replaces the old one ─────────
+         *
+         * A move (or a new trade, or a larger floor area) carries a fresh
+         * locational clearance — see `permitTypeIdsAtSubmission` — and until
+         * 5 October 2026 issuing it left the business holding two live Zoning
+         * Clearances, one for premises it had left. An amendment names the
+         * Business Permit as its prior permit, not the zoning one, so
+         * `priorPermitFor` above (renewals only, type-matched) never found it.
+         *
+         * Superseded rather than expired, for the reason on the enum: the
+         * old certificate's term stays as issued. No `prior_permit_id` is
+         * written: this is not a renewal, and the renewal analytics read that
+         * chain as one.
+         */
+        if ($app->application_type === ApplicationType::Amendment && $type->code === 'ZONING') {
+            Permit::query()
+                ->where('business_id', $app->business_id)
+                ->where('permit_type_id', $type->id)
+                ->whereKeyNot($permit->id)
+                ->where('status', PermitStatus::Active->value)
+                ->get()
+                ->each(function (Permit $old) {
+                    $old->update(['status' => PermitStatus::Superseded]);
+                    Audit::log('permit.superseded', $old);
+                });
         }
 
         return $permit;
@@ -6013,6 +6178,90 @@ class WorkflowService
         Audit::log('assignment.approved', $assignment);
     }
 
+    /**
+     * Move a booked visit to another day, and tell the applicant.
+     *
+     * Was a bare `update` in `InspectionController::reschedule`, so the
+     * applicant — who had been sent "Sanitary Permit inspection is set for
+     * 06 Oct 2026" — was sent nothing when it moved, and would wait in for a
+     * visit that was no longer coming (browser testing, 5 October 2026). Same
+     * notice as the booking, worded as a move.
+     */
+    public function rescheduleInspection(Inspection $inspection, mixed $scheduledAt): Inspection
+    {
+        $scheduledAt = $this->visitInstant($scheduledAt);
+        $this->refusePastVisitDate($scheduledAt);
+
+        return DB::transaction(function () use ($inspection, $scheduledAt) {
+            $inspection->update([
+                'scheduled_at' => $scheduledAt,
+                'status' => InspectionStatus::Rescheduled,
+            ]);
+            $inspection->refresh();
+            Audit::log('inspection.rescheduled', $inspection, ['scheduled_at' => (string) $inspection->scheduled_at]);
+
+            $app = $inspection->application;
+            if ($app !== null) {
+                $permit = $this->pivotForDepartment($app, $inspection->department_id)?->permitType?->name
+                    ?? ($inspection->department?->name ?? 'The office');
+                $this->notify->applicationNote(
+                    $app,
+                    $permit.' inspection has been moved to '.$inspection->scheduled_at->format('d M Y').'.',
+                );
+            }
+
+            return $inspection;
+        });
+    }
+
+    /**
+     * The booked instant, in the app's clock (Asia/Manila).
+     *
+     * The browser sends `toISOString()` — a UTC "…Z" string — and
+     * `Carbon::parse` keeps that zone, so a visit booked for 06:28 Manila was
+     * stored as "22:28" the day before while every other column is Manila
+     * (found shifting the register's timestamps, 5 October 2026). That also
+     * put the "no result before the booked day" check a day out. Converted
+     * here, once, for all three ways a visit gets a date.
+     */
+    private function visitInstant(mixed $scheduledAt): CarbonImmutable
+    {
+        $when = $scheduledAt instanceof \DateTimeInterface
+            ? CarbonImmutable::instance($scheduledAt)
+            : CarbonImmutable::parse((string) $scheduledAt);
+
+        return $when->setTimezone(config('app.timezone'));
+    }
+
+    /**
+     * A visit is booked for today or later (browser testing, 5 October 2026:
+     * one was booked in the past). Today is Manila's — config/app.php.
+     */
+    private function refusePastVisitDate(mixed $scheduledAt): void
+    {
+        $when = $scheduledAt instanceof \DateTimeInterface
+            ? CarbonImmutable::instance($scheduledAt)
+            : CarbonImmutable::parse((string) $scheduledAt);
+
+        if ($when->lessThan(CarbonImmutable::now()->startOfDay())) {
+            throw ValidationException::withMessages([
+                'scheduled_at' => ['Pick today or a later date.'],
+            ]);
+        }
+    }
+
+    /**
+     * A new visit, with nobody named on it.
+     *
+     * This used to name an account as inspector — `leastLoadedInspector()`,
+     * the office's active user with the fewest open visits. The client,
+     * 5 October 2026: *"since an inspector can have no account in the system,
+     * would it be better if the admin just type the name of the inspector
+     * assigned?"* An account picked by load was a guess the card then printed
+     * as fact, so the visit now opens blank and the office types the name
+     * (InspectionController::nameInspector). The officer in charge books it
+     * and decides it either way.
+     */
     private function openInspection(Application $app, int $departmentId, mixed $scheduledAt): Inspection
     {
         return Inspection::create([
@@ -6020,17 +6269,7 @@ class WorkflowService
             'department_id' => $departmentId,
             'status' => InspectionStatus::Scheduled,
             'scheduled_at' => $scheduledAt,
-            'inspector_user_id' => $this->leastLoadedInspector($departmentId),
         ]);
-    }
-
-    private function leastLoadedInspector(int $departmentId): ?int
-    {
-        return User::where('department_id', $departmentId)
-            ->where('is_active', true)
-            ->withCount(['inspections' => fn ($q) => $q->whereIn('status', ['scheduled', 'in_progress'])])
-            ->orderBy('inspections_count')
-            ->value('id');
     }
 
     /** The pivot row for one permit code on this filing, or null. */
@@ -6078,58 +6317,15 @@ class WorkflowService
         return PermitType::where('code', PermitType::OUTCOME_CODE)->value('issuing_department_id');
     }
 
-    /**
-     * A filing may not be approved until somebody has said which tier it is.
-     *
-     * The client: "the admin must not approve the application unless an
-     * Application category is chosen."
-     *
-     * A GUESS IS NOT A CHOICE. `submit()` seeds a tier from `Ra11032::tierFor()`
-     * — which, for a new application with no high-tech line above the capital
-     * floor, falls through to `complex` — so the column is never null and a
-     * null-check would never once fire. The question is who set it: null
-     * `complexity_set_by_user_id` means the system guessed, a user id means an
-     * officer put their name to it.
-     *
-     * BPLO is now the office that answers it, at their FIRST approval, and that
-     * is a change: it used to be any of the seven offices, at any point before
-     * the last one signed off. BPLO reads every filing and reads it earliest, so
-     * asking them is both the soonest the question can be answered and the only
-     * way to guarantee it is answered by someone rather than by whoever happened
-     * to be last. Restated at `approveOverall()` because that is where permits
-     * are minted, and minting must not depend on the earlier gate having run.
+    /*
+     * `requireProcessingCategory()` and `hasProcessingCategory()` stood here
+     * until 5 October 2026. The first had had no caller since the tier came
+     * from Malabon's Citizen's Charter (27 September); the second held a paid
+     * filing at For Final Approval when its last clearance was issued, for
+     * BPLO to "confirm the category" — a control the UI no longer offers, so
+     * the filing waited on a press nobody could make. The client: *"No, close
+     * it automatically."* See `refreshReadiness`.
      */
-    /**
-     * Has an officer CONFIRMED this filing's RA 11032 tier?
-     *
-     * The same question `requireProcessingCategory()` asks, without throwing,
-     * because there is now one caller that must not throw. When a new filing's
-     * last clearance is approved it issues the business permit on the spot, and
-     * that runs inside the CLEARANCE OFFICE's approval — so a filing missing its
-     * tier would fail CENRO's own Approve press with a validation error about a
-     * category CENRO has no part in setting and cannot fix.
-     *
-     * The gap should not exist: `approveMainForm()` already refuses BPLO's first
-     * act without a confirmed tier, so anything past it has one by construction.
-     * One filing in the register is past it without one — written before that
-     * guard existed — which is exactly why the auto path tests rather than
-     * assumes.
-     */
-    private function hasProcessingCategory(Application $app): bool
-    {
-        return Ra11032::isTier($app->complexity) && $app->complexity_set_by_user_id !== null;
-    }
-
-    private function requireProcessingCategory(Application $app): void
-    {
-        if ($this->hasProcessingCategory($app)) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            'complexity' => ['Choose this application’s processing category before approving it. The category shown was assigned automatically from the filing type and the declared capital — nobody has checked it against the Citizen’s Charter. Confirm it or change it under For Office Use Only, then approve.'],
-        ]);
-    }
 
     /**
      * An office sets which RA 11032 tier this filing belongs to.

@@ -290,6 +290,22 @@ final class ApplicationVisibility
             || $inspection->inspector_user_id === $user->id;
     }
 
+    /**
+     * May this reader see who inspected — the typed `inspector_name`?
+     *
+     * The staff half of `readsInspectionDetail`: everyone it lets in except the
+     * applicant. The client, 5 October 2026, called the name "just for the
+     * record" — the office's own note of who went, not something told to the
+     * business. The applicant keeps the findings (they have to put them right);
+     * they do not get the office's staffing.
+     */
+    public static function readsInspectorName(?User $user, Inspection $inspection): bool
+    {
+        return $user !== null
+            && ($user->hasPermission(self::VIEW_ALL) || self::readsEveryOffice($user))
+            && self::readsInspectionDetail($user, $inspection);
+    }
+
     /** May this user read this application at all? */
     public static function canView(User $user, Application $application): bool
     {

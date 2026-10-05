@@ -137,6 +137,17 @@ function answer(row: PermitRegisterRow, key: string): CellValue {
   return null
 }
 
+/** "Suspended 34 days · Sanitary Permit with City Health Office", or null. */
+function suspensionCell(row: PermitRegisterRow): CellValue {
+  if (row.status !== 'suspended') return null
+  const days = typeof row.suspended_days === 'number'
+    ? `Suspended ${row.suspended_days} ${row.suspended_days === 1 ? 'day' : 'days'}`
+    : 'Suspended'
+  const f = row.suspended_for
+  if (!f) return days
+  return `${days} · ${f.name}${f.office ? ` with ${f.office}` : ''}`
+}
+
 /** An office-sheet answer that is a date, formatted like every other date. */
 function answerDate(row: PermitRegisterRow, key: string): CellValue {
   const raw = answer(row, key)
@@ -239,6 +250,15 @@ export const SHARED_COLUMNS: PermitColumn[] = [
   // Status is drawn as a chip rather than as text, so it is handled by the
   // page and deliberately carries no `value` worth printing here.
   { key: 'status', label: 'Status', sort: 'status', value: (r) => r.status_label },
+  {
+    key: 'suspension',
+    label: 'Suspension',
+    /*
+     * How long, and what it waits on — the line BPLO's 30-day list is read by
+     * (client, 5 October 2026). A dash on every row that is not suspended.
+     */
+    value: (r) => suspensionCell(r),
+  },
   { key: 'valid_from', label: 'Valid from', sort: 'valid_from', tnum: true, value: (r) => formatDate(r.valid_from) },
   { key: 'valid_until', label: 'Valid until', sort: 'valid_until', tnum: true, value: (r) => formatDate(r.valid_until) },
   {
@@ -250,8 +270,16 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      * a column, so ordering by it would mean ordering by `valid_until` under
      * another name — and a header that sorted by a DIFFERENT column than the
      * one it sits on is worse than one that does not sort.
+     *
+     * A dash on a superseded or revoked permit (5 October 2026). Its term
+     * still has days on paper, but the permit no longer runs to them — a
+     * renewal replaced it, or the City took it back — so a countdown on that
+     * row reads as a live permit expiring (tester).
      */
-    value: (r) => (typeof r.days_until_expiry === 'number' ? String(r.days_until_expiry) : null),
+    value: (r) =>
+      r.status === 'superseded' || r.status === 'revoked' || typeof r.days_until_expiry !== 'number'
+        ? null
+        : String(r.days_until_expiry),
   },
   { key: 'issued_at', label: 'Issued on', sort: 'issued_at', tnum: true, value: (r) => formatDate(r.issued_at) },
   { key: 'issued_by', label: 'Issued by', value: (r) => r.issued_by ?? null },

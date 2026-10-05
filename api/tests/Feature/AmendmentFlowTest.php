@@ -5,10 +5,12 @@ use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAmendment;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationPermitType;
 use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
+use App\Models\DocumentType;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -99,6 +101,7 @@ it('carries the business permit alone, not the five clearances', function () {
     [$appId] = amendmentFiling();
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $codes = Application::findOrFail($appId)->permitTypes()->pluck('code')->all();
@@ -207,6 +210,7 @@ it('freezes the requested changes once the amendment is submitted', function () 
     [$appId] = amendmentFiling();
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     test()->withHeaders($owner)
@@ -231,6 +235,7 @@ it('applies the change to the business on BPLO’s approval, keeping what it rep
     $owner = authAs('owner@biztrack.local');
     $before = Business::findOrFail($businessId)->business_area_sqm;
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*
@@ -275,6 +280,7 @@ it('reprints the business permit over the same term, superseding the old one', f
 
     $old = Permit::where('business_id', $businessId)->firstOrFail();
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -314,6 +320,7 @@ it('freezes a permit face at issue, so an amendment cannot rewrite old certifica
     )]);
     $faceBefore = $old->fresh()->issued_details['trade_name'];
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -338,6 +345,7 @@ it('refuses a second approval, so a change cannot be applied twice', function ()
     [$appId, $businessId] = amendmentFiling(['business_area_sqm' => '250']);
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -423,6 +431,7 @@ it('tells the offices that certified this business when its address changes', fu
     $officer = User::where('department_id', $cho->id)->firstOrFail();
     $before = AppNotification::where('user_id', $officer->id)->count();
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*
@@ -489,6 +498,7 @@ it('does not pester the offices about a detail they never verified', function ()
     $before = AppNotification::where('user_id', $officer->id)
         ->where('type', 'amendment')->count();
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -515,6 +525,7 @@ it('refuses to submit an amendment that says only THAT something changed', funct
         ->deleteJson("/api/v1/applications/{$appId}/amendments/business_area_sqm")
         ->assertOk();
 
+    attachRequiredDocuments($appId);
     $message = test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
@@ -531,6 +542,7 @@ it('shows BPLO the requested changes, old beside new', function () {
     [$appId, $businessId] = amendmentFiling(['trade_name' => 'The New Sign']);
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     $rows = test()->withHeaders(authAs('bplo@biztrack.local'))
@@ -582,6 +594,7 @@ it('stacks the amendment fee for the January renewal to collect', function () {
     [$appId, $businessId] = amendmentFiling(['business_area_sqm' => '250']);
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -604,6 +617,7 @@ it('does not stack the same amendment twice', function () {
     [$appId] = amendmentFiling(['trade_name' => 'Twice Over']);
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -633,6 +647,7 @@ it('prices the amendment from the LGU setting, not from the ordinance', function
     [$appId, $businessId] = amendmentFiling(['trade_name' => 'Priced Signage']);
     $owner = authAs('owner@biztrack.local');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
@@ -680,6 +695,7 @@ it('carries the zoning clearance when the premises move, not when an address is 
         'address_street' => 'Rizal Avenue',
         'address_pin' => '14.6600,120.9500',
     ]);
+    attachRequiredDocuments($moveId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$moveId}/submit")->assertOk();
 
@@ -693,6 +709,7 @@ it('carries the zoning clearance when the premises move, not when an address is 
      * somebody for fixing a typo.
      */
     [$streetId] = amendmentFiling(['address_street' => 'Moved Avenue']);
+    attachRequiredDocuments($streetId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$streetId}/submit")->assertOk();
 
@@ -709,6 +726,7 @@ it('carries the zoning clearance when the premises move, not when an address is 
      */
     $elsewhere = Barangay::where('id', '!=', Barangay::first()->id)->firstOrFail();
     [$brgyOnlyId] = amendmentFiling(['address_barangay_id' => (string) $elsewhere->id]);
+    attachRequiredDocuments($brgyOnlyId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$brgyOnlyId}/submit")->assertOk();
 
@@ -723,6 +741,7 @@ it('carries the zoning clearance when the premises move, not when an address is 
      * contradicts for an EXPANSION; that case is the next test.
      */
     [$areaId] = amendmentFiling(['business_area_sqm' => '250']);
+    attachRequiredDocuments($areaId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$areaId}/submit")->assertOk();
 
@@ -744,6 +763,7 @@ it('carries a new zoning clearance when an amendment changes the trade or enlarg
 
     $other = PsicCode::where('id', '!=', PsicCode::first()->id)->firstOrFail();
     [$tradeId] = amendmentFiling(['line_of_business' => (string) $other->id]);
+    attachRequiredDocuments($tradeId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$tradeId}/submit")->assertOk();
     expect($codes($tradeId))->toBe(['BUSINESS', 'ZONING']);
 
@@ -752,18 +772,21 @@ it('carries a new zoning clearance when an amendment changes the trade or enlarg
     // the fixture's business carries no floor area to begin with.
     [$growId, $growBusiness] = amendmentFiling(['business_area_sqm' => '250']);
     Business::whereKey($growBusiness)->update(['business_area_sqm' => 100]);
+    attachRequiredDocuments($growId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$growId}/submit")->assertOk();
     expect($codes($growId))->toBe(['BUSINESS', 'ZONING']);
 
     // A smaller one is not.
     [$shrinkId, $shrinkBusiness] = amendmentFiling(['business_area_sqm' => '80']);
     Business::whereKey($shrinkBusiness)->update(['business_area_sqm' => 100]);
+    attachRequiredDocuments($shrinkId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$shrinkId}/submit")->assertOk();
     expect($codes($shrinkId))->toBe([PermitType::OUTCOME_CODE]);
 
     // Nor is a new owner: Annex A 63, a change of tenants or proprietors is
     // not a change of occupancy.
     [$ownerId] = amendmentFiling(['owner_name' => 'Juana Dela Cruz']);
+    attachRequiredDocuments($ownerId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$ownerId}/submit")->assertOk();
     expect($codes($ownerId))->toBe([PermitType::OUTCOME_CODE]);
 
@@ -785,6 +808,7 @@ it('refuses to approve a move until the new address is cleared', function () {
     $owner = authAs('owner@biztrack.local');
     $before = Business::findOrFail($businessId)->address->barangay_id;
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*
@@ -953,6 +977,7 @@ it('replaces the one line of business rather than adding to it', function () {
         'line_of_business' => (string) $replacement->id,
     ]);
 
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     /*
@@ -1002,6 +1027,7 @@ it('does not re-rate a change of trade, and says which detail the fee is for', f
     $replacement = PsicCode::skip(1)->first();
     [$appId] = amendmentFiling(['line_of_business' => (string) $replacement->id]);
 
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     /*
@@ -1039,6 +1065,7 @@ it('records a change of ownership and tells BPLO to move the account', function 
     $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     $noticesBefore = AppNotification::where('user_id', $bplo->id)->count();
 
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
@@ -1082,6 +1109,7 @@ it('recomposes line1, so a later business edit cannot undo the move', function (
         'address_street' => 'Moved Avenue',
     ]);
 
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
@@ -1184,6 +1212,7 @@ it('carries what a filing declared onto the business, and lets an amendment over
         ],
     ]);
 
+    attachRequiredDocuments($appId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
@@ -1216,6 +1245,7 @@ it('does not blank a figure a later filing simply left out', function () {
     Application::findOrFail($firstId)->update([
         'fee_profile' => ['employees' => 9, 'delivery_vehicles_motorized' => 2],
     ]);
+    attachRequiredDocuments($firstId);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$firstId}/submit")->assertOk();
     bploApprovesForm($firstId);
@@ -1240,6 +1270,7 @@ it('does not blank a figure a later filing simply left out', function () {
 
     Application::findOrFail($secondId)->update(['fee_profile' => ['floor_area_sqm' => 55]]);
 
+    attachRequiredDocuments($secondId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$secondId}/submit")->assertOk();
     bploApprovesForm($secondId);
 
@@ -1290,4 +1321,176 @@ it('serves the field list as reference data, without a business', function () {
     foreach (['writes', 'column', 'cast', 'validation'] as $secret) {
         expect($rows->first())->not->toHaveKey($secret);
     }
+});
+
+/*
+ * ── Only the Business Permit, one amendment at a time ─────────────────────
+ *
+ * Browser testing, 5 October 2026: a Sanitary Permit could be "amended"
+ * through the API (201, then it submitted carrying BUSINESS and SANITARY and
+ * BPLO's approve 422'd citing the zoning ordinance), and a second amendment
+ * submitted while the first was still open. See `App\Support\AmendmentScope`.
+ */
+
+it('refuses an amendment of anything but the Business Permit', function () {
+    [, $businessId] = amendmentFiling();
+    $owner = authAs('owner@biztrack.local');
+
+    $sanitary = Permit::create([
+        'application_id' => Application::where('business_id', $businessId)->where('application_type', 'new')->value('id'),
+        'business_id' => $businessId,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'permit_number' => 'AMEND-SAN-'.random_int(10000, 99999),
+        'issued_at' => now()->subMonths(2),
+        'valid_from' => now()->subMonths(2),
+        'valid_until' => now()->addMonths(4),
+        'status' => 'active',
+    ]);
+
+    test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::where('code', 'SANITARY')->pluck('id')->all(),
+        'prior_permit_id' => $sanitary->id,
+    ])->assertStatus(422)->assertJsonPath('errors.application_type.0', 'Only the Business Permit can be amended.');
+
+    // Naming the business permit but asking for a clearance type is refused too.
+    $business = Permit::where('business_id', $businessId)
+        ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))->firstOrFail();
+    test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::whereIn('code', [PermitType::OUTCOME_CODE, 'SANITARY'])->pluck('id')->all(),
+        'prior_permit_id' => $business->id,
+    ])->assertStatus(422);
+});
+
+it('refuses a second amendment while one is open, naming it', function () {
+    [$firstId, $businessId] = amendmentFiling();
+    $owner = authAs('owner@biztrack.local');
+    attachRequiredDocuments(Application::findOrFail($firstId));
+    attachRequiredDocuments($firstId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$firstId}/submit")->assertOk();
+    $tracking = Application::findOrFail($firstId)->tracking_id;
+
+    $prior = Application::findOrFail($firstId)->prior_permit_id;
+
+    test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+        'prior_permit_id' => $prior,
+    ])->assertStatus(422)->assertJsonPath('errors.application_type.0', "An amendment is already open ({$tracking}).");
+
+    // A draft started before the first was submitted is stopped at submit.
+    $draft = Application::create([
+        'business_id' => $businessId,
+        'applicant_user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
+        'application_type' => 'amendment',
+        'status' => 'draft',
+        'data_privacy_consent' => true,
+        'prior_permit_id' => $prior,
+    ]);
+    $draft->permitTypes()->sync(PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all());
+    ApplicationAmendment::create(['application_id' => $draft->id, 'field' => 'business_area_sqm', 'new_value' => '300']);
+
+    attachRequiredDocuments($draft->id);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$draft->id}/submit")
+        ->assertStatus(422)->assertJsonPath('errors.application_type.0', "An amendment is already open ({$tracking}).");
+});
+
+it('refuses to submit an amendment without its affidavit', function () {
+    // The submit gate's amendment list (`RequiredDocuments`): FO-003's own.
+    [$appId] = amendmentFiling();
+
+    $message = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->json('errors.documents.0');
+
+    expect($message)->toContain(DocumentType::where('code', 'AMEND_AFFIDAVIT')->value('name'));
+});
+
+/*
+ * ── A move opens its Zoning Clearance at submit ───────────────────────────
+ *
+ * Client, 5 October 2026: *"As soon as the move is submitted."* Until then
+ * nothing told the applicant to apply for the new Zoning Clearance or gave
+ * CPDO anything, while BPLO's approve refused for want of it; and once it was
+ * issued the business held two live Zoning Clearances.
+ */
+it('opens the Zoning Clearance as soon as a move is submitted, and tells the applicant', function () {
+    [$appId] = amendmentFiling([
+        'address_street' => 'Rizal Avenue',
+        'address_pin' => '14.6600,120.9500',
+    ]);
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $app = Application::findOrFail($appId);
+    $zoning = $app->permitTypes()->where('code', 'ZONING')->firstOrFail();
+
+    expect($zoning->pivot->mode)->toBe(ApplicationPermitType::MODE_APPLY)
+        ->and($app->statusHistory()->reorder()->latest('id')->value('note'))->toContain('Apply for the Zoning Clearance now')
+        ->and(AppNotification::where('user_id', $app->applicant_user_id)
+            ->where('body', 'like', '%Apply for the Zoning Clearance now%')->exists())->toBeTrue();
+
+    // The clearance page is open and carries the Zoning card.
+    $page = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$appId}/clearances")->assertOk();
+    expect($page->json('meta.unlocked'))->toBeTrue()
+        ->and(collect($page->json('data'))->pluck('permit_type.code'))->toContain('ZONING');
+});
+
+it('supersedes the old Zoning Clearance when the move’s new one is issued', function () {
+    [$appId, $businessId] = amendmentFiling([
+        'address_street' => 'Rizal Avenue',
+        'address_pin' => '14.6600,120.9500',
+    ]);
+    $zoningType = PermitType::where('code', 'ZONING')->firstOrFail();
+    $old = Permit::create([
+        'application_id' => Application::where('business_id', $businessId)->where('application_type', 'new')->value('id'),
+        'business_id' => $businessId,
+        'permit_type_id' => $zoningType->id,
+        'permit_number' => 'AMEND-ZON-'.random_int(10000, 99999),
+        'issued_at' => now()->subMonths(2),
+        'valid_from' => now()->subMonths(2),
+        'valid_until' => now()->addMonths(4),
+        'status' => 'active',
+    ]);
+
+    $owner = authAs('owner@biztrack.local');
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    // The applicant hands the sheet in: CPDO is routed.
+    satisfyChecklist(Application::findOrFail($appId), $zoningType);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", ['form_data' => [], 'submit' => true])
+        ->assertSuccessful();
+
+    $cpdo = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', Department::where('code', 'CPDO')->value('id'))
+        ->firstOrFail();
+
+    // BPLO still may not approve the move before CPDO issues.
+    $bplo = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', Department::where('code', 'BPLO')->value('id'))->firstOrFail();
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$bplo->id}/approve")->assertStatus(422);
+
+    test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$cpdo->id}/approve")->assertOk();
+    $visitId = test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/permits/ZONING/inspection", ['scheduled_at' => now()->toDateTimeString()])
+        ->assertCreated()->json('data.id');
+    test()->withHeaders(authAs('zoning@biztrack.local'))
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+
+    $new = Permit::where('application_id', $appId)->where('permit_type_id', $zoningType->id)->sole();
+    expect($new->status->value)->toBe('active')
+        ->and($old->fresh()->status->value)->toBe('superseded')
+        ->and(Permit::where('business_id', $businessId)->where('permit_type_id', $zoningType->id)
+            ->where('status', 'active')->count())->toBe(1);
 });

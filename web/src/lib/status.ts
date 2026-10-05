@@ -75,13 +75,24 @@ export const TONE_CLASSES: Record<StatusTone, string> = {
    * exist in this build — a badge asking for one renders with no background
    * and no border, silently. These three were written that way first.
    */
-  review: 'bg-s-purple-tint text-s-purple border-s-purple',
+  /*
+   * Blue since 5 October 2026 (client: *"change the color of For Approval to
+   * blue … for all showing the For Approval banner"*). Every For Approval
+   * badge — filing and clearance alike — reads this one tone, which is why
+   * one line changes all of them.
+   */
+  review: 'bg-blue-50 text-blue-800 border-blue-300',
   verify: 'bg-s-teal-tint text-s-teal-ink border-s-teal',
+  /*
+   * Returned and Rejected are two reds, not one (client, 5 October 2026):
+   * Returned the lighter rose — a correction, and the applicant's move;
+   * Rejected the deep red below — the office's refusal.
+   */
   warning: 'bg-s-rose-tint text-s-rose-ink border-s-rose',
   muted: 'border-dashed bg-white text-ink-muted border-line',
   scheduled: 'bg-s-yellow-tint text-s-yellow-ink border-s-yellow',
   success: 'bg-green-50 text-green-700 border-green-200',
-  danger: 'bg-red-50 text-red-700 border-red-200',
+  danger: 'bg-s-red-tint text-s-red-deep border-s-red',
 }
 
 export const TONE_ICONS: Record<StatusTone, IconType> = {
@@ -770,9 +781,8 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
  * seventh until the client asked what separated it from Approved; see
  * GUIDE_OMITTED, which is worth reading next to this.
  *
- * The status still exists and is still reached — a renewal stops there so BPLO
- * can read the certificate copies the applicant uploaded, which is real
- * evidence rather than a re-reading of our own records.
+ * The status still exists, for the filings already standing at it; since
+ * 5 October 2026 no new or renewal filing is sent there (see OMITTED_BY_TYPE).
  *
  * Dropping it from this array first moved it under "If something interrupts
  * it", because the detours were derived as "not in the flow" and there was only
@@ -888,12 +898,13 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    */
   amendment: ['for_final_approval'],
   /*
-   * A NEW filing can still reach For Final Approval, but only when it becomes
-   * ready with no confirmed RA 11032 processing category and falls back to BPLO
-   * (`WorkflowService::refreshReadiness`). That is an internal data problem the
-   * applicant cannot act on and did not cause, so naming it in their guide
-   * explains nothing and worries everyone. The badge still has a label if they
-   * ever see it — this only keeps it out of the list of things to expect.
+   * A NEW filing no longer reaches For Final Approval at all. It did until
+   * 5 October 2026, when it became ready with no confirmed RA 11032
+   * processing category and fell back to BPLO; the client had that closed
+   * automatically instead (*"No, close it automatically."*), so the last
+   * clearance issued completes the filing (`WorkflowService::refreshReadiness`).
+   * Listed so the status does not reappear under "If something interrupts
+   * it"; the badge keeps its label for the filings that already stand there.
    */
   new: ['draft', 'for_final_approval'],
   /*
@@ -1061,7 +1072,13 @@ export const AMENDMENT_NOTE =
  * the detours, or named here with a reason. There is no fourth outcome in
  * which one goes missing quietly.
  */
-export const GUIDE_OMITTED: ApplicationStatus[] = ['issued']
+/*
+ * `cancelled` joined `issued` on 5 October 2026. The status exists on the
+ * API (a draft or an unpaid filing may be cancelled through it) but no screen
+ * offers an applicant the act, so the guide was promising an exit nobody can
+ * take. Client: *"Remove 'Cancelled' here. We don't have this status right?"*
+ */
+export const GUIDE_OMITTED: ApplicationStatus[] = ['issued', 'cancelled']
 
 /*
  * `STATUS_DETOURS` was here. It is `statusDetoursFor(flow)` now, because the

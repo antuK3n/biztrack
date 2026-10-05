@@ -372,7 +372,16 @@ function permitChip(
   permitStatus: ServerClearanceStatus | null,
   office: OfficeProgress | undefined,
   permitCode: string,
+  issuedStatus: string | null = null,
 ): Chip {
+  /*
+   * A suspended certificate outranks everything, the filing's own state
+   * included: the pivot still reads approved, the filing may be decided, and
+   * neither is what the applicant needs to know. Client, 5 October 2026, on a
+   * Mayor's Permit row reading "Approved" beside a rejected Sanitary Permit.
+   */
+  if (issuedStatus === 'suspended') return { tone: 'neutral', label: 'Suspended' }
+
   // A decided or unpaid filing answers for all of its permits at once.
   const own = appStateChip(appStatus)
   if (own) return own
@@ -419,7 +428,7 @@ function permitChip(
    *
    * A label of its own rather than a ClearanceStatus one, which is the
    * established shape here: "Not Yet Submitted", "Inspection Passed" and
-   * "Inspection Failed" are all this function's own words for a situation the
+   * "Rejected" (for a failed visit) are all this function's own words for a situation the
    * status alone does not describe.
    */
   if (
@@ -470,7 +479,15 @@ function permitChip(
      * went on 17 September 2026 — and the lookup would have fallen through to
      * the neutral default, quietly painting a failed inspection grey.
      */
-    if (office.inspection === 'failed') return { tone: 'danger', label: 'Inspection Failed' }
+    /*
+     * "Rejected", not "Inspection Failed", since 5 October 2026. The office
+     * records the outcome with a button called Reject, and the client reads
+     * it as one: *"Inspection Failed should be named Rejected, right??"* It
+     * also suspends the Business Permit now, exactly as a refused clearance
+     * does, so the two outcomes wear one word; the row's note says which
+     * way back applies (a re-inspection here, a new application there).
+     */
+    if (office.inspection === 'failed') return { tone: 'danger', label: 'Rejected' }
     if (office.inspection === 'passed' || office.inspection === 'conditional')
       return { tone: clearanceStatusMeta('approved').tone, label: 'Inspection Passed' }
   }
@@ -787,7 +804,15 @@ function StatusGuide() {
      */
     withSubFlow?: boolean
   }) => {
-    const meta = applicationStatusMeta(status)
+    /*
+     * "Approved", never "Completed", on the rail. The badge for `approved`
+     * reads Completed once a filing is decided, and the guide's last step was
+     * borrowing that word. Client, 5 October 2026: *"Approved means the
+     * permit is issued while Completed means the whole process is done"* —
+     * and a completed filing has left this page, so the guide has no step to
+     * call by that name.
+     */
+    const meta = status === 'approved' ? GATHERING_META : applicationStatusMeta(status)
 
     return (
       /*
@@ -892,7 +917,7 @@ function StatusGuide() {
                   existed. Now there are three rails and the number has to
                   follow the step it is standing on.
                 */}
-                Once every permit is approved, your application moves on to step {index + 2}.
+                Once every permit is approved, your application is complete and leaves this page.
               </p>
             </div>
           )}
@@ -1085,11 +1110,11 @@ function StatusGuide() {
             has gone right — and NEW filings only: a suspension follows one of
             the other permits being refused, which an amendment never gathers.
 
-            Red, matching the notice PermitDetailPage prints on a suspended
-            certificate — NOT the purple a suspended BUSINESS wears in
-            BUSINESS_STATUS wears. That one is an admin action against the whole
-            account for a different reason, and one word in two colours is the
-            confusion this row exists to prevent.
+            Gray since 5 October 2026 (client: *"Suspended being gray"*) — a
+            hold, not a verdict, and the same gray the Track row's chip and the
+            permits register use for a suspended certificate. NOT the purple a
+            suspended BUSINESS wears in BUSINESS_STATUS: that one is an admin
+            action against the whole account for a different reason.
           */}
           {flow === 'new' && (
             <li className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-1 sm:flex-nowrap">
@@ -1097,7 +1122,7 @@ function StatusGuide() {
                 <ChevronRightIcon size={14} />
               </span>
               <span
-                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${TONE_CLASSES.danger}`}
+                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${TONE_CLASSES.neutral}`}
               >
                 Suspended
               </span>
@@ -1544,6 +1569,7 @@ function ApplicationRow({
                 pt.status,
                 detail ? officeProgressFor(pt.code) : undefined,
                 pt.code,
+                pt.permit_status ?? null,
               )
               /*
                * A permit the applicant has not begun, on a filing where they
@@ -1678,7 +1704,8 @@ function ApplicationRow({
                         to={`/applications/${app.id}/clearances`}
                         className="pointer-events-auto relative z-20 shrink-0 rounded-md border border-royal/40 bg-white px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:border-royal hover:bg-royal hover:text-white"
                       >
-                        Apply or upload a copy
+                        {/* "Apply or upload a copy" until 4 October 2026, when held copies went. */}
+                        Apply
                       </Link>
                     )}
                     {/*
@@ -1728,6 +1755,18 @@ function ApplicationRow({
                         submittedAt={app.submitted_at}
                       />
                     </div>
+                  )}
+
+                  {/*
+                    What a Suspended chip is waiting on, in one line — client,
+                    5 October 2026: show WHICH office caused it on the Track
+                    row. Same indent and z-order as the returned note below.
+                  */}
+                  {pt.permit_status === 'suspended' && pt.suspension && (
+                    <p className="relative z-20 mt-2 pl-[7rem] text-xs leading-relaxed text-ink-secondary">
+                      Waiting on your {pt.suspension.for}
+                      {pt.suspension.office ? ` with ${pt.suspension.office}` : ''}.
+                    </p>
                   )}
 
                   {returned && (

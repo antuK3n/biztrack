@@ -116,6 +116,7 @@ it('refuses to submit an amendment that amends nothing', function () {
     $permit = Business::where('name', 'like', 'Nena%')->firstOrFail()->permits()->firstOrFail();
     $appId = amendmentDraft(['prior_permit_id' => $permit->id]);
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
         ->assertJsonValidationErrors('requested_changes');
@@ -148,6 +149,7 @@ it('submits once something is actually being amended', function () {
         'changes' => [['field' => 'trade_name', 'new_value' => 'Amended Trading Name']],
     ])->assertOk();
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     expect(Application::findOrFail($appId)->status->value)->not->toBe('draft');

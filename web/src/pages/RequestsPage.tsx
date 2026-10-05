@@ -323,10 +323,20 @@ function LetterView({
                 automatically" tells the applicant there is nobody at the other
                 end of this particular row to have chased it — the answer to
                 "who do I talk to" is the office named above, through Messages.
+
+                Only the DENR rows are raised when a certificate is issued
+                (WorkflowService::raiseDenrRequirements, titled "DENR …"). The
+                Other Requirement rules (`rule.*`) are raised at submission and
+                the TIN question when BPLO accepts the form, so on those the
+                certificate line was simply untrue (tester, 5 October 2026).
+                The title is what tells them apart: the resource does not emit
+                `system_key`, and the DENR rows carry none.
               */}
               {!hasNamedAuthor(request) && (
                 <span className="block text-xs italic text-ink-muted">
-                  Requested automatically when your certificate was issued
+                  {request.subject.startsWith('DENR ')
+                    ? 'Requested automatically when your certificate was issued'
+                    : 'Raised automatically from your application'}
                 </span>
               )}
             </div>

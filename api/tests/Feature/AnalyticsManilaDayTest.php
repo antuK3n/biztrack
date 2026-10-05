@@ -9,12 +9,16 @@ use Carbon\CarbonImmutable;
 /*
  * A "day", a "month" and a "working day" are Malabon's, not UTC's.
  *
- * The app stores UTC and the City lives eight hours ahead. Every figure that
- * cuts time into days used the UTC date, so the nightly refresh (03:00 Manila,
+ * The app stored UTC and the City lives eight hours ahead. Every figure that
+ * cut time into days used the UTC date, so the nightly refresh (03:00 Manila,
  * 19:00 UTC the day before) computed yesterday, a report for September lost
  * the last eight hours of the 30th, and a filing received at 7 am on a Monday
- * was a working day older than it was. Each case below is one of those edges,
- * with the instant written in UTC and its Manila reading beside it.
+ * was a working day older than it was. Each case below is one of those edges.
+ *
+ * Since 5 October 2026 the app clock is Asia/Manila (config/app.php), so a
+ * STORED timestamp is a Manila wall-clock time and the fixtures below write
+ * Manila times. The travelled-to instants are still given in UTC, because
+ * the edge being pinned is the server clock reading 19:00 UTC.
  */
 
 it('reads today, and where a Manila day starts and ends, on the Manila clock', function () {
@@ -22,21 +26,21 @@ it('reads today, and where a Manila day starts and ends, on the Manila clock', f
     $at = CarbonImmutable::parse('2026-09-30 19:00:00', 'UTC');
 
     expect(ManilaCalendar::today($at)->toDateString())->toBe('2026-10-01')
-        ->and(ManilaCalendar::startOfDay('2026-10-01')->toDateTimeString())->toBe('2026-09-30 16:00:00')
-        ->and(ManilaCalendar::startOfNextDay('2026-10-01')->toDateTimeString())->toBe('2026-10-01 16:00:00')
-        ->and(ManilaCalendar::monthOf('2026-09-30 17:00:00'))->toBe('2026-10')
-        ->and(ManilaCalendar::dateOf('2026-09-30 15:59:59'))->toBe('2026-09-30');
+        ->and(ManilaCalendar::startOfDay('2026-10-01')->toDateTimeString())->toBe('2026-10-01 00:00:00')
+        ->and(ManilaCalendar::startOfNextDay('2026-10-01')->toDateTimeString())->toBe('2026-10-02 00:00:00')
+        ->and(ManilaCalendar::monthOf('2026-10-01 01:00:00'))->toBe('2026-10')
+        ->and(ManilaCalendar::dateOf('2026-09-30 23:59:59'))->toBe('2026-09-30');
 });
 
 it('counts working days between Manila dates', function () {
-    // Monday 7 September, 07:00 Manila is Sunday 6 September in UTC. Decided
+    // Monday 7 September, 07:00 Manila (Sunday 6 September in UTC). Decided
     // the same Monday afternoon, it took no working days at all; the UTC
     // dates (Sunday → Monday) used to make it one.
-    expect(ManilaCalendar::workingDaysBetween('2026-09-06 23:00:00', '2026-09-07 07:00:00'))->toBe(0)
+    expect(ManilaCalendar::workingDaysBetween('2026-09-07 07:00:00', '2026-09-07 15:00:00'))->toBe(0)
         // Friday 11 September 16:00 Manila → Monday 14 September 09:00 Manila.
-        ->and(ManilaCalendar::workingDaysBetween('2026-09-11 08:00:00', '2026-09-14 01:00:00'))->toBe(1)
+        ->and(ManilaCalendar::workingDaysBetween('2026-09-11 16:00:00', '2026-09-14 09:00:00'))->toBe(1)
         // Three full weeks, Monday to Monday: fifteen.
-        ->and(ManilaCalendar::workingDaysBetween('2026-09-07 02:00:00', '2026-09-28 02:00:00'))->toBe(15);
+        ->and(ManilaCalendar::workingDaysBetween('2026-09-07 10:00:00', '2026-09-28 10:00:00'))->toBe(15);
 });
 
 it('puts the 3 am refresh on the Manila day, so the 1st of the month is the new month', function () {
@@ -46,9 +50,9 @@ it('puts the 3 am refresh on the Manila day, so the 1st of the month is the new 
     $before = DashboardAnalytics::build();
     $business = anaBusiness();
     // 01:00 Manila on 1 March: filed this month.
-    anaFiling($business, ['submitted_at' => '2027-02-28 17:00:00', 'created_at' => '2027-02-28 17:00:00']);
+    anaFiling($business, ['submitted_at' => '2027-03-01 01:00:00', 'created_at' => '2027-03-01 01:00:00']);
     // 23:00 Manila on 28 February: filed last month.
-    anaFiling($business, ['submitted_at' => '2027-02-28 15:00:00', 'created_at' => '2027-02-28 15:00:00']);
+    anaFiling($business, ['submitted_at' => '2027-02-28 23:00:00', 'created_at' => '2027-02-28 23:00:00']);
     $after = DashboardAnalytics::build();
 
     expect($after['today'])->toBe('2027-03-01')
@@ -80,8 +84,8 @@ it('bounds a report period by Manila dates and buckets it by Manila month', func
         'issued_at' => $issuedAt,
     ]);
 
-    $permit('2027-01-31 17:00:00'); // 1 February, 01:00 Manila — February's
-    $permit('2027-02-28 17:00:00'); // 1 March, 01:00 Manila — after the period
+    $permit('2027-02-01 01:00:00'); // 1 February, 01:00 Manila — February's (31 January in UTC)
+    $permit('2027-03-01 01:00:00'); // 1 March, 01:00 Manila — after the period
 
     $report = LguReports::build(
         'permits-issued',
@@ -103,12 +107,12 @@ it('ages a decided filing in working days between Manila dates on the report', f
     $filing = anaFiling($business, [
         'status' => 'approved',
         'complexity' => 'simple',
-        'submitted_at' => '2026-09-06 23:00:00',
-        'decided_at' => '2026-09-07 07:00:00',
+        'submitted_at' => '2026-09-07 07:00:00',
+        'decided_at' => '2026-09-07 15:00:00',
     ]);
     anaAssignment($filing, $office['code'], [
-        'assigned_at' => '2026-09-06 23:00:00',
-        'completed_at' => '2026-09-07 07:00:00',
+        'assigned_at' => '2026-09-07 07:00:00',
+        'completed_at' => '2026-09-07 15:00:00',
     ]);
 
     $report = LguReports::build(

@@ -91,6 +91,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  */
 import BarangayZoningMap from './BarangayZoningMap'
 import { useZoneAtPin, type ZoneAtPinQuery } from '../../lib/zoneAtPin'
+import { RequestedChanges } from '../../components/RequestedChanges'
 import {
   LocationInsightsPanel,
   ZoningConformanceNote,
@@ -2738,7 +2739,8 @@ function IdentifyFilingModal({
                       ? { text: blockedReason, cls: 'text-s-red font-semibold' }
                       : chosen || inProgress || days === null || days >= 0
                         ? null
-                        : { text: 'No valid copy on file.', cls: 'text-s-red' }
+                        : // Lapsed and still renewable, so it says both (5 October 2026).
+                          { text: 'Expired — tick it to renew.', cls: 'text-s-red' }
                   return (
                     // Presentational so the radios are the radiogroup's own
                     // children, not list items wrapping them.
@@ -4304,14 +4306,10 @@ export function ApplyWizard() {
      * answer a future release asks for is simply not shown here, rather than
      * shown to everybody.
      *
-     * NOT re-checked on the server, and that is worth knowing rather than
-     * assuming. `ApplicationController::submit` enforces no documentary
-     * requirement at all — it never has — so this list is what asks for a
-     * document and BPLO's review is what catches a missing one. The gating
-     * above therefore decides what the applicant is SHOWN, not what the API
-     * will accept. If these copies ever need to block submission, the gate
-     * belongs in `submit` beside the amendment and prior-permit checks, and it
-     * would be a new refusal on a path that currently accepts everything.
+     * Re-checked at submit by `App\Support\RequiredDocuments`, which ports
+     * this rule line for line (5 October 2026) — change both together. The
+     * gating above decides what the applicant is SHOWN; the server decides
+     * what it accepts, and the two must agree.
      */
     /*
      * ── An AMENDMENT has its own requirement list ─────────────────────────
@@ -5569,7 +5567,13 @@ export function ApplyWizard() {
   const [feeEstimateFailed, setFeeEstimateFailed] = useState(false)
 
   useEffect(() => {
-    if (phase !== 'review' || applicationId === null) return
+    /*
+     * Never for an amendment: no Tax Order of Payment is raised on one, and
+     * the estimate priced the Mayor's Permit and five clearances over a
+     * trade-name correction — "₱6,425 … including the five other permits"
+     * (tester, 5 October 2026; docs/amendment-2026-09-19.md §3).
+     */
+    if (phase !== 'review' || applicationId === null || applicationType === 'amendment') return
 
     let live = true
     const timer = setTimeout(() => {
@@ -5849,6 +5853,9 @@ export function ApplyWizard() {
     ]
     return parts.length === 0 ? null : parts.join(', ')
   }, [amendment, amendRows, applicationType])
+
+  /** The rows asked about, with their values, for Review and the confirmation dialog. */
+  const amendRequested = useMemo(() => amendRows.filter((r) => r.requested), [amendRows])
 
   /*
    * `clearanceDecisions` is gone. Review & Submit used to list which of the six
@@ -7223,7 +7230,7 @@ export function ApplyWizard() {
     let bid = businessId ?? prefillBusinessId
     if (!bid) {
       bid = (await businesses.create(businessPayload())).id
-    } else if (!clearanceOnlyRenewal) {
+    } else if (!clearanceOnlyRenewal && applicationType !== 'amendment') {
       await businesses.update(bid, businessPayload())
     }
     /*
@@ -7242,8 +7249,14 @@ export function ApplyWizard() {
      * client reported. The press is honest about it now, but the save
      * should not have been failing in the first place.
      *
-     * A NEW filing and an AMENDMENT both still update: the first is where
-     * the business is described, and the second exists to change it.
+     * A NEW filing still updates: it is where the business is described.
+     *
+     * An AMENDMENT stopped on 5 October 2026. It was kept here because "it
+     * exists to change the business", but it never changes it this way: what
+     * it asks is written as `requested_changes` and applied by BPLO's
+     * approval. Its sequence shows none of the business steps either, so the
+     * payload was a prefill copy, and on a thin record the 422 it drew
+     * stopped the draft being created at all — the same failure as above.
      */
     setBusinessId(bid)
     const app = await applications.create({
@@ -7988,9 +8001,19 @@ export function ApplyWizard() {
      */
     chosen?: string,
   ): Promise<AmendmentRow[] | null> {
-    if (applicationId === null) return null
-
     const typed = (chosen ?? amendTyped[field] ?? '').trim()
+    /*
+     * No draft to write to. This returned null without a word, and the
+     * header went on claiming the answer was saved (tester, 5 October 2026).
+     * Said only when there is something to lose: `flushAmendments` walks
+     * every row, typed or not.
+     */
+    if (applicationId === null) {
+      if (typed !== '') setAmendError('Not saved: the draft could not be created.')
+
+      return null
+    }
+
     const row = amendRows.find((r) => r.field === field)
     // Untouched and never requested: nothing to send.
     if (row !== undefined && !row.requested && typed === '') return null
@@ -8077,8 +8100,24 @@ export function ApplyWizard() {
    * `ApplicationController::store` asks only for the business and the
    * permits, so nothing below was ever a server requirement.
    */
-  const canCreateDraft = clearanceOnlyRenewal
+  /*
+   * ── An amendment is gated the same way, and only once the dialog is done ──
+   *
+   * It ran the new-filing chain below, lessor clause and all. A rented
+   * business whose record holds no lessor failed it, no draft was ever
+   * written, and New Details read "not recorded" under every CURRENT value
+   * while the header said All Changes Saved (tester, 5 October 2026). The
+   * amendment never asks any of those questions — a thin business record is
+   * the record's problem, not this filing's — so it needs what the
+   * clearance-only renewal needs: the business and its permit.
+   *
+   * `identify === null` is the applicant having pressed Continue. Opening the
+   * dialog and backing out left blank "2026 Amendment" drafts behind; nothing
+   * is written until the dialog has been answered.
+   */
+  const canCreateDraft = clearanceOnlyRenewal || applicationType === 'amendment'
     ? prefillBusinessId !== null && form.permit_type_ids.length > 0 && priorPermitAnswered
+      && (applicationType !== 'amendment' || identify === null)
     : form.permit_type_ids.length > 0 &&
     form.name.trim() !== '' &&
     /*
@@ -8128,7 +8167,8 @@ export function ApplyWizard() {
      *
      * Nothing replaces it. The business is settled in the dialog before the
      * wizard opens, which is all a draft needs, and what is being amended is
-     * asked on the step that writes it.
+     * asked on the step that writes it. An amendment no longer reaches this
+     * chain at all since 5 October 2026 — see the note above the ternary.
      */
     true
 
@@ -8164,8 +8204,29 @@ export function ApplyWizard() {
          * push a prefill-derived copy back over the register on every save.
          * It answered 422 there and failed the autosave with it.
          */
-        const bid = clearanceOnlyRenewal ? null : businessId ?? prefillBusinessId
-        if (bid) await businesses.update(bid, businessPayload())
+        // Nor on an amendment, for the reason `createDraft` gives.
+        const bid = clearanceOnlyRenewal || applicationType === 'amendment'
+          ? null
+          : businessId ?? prefillBusinessId
+        /*
+         * ── A refused business write no longer takes the filing's answers down ──
+         *
+         * This was a bare await ahead of the application update, so a 422 on
+         * the business (a thin record, a renewal's prefill) threw before the
+         * consent tick was ever sent, and the 422 is swallowed below — the
+         * draft reopened on Part 1, unticked (tester, 5 October 2026). Still
+         * written first, because `syncLineCapitalization` reads the business's
+         * lines, and its failure is still the save's failure; it just no
+         * longer stops the half that would have succeeded.
+         */
+        let businessFailure: unknown = null
+        if (bid) {
+          try {
+            await businesses.update(bid, businessPayload())
+          } catch (err) {
+            businessFailure = err
+          }
+        }
         /*
          * `permit_type_ids` is deliberately NOT sent here.
          *
@@ -8202,8 +8263,17 @@ export function ApplyWizard() {
         if (isReuse) {
           await applications.setPriorPermit(id, priorPermitId, priorPermitIds)
         }
+        if (businessFailure !== null) throw businessFailure
       } else {
-        await applications.update(id, { fee_profile: feeProfile })
+        /*
+         * The tick rides here too. `ensureDraftRaw` may hand back a create
+         * another caller started before the box was ticked, carrying the
+         * `false` of that moment — and this save then marks the tick as sent.
+         */
+        await applications.update(id, {
+          fee_profile: feeProfile,
+          data_privacy_consent: consent,
+        })
       }
       // The office sheets used to be flushed here alongside everything else.
       // They are not this wizard's to save any more — <ClearanceStage> saves
@@ -8603,6 +8673,16 @@ export function ApplyWizard() {
       return
     }
     if (openedSnapshotRef.current === snapshot) return
+    /*
+     * Not while the amendment's entry dialog is still up. The title names
+     * itself ("2026 Amendment") the moment the form opens, which counted as a
+     * change, so opening the dialog and backing out left a blank draft in the
+     * list every time (tester, 5 October 2026). Nothing is worth keeping
+     * until Continue — and after it the real draft is created at once
+     * (`canCreateDraft`), so a scratch row would only race it and could be
+     * left behind as a second card for the same filing.
+     */
+    if (applicationType === 'amendment' && (identify !== null || canCreateDraft)) return
 
     /*
      * What the entry dialog was told. Undefined on a new permit, which has
@@ -8758,6 +8838,9 @@ export function ApplyWizard() {
     priorPermitId,
     priorPermitIds,
     amendment,
+    // The amendment's write waits on the dialog closing; see the early return.
+    identify,
+    canCreateDraft,
     /*
      * Nor is this. It moves with `title` today, which is in `snapshot`, so
      * leaving it out would work by luck — the same luck the note on
@@ -9587,8 +9670,19 @@ export function ApplyWizard() {
           clearance-only renewal has none of the three. It goes to the permit's
           own office, is never billed at submission, and carries one permit.
         */}
+        {/*
+          And an amendment has neither a Tax Order of Payment nor five
+          clearances (docs/amendment-2026-09-19.md §3). The one thing it may
+          ask next is the new Zoning Clearance, which opens on submission.
+        */}
         <p className="mt-4 text-sm text-ink-secondary">
-          {clearanceOnlyRenewal
+          {applicationType === 'amendment'
+            ? amendNeedsZoning
+              ? 'BPLO is now reviewing your amendment. Next, apply for your new Zoning ' +
+                'Clearance — it is open under Permit Tracking now.'
+              : 'BPLO is now reviewing your amendment. No action needed from you right now — ' +
+                'the changes apply once it is approved.'
+            : clearanceOnlyRenewal
             ? `${submitOffice} is now reviewing your application and will arrange an ` +
               'inspection. No action needed from you right now — nothing is due today, and ' +
               'the fee joins your next business permit renewal in January.'
@@ -9656,7 +9750,14 @@ export function ApplyWizard() {
    * The scratch row is only consulted while there is no real draft — after
    * that it is discarded, and `dirty` is the one true answer.
    */
-  const scratchUpToDate = applicationId === null && scratchSavedSnapshot === snapshot
+  /*
+   * Never on an amendment. Its answers are `requested_changes` rows, which
+   * only a real draft can hold and the scratch row never carries — so a
+   * scratch copy being current said All Changes Saved over details that had
+   * gone nowhere (tester, 5 October 2026).
+   */
+  const scratchUpToDate =
+    applicationId === null && scratchSavedSnapshot === snapshot && applicationType !== 'amendment'
   const savedOnServer = (applicationId !== null && !dirty) || scratchUpToDate
   /* Only before anything at all has reached the server. */
   const neverSaved = applicationId === null && scratchSavedSnapshot === null
@@ -13199,7 +13300,9 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
             <p className="text-lg font-medium text-royal">
-              {clearanceOnlyRenewal
+              {applicationType === 'amendment'
+                ? 'Your amendment is ready to submit'
+                : clearanceOnlyRenewal
                 ? `Your ${priorPermitChoice?.permit_type?.name ?? 'permit'} renewal is ready to submit`
                 : 'Your Business Permit application is ready to submit'}
             </p>
@@ -13218,15 +13321,34 @@ export function ApplyWizard() {
               a future trim — an applicant who thinks approval is the end, or
               that payment is the end, is the surprise this screen exists to
               prevent.
+
+              It said the Business Permit was "released after all of them are
+              approved". It is released AT PAYMENT (docs/application-flow-
+              2026-09.md, `WorkflowService::releaseOutcomePermit`); the five
+              clearances follow it, each on its own (tester, 5 October 2026).
+
+              An amendment gets its own sentence: no Tax Order of Payment, no
+              five clearances — BPLO reads it and approval applies it
+              (docs/amendment-2026-09-19.md §3). The one thing it may still ask
+              of the applicant is a new Zoning Clearance, on the same rule that
+              puts ZONING on the filing (`amendNeedsZoning`).
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              {clearanceOnlyRenewal
+              {applicationType === 'amendment'
+                ? amendNeedsZoning
+                  ? amendMovesPremises
+                    ? 'BPLO reviews it. Because the address changes, apply for a new Zoning '
+                      + 'Clearance under Permit Tracking right after you submit.'
+                    : 'BPLO reviews it. Because of this change, apply for a new Zoning '
+                      + 'Clearance under Permit Tracking right after you submit.'
+                  : 'BPLO reviews it. The changes apply once it is approved.'
+                : clearanceOnlyRenewal
                 ? `${renewingOffice ?? 'The issuing office'} reviews this and inspects your ` +
                   'premises. Nothing to pay now — the fee joins your next business permit ' +
                   'renewal in January.'
                 : 'BPLO reviews this form first. If they accept it, we raise your Tax Order of '
-                  + 'Payment and you pay — and once that is settled, your five LGU clearances '
-                  + 'open. Your Business Permit is released after all of them are approved.'}
+                  + 'Payment and you pay. Your Business Permit is released as soon as you pay; '
+                  + 'the five clearances are applied for after that, each approved on its own.'}
             </p>
             {/*
               ── The summary of payment, on the step that asks for a decision ──
@@ -13259,7 +13381,31 @@ export function ApplyWizard() {
               due, which is the half an applicant would otherwise be surprised
               by in January.
             */}
-            {clearanceOnlyRenewal ? (
+            {/*
+              An amendment is not billed either: its fee is an unbilled row
+              collected with the next renewal (`recordAmendmentFee`, client,
+              19 September 2026). One line, and "if any" because the amount is
+              set by `BIZTRACK_AMENDMENT_FEE`, which the browser is not told and
+              which stands at ₱0 until the LGU names a figure.
+            */}
+            {applicationType === 'amendment' ? (
+              <>
+                {amendRequested.length > 0 && (
+                  <div className="mt-6 w-full max-w-lg rounded-lg border border-line bg-shell px-5 py-3">
+                    <h2 className="text-left text-[13px] font-bold uppercase tracking-wide text-ink">
+                      Changes requested
+                    </h2>
+                    <div className="mt-1">
+                      <RequestedChanges amendRows={amendRequested} />
+                    </div>
+                  </div>
+                )}
+                <p className="mt-4 max-w-md text-sm text-ink-secondary">
+                  Nothing to pay now. The amendment fee, if any, is added to your next Business
+                  Permit renewal.
+                </p>
+              </>
+            ) : clearanceOnlyRenewal ? (
               <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
                 <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
                   Nothing to pay now
@@ -13384,13 +13530,13 @@ export function ApplyWizard() {
              * amendment does not ask those, so the condition here was
              * permanently false and the confirmation page stayed silent about
              * what had just been filed.
+             *
+             * With the values since 5 October 2026, and moved up under the
+             * heading: it named the fields alone ("Trade name, Total
+             * employees") at the foot of the page, which told the applicant
+             * what they had touched and not what they had asked for. See the
+             * "Changes requested" block above the fee line.
              */}
-            {applicationType === 'amendment' && amendmentSummary && (
-              <>
-                <p className="mt-4 text-lg font-medium text-royal">Amending</p>
-                <p className="text-sm text-ink-muted">{amendmentSummary}</p>
-              </>
-            )}
           </div>
         </div>
       )}
@@ -13596,8 +13742,33 @@ export function ApplyWizard() {
             * go to its counter first.
             */}
           <p className="pt-4 text-center text-lg">
-            Submit this application to {submitOffice} for approval?
+            Submit this {applicationType === 'amendment' ? 'amendment' : 'application'} to{' '}
+            {submitOffice} for approval?
           </p>
+          {/*
+            ── What the amendment changes, at the press that commits it ──────
+
+            The dialog was generic, so the applicant confirmed an amendment
+            without being shown what it amends (tester, 5 October 2026). The
+            values while the list is short enough to read in a dialog; past
+            six rows the names alone, because the full list would push the
+            warning below off the screen and Review has just shown it.
+          */}
+          {applicationType === 'amendment' && amendRequested.length > 0 && (
+            <div className="mb-2 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
+              {amendRequested.length <= 6 ? (
+                <>
+                  <p className="font-bold text-ink">Changes:</p>
+                  <RequestedChanges amendRows={amendRequested} />
+                </>
+              ) : (
+                <p>
+                  <span className="font-bold text-ink">Changes:</span>{' '}
+                  {amendRequested.map((r) => r.label).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
           {/*
             ── Late, and it costs something ────────────────────────────────
 
@@ -13684,7 +13855,8 @@ export function ApplyWizard() {
               note saying what to fix.
             </p>
             <p className="mt-2">
-              Press <span className="font-semibold">Cancel</span> if you would like to look over
+              {/* The button has read "Keep reviewing" since it was renamed; this still said Cancel. */}
+              Press <span className="font-semibold">Keep reviewing</span> if you would like to look over
               your application again.
             </p>
           </div>

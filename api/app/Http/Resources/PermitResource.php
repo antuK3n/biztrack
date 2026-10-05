@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\PermitStatus;
+use App\Models\Permit;
 use App\Support\RenewalWindow;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -34,6 +36,16 @@ class PermitResource extends JsonResource
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,
             ] : null,
+            /*
+             * Why it is suspended, and since when. Client, 5 October 2026:
+             * *"Show WHY it is suspended and WHICH office caused it."* Null on
+             * every permit that is not Suspended, so a screen never explains a
+             * suspension that is over. `suspended_for` is null when the cause
+             * named no single permit (a sanctioned business, a rejected
+             * filing). The owner and staff get the reason; the public QR page
+             * builds its own smaller payload in VerifyController.
+             */
+            ...$this->suspension(),
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$this->permit_number,
             /*
              * Why this permit cannot be renewed today, or null if it can.
@@ -61,6 +73,39 @@ class PermitResource extends JsonResource
                 : null,
             // Set on the owner's own list only (PermitController::index).
             'renewal_in_progress' => $this->whenHas('renewal_in_progress'),
+        ];
+    }
+
+    /** @return array{suspended_at: ?string, suspended_days: ?int, suspension_reason: ?string, suspended_for: ?array} */
+    private function suspension(): array
+    {
+        $on = $this->status === PermitStatus::Suspended;
+
+        return [
+            'suspended_at' => $on ? optional($this->suspended_at)->toDateString() : null,
+            'suspended_days' => $on ? $this->daysSuspended() : null,
+            'suspension_reason' => $on ? $this->suspension_reason : null,
+            'suspended_for' => $on ? self::suspendedFor($this->resource) : null,
+        ];
+    }
+
+    /**
+     * The refused permit and its office, or null. Shared with the public
+     * verify payload and the Track row so the three name it alike.
+     *
+     * @return array{code: string, name: string, office: ?string}|null
+     */
+    public static function suspendedFor(Permit $permit): ?array
+    {
+        if ($permit->suspended_for_permit_type_id === null) {
+            return null;
+        }
+        $type = $permit->suspendedFor;
+
+        return $type === null ? null : [
+            'code' => $type->code,
+            'name' => $type->name,
+            'office' => $type->department?->name,
         ];
     }
 }

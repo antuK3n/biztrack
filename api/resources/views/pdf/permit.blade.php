@@ -74,6 +74,10 @@
            that is expired or revoked must say so on its own face, or a stale
            download passes for a current one. */
         .status { text-align: center; font-size: 11px; font-weight: bold; letter-spacing: 2px; color: #bd0000; margin-top: 4px; }
+        /* Suspended prints as a boxed banner with its date (client, 5 October
+           2026: "the PDF prints SUSPENDED"). The small line above was easy to
+           miss on a certificate taped to a wall. */
+        .status.banner { font-size: 16px; border: 2px solid #bd0000; padding: 6px 10px; margin: 10px 70px 0; }
 
         table.fields { width: 100%; border-collapse: separate; border-spacing: 0 7px; margin-top: 18px; }
         table.fields td { vertical-align: middle; }
@@ -484,7 +488,9 @@
     @else
         <div class="title">{{ strtoupper($permit_type_name) }}</div>
     @endif
-    @if($status_label && $status_label !== 'Active')
+    @if($status_label === 'Suspended')
+        <div class="status banner">SUSPENDED{{ !empty($suspended_on) ? ' — '.strtoupper($suspended_on) : '' }}</div>
+    @elseif($status_label && $status_label !== 'Active')
         <div class="status">{{ strtoupper($status_label) }}</div>
     @endif
 

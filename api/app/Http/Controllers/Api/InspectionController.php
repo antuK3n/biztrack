@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\InspectionResult;
-use App\Enums\InspectionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\InspectionResource;
@@ -117,15 +116,11 @@ class InspectionController extends Controller
 
         /*
          * A pass on a suspended or blacklisted business is refused by the
-         * service; asked here as well so the refusal comes before this officer
-         * is written onto the visit below.
+         * service; asked here as well so the refusal comes before anything
+         * on the visit is touched.
          */
         if (InspectionResult::from($data['result'])->progresses()) {
             $this->workflow->refuseWhileOnHold($inspection->application?->business);
-        }
-
-        if (! $inspection->inspector_user_id) {
-            $inspection->update(['inspector_user_id' => $request->user()->id]);
         }
 
         $this->workflow->recordInspection(
@@ -195,11 +190,9 @@ class InspectionController extends Controller
             'scheduled_at' => ['required', 'date'],
         ]);
 
-        $inspection->update([
-            'scheduled_at' => $data['scheduled_at'],
-            'status' => InspectionStatus::Rescheduled,
-        ]);
-        Audit::log('inspection.rescheduled', $inspection, ['scheduled_at' => $data['scheduled_at']]);
+        // In the service since 5 October 2026, so the move refuses a past
+        // date and tells the applicant, as the first booking does.
+        $inspection = $this->workflow->rescheduleInspection($inspection, $data['scheduled_at']);
 
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
@@ -263,6 +256,77 @@ class InspectionController extends Controller
     }
 
     /**
+     * Type, change or clear the inspector's name on a visit — for the record.
+     *
+     * The client, 5 October 2026: *"since an inspector can have no account in
+     * the system, would it be better if the admin just type the name of the
+     * inspector assigned? The officer in charge is still the one to approve or
+     * reject the inspection, but he/she must still be able to put the inspector
+     * name just for the record. The field must be editable."*
+     *
+     * This REPLACED `claim` / `release` (4 October 2026), which made the
+     * inspector an account that took the visit. An office's inspectors mostly
+     * have no account, so the card named whoever happened to press the button,
+     * and the officer in charge — who books the visit and approves it — was
+     * shown as somebody else's helper. Who decides is still the OIC
+     * (`application_assignments`); this is only a name on the row. Bring the
+     * account version back only if inspectors get their own logins AND the
+     * client wants them, not the OIC, to record the result.
+     *
+     * Blank clears it, and a blank name never blocks recording the result.
+     * Refused once the clearance is closed — see
+     * `Inspection::inspectorNameEditable()`.
+     */
+    public function nameInspector(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+
+        $data = $request->validate([
+            'inspector_name' => ['present', 'nullable', 'string', 'max:120'],
+        ], [
+            'inspector_name.max' => 'Keep the name under 120 characters.',
+        ]);
+
+        abort_unless($inspection->inspectorNameEditable(), 422, 'This clearance is closed.');
+
+        $from = $inspection->inspector_name;
+        $to = trim((string) ($data['inspector_name'] ?? '')) ?: null;
+
+        if ($from !== $to) {
+            $inspection->forceFill(['inspector_name' => $to])->save();
+            Audit::log('inspection.inspector_named', $inspection, ['from' => $from, 'to' => $to]);
+        }
+
+        return response()->json([
+            'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
+        ]);
+    }
+
+    /**
+     * The names this office has typed before, newest first, for the field's
+     * autocomplete — so "Carlos Dizon" is not also "C. Dizon" by the third
+     * visit.
+     *
+     * The caller's OWN office only: another office's inspectors are its own
+     * personnel record (see InspectionResource on `inspector`). An account with
+     * no department — the super admin — gets none, since it names nobody.
+     */
+    public function inspectorNames(Request $request): JsonResponse
+    {
+        $departmentId = $request->user()->department_id;
+
+        $names = $departmentId === null ? collect() : Inspection::query()
+            ->where('department_id', $departmentId)
+            ->whereNotNull('inspector_name')
+            ->groupBy('inspector_name')
+            ->orderByRaw('max(updated_at) desc')
+            ->limit(20)
+            ->pluck('inspector_name');
+
+        return response()->json(['data' => $names->values()]);
+    }
+
+    /**
      * A visit belongs to the office that booked it, or to the inspector named
      * on it. The `admin` exemption that used to open this method was REMOVED
      * rather than replaced with a permission check (INS-7).
@@ -288,79 +352,11 @@ class InspectionController extends Controller
      * The `inspector_user_id` disjunct is deliberately kept and is deliberately
      * not department-scoped — but note it survives a department transfer
      * (INS-6): an officer moved between offices in the admin user editor keeps
-     * write access to their old office's open visits. leastLoadedInspector()
-     * only ever names a user from the booking department, so this is safe at
-     * booking time and is a separate, un-fixed finding.
+     * write access to their old office's open visits. Since 5 October 2026 no
+     * new visit names an account (the inspector is typed text, see
+     * `nameInspector`), so the disjunct only ever matches older rows and the
+     * finding shrinks with them; it is still un-fixed.
      */
-    /**
-     * Take the site visit: become its inspector.
-     *
-     * The twin of `AssignmentController::claim`, and deliberately shaped like
-     * it — same conditional update, same 409 when somebody got there first,
-     * same silence when the caller already holds it. The client's point on
-     * 4 October 2026 was that the inspection can belong to a different officer
-     * from the review; it could already, but only an admin could say so. This
-     * is the office doing it for itself, which is what Claim has always meant
-     * on the other stage.
-     *
-     * `whereNull` in the UPDATE rather than a read-then-write: two inspectors
-     * pressing Claim on the same visit is the ordinary case this guards, and a
-     * check followed by a write would let both through.
-     */
-    public function claim(Request $request, Inspection $inspection): JsonResponse
-    {
-        $this->authorizeDepartment($request, $inspection);
-
-        $user = $request->user();
-
-        if ($inspection->inspector_user_id === $user->id) {
-            return response()->json(['data' => new InspectionResource($inspection->load('inspector'))]);
-        }
-
-        $taken = Inspection::whereKey($inspection->id)
-            ->whereNull('inspector_user_id')
-            ->update(['inspector_user_id' => $user->id]);
-
-        if ($taken === 0) {
-            $holder = $inspection->fresh()->load('inspector')->inspector;
-            abort(409, $holder
-                ? "This visit is already with {$holder->name}. Only the system administrator can move it."
-                : 'This visit is already with another officer.');
-        }
-
-        Audit::log('inspection.claimed', $inspection->fresh(), ['inspector_user_id' => $user->id]);
-
-        return response()->json(['data' => new InspectionResource($inspection->fresh()->load('inspector'))]);
-    }
-
-    /**
-     * Put the visit back: stop being its inspector.
-     *
-     * Same reasoning as `AssignmentController::release` — a claim that takes
-     * one click and an administrator to undo is a claim people stop making.
-     * Refused on somebody else's visit, because releasing another officer's
-     * work is a reassignment, and reassignment is the admin's.
-     */
-    public function release(Request $request, Inspection $inspection): JsonResponse
-    {
-        $this->authorizeDepartment($request, $inspection);
-
-        $user = $request->user();
-
-        abort_unless(
-            $inspection->inspector_user_id === null || $inspection->inspector_user_id === $user->id,
-            403,
-            'This visit is with another officer. Only the system administrator can move it.'
-        );
-
-        if ($inspection->inspector_user_id !== null) {
-            $inspection->forceFill(['inspector_user_id' => null])->save();
-            Audit::log('inspection.released', $inspection, ['released_by_user_id' => $user->id]);
-        }
-
-        return response()->json(['data' => new InspectionResource($inspection->fresh()->load('inspector'))]);
-    }
-
     private function authorizeDepartment(Request $request, Inspection $inspection): void
     {
         $user = $request->user();

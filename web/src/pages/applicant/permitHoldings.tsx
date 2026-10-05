@@ -285,11 +285,20 @@ function PermitRow({
     <div
       className={`flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5 ${past ? 'bg-shell' : 'bg-royal'}`}
     >
-      <span
-        className={`min-w-0 flex-1 truncate text-base font-bold ${past ? 'text-ink-secondary' : 'text-white'}`}
-      >
-        {typeName}
-      </span>
+      <div className="min-w-0 flex-1">
+        <span
+          className={`block truncate text-base font-bold ${past ? 'text-ink-secondary' : 'text-white'}`}
+        >
+          {typeName}
+        </span>
+        {/* What a suspension waits on, the Track row's line (5 October 2026). */}
+        {permit.status === 'suspended' && permit.suspended_for && (
+          <span className={`block truncate text-xs ${past ? 'text-ink-muted' : 'text-white/85'}`}>
+            Waiting on your {permit.suspended_for.name}
+            {permit.suspended_for.office ? ` with ${permit.suspended_for.office}` : ''}
+          </span>
+        )}
+      </div>
       {note && (
         <span
           className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${

@@ -107,7 +107,7 @@ function issueClearanceOnRenewal(Application $app, string $code): void
 
     $visit = $workflow->scheduleClearanceInspection(
         $workflow->pivotFor($app->fresh(), $code),
-        now()->addDays(3),
+        now(),
     );
     $workflow->recordInspection($visit, InspectionResult::Passed, 'Compliant.');
 }
@@ -287,6 +287,7 @@ it('bills every clearance on a multi-permit renewal, and stacks what it billed',
         satisfyChecklist($app, $code);
     }
 
+    attachRequiredDocuments($app->id);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 

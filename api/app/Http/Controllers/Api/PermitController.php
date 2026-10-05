@@ -31,9 +31,14 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PermitController extends Controller
 {
-    // The issuing office comes down too, so the owner's screen can name it
-    // and open a conversation with it [client, 5 October 2026].
-    private array $eager = ['permitType.department:id,name', 'business:id,name', 'application:id,tracking_id'];
+    private array $eager = [
+        // The issuing office comes down too, so the owner's screen can name it
+        // and open a conversation with it [client, 5 October 2026].
+        'permitType.department:id,name', 'business:id,name', 'application:id,tracking_id',
+        // What a suspended row names as its cause (5 October 2026). Two
+        // constant queries; empty on a page with nothing suspended.
+        'suspendedFor.department:id,name',
+    ];
 
     public function __construct(private WorkflowService $workflow) {}
 
@@ -199,6 +204,14 @@ class PermitController extends Controller
              */
             'expiring_within' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:365'],
             /*
+             * Suspended for at least N days — BPLO's chase list. Client,
+             * 5 October 2026: *"after 30 days unresolved BPLO sees it in a
+             * list and may revoke it with a reason."* Days rather than a date
+             * for the same reason as `expiring_within`. A suspension with no
+             * recorded date is left out: its age is unknown, not long.
+             */
+            'suspended_over_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
+            /*
              * Issuance window, for the report an office is asked for at the
              * end of a month. Both ends optional — "everything since March" is
              * as ordinary a question as a closed range.
@@ -265,6 +278,12 @@ class PermitController extends Controller
                     now()->startOfDay()->addDays($days)->toDateString(),
                 ])
                 ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Suspended->value]);
+        }
+
+        if ($over = $request->integer('suspended_over_days')) {
+            $query->where('status', PermitStatus::Suspended->value)
+                ->whereNotNull('suspended_at')
+                ->where('suspended_at', '<=', now()->startOfDay()->subDays($over)->endOfDay());
         }
 
         /*
@@ -1259,6 +1278,11 @@ class PermitController extends Controller
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',
             'department_name' => $permit->permitType?->department?->name,
             'status_label' => $permit->status?->label(),
+            // The date the PDF prints beside SUSPENDED (5 October 2026); null
+            // when not suspended or the date was never recorded.
+            'suspended_on' => $permit->status === PermitStatus::Suspended
+                ? optional($permit->suspended_at)->format('F j, Y')
+                : null,
             /*
              * ── The face as it was SIGNED, not as the register reads today ───
              *

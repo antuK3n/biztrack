@@ -1643,9 +1643,18 @@ export function ClearanceStage({
         the money — already explained on the card above it — and then
         promised a Business Permit the applicant is already holding.
       */}
+      {/*
+        Counted off the filing, not assumed. "All five are required" stood
+        over a moving amendment carrying ZONING alone (tester, 5 October
+        2026); the server sends the clearances the filing carries, so the
+        sentence counts those.
+      */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Each of these is a separate certificate for your premises, issued and inspected by its
-        own city office. All five are required.
+        {visibleRows.length === 1
+          ? `Your ${visibleRows[0].permit_type.name} is a certificate for your premises, ` +
+            'issued and inspected by its own city office. It is required.'
+          : 'Each of these is a separate certificate for your premises, issued and inspected ' +
+            `by its own city office. All ${visibleRows.length === 5 ? 'five' : visibleRows.length} are required.`}
       </p>
 
       {/*

@@ -222,6 +222,23 @@ function CertField({
   )
 }
 
+/**
+ * Why it is suspended, in one or two sentences: since when, which office
+ * rejected which permit and its words, and how it comes back.
+ */
+function suspensionSentence(permit: Permit): string {
+  const since = permit.suspended_at ? `Suspended since ${formatDate(permit.suspended_at)}` : 'Suspended'
+  const reason = permit.suspension_reason?.trim().replace(/\.$/, '') ?? ''
+  const f = permit.suspended_for
+  if (f) {
+    const office = f.office ?? 'the issuing office'
+    return `${since} because ${office} rejected your ${f.name}${reason ? `: ${reason}` : ''}. `
+      + `It returns to Active once ${office} approves it.`
+  }
+  if (reason) return `${since}. Reason: ${reason}.`
+  return `${since}. It does not verify while suspended.`
+}
+
 export function PermitDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
@@ -542,13 +559,14 @@ export function PermitDetailPage() {
               how to get it back — so the route is on the screen rather than
               in the notification they have already scrolled past.
 
-              The cause is deliberately NOT named here. A suspension can
-              follow a refused clearance, which the clearance page explains
-              per permit with the office's own words, and it may in future
-              follow an enforcement decision, which has no page yet. Naming
-              one cause on a screen that cannot know which it was would be
-              wrong half the time; pointing at the page that CAN say is right
-              either way.
+              The cause IS named now. It was left out while this screen could
+              not know which it was; since 5 October 2026 the permit records
+              it (`suspended_for`, `suspension_reason`), and the client asked
+              for exactly this: *"Show WHY it is suspended and WHICH office
+              caused it."* "Rejected" covers a failed visit too — the client
+              reads the inspection's Reject as the permit being rejected. A
+              suspension that named no permit (a sanctioned business, a
+              rejected filing) shows its reason alone.
 
               Revoked gets the word and no route, because there is no route:
               `PermitStatus::Revoked` has no writer and no way back, and
@@ -560,9 +578,7 @@ export function PermitDetailPage() {
                   Suspended
                 </p>
                 <p className="mt-1.5 text-center text-xs leading-relaxed text-ink-secondary">
-                  This permit does not verify while it is suspended — anyone scanning the QR
-                  code is told so. If one of your other permits was rejected, apply for it
-                  again and this permit is restored as soon as that office approves it.
+                  {suspensionSentence(permit)}
                 </p>
                 {permit.application !== null && (
                   <p className="mt-2 text-center">

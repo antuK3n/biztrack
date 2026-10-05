@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\PermitStatus;
+use App\Models\Permit;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -31,7 +33,8 @@ class ApplicationListResource extends JsonResource
              * guide line and a different queue tab for the two, so it needs
              * the answer rather than a rule for deriving it. See
              * `Application::isDecided()`.
-             */            'decided' => $this->resource->isDecided(),
+             */
+            'decided' => $this->resource->isDecided(),
             'business' => $this->relationLoaded('business') && $this->business ? [
                 'id' => $this->business->id,
                 'name' => $this->business->name,
@@ -75,6 +78,28 @@ class ApplicationListResource extends JsonResource
                     'name' => $pt->name,
                     'status' => $pt->pivot?->status?->value,
                     'status_label' => $pt->pivot?->status?->label(),
+                    /*
+                     * The CERTIFICATE's status, beside the pivot's. The pivot
+                     * says approved for ever once the office approves; the
+                     * certificate can be suspended afterwards (a clearance
+                     * refused, a visit failed), and the Track row read the
+                     * pivot — so a suspended Mayor's Permit wore "Approved".
+                     * Client, 5 October 2026: *"why was this business permit
+                     * still not Suspended despite having an other permit being
+                     * Rejected?"* Null when nothing is issued yet.
+                     */
+                    'permit_status' => $this->relationLoaded('permits')
+                        ? $this->issuedFor($pt->id)?->status?->value
+                        : null,
+                    /*
+                     * Which permit, at which office, a suspended certificate
+                     * is waiting on — the one line under the Suspended chip
+                     * (client, 5 October 2026: show WHICH office caused it).
+                     * Null unless suspended for a named permit.
+                     */
+                    'suspension' => $this->relationLoaded('permits')
+                        ? $this->suspensionOf($this->issuedFor($pt->id))
+                        : null,
                 ])->values()
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
@@ -98,5 +123,22 @@ class ApplicationListResource extends JsonResource
              */
             'last_opened_at' => optional($this->last_opened_at)->toISOString(),
         ];
+    }
+
+    /** The latest certificate this filing issued for one permit type, or null. */
+    private function issuedFor(int $permitTypeId): ?Permit
+    {
+        return $this->permits->where('permit_type_id', $permitTypeId)->sortByDesc('id')->first();
+    }
+
+    /** @return array{for: string, office: ?string}|null */
+    private function suspensionOf(?Permit $permit): ?array
+    {
+        if ($permit === null || $permit->status !== PermitStatus::Suspended) {
+            return null;
+        }
+        $named = PermitResource::suspendedFor($permit);
+
+        return $named === null ? null : ['for' => $named['name'], 'office' => $named['office']];
     }
 }

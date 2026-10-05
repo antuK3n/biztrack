@@ -131,9 +131,9 @@ it('approves a ready renewal instead of sending it to BPLO', function () {
      * The stage itself. Every required clearance approved leaves BPLO nothing
      * to weigh that the register does not already hold.
      *
-     * Classified first, because the OTHER route to For Final Approval is
-     * still live and would answer this question with the wrong yes — see the
-     * test below, which is the first draft of this one, failing.
+     * Classified first, as it was written while an unclassified filing still
+     * had its own route to For Final Approval (retired 5 October 2026 — see
+     * the test below).
      */
     [$app, $type] = ffaFiling('renewal', 'approved');
     classifyAsOfficer($app);
@@ -143,19 +143,22 @@ it('approves a ready renewal instead of sending it to BPLO', function () {
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
-it('still parks ANY filing that nobody has classified', function () {
+it('closes a ready filing nobody has classified, too', function () {
     /*
-     * The one route to For Final Approval that survives, and the reason the
-     * status is not deleted outright: a filing nobody has given an RA 11032
-     * tier must not have a permit issued against a statutory deadline the
-     * tier decides. That has nothing to do with uploads and is not what the
-     * client asked to remove.
+     * This was "still parks ANY filing that nobody has classified": the one
+     * route to For Final Approval that survived 3 October, holding a filing
+     * with no officer-confirmed RA 11032 tier for BPLO. The tier is read from
+     * Malabon's Citizen's Charter and BPLO's screen no longer offers a way to
+     * confirm it, so a tester's filing sat there with nothing to press; the
+     * client's answer on 5 October 2026 was *"No, close it automatically."*
+     * The rule is rewritten, not weakened: the filing closes.
      */
     [$app] = ffaFiling('renewal', 'approved');
 
     app(WorkflowService::class)->refreshReadiness($app);
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->fresh()->isDecided())->toBeTrue();
 });
 
 it('leaves a renewal where it is while a clearance is still outstanding', function () {

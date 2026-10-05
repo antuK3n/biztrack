@@ -180,7 +180,7 @@ function clearanceOfficeHalf(int $appId, string $code): void
     ])->assertOk();
 
     $inspectionId = test()->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
-        'scheduled_at' => now()->addDay()->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
     ])->assertCreated()->json('data.id');
 
     test()->postJson("/api/v1/inspections/{$inspectionId}/conduct", [
@@ -217,6 +217,7 @@ it('walks a new application from filing to every permit issued', function () {
         'fee_profile' => feeProfile(1_850_000),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     expect(Application::find($appId)->permitTypes()->pluck('code')->sort()->values()->all())
@@ -346,6 +347,7 @@ it('renews one of the six and issues only that', function () {
         'fee_profile' => feeProfile(2_100_000),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     // NOT expanded to six.

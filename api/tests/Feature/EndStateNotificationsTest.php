@@ -57,6 +57,7 @@ function payingApplication(string $businessName, string $registrationNumber): in
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);
@@ -116,7 +117,7 @@ it('notifies the applicant when the application is approved', function () use ($
 
         $visitId = $this->withHeaders($officer)
             ->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
-                'scheduled_at' => now()->addWeekdays(2)->startOfHour()->toDateTimeString(),
+                'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
             ])->assertCreated()->json('data.id');
 
         $this->withHeaders($officer)

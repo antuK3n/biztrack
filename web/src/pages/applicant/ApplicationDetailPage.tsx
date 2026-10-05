@@ -9,6 +9,7 @@ import {
   XIcon,
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { RequestedChanges } from '../../components/RequestedChanges'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
@@ -153,14 +154,19 @@ function OfficeVisits({ app }: { app: Application }) {
           * non-empty exactly when approveAndIssue has run. The forward-looking
           * wording survives for the gap between the last passing visit and the
           * permits being written, which is the only moment it was ever true.
+          *
+          * The last two said the permits wait on EVERY office, which stopped
+          * being true when each clearance became its own approval: one office
+          * issues its certificate on its own result (tester, 5 October 2026;
+          * docs/application-flow-2026-09.md).
           */}
         {outstanding === 0 && app.permits.length > 0
           ? 'Every office has been, and your permits are issued — they are on this page and in your Profile.'
           : outstanding === 0
-          ? 'Every office has been. Your permits are issued once the last result is recorded.'
-          : `An office passing its visit does not issue a permit — ${
-              outstanding === 1 ? 'one office has' : `${outstanding} offices have`
-            } still to inspect, and the permits are issued only when all of them have passed.`}
+          ? 'Every office has been. Each permit is issued once its office records the result.'
+          : `${
+              outstanding === 1 ? 'One office has' : `${outstanding} offices have`
+            } still to inspect. Each permit is issued by its own office after its visit.`}
       </p>
       <ul className="mt-4 space-y-2">
         {visits.map((visit) => {
@@ -436,6 +442,17 @@ export function ApplicationDetailPage() {
   const status = app.status
   const isPayment = status === 'pending_payment'
   /*
+   * An amendment carries the Business Permit, plus ZONING when the premises
+   * move or the trade or area grows (`WorkflowService::amendmentNeedsLocationalClearance`).
+   * Read off the filing's own permit list, so this page and the server cannot
+   * disagree about whether a Zoning Clearance is owed.
+   */
+  const isAmendment = app.application_type === 'amendment'
+  const amendmentNeedsZoning = isAmendment && app.permit_types.some((pt) => pt.code === 'ZONING')
+  const changes = isAmendment ? (app.requested_changes ?? []) : []
+  /* Every row is applied in one transaction, so the first date is the date. */
+  const changesAppliedAt = (app.requested_changes ?? []).find((c) => c.applied_at)?.applied_at ?? null
+  /*
    * The visit the applicant should be getting ready for.
    *
    * Pending ones first, soonest first. A filing carries one visit per inspecting
@@ -672,8 +689,15 @@ export function ApplicationDetailPage() {
               * reads the form first, and only then is there anything to pay.
               * An applicant who remembers the old system expects a bill here.
               */}
+            {/*
+              Not on an amendment: no fee is assessed on one — it joins the
+              next renewal (docs/amendment-2026-09-19.md §3) — so the second
+              sentence promised a bill that never comes (tester, 5 October 2026).
+            */}
             <p className="mt-2 text-sm italic text-ink-secondary">
-              BPLO is reading your form. Your fees are assessed once it is approved.
+              {isAmendment
+                ? 'BPLO is reading your amendment.'
+                : 'BPLO is reading your form. Your fees are assessed once it is approved.'}
             </p>
             {app.deadline_at && (
               <p className="mt-3 text-base italic text-ink-secondary">
@@ -724,12 +748,12 @@ export function ApplicationDetailPage() {
             </div>
             <p className="mt-2 text-sm italic text-ink-secondary">
               {otherPermits.outstanding.length === 0
-                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. BPLO is closing your application.`
+                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. Your application is complete.`
                 : `Your Business Permit is issued — download it from your profile. ` +
                   `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
                   ` · still to come: ${otherPermits.outstanding.join(', ')}.` +
-                  ' Apply for each one, or upload the permit you already hold.' +
-                  ' If one is rejected, your Business Permit is suspended until it is settled.'}
+                  ' Apply for each one.' +
+                  ' If one is rejected or fails its inspection, your Business Permit is suspended until it is settled.'}
             </p>
             {inspection?.scheduled_at && (
               <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
@@ -880,6 +904,25 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
+        {/*
+          ── What the amendment changes ──────────────────────────────────
+
+          This page never read `requested_changes`, so the applicant could
+          not see on their own filing what they had asked to change (tester,
+          5 October 2026). Old → new while BPLO decides; once approved, what
+          the change actually replaced (`old_value`) and the day it landed.
+        */}
+        {changes.length > 0 && (
+          <section aria-labelledby="changes-heading" className="mt-6 rounded-xl bg-white px-5 py-4 shadow-card">
+            <h3 id="changes-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+              {changesAppliedAt ? `Changes applied on ${formatDate(changesAppliedAt)}` : 'Changes requested'}
+            </h3>
+            <div className="mt-2">
+              <RequestedChanges requested={changes} />
+            </div>
+          </section>
+        )}
+
         {/* ── Who is handling it, office by office ─────────────────────── */}
         {/*
           * A labelled block, not the old right-aligned italic line.
@@ -983,7 +1026,33 @@ export function ApplicationDetailPage() {
           * screen from the one page where the applicant still has work to do
           * would be sending them away from it.
           */}
-        {status !== 'draft' && (
+        {/*
+          ── On an amendment, only when it carries ZONING ───────────────────
+
+          The card told every amendment its clearances open "once BPLO
+          approves … and you have paid … covers all five". An amendment pays
+          nothing and carries no clearance — except a new Zoning Clearance
+          when the premises move or the trade or area grows, which opens the
+          moment it is submitted (tester, 5 October 2026). So that case gets
+          one sentence and the link, and every other amendment no card.
+        */}
+        {status !== 'draft' && amendmentNeedsZoning && (
+          <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
+            <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
+            <p className="mt-1 text-sm text-ink-secondary">
+              {(app.requested_changes ?? []).some((c) => c.field === 'address_pin')
+                ? 'A new Zoning Clearance is needed for the new address.'
+                : 'A new Zoning Clearance is needed for this change.'}{' '}
+              <Link
+                to={`/applications/${app.id}/clearances`}
+                className="font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+              >
+                Apply for it here.
+              </Link>
+            </p>
+          </section>
+        )}
+        {status !== 'draft' && !isAmendment && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             {/*

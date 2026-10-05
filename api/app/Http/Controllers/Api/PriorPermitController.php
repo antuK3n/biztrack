@@ -7,9 +7,12 @@ use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\Application;
+use App\Models\Permit;
+use App\Support\AmendmentScope;
 use App\Support\Audit;
 use App\Support\RenewablePermit;
 use App\Support\RenewalScope;
+use App\Support\RenewalWindow;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -119,6 +122,26 @@ class PriorPermitController extends Controller
             && ($refusal = RenewablePermit::refusal($ids, $application->id))
         ) {
             throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
+        }
+
+        /*
+         * Not a permit already replaced or already being renewed — the same
+         * question `ApplicationController::store` asks, on this other door
+         * (`RenewalWindow::claimRefusal`, 5 October 2026). This filing is
+         * never counted against itself.
+         */
+        // An amendment names the Business Permit alone (`AmendmentScope`).
+        if ($application->application_type === ApplicationType::Amendment
+            && ($refusal = AmendmentScope::refusal($ids, null))) {
+            throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
+        }
+
+        if ($application->application_type === ApplicationType::Renewal) {
+            foreach (Permit::whereKey($ids)->get() as $prior) {
+                if ($refusal = RenewalWindow::claimRefusal($prior, $application)) {
+                    throw ValidationException::withMessages(['prior_permit_id' => [$refusal]]);
+                }
+            }
         }
 
         // The primary keys the renewal chain; the first tick is the answer.

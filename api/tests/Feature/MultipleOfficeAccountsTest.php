@@ -79,6 +79,7 @@ function filingRoutedTo(array $codes, string $registrationNumber): int
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     foreach ($codes as $code) {

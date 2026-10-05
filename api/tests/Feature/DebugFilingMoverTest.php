@@ -55,6 +55,7 @@ function moverFreshFiling(): Application
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
+    attachRequiredDocuments($appId);
     test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     return Application::findOrFail($appId);
@@ -411,7 +412,7 @@ it('stops an advance at what only the applicant can do, and invents nothing for 
         ->and(moverAudits())->toHaveCount(0);
 });
 
-it('takes a filing to Completed, through BPLO final approval, once the applicant has handed every permit in', function () {
+it('takes a filing to Completed by the last office act, once the applicant has handed every permit in', function () {
     $app = moverFreshFiling();
     moverAsAdmin();
     test()->postJson("/api/v1/debug/filings/{$app->id}/advance", ['to' => 'paid'])->assertOk();
@@ -424,19 +425,19 @@ it('takes a filing to Completed, through BPLO final approval, once the applicant
     $res = test()->postJson("/api/v1/debug/filings/{$app->id}/advance", ['to' => 'approved'])->assertOk();
 
     /*
-     * Three office acts per permit, then BPLO's final approval. Nobody put an
-     * officer's name to the RA 11032 category (the panel's BPLO step is the
-     * Approve press alone, as on BPLO's screen), so the last pass parks the
-     * filing at For Final Approval instead of closing it by itself
-     * (WorkflowService::refreshReadiness) and the advance takes the step BPLO
-     * would take there.
+     * Three office acts per permit, and nothing after. Until 5 October 2026
+     * nobody having put a name to the RA 11032 category parked the filing at
+     * For Final Approval and the advance took a sixteenth step, BPLO's final
+     * approval; the client had that closed automatically (*"No, close it
+     * automatically."*), so the last inspection passed completes the filing
+     * (WorkflowService::refreshReadiness).
      */
     $results = collect($res->json('data.results'));
-    expect($results)->toHaveCount(16)
-        ->and($results->last()['step'])->toBe('bplo_approve')
-        ->and($results->last()['label'])->toBe('BPLO gives the final approval')
+    expect($results)->toHaveCount(15)
+        ->and($results->pluck('step'))->not->toContain('bplo_approve')
         ->and($results->pluck('ok')->unique()->all())->toBe([true])
         ->and($res->json('data.reached'))->toBeTrue()
         ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->fresh()->isDecided())->toBeTrue()
         ->and(clearancePermitsIssued($app))->toBe(5);
 });

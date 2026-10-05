@@ -194,12 +194,16 @@ it('tells the owner, in the app and by e-mail, when an inspection fails', functi
         'application_id' => $app->id,
         'department_id' => $fire->id,
         'status' => InspectionStatus::Scheduled,
-        'scheduled_at' => now()->addDay(),
+        // Today: a result cannot be recorded before the booked day (5 October 2026).
+        'scheduled_at' => now(),
     ]);
 
     app(WorkflowService::class)->recordInspection($visit, InspectionResult::Failed, 'No fire extinguisher on the ground floor.');
 
-    $notice = AppNotification::where('user_id', $app->applicant_user_id)->latest('id')->first();
+    // By title, not the latest row: a failure may now also suspend the
+    // business permit, and that notice follows this one (5 October 2026).
+    $notice = AppNotification::where('user_id', $app->applicant_user_id)
+        ->where('title', 'Inspection did not pass')->latest('id')->first();
     expect($notice->body)->toContain('inspection did not pass')
         ->and($notice->body)->toContain('No fire extinguisher on the ground floor.');
     Queue::assertPushed(SendOwnerUpdateEmail::class, fn (SendOwnerUpdateEmail $job) => $job->title === $notice->title

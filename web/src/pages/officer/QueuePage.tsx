@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { InboxIcon } from '../../components/icons'
+import { InspectorNameField } from '../../components/InspectorNameField'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoModal, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { applications, assignments, inspections, payments } from '../../lib/resources'
+import { applications, assignments, payments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
 import {
   TONE_CLASSES,
@@ -661,17 +662,12 @@ interface QueueItem {
   /** `at` in milliseconds, for the browser-side sorts. Missing sorts as brand new. */
   atMs: number
   /**
-   * Who holds this row's work, which is not always the officer in charge.
+   * This office's current site visit, with the inspector's name typed on it.
    *
-   * A row at For Inspection is about a SITE VISIT, and the visit has its own
-   * holder: `inspections.inspector_user_id`, named when the visit is booked
-   * and movable without touching the review. The card showed the reviewer on
-   * both stages until 4 October 2026, which the client caught — *"it is
-   * possible that a new officer may be assigned in the For Inspection"*.
-   *
-   * Null where this office has no visit on the filing, including a permit
-   * whose visit is DUE but unbooked: there is no inspector yet, and the
-   * review officer is still the one holding the work.
+   * The officer in charge holds the visit as well as the review — they book
+   * it and decide it — and the inspector is a name kept "just for the record"
+   * (client, 5 October 2026). Null where this office has no visit on the
+   * filing, including a permit whose visit is due but unbooked.
    */
   inspection: Assignment['inspection']
   /**
@@ -925,8 +921,6 @@ async function loadEveryStage(
         // be the only stage whose `meta.total` had the type applied.
         type: '',
         oic: stage === 'payment' ? undefined : args.oic,
-        // Each stage asks about ITS own holder, not the merged `any`.
-        oicOn: stage === 'inspection' ? 'inspection' : undefined,
         page: 1,
         perPage: window,
       })
@@ -989,8 +983,6 @@ async function loadPage(args: {
   type: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
-  /** Whose holder `oic` means; see the call site. */
-  oicOn?: 'inspection' | 'any'
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -1024,7 +1016,6 @@ async function loadPage(args: {
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
     ...(args.oic ? { oic: args.oic } : {}),
-    ...(args.oic && args.oicOn ? { oic_on: args.oicOn } : {}),
     page: args.page,
     per_page: args.perPage,
   })
@@ -1095,11 +1086,10 @@ const TYPE_LABEL: Record<string, string> = {
 const CARD = 'flex h-full flex-col overflow-hidden rounded-lg bg-white shadow-card'
 
 /**
- * Is this row about a SITE VISIT rather than the paperwork review?
+ * The visit this row is about, when the office's permit is AT its visit.
  *
- * One definition, because three places ask it: the row that names the holder,
- * and the two handlers that claim and release. Two of them disagreeing would
- * mean a card showing the inspector over a button that took the review.
+ * A permit whose visit is due but unbooked has no visit yet, so no inspector
+ * line either.
  */
 function visitOf(item: QueueItem): QueueItem['inspection'] {
   return item.clearance?.status === 'for_inspection' ? item.inspection : null
@@ -1141,39 +1131,20 @@ function QueueRow({
   /*
    * ── Whose name goes under the row ───────────────────────────────────────
    *
-   * A row at For Inspection is about a SITE VISIT, and the visit is held by
-   * `inspections.inspector_user_id` — a different column from the review's
-   * officer in charge, and often a different person: the inspector is named
-   * when the visit is booked (`leastLoadedInspector`), an admin can move
-   * them, and whoever conducts the visit claims it. The card printed the
-   * reviewer on both stages until 4 October 2026, which the client caught:
-   * *"the officer assigned on the For Approval is the same as the For
-   * Inspection. It should not be like that."*
-   *
-   * Decided per ROW and not per tab, because All stages mixes them — and
-   * because it is the truer test anyway: the row is about a visit when this
-   * office's permit is AT its visit and a visit exists. A permit whose visit
-   * is due but unbooked has no inspector yet, so the reviewer is still the
-   * one holding the work and is still who the card should name.
+   * Always the officer in charge, on every stage. On 4 October 2026 a visit
+   * row named an inspector ACCOUNT here instead, with its own Assign/Unassign;
+   * on 5 October the client settled it: *"The officer in charge is still the
+   * one to approve or reject the inspection, but he/she must still be able to
+   * put the inspector name just for the record."* So the OIC line stays, and a
+   * visit row adds the typed inspector name beneath it.
    */
   const visit = visitOf(item)
-  const holder = visit
-    ? {
-        label: 'Inspector',
-        name: visit.inspector?.name ?? null,
-        vacant: 'Visit not yet taken by anyone',
-        canClaim: visit.can_claim,
-        canAct: visit.can_act,
-        mine: visit.inspector !== null && visit.can_act,
-      }
-    : {
-        label: 'Officer in charge',
-        name: item.officer?.name ?? null,
-        vacant: 'Not yet taken by anyone',
-        canClaim: item.canClaim,
-        canAct: item.canAct,
-        mine: item.mine,
-      }
+  const holder = {
+    name: item.officer?.name ?? null,
+    canClaim: item.canClaim,
+    canAct: item.canAct,
+    mine: item.mine,
+  }
 
   /*
    * ── Which status the badge shows, which depends on the seat ────────────
@@ -1387,12 +1358,12 @@ function QueueRow({
           <p className="text-sm text-ink-secondary">
             {holder.name ? (
               <>
-                <span className="text-ink-muted">{holder.label}: </span>
+                <span className="text-ink-muted">Officer in charge: </span>
                 <span className="font-semibold text-ink">{holder.name}</span>
                 {!holder.canAct && <span className="text-ink-muted"> · read-only for you</span>}
               </>
             ) : (
-              <span className="text-ink-muted">{holder.vacant}</span>
+              <span className="text-ink-muted">Not yet taken by anyone</span>
             )}
           </p>
           {holder.canClaim && onClaim && (
@@ -1427,6 +1398,22 @@ function QueueRow({
             >
               {claiming ? 'Releasing…' : 'Unassign from me'}
             </button>
+          )}
+          {/*
+            * The inspector's name, typed for the record (client, 5 October
+            * 2026). Full width so it wraps under the OIC line rather than
+            * squeezing beside the buttons.
+            */}
+          {visit && (
+            <div className="w-full">
+              <InspectorNameField
+                inspectionId={visit.id}
+                name={visit.inspector_name}
+                canEdit={visit.can_name_inspector}
+                label="Inspector"
+                context={item.name}
+              />
+            </div>
           )}
         </div>
       )}
@@ -1696,16 +1683,6 @@ export function QueuePage() {
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
-        /*
-         * Which holder 'oic' is asking about. For Inspection is about the
-         * SITE VISIT's inspector, a different column from the review's officer
-         * in charge; All stages mixes the two and asks about either, or "My
-         * assigned" would drop every visit the reader is out on.
-         */
-        oicOn: (tab === 'inspection' ? 'inspection' : tab === 'all' ? 'any' : undefined) as
-          | 'inspection'
-          | 'any'
-          | undefined,
         page,
         perPage,
       }
@@ -1827,20 +1804,9 @@ export function QueuePage() {
     setClaimingId(item.assignmentId)
     setClaimError(null)
     setClaimMessage(null)
-    /*
-     * Whichever this row is about. Taking the visit must not take the
-     * review — they are different columns held by different people, which is
-     * the whole of the client's 4 October report.
-     */
-    const visit = visitOf(item)
     try {
-      if (visit) {
-        await inspections.claim(visit.id)
-        setClaimMessage(`The site visit for ${item.name} is yours.`)
-      } else {
-        await assignments.claim(item.assignmentId)
-        setClaimMessage(`${item.name} is yours — you are now the officer in charge.`)
-      }
+      await assignments.claim(item.assignmentId)
+      setClaimMessage(`${item.name} is yours — you are now the officer in charge.`)
       restart()
       reload()
     } catch (err) {
@@ -1863,15 +1829,9 @@ export function QueuePage() {
     setClaimingId(item.assignmentId)
     setClaimError(null)
     setClaimMessage(null)
-    const visit = visitOf(item)
     try {
-      if (visit) {
-        await inspections.release(visit.id)
-        setClaimMessage(`The site visit for ${item.name} is back with the office.`)
-      } else {
-        await assignments.release(item.assignmentId)
-        setClaimMessage(`${item.name} is back with the office. Any officer here can take it.`)
-      }
+      await assignments.release(item.assignmentId)
+      setClaimMessage(`${item.name} is back with the office. Any officer here can take it.`)
       restart()
       reload()
     } catch (err) {
@@ -2335,7 +2295,7 @@ export function QueuePage() {
                     }`}
                     title={
                       impossible
-                        ? 'A new filing is issued when its last clearance is approved, so none waits here.'
+                        ? 'A new filing completes by itself when its last clearance is issued, so none waits here.'
                         : undefined
                     }
                   >
@@ -2513,9 +2473,16 @@ export function QueuePage() {
                          *
                          * An empty destructive-looking queue makes people go
                          * looking for the filings they think they have lost, so
-                         * the emptiness is explained rather than merely stated.
+                         * the emptiness was explained rather than merely stated.
+                         *
+                         * Cut to one line on 5 October 2026. The Business
+                         * Permit is released at payment and the BPLO closing
+                         * step is going — a filing completes by itself when its
+                         * last clearance is issued — so "issued as soon as the
+                         * last clearance is approved" described a step that no
+                         * longer exists (tester).
                          */
-                        'Nothing is waiting on your final approval. New applications no longer stop here — their Mayor’s Permit is issued as soon as the last clearance is approved. Renewals still arrive here for you to check the certificates they uploaded.'
+                        'Nothing is waiting on BPLO here.'
                       : // Both halves of what this tab now holds: filings this
                         // office has signed off and that have not finished.
                         'Nothing your office has approved is still in progress.'

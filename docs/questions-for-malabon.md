@@ -737,18 +737,14 @@ confirmed. The zoning checklist says this to a renewal rather than hiding it.
 ## A29. What does a business owe for the special permits the Revenue Code names, beyond the fee?
 
 **The question.** The Code says a business must *secure* a Liquor Permit
-(Art. T), a Mayor's Permit to sell tobacco (Art. U), a storage permit for
-flammables (Art. O), an inspection of engines and machinery (Art. N), a
-lumberyard Special Permit (Art. AC) and Health Certificates for food handlers
-(Art. 4D). It gives the fee for each. It does not say what the applicant hands
-in to get one. Three things we need to know:
+(Art. T), a Mayor's Permit to sell tobacco (Art. U) and Health Certificates
+for food handlers (Art. 4D). It gives the fee for each. It does not say what
+the applicant hands in to get one. Two things we need to know:
 
 1. For the **Liquor Permit**, does BPLO ask for documents (barangay clearance,
    police clearance, a sketch for the Sec. 3T.04 distance rule) or only the
    fee and the distance check?
-2. Who inspects under **Art. O and Art. N** — BFP or BPLO? And is the fee
-   assessed from the applicant's declared quantities, or from the inspection?
-3. Do **Health Certificates** gate the release of the Sanitary Permit, or are
+2. Do **Health Certificates** gate the release of the Sanitary Permit, or are
    they collected afterwards?
 
 **Why it matters.** Since 5 October 2026 the system raises an "Other
@@ -759,11 +755,40 @@ cannot act.
 
 **What we assumed meanwhile.** Each row asks only for what the Code itself
 makes the office need — the nearest school or church and its distance for
-liquor, the kinds and quantities stored for flammables, each machine's
-horsepower — and asks nothing for tobacco and lumberyards, where the Code
-wants only the fee. Health Certificates are asked for as documents, to the
+liquor — and asks nothing for tobacco, where the Code wants only the fee. Health Certificates are asked for as documents, to the
 City Health Office, and do not block anything yet. All of it is a table in
 `OtherRequirementRules`; an answer here changes a row.
+
+The storage permit for flammables (Art. O), the engine and machinery
+inspection (Art. N) and the lumberyard Special Permit (Art. AC) were rows for
+one day and were dropped on 5 October 2026 at the client's word — *"safe to
+not include this for less complexity"* — so they are no longer asked about
+here.
+
+## A30. Is "maintaining an office only" (Sec. 3A.03 item 64) the right Mayor's Permit fee for a trade the schedule does not name?
+
+**The question.** Item 64 reads *"All other businesses not specifically
+mentioned, maintaining an office only"*, priced by area from ₱450. The system
+bills it to every business whose line of business has no category of its own
+in Sec. 3A.03 — a sari-sari store, a grocery, and a restaurant whose kind
+(multiple-menu, franchised or non-franchised fast-food) the line of business
+does not say. Is that BPLO's practice? Or does item 64 apply only to a
+business that keeps an office and nothing else, with a different fee (or a
+question to the applicant) for a shop or restaurant that does trade there?
+
+**Why it matters.** A tester read the ₱450 line on a restaurant as a charge
+for "an office only" and reported it as wrong (5 October 2026). If item 64 is
+narrower than we read it, these businesses are charged a fee the Code does not
+give them; if we switch it off, they pay no Mayor's Permit fee at all, which is
+the larger error. Changing either way changes what a citizen is charged, so it
+is not ours to settle by reading.
+
+**What we assumed meanwhile.** Item 64 stays the fallback: it bills only when
+no category-specific Mayor's Permit line matched (`FeeCalculator::assess`),
+never beside one, so a carinderia, barber shop or movie house never sees it.
+About 97 of the 135 line-of-business codes reach it, deliberately
+(`TaxClassificationTest`). An answer here changes the rule's conditions, or
+switches it off and puts a question in the wizard instead.
 ---
 
 # B. For MISD — systems, data, hosting, accounts

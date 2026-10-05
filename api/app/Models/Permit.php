@@ -20,6 +20,11 @@ class Permit extends Model
         'issued_by_user_id',
         // Written by WorkflowService::revokePermit and nothing else.
         'revoked_at', 'revoked_reason',
+        // Why it is suspended — written by WorkflowService when it stops being
+        // Active, cleared when it returns (migration
+        // 2026_10_05_090000_a_suspended_permit_remembers_why).
+        'suspended_at', 'suspension_reason', 'suspended_for_permit_type_id',
+        'suspension_reminded_at',
         // The old register's key for a certificate it issued on paper; null on
         // every permit BizTrack mints (migration
         // 2026_09_27_000100_let_the_register_hold_what_the_old_system_issued).
@@ -38,6 +43,8 @@ class Permit extends Model
          * a raw string has no such method.
          */
         'revoked_at' => 'datetime',
+        'suspended_at' => 'datetime',
+        'suspension_reminded_at' => 'datetime',
         /*
          * The business details as they were when this certificate was signed.
          * See `App\Support\PermitFace` for the builder and the migration for
@@ -156,6 +163,40 @@ class Permit extends Model
     public function permitType(): BelongsTo
     {
         return $this->belongsTo(PermitType::class);
+    }
+
+    /**
+     * The permit whose refusal or failed visit suspended this one, or null —
+     * a sanctioned business or a rejected filing names no single permit.
+     */
+    public function suspendedFor(): BelongsTo
+    {
+        return $this->belongsTo(PermitType::class, 'suspended_for_permit_type_id');
+    }
+
+    /**
+     * The columns that say a suspension is over, spread into every update that
+     * returns a permit to Active — so no way back leaves a stale cause showing,
+     * or a reminder still counting.
+     *
+     * @return array<string, null>
+     */
+    public static function suspensionCleared(): array
+    {
+        return [
+            'suspended_at' => null,
+            'suspension_reason' => null,
+            'suspended_for_permit_type_id' => null,
+            'suspension_reminded_at' => null,
+        ];
+    }
+
+    /** Whole days since it was suspended, or null when the date is unknown. */
+    public function daysSuspended(): ?int
+    {
+        return $this->suspended_at === null
+            ? null
+            : (int) $this->suspended_at->copy()->startOfDay()->diffInDays(now()->startOfDay());
     }
 
     /**

@@ -415,17 +415,19 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     // Inspections (inspection.manage)
     Route::middleware('permission:inspection.manage')->group(function () {
         Route::get('inspections', [InspectionController::class, 'index']);
+        // Above `inspections/{inspection}`, or the binding would take the word.
+        Route::get('inspections/inspector-names', [InspectionController::class, 'inspectorNames']);
         Route::get('inspections/{inspection}', [InspectionController::class, 'show']);
         Route::post('inspections/{inspection}/conduct', [InspectionController::class, 'conduct']);
         Route::post('inspections/{inspection}/reschedule', [InspectionController::class, 'reschedule']);
         /*
-         * Who is going on the visit, said by the office rather than the admin.
-         * On `inspection.manage` with the rest because it is the same people
-         * and the same act: naming who turns up is part of running the visit,
-         * not a decision on the application.
+         * The inspector's name, typed for the record (client, 5 October 2026).
+         * It replaced the claim/release pair that made the inspector an
+         * account. On `inspection.manage` with the rest because it is the same
+         * people and the same act: saying who went is part of running the
+         * visit, not a decision on the application.
          */
-        Route::post('inspections/{inspection}/claim', [InspectionController::class, 'claim']);
-        Route::post('inspections/{inspection}/release', [InspectionController::class, 'release']);
+        Route::patch('inspections/{inspection}/inspector', [InspectionController::class, 'nameInspector']);
         /*
          * Re-inspection after a failure. On `inspection.manage` with the rest,
          * because it is the same act as scheduling the first visit and the same

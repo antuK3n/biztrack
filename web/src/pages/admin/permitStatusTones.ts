@@ -5,13 +5,15 @@ import type { ChipTone } from '../../components/ui/Proto'
  *
  * Superseded and Retired are grey: ordinary ends of a certificate, not
  * problems (DESIGN.md, Red Means Stop). Red is for the two an office decided
- * against the business — Revoked and Rejected; purple for Suspended.
+ * against the business — Revoked and Rejected. Suspended is grey too, a hold
+ * rather than a verdict (client, 5 October 2026); a suspended BUSINESS keeps
+ * its purple elsewhere, being an admin action against the account.
  */
 export const STATUS_TONES: Record<string, ChipTone> = {
   active: 'tint-green',
   expired: 'tint-yellow',
   superseded: 'tint-gray',
-  suspended: 'tint-purple',
+  suspended: 'tint-gray',
   revoked: 'tint-red',
   retired: 'tint-gray',
   rejected: 'tint-red',

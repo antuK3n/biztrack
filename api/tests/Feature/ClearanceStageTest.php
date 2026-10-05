@@ -120,6 +120,7 @@ function submittedClearanceApplication(string $name = 'Submitted Stage Store'): 
 {
     $app = draftClearanceApplication($name);
 
+    attachRequiredDocuments($app->id);
     test()->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
     return $app->fresh();
@@ -274,7 +275,7 @@ function driveClearanceToApproved(Application $app, string $code): void
     test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
 
     test()->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
     ])->assertCreated();
 
     $visit = Inspection::where('application_id', $app->id)
@@ -1078,7 +1079,7 @@ it('reports a permit as approved only once its inspection has passed', function 
 
     authAs('zoning@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/permits/ZONING/inspection", [
-        'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        'scheduled_at' => now()->toDateTimeString(), // today: no result before the booked day
     ])->assertCreated();
 
     $visit = Inspection::where('application_id', $app->id)->where('department_id', $cpdo->id)->firstOrFail();
@@ -1103,6 +1104,9 @@ it('refuses a stranger the clearance list', function () {
 
 it('refuses a stranger every clearance write', function () {
     $app = paidClearanceApplication();
+    // The filing carries its Documentary Requirements since 5 October 2026
+    // (the submit gate); the stranger must add none.
+    $documentsBefore = ApplicationDocument::where('application_id', $app->id)->count();
 
     authAs('juan@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertForbidden();
@@ -1121,7 +1125,7 @@ it('refuses a stranger every clearance write', function () {
         ->firstOrFail();
 
     expect($row->status)->toBe(ClearanceStatus::NotStarted)
-        ->and(ApplicationDocument::where('application_id', $app->id)->count())->toBe(0)
+        ->and(ApplicationDocument::where('application_id', $app->id)->count())->toBe($documentsBefore)
         ->and(ApplicationAssignment::where('application_id', $app->id)
             ->where('department_id', Department::where('code', 'CPDO')->value('id'))->exists())
         ->toBeFalse();
@@ -1207,6 +1211,7 @@ it('opens the stage for the service at payment, and not one step before', functi
     expect($service->isUnlocked($app))->toBeFalse()
         ->and($service->lockedReason($app))->toBeString();
 
+    attachRequiredDocuments($app->id);
     $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
     $submitted = $app->fresh();
