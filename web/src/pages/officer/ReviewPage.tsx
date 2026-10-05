@@ -3415,8 +3415,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     return parts.length > 0 ? parts.join(' and ') : null
   })()
 
+  /*
+   * A filing the owner cancelled is read-only too, as the API refuses its
+   * edits [Ken, 5 October 2026]. Kept apart from `decided`, which also picks
+   * the Approved/Rejected heading, and a cancelled filing is neither.
+   */
+  const withdrawn = app.status === 'cancelled'
   // A decided review is a record for good: there is nothing left to change.
-  const editing = mode === 'edit' && !decided && !heldByAnother
+  const editing = mode === 'edit' && !decided && !withdrawn && !heldByAnother
 
   /*
    * The applicant's own rule for each edited field, run as it is typed.
@@ -4883,7 +4889,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               <>This filing is with another officer, so it is read-only for you.</>
             )}
           </p>
-        ) : (
+        ) : withdrawn ? null : (
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2.5">
               <span

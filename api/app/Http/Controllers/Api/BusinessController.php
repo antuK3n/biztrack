@@ -254,12 +254,12 @@ class BusinessController extends Controller
         );
 
         /*
-         * "Decided" as Approve reads it, except a filing the owner cancelled:
-         * whether that one stays editable has not been decided, so it is
-         * left as it was.
+         * "Decided" as Approve reads it, a filing the owner cancelled
+         * included: that one is read-only for officers too [Ken, 5 October
+         * 2026].
          */
         abort_if(
-            $application->isDecided() && $application->status !== ApplicationStatus::Cancelled,
+            $application->isDecided(),
             422,
             "This filing has been decided and can't be edited."
         );

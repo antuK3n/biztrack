@@ -308,3 +308,16 @@ it('refuses an officer of the office who does not hold the case', function () {
         ->assertOk();
     expect($app->fresh()->business->name)->toBe('By The Holder');
 });
+
+it('refuses an edit once the owner has cancelled the filing', function () {
+    // Read-only like a decided filing [Ken, 5 October 2026].
+    $app = Application::findOrFail(scopedAssignmentFiling('Officer Edit Cancelled Co'));
+    Application::whereKey($app->id)->update(['status' => 'cancelled']);
+
+    authAs('sanitary@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'After Cancelling']))
+        ->assertStatus(422)
+        ->assertJsonPath('message', "This filing has been decided and can't be edited.");
+
+    expect($app->fresh()->business->name)->not->toBe('After Cancelling');
+});
