@@ -187,9 +187,9 @@ it('keeps each office to its own vocabulary and its own certificates', function 
         ->and($hc->fresh()->status)->toBe(PermitStatus::Active);
 });
 
-it('lets the super admin change any office’s permit with that office’s choices, revoking included', function () {
+it('lets the super admin change any office’s permit with that office’s choices, revoking only the Mayor’s Permit', function () {
     // Client, 5 October 2026: the super admin has BPLO's choices on a Mayor's
-    // Permit, Revoked included (reversing the 4 October instruction).
+    // Permit, Revoked included; Ken, same day: only a Mayor's Permit is revoked.
     ['business' => $mp, 'sanitary' => $hc] = statusPair();
 
     $admin = test()->withHeaders(authAs('admin@biztrack.local'))
@@ -199,7 +199,7 @@ it('lets the super admin change any office’s permit with that office’s choic
 
     $clearance = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/permits/{$hc->id}/status-options")->assertOk()->json('data');
-    expect(array_column($clearance['options'], 'label'))->toBe(['Rejected', 'Revoked']);
+    expect(array_column($clearance['options'], 'label'))->toBe(['Rejected']);
 
     setStatus('admin@biztrack.local', $mp, 'suspended', 'Violations found.')->assertOk();
     expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);

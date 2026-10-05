@@ -187,6 +187,7 @@ it('opens only the ticked permits after payment, in no queue but their own offic
 });
 
 it('closes the filing when the last ticked permit is issued', function () {
+    duringOfficeHours();
     $app = newFilingForBplo();
     bploApprovesForm($app, ['SANITARY']);
     $owner = authAs('owner@biztrack.local');

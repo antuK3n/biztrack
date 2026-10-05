@@ -591,13 +591,15 @@ class PermitController extends Controller
                 403,
                 'This permit is issued by another office.',
             );
-            // Its own office, then — which revokes only if it is BPLO's Mayor's Permit.
-            abort_unless(
-                $permit->permitType?->code === PermitType::OUTCOME_CODE,
-                403,
-                PermitStatus::Revoked->label().' is not a status this permit can be set to.',
-            );
         }
+        // Only a Mayor's Permit is ever revoked — by BPLO, its issuer, or by
+        // the super admin. Every other certificate can only be rejected
+        // [Ken, 5 October 2026: "you cant revoke the other permits only business"].
+        abort_unless(
+            $permit->permitType?->code === PermitType::OUTCOME_CODE,
+            403,
+            PermitStatus::Revoked->label().' is not a status this permit can be set to.',
+        );
 
         $this->workflow->revokePermit($permit, $data['reason']);
 
@@ -671,7 +673,7 @@ class PermitController extends Controller
         $canChange = $this->mayChangeStatus($request, $permit);
         $final = ! $this->workflow->statusCanMove($permit);
 
-        $options = collect($this->workflow->statusOptionsFor($permit, $this->isSuperAdmin($request)))
+        $options = collect($this->workflow->statusOptionsFor($permit))
             ->except($permit->status->value)
             ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
             ->values()

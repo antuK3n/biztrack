@@ -63,15 +63,13 @@ it('prices every permit the filing will be billed for, not just the one it holds
         ->json('data');
 
     /*
-     * The five clearances are in the estimate even though the draft does not
-     * carry them yet, because `attachRequiredPermitTypes` will attach them at
-     * submission and bill for them. Asserted on the SHAPE — at least one line
-     * naming an office other than BPLO's own permit — rather than on a peso
-     * figure the ordinance owns.
-     */
-    $labels = collect($preview['line_items'])->pluck('label')->implode(' | ');
+     * Since BPLO ticks the other permits at approval (Rupert, 5 October 2026),
+     * a draft is billed for the Business Permit alone until then, so that is
+     * what the estimate prices. Asserted on the SHAPE, not on a peso figure
+     * the ordinance owns.
+     */    $labels = collect($preview['line_items'])->pluck('label')->implode(' | ');
     expect($preview['total_amount'])->toBeGreaterThan(0)
-        ->and(strtolower($labels))->toContain('sanitary');
+        ->and(strtolower($labels))->toContain('business permit');
 });
 
 it('writes nothing — no assessment row, no change to the draft', function () {
