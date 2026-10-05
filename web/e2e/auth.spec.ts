@@ -42,6 +42,10 @@ test('the sign-in page is reachable and labelled', async ({ page }) => {
   // explicitly. Both fields must have a real accessible name.
   await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible()
   await expect(page.getByRole('textbox', { name: /password/i })).toBeVisible()
+
+  // Only an email signs an owner in, so the label names only that.
+  await expect(page.getByRole('textbox', { name: /email/i })).toHaveAccessibleName(/^Email\s*\(required\)$/)
+  await expect(page.getByText('Email or number')).toHaveCount(0)
 })
 
 test('a business owner signs in and lands in the app', async ({ page }) => {

@@ -468,13 +468,19 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             branch had both: the marker went on while there were two doors,
             and the third arrived after.
           */}
-          <FieldLabel required>{staff || admin ? 'Work email' : 'Email or number'}</FieldLabel>
+          {/*
+            The owner's label said "Email or number", but only an email signs
+            in (AuthController::login validates and looks up `email`), so a
+            mobile number met "Add an @ sign." (checklist, Business Owner
+            Login 9).
+          */}
+          <FieldLabel required>{staff || admin ? 'Work email' : 'Email'}</FieldLabel>
           <input
             type="email"
             name="email"
             autoComplete="email"
             inputMode="email"
-            placeholder={staff || admin ? 'Work email' : 'Email or number'}
+            placeholder={staff || admin ? 'Work email' : 'Email'}
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)
