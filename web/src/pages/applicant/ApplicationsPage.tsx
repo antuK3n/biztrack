@@ -1306,10 +1306,18 @@ function ApplicationRow({
    * The rows this accordion draws. A filing with no permit types still gets one
    * row — the Mayor's Permit is what every filing is ultimately for, and an
    * accordion that opens onto nothing reads as a broken control.
+   *
+   * The Mayor's Permit leads. The filing stores it last (it is attached at
+   * submit, after the clearances the applicant picked), so the API order put
+   * the permit the whole filing is for at the bottom of six. Ken, 6 October
+   * 2026: it goes first. The rest keep the order they came in, which is what
+   * a stable sort on "is it BUSINESS" gives; the copy leaves the payload alone.
    */
   const rows =
     app.permit_types.length > 0
-      ? app.permit_types
+      ? [...app.permit_types].sort(
+          (a, b) => Number(b.code === 'BUSINESS') - Number(a.code === 'BUSINESS'),
+        )
       : [{ code: '—', name: 'Business Permit', status: null, status_label: null }]
 
   /*
