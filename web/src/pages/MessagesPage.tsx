@@ -1316,6 +1316,7 @@ export function MessagesPage() {
         className="flex-1 px-5 pb-5 pt-4"
         scrollClassName="min-h-0"
         onSent={reload}
+        onRead={reload}
       />
     </section>
   ) : (

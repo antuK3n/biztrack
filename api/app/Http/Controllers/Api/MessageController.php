@@ -1770,7 +1770,15 @@ class MessageController extends Controller
 
         $stats = Message::query()
             ->whereIn('thread_id', $threadIds)
-            ->selectRaw('thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at')
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
+            // `unread_total` on the inbox's definition, so the office pills can
+            // carry a number for what each office wrote that is still unread
+            // [client, 5 October 2026]. Without it every pill read 0.
+            ->selectRaw(
+                'thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at, '
+                .'SUM(CASE WHEN messages.read_at IS NULL AND messages.sender_user_id <> ? THEN 1 ELSE 0 END) as unread_total',
+                [$user->id]
+            )
             ->groupBy('thread_id')
             ->get()
             ->keyBy('thread_id');

@@ -630,3 +630,65 @@ it('counts the enquiries it merges in, so the inbox total is never short', funct
         // equal, not identical: rows on later pages are counted too.
         ->and($body['meta']['total'])->toBeGreaterThanOrEqual($rows->count());
 });
+
+/*
+ * The office pills on an applicant's conversation carry a red number for what
+ * each office has written that the applicant has not read yet [client, 5
+ * October 2026]. The screen's first fetch names no office and asks again for
+ * the one its picker settled on, so a transcript that marked EVERY thread read
+ * on that first fetch emptied every pill before the applicant opened any.
+ */
+it('clears only the opened office’s unread count, not every office on the filing', function () {
+    $appId = requirementFilingForInbox();
+    $choId = assignOffice($appId, 'CHO');
+    $bfpId = assignOffice($appId, 'BFP');
+
+    foreach (['sanitary@biztrack.local' => $choId, 'fire@biztrack.local' => $bfpId] as $email => $dept) {
+        test()->withHeaders(authAs($email))->postJson("/api/v1/applications/{$appId}/messages", [
+            'body' => 'Please send your missing page.',
+            'department_id' => $dept,
+        ])->assertCreated();
+    }
+
+    $unread = function () use ($appId) {
+        $row = collect(
+            test()->withHeaders(authAs('owner@biztrack.local'))
+                ->getJson('/api/v1/message-threads')->assertOk()->json('data')
+        )->firstWhere('application_id', $appId);
+
+        return collect($row['offices'])->pluck('unread_count', 'code');
+    };
+
+    expect($unread()['CHO'])->toBe(1)->and($unread()['BFP'])->toBe(1);
+
+    // The unaddressed first fetch reads nothing.
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$appId}/messages")->assertOk();
+    expect($unread()['CHO'])->toBe(1)->and($unread()['BFP'])->toBe(1);
+
+    // Opening City Health reads City Health, and only City Health.
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$appId}/messages?department_id={$choId}")->assertOk();
+    expect($unread()['CHO'])->toBe(0)->and($unread()['BFP'])->toBe(1);
+});
+
+it('carries each office’s unread count on the transcript, for the office pills', function () {
+    $appId = requirementFilingForInbox();
+    // Taken, not just routed: an owner opens an office's conversation only
+    // once an officer there holds the filing, and City Health has not written.
+    $choId = takeFiling($appId, 'CHO');
+    $bfpId = takeFiling($appId, 'BFP');
+
+    test()->withHeaders(authAs('fire@biztrack.local'))->postJson("/api/v1/applications/{$appId}/messages", [
+        'body' => 'Please send your fire extinguisher receipt.',
+        'department_id' => $bfpId,
+    ])->assertCreated();
+
+    $offices = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$appId}/messages?department_id={$choId}")
+            ->assertOk()->json('meta.offices')
+    )->pluck('unread_count', 'code');
+
+    expect($offices['BFP'])->toBe(1)->and($offices['CHO'])->toBe(0);
+});

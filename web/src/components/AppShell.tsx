@@ -12,6 +12,7 @@ import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
+import { MESSAGES_READ_EVENT } from './MessagesPanel'
 import { AccountRestrictedModal } from './ui/Proto'
 import { BellIcon } from './icons'
 import { OfficeHoursNotice } from './OfficeHoursNotice'
@@ -306,9 +307,13 @@ function useUnread() {
 
     poll()
     const timer = setInterval(poll, UNREAD_POLL_MS)
+    // Opening a conversation reads it; ask again now rather than show a count
+    // for mail the reader is looking at until the next tick.
+    window.addEventListener(MESSAGES_READ_EVENT, poll)
     return () => {
       cancelled = true
       clearInterval(timer)
+      window.removeEventListener(MESSAGES_READ_EVENT, poll)
     }
   }, [setUnread])
 
