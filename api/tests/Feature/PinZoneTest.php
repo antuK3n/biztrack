@@ -21,7 +21,12 @@ use App\Support\Zoning\PinZone;
  *   Acacia, Industrial-2        14.667975, 120.969217
  *   Potrero, Residential-1      14.663695, 120.985820
  *   Muzon, Fishpond             14.675865, 120.947324
- *   Catmon, in no traced zone   14.669393, 120.959980
+ *   in no traced zone           14.667975, 120.969217 read against Catmon
+ *
+ * Every pin inside a barangay has a zone since the traced files were filled
+ * to the outline (6 October 2026); Catmon's old blank pin, 14.669393,
+ * 120.959980, is now C-2. A zone is unknown only for a pin off the chosen
+ * barangay's file, so the Acacia pin read against Catmon stands in for it.
  *
  * Self-contained (no helpers from other files): Pest's parallel runner loads
  * files separately.
@@ -99,9 +104,10 @@ it('reads the zone from the traced polygon under the pin, and nothing else', fun
         ->and(PinZone::at(14.667975, 120.969217, pzBarangay('Acacia'))['codes'])->toBe(['I-2'])
         ->and(PinZone::at(14.663695, 120.98582, pzBarangay('Potrero'))['codes'])->toBe(['R-1']);
 
-    // Unknown: ground the tracing left blank, no pin, no barangay, and a pin
-    // read against another barangay's file.
-    expect(PinZone::at(14.669393, 120.959980, pzBarangay('Catmon')))->toBeNull()
+    // Unknown: no pin, no barangay, and a pin read against another
+    // barangay's file. The filled files leave no blank ground inside one.
+    expect(PinZone::at(14.669393, 120.959980, pzBarangay('Catmon'))['codes'])->toBe(['C-2'])
+        ->and(PinZone::at(14.667975, 120.969217, pzBarangay('Catmon')))->toBeNull()
         ->and(PinZone::at(null, null, pzBarangay('Longos')))->toBeNull()
         ->and(PinZone::at(14.659117, 120.957631, null))->toBeNull()
         ->and(PinZone::at(14.667975, 120.969217, pzBarangay('Longos')))->toBeNull();
@@ -205,7 +211,7 @@ it('answers the wizard for the pin and line on screen', function () {
         ->assertJsonPath('data.refusal', 'Warehousing and storage isn\'t allowed in the Homes and apartments, some small shops'.PZ_SENTENCE);
     $this->getJson($query([14.659117, 120.957631], 'Longos', '47111'))->assertOk()
         ->assertJsonPath('data.refusal', null);
-    $this->getJson($query([14.669393, 120.959980], 'Catmon', '52101'))->assertOk()
+    $this->getJson($query([14.667975, 120.969217], 'Catmon', '52101'))->assertOk()
         ->assertJsonPath('data.zone', null)
         ->assertJsonPath('data.refusal', null);
 
@@ -222,7 +228,10 @@ it('refuses to submit a new filing whose pin is in a zone that clearly does not 
         ->assertJsonPath('errors.zoning.0', 'Warehousing and storage isn\'t allowed in the Homes and apartments, some small shops'.PZ_SENTENCE);
     expect(Application::findOrFail($refused)->status->value)->toBe('draft');
 
-    // Allowed, unclear, or with no pin at all: submitted as before.
+    // Allowed, or with no pin at all: submitted as before. (The unclear case,
+    // a pin on ground the tracing left blank, went when the files were filled
+    // to the outline; warehousing at Catmon's old blank pin is now in C-2,
+    // whose list has it.)
     foreach ([['Longos', [14.659117, 120.957631], '47111'], ['Catmon', [14.669393, 120.959980], '52101'], ['Longos', null, '52101']] as [$barangay, $pin, $code]) {
         $id = pzDraft($barangay, $pin, $code);
         attachRequiredDocuments($id);
@@ -304,7 +313,8 @@ it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is un
     expect($pinned['ZONING'])->toBe(['codes' => ['R-2-BASIC', 'R-2-MAX'], 'name' => 'R-2 Basic or R-2 Max'])
         ->and(collect($pinned)->except('ZONING')->filter()->all())->toBe([]);
 
-    expect($sheets(pzDraft('Catmon', [14.669393, 120.959980], '47111'))['ZONING'])->toBeNull();
+    // No pin, no zone: the line is left off rather than guessed.
+    expect($sheets(pzDraft('Longos', null, '47111'))['ZONING'])->toBeNull();
 });
 
 it('says in the note under the map what the zone at the pin says, and nothing about another zone', function () {
@@ -329,7 +339,7 @@ it('says in the note under the map what the zone at the pin says, and nothing ab
     // Passed but not on the pin's list (a sari-sari store in Industrial-2), or
     // a pin in no traced zone: the barangay's answer, with no zone marked as
     // the one that lists it.
-    foreach ([[[14.667975, 120.969217], 'Acacia'], [[14.669393, 120.959980], 'Catmon']] as [$pin, $barangay]) {
+    foreach ([[[14.667975, 120.969217], 'Acacia'], [[14.667975, 120.969217], 'Catmon']] as [$pin, $barangay]) {
         $answer = $note($pin, $barangay, '47111');
         expect($answer['verdict'])->not->toBe('refused')
             ->and(collect($answer['zones'])->filter(fn ($z) => $z['listed'] || $z['possible'])->all())->toBe([]);
