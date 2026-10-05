@@ -42,11 +42,20 @@ it('re-bills a returned new filing whose fee profile was corrected', function ()
     $preview = (float) $this->postJson("/api/v1/applications/{$app->id}/fee-preview", ['fee_profile' => $corrected])
         ->assertOk()->json('data.total_amount');
     $this->postJson("/api/v1/applications/{$app->id}/resubmit")->assertOk();
-    bploApprovesForm($app->id);
+    $reassessed = (float) $app->fresh()->feeAssessment->total_amount;
 
-    $billed = (float) $app->fresh()->feeAssessment->total_amount;
+    // Since 5 October 2026 a new filing is priced over the Business Permit
+    // alone until BPLO ticks its other permits at approval, and their fees
+    // join the bill then. So the preview is the Business Permit's share of
+    // the bill, not all of it.
+    bploApprovesForm($app->id);
+    $businessPermitShare = collect($app->fresh()->feeAssessment->line_items)
+        ->filter(fn (array $line) => $line['permit_codes'] === [PermitType::OUTCOME_CODE])
+        ->sum('amount');
+
     expect($preview)->not->toBe($before)
-        ->and($billed)->toBe($preview);
+        ->and($reassessed)->toBe($preview)
+        ->and((float) $businessPermitShare)->toBe($preview);
 });
 
 it('re-bills a returned renewal whose gross sales were corrected', function () {
