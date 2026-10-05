@@ -7257,7 +7257,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:2199",
+        "check": "api/app/Services/WorkflowService.php:2232",
         "test": "api/tests/Feature/ClearanceStageTest.php::refuses to start a permit on a submitted filing that has not been paid for",
         "marker": "! $app->status?->isPaid() && ! $app->defersPayment()"
       }
@@ -7418,7 +7418,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/app/Services/WorkflowService.php:2199",
+        "check": "api/app/Services/WorkflowService.php:2232",
         "test": "api/tests/Feature/ClearanceStageTest.php::refuses to start a permit on a submitted filing that has not been paid for",
         "marker": "! $app->status?->isPaid() && ! $app->defersPayment()"
       }
@@ -7849,7 +7849,7 @@
       "data_needed": [],
       "status": "implemented",
       "implemented": {
-        "check": "api/database/seeders/RbacSeeder.php:260",
+        "check": "api/database/seeders/RbacSeeder.php:264",
         "test": "api/tests/Feature/ZoningOfficerTest.php::lets the zoning officer clear its own assignment but not end the application",
         "marker": "'zoning_officer' => ["
       }

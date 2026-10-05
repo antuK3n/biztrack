@@ -1181,7 +1181,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-10.1-c12-13** · Art. IX §10.1 · p. 65 — **Filing fee before acceptance; verification fee before release** · _Implemented_
   The filing fee is paid before the application is accepted, and the verification fee before the approved clearance is released. BizTrack collects both before CPDO receives the sheet, which satisfies both.
   > Payment under schedule (a) shall be made prior to acceptance of application. 13) Payment under schedule (b) shall be made prior to the release of approved application.
-  checked at `api/app/Services/WorkflowService.php:2199`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
+  checked at `api/app/Services/WorkflowService.php:2232`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
 - **IX-10.1-c16** · Art. IX §10.1 · p. 65 — **Subdivision and condominium clearance fees** · _Not applicable_
   Subdivision and condominium clearances follow the PD 957 rates.
   Subdivision and condominium projects only; not a business filing.
@@ -1206,7 +1206,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-10.4** · Art. IX §10.4 · p. 66 — **Fees paid to the City Treasurer before the permit** · _Implemented_
   The fees are paid to the City Treasurer before the permit to develop, build, renovate or expand is issued.
   > The fees imposed in this Article shall be paid to the City Treasurer before the permit to develop land, construct, renovate and expand, in Malabon City is issued.
-  checked at `api/app/Services/WorkflowService.php:2199`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
+  checked at `api/app/Services/WorkflowService.php:2232`; proved by `ClearanceStageTest.php` — “refuses to start a permit on a submitted filing that has not been paid for”
 - **IX-10.5** · Art. IX §10.5 · p. 66 — **The Mayor administers the fees** · _Not applicable_
   The City Mayor administers the fee provisions.
   Assigns administrative responsibility within City Hall; nothing on a filing depends on it.
@@ -1277,7 +1277,7 @@ Citations give the page number printed on the ordinance. The verbatim text of ev
 - **IX-14-1a** · Art. IX §14 · p. 67 — **The Zoning Administrator acts on every locational clearance** · _Implemented_
   The Zoning Administrator (CPDO’s zoning officer) acts on every application for locational clearance. BizTrack routes the zoning sheet to CPDO and only CPDO approves or returns it.
   > Pursuant to the provisions of EO 72 implementing RA 7160 in relation to Sec. 5, Paragraph a and d, and Section 7 of Executive Order No. 648 dated 07 February 1981, the Zoning Administrator shall perform the following: 1. Enforcement a. Act on all applications for Locational Clearance
-  checked at `api/database/seeders/RbacSeeder.php:260`; proved by `ZoningOfficerTest.php` — “lets the zoning officer clear its own assignment but not end the application”
+  checked at `api/database/seeders/RbacSeeder.php:264`; proved by `ZoningOfficerTest.php` — “lets the zoning officer clear its own assignment but not end the application”
 - **IX-14-1b** · Art. IX §14 · p. 67 — **The Zoning Administrator issues Notices of Non-Conformance** · _Shown_
   The Zoning Administrator issues Notices of Non-Conformance.
   > Issuance of Notice of Non-Conformance to owners/ operators of uses, buildings or structures that are non-conforming to the applicable provisions of this Ordinance.
