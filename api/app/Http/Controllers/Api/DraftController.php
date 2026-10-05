@@ -115,7 +115,7 @@ class DraftController extends Controller
      * Scoped to the one owner: two businesses may each hold a draft called
      * "New Business Permit" and neither is a repeat of the other.
      */
-    private static function freeTitle(int $userId, ?string $wanted): ?string
+    private static function freeTitle(int $userId, ?string $wanted, ?int $exceptDraftId = null): ?string
     {
         $base = trim((string) $wanted);
 
@@ -125,9 +125,20 @@ class DraftController extends Controller
             return null;
         }
 
+        /*
+         * Counted against everything on the Drafts page, and only that
+         * (client, 5 October 2026: *"count only what you can see"*): this
+         * owner's other unfinished copies AND their draft applications. A
+         * number freed by a deletion is reused, from (2) up.
+         */
         $taken = WizardDraft::where('user_id', $userId)
+            ->when($exceptDraftId !== null, fn ($q) => $q->whereKeyNot($exceptDraftId))
             ->whereNotNull('title')
             ->pluck('title')
+            ->merge(\App\Models\Application::where('applicant_user_id', $userId)
+                ->where('status', \App\Enums\ApplicationStatus::Draft->value)
+                ->whereNotNull('title')
+                ->pluck('title'))
             ->map(fn ($t) => trim((string) $t))
             ->all();
 
@@ -207,7 +218,20 @@ class DraftController extends Controller
          * save silently wipe a title the applicant chose.
          */
         if (array_key_exists('title', $data)) {
-            $changes['title'] = $data['title'];
+            /*
+             * Through the same numbering as a new draft. The wizard saves its
+             * own default name back on every autosave, so this path is how two
+             * cards both came to read a bare "New Business Permit" (client, 5
+             * October 2026: "The numbering in the names is kinda off"). A name
+             * the draft already holds is left as it is.
+             */
+            // The draft's own numbered name answers to its base name: "New Business
+            // Permit" saved over "New Business Permit (4)" keeps the (4).
+            $wanted = trim((string) $data['title']);
+            $held = trim((string) $draft->title);
+            $changes['title'] = $wanted !== '' && ($held === $wanted || preg_match('/^'.preg_quote($wanted, '/').' \(\d+\)$/u', $held) === 1)
+                ? $draft->title
+                : self::freeTitle($draft->user_id, $data['title'], $draft->id);
         }
 
         if ($changes !== []) {
