@@ -82,11 +82,15 @@ final class OtherRequirementRules
             'article' => 'Revenue Code Art. T, Sec. 3T.01',
             'department' => 'BPLO',
             'conditions' => ['flags' => ['sells_liquor']],
-            'summary' => 'A Liquor Permit from BPLO before you sell or serve liquor. The filing fee is on your assessment. BPLO checks the distance to the nearest school, church, hospital or public building.',
-            'request_type' => 'message',
-            'description' => 'Because your business sells or serves liquor, this filing also applies for your Liquor Permit (Revenue Code Sec. 3T.01). '
-                .'Sec. 3T.04 does not allow one within 50 metres of a school, church, hospital or public building for a bar, pub or beer garden, or within 200 metres for a night club or cabaret. '
-                .'Reply with the nearest of these to your premises and roughly how far away it is, in metres. There is no document to attach.',
+            /*
+             * Told, not asked, since 5 October 2026. It asked the applicant for the
+             * nearest school, church or hospital and its distance (Sec. 3T.04);
+             * client: *"No need to ask for that in the other requirement. Remove
+             * it."* BPLO checks the distance itself when it issues the permit.
+             */
+            'summary' => 'A Liquor Permit from BPLO before you sell or serve liquor. Its fee is on your Tax Order of Payment.',
+            'request_type' => null,
+            'description' => null,
         ],
         [
             'key' => 'tobacco_permit',
