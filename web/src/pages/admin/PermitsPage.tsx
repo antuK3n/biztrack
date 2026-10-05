@@ -168,7 +168,7 @@ const STATUS_TONES: Record<string, ChipTone> = {
   active: 'tint-green',
   expired: 'tint-yellow',
   superseded: 'tint-gray',
-  suspended: 'tint-purple',
+  suspended: 'tint-gray',
   revoked: 'tint-red',
 }
 
