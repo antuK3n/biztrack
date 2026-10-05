@@ -794,9 +794,9 @@ test.describe('the permit register table', () => {
     await expect.poll(() => asked.at(-1)).toContain('status=revoked')
   })
 
-  test('the super admin is offered no Revoke', async ({ page }) => {
-    // Client, 4 October 2026: "paki tanggal ang revoke sa super admin".
-    await expect(page.getByRole('button', { name: /^Revoke / })).toHaveCount(0)
+  test('the super admin is offered Revoke on permits in force', async ({ page }) => {
+    // Ken, 5 October 2026: the super admin revokes any permit.
+    await expect(page.getByRole('button', { name: /^Revoke / }).first()).toBeVisible()
   })
 
   test('every View button names the permit it opens', async ({ page }) => {

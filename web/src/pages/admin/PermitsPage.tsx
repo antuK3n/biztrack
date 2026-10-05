@@ -156,12 +156,16 @@ const RETIRED_FILTERS: { value: RetiredFilter; label: string }[] = [
 /**
  * Revocable by THIS reader: in force, and issued by the reader's own office —
  * BPLO the Mayor's Permit, CHO its Sanitary Permits, and so on [client, 4
- * October 2026]. The server applies the same rule (PermitController::revoke).
+ * October 2026] — or any permit for the super admin [Ken, 5 October 2026].
+ * The server applies the same rule (PermitController::revoke).
  */
-function revocable(permit: PermitRegisterRow, ownOffice: OfficeCode | null): boolean {
+function revocable(
+  permit: PermitRegisterRow,
+  ownOffice: OfficeCode | null,
+  isSuperAdmin: boolean,
+): boolean {
   return (
-    ownOffice !== null &&
-    permit.permit_type?.code === ownOffice &&
+    (isSuperAdmin || (ownOffice !== null && permit.permit_type?.code === ownOffice)) &&
     (permit.status === 'active' || permit.status === 'suspended')
   )
 }
@@ -1140,7 +1144,7 @@ export function PermitsPage() {
                         destructive act on this row (DESIGN.md, Red Means
                         Stop); the dialog behind it is the confirmation.
                       */}
-                      {canRevoke && revocable(permit, ownOffice) && (
+                      {canRevoke && revocable(permit, ownOffice, isSuperAdmin) && (
                         <button
                           type="button"
                           onClick={() => setRevoking(permit)}

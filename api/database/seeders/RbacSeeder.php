@@ -117,8 +117,9 @@ class RbacSeeder extends Seeder
                     /*
                      * Taking a permit away — the Mayor's Permit only, the one
                      * BPLO issues (PermitController::revoke). Every office now
-                     * revokes its own certificate the same way; the super
-                     * admin revokes none [client, 4 October 2026].
+                     * revokes its own certificate the same way [client, 4
+                     * October 2026]; the super admin revokes any of them
+                     * [Ken, 5 October 2026].
                      */
                     'permit.revoke',
                 ],
@@ -215,6 +216,9 @@ class RbacSeeder extends Seeder
                     'application.view_all', 'application.view_any_office',
                     'application.reject',
                     'fee.adjust', 'permit.view_all', 'permit.issue',
+                    // Any permit, where each office revokes only its own
+                    // (PermitController::revoke) [Ken, 5 October 2026].
+                    'permit.revoke',
                     'compliance.view',
                     /*
                      * The super admin holds `analytics.processing_time` AND, since

@@ -6,7 +6,6 @@ use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
-use App\Models\ApplicationDocument;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
@@ -509,9 +508,12 @@ class PermitController extends Controller
             'reason.required' => 'Say why this permit is being revoked. The owner is told, and it is audited.',
         ]);
 
+        // The issuing office revokes its own certificate; the super admin
+        // revokes any (Ken, 5 October 2026).
+        $user = $request->user();
         $issuer = $permit->permitType?->issuing_department_id;
         abort_unless(
-            $issuer !== null && (int) $issuer === (int) $request->user()->department_id,
+            $user->hasRole('admin') || ($issuer !== null && (int) $issuer === (int) $user->department_id),
             403,
             'Only the office that issued this permit can revoke it.',
         );
