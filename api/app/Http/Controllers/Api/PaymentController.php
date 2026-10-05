@@ -551,7 +551,7 @@ class PaymentController extends Controller
         ]);
     }
 
-    /** dompdf receipt. The watermark is gone; the header and footer carry the simulated-payment disclosure. */
+    /** dompdf receipt (resources/views/pdf/receipt.blade.php). */
     public function receipt(Request $request, Payment $payment): Response
     {
         $payment->load(['application.business', 'application.feeAssessment']);
