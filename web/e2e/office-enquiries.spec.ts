@@ -238,7 +238,7 @@ test.describe('the administrator’s own shelf', () => {
      */
     await page.goto('/staff/messages')
 
-    const shelf = page.getByRole('button', { name: /^System Administrator/ })
+    const shelf = page.getByRole('button', { name: /^Super Administrator/ })
     await expect(shelf).toBeVisible({ timeout: 20000 })
 
     for (const other of ['General enquiries', 'Permits']) {
@@ -318,7 +318,7 @@ test.describe('the shelves keep to themselves', () => {
     await expect(rows.first()).toBeVisible({ timeout: 20000 })
     await rows.first().click()
 
-    await page.getByRole('button', { name: /^System Administrator/ }).click()
+    await page.getByRole('button', { name: /^Super Administrator/ }).click()
     await expect(rows.first()).toBeVisible({ timeout: 20000 })
 
     await expect(rows).toHaveCount(1)
@@ -379,7 +379,7 @@ test.describe('the shelf badges', () => {
     const rows = page.getByRole('main').getByRole('listitem')
     await expect(rows.first()).toBeVisible({ timeout: 20000 })
 
-    const other = [/^General enquiries/, /^System Administrator/]
+    const other = [/^General enquiries/, /^Super Administrator/]
     const carrying = []
     for (const label of other) {
       if ((await badgeOn(page, label)) !== null) carrying.push(label)

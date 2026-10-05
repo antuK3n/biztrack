@@ -17,6 +17,7 @@ use App\Services\WorkflowService;
 use App\Support\Audit;
 use App\Support\Caseload;
 use App\Support\Ra11032;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -433,7 +434,7 @@ class AssignmentController extends Controller
      * on one beside it — the same join the `clearance_status` filter makes,
      * and for the same reason.
      *
-     * @param  \Illuminate\Database\Eloquent\Builder<ApplicationAssignment>  $query
+     * @param  Builder<ApplicationAssignment>  $query
      */
     private function hideUnsubmittedClearances($query): void
     {
@@ -1044,7 +1045,7 @@ class AssignmentController extends Controller
         if ($taken === 0) {
             $holder = $assignment->fresh()->load('officer')->officer;
             abort(409, $holder
-                ? "This filing is already with {$holder->name}. Only the system administrator can move it."
+                ? "This filing is already with {$holder->name}. Only the Super Administrator can move it."
                 : 'This filing is already with another officer.');
         }
 
@@ -1081,7 +1082,7 @@ class AssignmentController extends Controller
         abort_unless(
             $assignment->officer_user_id === null || $assignment->officer_user_id === $user->id,
             403,
-            'This filing is with another officer. Only the system administrator can move it.'
+            'This filing is with another officer. Only the Super Administrator can move it.'
         );
 
         if ($assignment->officer_user_id !== null) {
@@ -1152,7 +1153,7 @@ class AssignmentController extends Controller
             $assignment->officer_user_id === null
                 || $assignment->officer_user_id === $request->user()->id,
             403,
-            'This filing is with another officer. Only the system administrator can move it.'
+            'This filing is with another officer. Only the Super Administrator can move it.'
         );
     }
 

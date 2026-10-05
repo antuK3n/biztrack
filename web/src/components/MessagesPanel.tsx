@@ -559,7 +559,7 @@ export function MessageThreadView({
          */
         administers
         ? (counterpartyName ?? 'this officer')
-        : 'the System Administrator'
+        : 'the Super Administrator'
       : viewerIsOfficer
         ? 'the applicant'
         : (active?.name ?? null)

@@ -4883,7 +4883,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             {holderName ? (
               <>
                 Officer in charge: <span className="font-bold">{holderName}</span>. Read-only for
-                you — the system administrator can reassign it.
+                you — the Super Administrator can reassign it.
               </>
             ) : (
               <>This filing is with another officer, so it is read-only for you.</>

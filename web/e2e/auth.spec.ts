@@ -125,7 +125,7 @@ test('the super admin signs in at their own door and nowhere else', async ({ pag
    * beside them and shared their `biztrack.token.staff` key.
    */
   await page.goto('/admin/login')
-  await expect(page.getByRole('heading', { name: /administrator sign-in/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /super administrator sign-in/i })).toBeVisible()
 
   const statuses = await page.evaluate(
     async ([adminEmail, officerEmail, password]) => {

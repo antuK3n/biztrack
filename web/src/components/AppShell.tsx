@@ -27,7 +27,7 @@ const ROLE_LABELS: Record<string, string> = {
   obo_staff: 'Building official staff',
   cenro_officer: 'Environment officer',
   market_admin: 'Market administrator',
-  admin: 'Administrator',
+  admin: 'Super Administrator',
 }
 
 export function roleLabel(user: User): string {

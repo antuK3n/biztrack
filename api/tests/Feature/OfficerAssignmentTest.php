@@ -165,6 +165,23 @@ it('offers every office a role, not just the four that were hard-coded', functio
         ->and($roles->firstWhere('name', 'cenro_officer')['wants_department'])->toBeTrue();
 });
 
+it('calls the admin role "Super Administrator", on a fresh register and an existing one', function () {
+    // Checklist, Manage Officer-in-Charge 3: no plain "Administrator" on screen.
+    $label = fn () => collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/roles')->assertOk()->json('data'))
+        ->firstWhere('name', 'admin')['label'];
+
+    expect($label())->toBe('Super Administrator');
+
+    // A register seeded before the rename still holds the old label.
+    Role::where('name', 'admin')->update(['display_name' => 'Administrator']);
+    $migration = require database_path('migrations/2026_10_05_120100_the_super_admin_role_reads_super_administrator.php');
+    $migration->up();
+
+    expect($label())->toBe('Super Administrator')
+        ->and(Role::where('name', 'admin')->count())->toBe(1);
+});
+
 it('refuses an officer with no office, and a super admin with one', function () {
     $admin = authAs('admin@biztrack.local');
 

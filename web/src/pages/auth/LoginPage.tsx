@@ -350,10 +350,10 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
 
   return (
     <AuthLayout
-      title={admin ? 'Administrator sign-in' : staff ? 'LGU staff sign-in' : 'Sign in to BizTrack'}
+      title={admin ? 'Super Administrator sign-in' : staff ? 'LGU staff sign-in' : 'Sign in to BizTrack'}
       lede={
         admin
-          ? 'For the BizTrack system administrator.'
+          ? 'For the BizTrack Super Administrator.'
           : staff
             ? 'For City of Malabon permit officers.'
             : undefined

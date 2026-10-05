@@ -123,7 +123,7 @@ class AnalyticsController extends Controller
         abort_unless(
             AnalyticsOffice::canSwitch($request->user()),
             403,
-            'These figures cover every office, so only BPLO and the administrator can read them.',
+            'These figures cover every office, so only BPLO and the Super Administrator can read them.',
         );
     }
 

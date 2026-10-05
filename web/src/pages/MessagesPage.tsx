@@ -120,19 +120,19 @@ const SHELVES: {
 }[] = [
   { value: 'permits', label: 'Permits', short: 'Permits', kind: 'application' },
   { value: 'enquiries', label: 'General enquiries', short: 'Enquiries', kind: 'general' },
-  { value: 'admin', label: 'System Administrator', short: 'Admin', kind: 'admin' },
+  { value: 'admin', label: 'Super Administrator', short: 'Super Admin', kind: 'admin' },
 ]
 
 /**
  * What to call what is on a shelf, in the plural the count needs.
  *
  * Written out rather than assembled from the label: "1 general enquiries" and
- * "1 System Administrators" are what a template produces, and the third shelf
+ * "1 Super Administrators" are what a template produces, and the third shelf
  * holds exactly one row for every officer alive, so its singular is the only
  * form anybody will ever read.
  */
 function shelfNoun(shelf: Shelf, count: number): string {
-  if (shelf === 'admin') return count === 1 ? 'conversation with the System Administrator' : 'conversations with the System Administrator'
+  if (shelf === 'admin') return count === 1 ? 'conversation with the Super Administrator' : 'conversations with the Super Administrator'
   if (shelf === 'enquiries') return count === 1 ? 'general enquiry' : 'general enquiries'
 
   return count === 1 ? 'permit' : 'permits'
@@ -930,12 +930,12 @@ export function MessagesPage() {
                   The FULL name to anybody listening, and the short one on the
                   glass. `title` alone does not do this: an element with text
                   content takes its accessible name from the text, so a screen
-                  reader would have announced "Admin" - which is the
+                  reader would have announced "Super Admin" - which is the
                   abbreviation, and the abbreviation only fits because the
                   sighted reader has two other segments beside it for context.
 
                   The count goes in it too. It is a superscript badge visually,
-                  and "System Administrator 2" announced as two separate things
+                  and "Super Administrator 2" announced as two separate things
                   is a number with nothing attached to it.
                 */
                 aria-label={waiting > 0 ? `${sh.label}, ${waiting} waiting` : sh.label}
@@ -947,7 +947,7 @@ export function MessagesPage() {
               >
                 {/*
                   The short name on the control and the full one in `title` and
-                  in the sentence below it. "System Administrator" across a
+                  in the sentence below it. "Super Administrator" across a
                   third of a 26rem column is three lines; the segment has to
                   stay one.
                 */}

@@ -10,8 +10,8 @@ use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
-use App\Support\ApplicationVisibility;
 use App\Support\AccountPrefill;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
@@ -591,7 +591,7 @@ class OfficeFormController extends Controller
                     fn ($review) => $review->officer_user_id !== null && $review->officer_user_id !== $user->id,
                 ),
                 403,
-                'This filing is with another officer. Only the system administrator can move it.'
+                'This filing is with another officer. Only the Super Administrator can move it.'
             );
             abort_if(
                 $application->permitTypes()

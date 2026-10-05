@@ -26,7 +26,7 @@ const DEPARTMENTS = [
 const ROLES = [
   {
     name: 'admin',
-    label: 'Administrator',
+    label: 'Super Administrator',
     description: 'Oversees the register',
     wants_department: false,
     // The seat is taken — there is exactly one super admin.

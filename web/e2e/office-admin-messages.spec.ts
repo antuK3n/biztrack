@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * The office's line to the System Administrator.
+ * The office's line to the Super Administrator.
  *
  * ── What this is cover for ─────────────────────────────────────────────────
  *
@@ -30,9 +30,9 @@ test.describe('an office account', () => {
      * nothing would tell an officer with a misspelt surname that the system
      * simply has no answer for them.
      */
-    const ask = page.getByRole('link', { name: /Message the System Administrator/ })
+    const ask = page.getByRole('link', { name: /Message the Super Administrator/ })
     await expect(ask).toBeVisible()
-    await expect(page.getByText(/maintained by the System Administrator/i)).toBeVisible()
+    await expect(page.getByText(/maintained by the Super Administrator/i)).toBeVisible()
 
     await ask.click()
     await expect(page).toHaveURL(/\/staff\/messages/)
@@ -88,7 +88,7 @@ test.describe('an office account', () => {
      * the row off the default shelf cannot silence it - asserted separately
      * in office-enquiries.spec.ts.
      */
-    const shelf = page.getByRole('button', { name: /^System Administrator/ })
+    const shelf = page.getByRole('button', { name: /^Super Administrator/ })
     await expect(shelf).toBeVisible({ timeout: 20000 })
 
     // Not on the caseload shelf: that is what having its own means.
@@ -98,13 +98,13 @@ test.describe('an office account', () => {
 
     await shelf.click()
 
-    await expect(rows.first()).toContainText('System Administrator')
+    await expect(rows.first()).toContainText('Super Administrator')
     await expect(rows.first()).toContainText('Your account and details')
   })
 
   test('can write to the administrator, and sees it appear', async ({ page }) => {
     await page.goto('/staff/messages')
-    await page.getByRole('button', { name: /^System Administrator/ }).first().click()
+    await page.getByRole('button', { name: /^Super Administrator/ }).first().click()
     await page
       .getByRole('main')
       .getByRole('listitem')
@@ -126,7 +126,7 @@ test.describe('a business owner', () => {
   test('keeps Settings, because their details are their own', async ({ page }) => {
     await page.goto('/profile')
     await expect(page.getByRole('link', { name: 'Edit your details' })).toBeVisible()
-    await expect(page.getByRole('link', { name: /Message the System Administrator/ })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /Message the Super Administrator/ })).toHaveCount(0)
   })
 
   test('has no administrator row — they write to BPLO instead', async ({ page }) => {
@@ -136,7 +136,7 @@ test.describe('a business owner', () => {
   })
 })
 
-test.describe('the System Administrator', () => {
+test.describe('the Super Administrator', () => {
   test.use({ storageState: 'e2e/.auth/default/admin.json' })
 
   test('has an Office Messages screen the rail actually reaches', async ({ page }) => {

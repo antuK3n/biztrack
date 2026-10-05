@@ -5,13 +5,14 @@ use App\Enums\ApplicationType;
 use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
-use App\Models\Department;
 use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Business;
+use App\Models\Department;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\SanitaryPrefill;
 use App\Support\SheetRequirements;
 
 /*
@@ -365,7 +366,7 @@ it('refuses the correction to an officer of the office who does not hold the cas
             'form_data' => ['building_permit_no' => 'BP-001-A'],
         ])
         ->assertForbidden()
-        ->assertJsonPath('message', 'This filing is with another officer. Only the system administrator can move it.');
+        ->assertJsonPath('message', 'This filing is with another officer. Only the Super Administrator can move it.');
 
     $this->withHeaders($obo)
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
@@ -666,10 +667,10 @@ it('suggests the sanitary classification from the line of business, as an offer'
 });
 
 it('sorts the sanitary classes the way a health officer would', function () {
-    expect(App\Support\SanitaryPrefill::classify(['manufacturer', 'restaurant']))->toBe('Food Establishment')
-        ->and(App\Support\SanitaryPrefill::classify(['manufacturer']))->toBe('Industrial')
-        ->and(App\Support\SanitaryPrefill::classify(['retailer', 'barber_shop']))->toBe('Personal / Public Service')
-        ->and(App\Support\SanitaryPrefill::classify(['retailer']))->toBe('Non-Food Establishment');
+    expect(SanitaryPrefill::classify(['manufacturer', 'restaurant']))->toBe('Food Establishment')
+        ->and(SanitaryPrefill::classify(['manufacturer']))->toBe('Industrial')
+        ->and(SanitaryPrefill::classify(['retailer', 'barber_shop']))->toBe('Personal / Public Service')
+        ->and(SanitaryPrefill::classify(['retailer']))->toBe('Non-Food Establishment');
 });
 
 it('refuses a future pest-control date and a negative toilet count on the Sanitary sheet', function () {

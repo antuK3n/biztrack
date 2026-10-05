@@ -116,7 +116,7 @@ it('pins the administrator row to the top of an officer’s inbox', function () 
         ->json('data');
 
     expect($rows[0]['kind'])->toBe('admin')
-        ->and($rows[0]['counterparty']['name'])->toBe('System Administrator');
+        ->and($rows[0]['counterparty']['name'])->toBe('Super Administrator');
 });
 
 it('shows the row before anything has been said in it', function () {

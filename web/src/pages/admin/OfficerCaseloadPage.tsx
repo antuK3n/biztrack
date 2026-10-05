@@ -679,7 +679,7 @@ export function OfficerCaseloadPage() {
                 description={
                   narrowed && allHeld.length > 0
                     ? `${officer} is holding ${allHeld.length} filing${allHeld.length === 1 ? '' : 's'}, and none of them matches the search or filters above. Clear them to see the whole caseload.`
-                    : "There is nothing to move. Work reaches an officer when they claim it from their office's queue, or when an administrator hands it to them below."
+                    : "There is nothing to move. Work reaches an officer when they claim it from their office's queue, or when the Super Administrator hands it to them below."
                 }
               />
             ) : (

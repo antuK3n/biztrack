@@ -458,7 +458,7 @@ export function ProfilePage() {
               <MailIcon size={24} className="shrink-0 text-white" />
               <span className="min-w-0 text-left">
                 <span className="block text-base font-bold text-white">
-                  Message the System Administrator
+                  Message the Super Administrator
                 </span>
                 <span className="block text-sm text-white/80">
                   To correct your name, mobile number, office or role
@@ -468,7 +468,7 @@ export function ProfilePage() {
             <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />
           </Link>
           <p className="mt-2 text-xs text-ink-muted">
-            Office accounts are maintained by the System Administrator, so these details are not
+            Office accounts are maintained by the Super Administrator, so these details are not
             edited here. Your conversation with them is pinned to the top of Messages.
           </p>
         </>

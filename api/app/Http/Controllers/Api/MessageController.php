@@ -2148,7 +2148,7 @@ class MessageController extends Controller
         $this->notify->push(
             $officer,
             'message',
-            'The System Administrator replied',
+            'The Super Administrator replied',
             $preview,
             '/messages',
         );
@@ -2308,7 +2308,7 @@ class MessageController extends Controller
             'business_name' => null,
             'status' => null,
             'counterparty' => [
-                'name' => 'System Administrator',
+                'name' => 'Super Administrator',
                 'subtitle' => 'Your account and details',
                 'is_officer' => true,
             ],

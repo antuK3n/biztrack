@@ -210,7 +210,7 @@ class RbacSeeder extends Seeder
              * policy decision the client has not made.
              */
             'admin' => [
-                'display_name' => 'Administrator',
+                'display_name' => 'Super Administrator',
                 'description' => 'Super admin: oversight of the register — accounts, reference data, audit, and processing-time monitoring.',
                 'permissions' => [
                     'application.view_all', 'application.view_any_office',
