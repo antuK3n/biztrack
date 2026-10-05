@@ -3185,37 +3185,13 @@ class WorkflowService
             return;
         }
 
-        $app->load('permitTypes');
-
         /*
-         * A failed inspection counts as a refusal too, since 5 October 2026
-         * (see recordInspection): the client reads the visit's Reject as the
-         * permit being rejected. Per office, the LATEST CONDUCTED visit — a
-         * re-inspection that is booked but not yet done answers nothing, so
-         * it must not let another office's approval lift the suspension.
-         * Settled when that office's clearance is Approved, which a passing
-         * re-inspection does.
+         * Still refused: an office's refusal, a failed visit that stands, or
+         * an ISSUED certificate its office set to Rejected [client and Ken,
+         * 5 October 2026] — see refusalsHolding(), which BPLO's Change status
+         * lock asks too, so the two cannot disagree.
          */
-        $failedOffices = Inspection::where('application_id', $app->id)
-            ->where('status', InspectionStatus::Completed->value)
-            ->orderBy('id')
-            ->get()
-            ->groupBy('department_id')
-            ->map(fn ($visits) => $visits->last())
-            ->filter(fn (Inspection $visit) => $visit->failed())
-            ->keys();
-
-        $stillRefused = $app->permitTypes->contains(
-            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected
-                || ($pt->pivot->status !== ClearanceStatus::Approved
-                    && $failedOffices->contains($pt->issuing_department_id)),
-        );
-
-        /*
-         * "Still refused" now also counts an ISSUED certificate its office set
-         * to Rejected [client, 5 October 2026] — see refusalsHolding().
-         */
-        if ($stillRefused || $this->refusalsHolding($app) !== []) {
+        if ($this->refusalsHolding($app) !== []) {
             return;
         }
 
@@ -3780,10 +3756,11 @@ class WorkflowService
     /**
      * What on this filing (or this business) is refused right now.
      *
-     * Two kinds, and both hold the Mayor's Permit suspended: a clearance an
-     * office refused while the filing was in review (the pivot), and an issued
-     * clearance its office has since set to Rejected. Returned as sentences
-     * the screen can show as they are.
+     * Three kinds, and all hold the Mayor's Permit suspended: a clearance an
+     * office refused while the filing was in review (the pivot), a failed
+     * visit that still stands, and an issued clearance its office has since
+     * set to Rejected. Returned as sentences the screen can show as they are;
+     * a failed visit reads as its permit rejected, as the Track row says it.
      *
      * @return list<string>
      */
@@ -3791,8 +3768,29 @@ class WorkflowService
     {
         $app->load('permitTypes');
 
+        /*
+         * A failed inspection counts as a refusal, since 5 October 2026 (see
+         * recordInspection): the client reads the visit's Reject as the
+         * permit being rejected. Per office, the LATEST CONDUCTED visit — a
+         * re-inspection that is booked but not yet done answers nothing, so
+         * it must not let another office's approval lift the suspension.
+         * Settled when that office's clearance is Approved, which a passing
+         * re-inspection does. In the lock too (Ken, 5 October 2026), so BPLO
+         * cannot set the Business Permit back to Active around it.
+         */
+        $failedOffices = Inspection::where('application_id', $app->id)
+            ->where('status', InspectionStatus::Completed->value)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('department_id')
+            ->map(fn ($visits) => $visits->last())
+            ->filter(fn (Inspection $visit) => $visit->failed())
+            ->keys();
+
         $refused = $app->permitTypes
-            ->filter(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected)
+            ->filter(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected
+                || ($pt->pivot->status !== ClearanceStatus::Approved
+                    && $failedOffices->contains($pt->issuing_department_id)))
             ->map(fn (PermitType $pt) => "{$pt->name} — rejected by its office on {$app->tracking_id}")
             ->values()
             ->all();

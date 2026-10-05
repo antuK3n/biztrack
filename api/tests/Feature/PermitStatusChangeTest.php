@@ -1,11 +1,15 @@
 <?php
 
+use App\Enums\ClearanceStatus;
+use App\Enums\InspectionResult;
+use App\Enums\InspectionStatus;
 use App\Enums\PermitStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
 use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\DocumentType;
+use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -249,6 +253,38 @@ it('dates and explains every suspension Change status makes, and clears it on th
         ->and($mp->suspended_at)->toBeNull()
         ->and($mp->suspension_reason)->toBeNull()
         ->and($mp->suspended_for_permit_type_id)->toBeNull();
+});
+
+it('locks the Mayor’s Permit for BPLO while a failed visit stands on its filing', function () {
+    /*
+     * Ken, 5 October 2026: a failed inspection holds the Business Permit as
+     * an office's refusal does (Rupert's rule, recordInspection), so BPLO
+     * cannot set it back to Active until that office passes a re-inspection.
+     */
+    ['business' => $mp, 'sanitary' => $hc] = statusPair();
+    $mp->update(['status' => PermitStatus::Suspended, 'suspended_cause' => 'refusal']);
+    Inspection::create([
+        'application_id' => $mp->application_id,
+        'department_id' => $hc->permitType->issuing_department_id,
+        'status' => InspectionStatus::Completed,
+        'result' => InspectionResult::Failed,
+        'scheduled_at' => now(),
+        'conducted_at' => now(),
+    ]);
+
+    $options = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson("/api/v1/permits/{$mp->id}/status-options")->assertOk()->json('data');
+    expect($options['locked'])->toContain("Sanitary Permit — rejected by its office on {$mp->application->tracking_id}");
+
+    setStatus('bplo@biztrack.local', $mp, 'active', 'Trying anyway.')
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.status.0', 'This permit is held suspended and cannot be changed until this is settled: '
+            ."Sanitary Permit — rejected by its office on {$mp->application->tracking_id}.");
+    expect($mp->fresh()->status)->toBe(PermitStatus::Suspended);
+
+    // A passing re-inspection settles it: the clearance is Approved.
+    $mp->application->permitTypes()->updateExistingPivot($hc->permit_type_id, ['status' => ClearanceStatus::Approved->value]);
+    setStatus('bplo@biztrack.local', $mp, 'active', 'Re-inspection passed.')->assertOk();
 });
 
 it('asks for a reason', function () {
