@@ -108,7 +108,7 @@ export function PermitsPage() {
         <EmptyState
           icon={ShieldCheckIcon}
           title="Nothing issued to you yet"
-          description="When an application is approved and the permit is issued, your business and its permits appear here to view, print, or save as PDF. Clearances you submitted a copy of instead of applying for appear here too, under the business they belong to."
+          description="When an application is approved and the permit is issued, your business and its permits appear here to view, print, or save as PDF."
           action={
             <Link
               to="/apply?type=new"
