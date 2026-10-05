@@ -2,6 +2,7 @@
 
 use App\Enums\ApplicationStatus;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\PermitType;
@@ -106,10 +107,11 @@ it('notifies the applicant when the application is approved', function () use ($
      * `bploApprovesForm()` above could not have approved the form without it.
      */
     foreach (END_STATE_OFFICE as $code => $deptCode) {
-        // Assign to Me first: outside BPLO an unheld case is not worked
-        // (request of 6 October 2026; claimAs in Pest.php).
-        $assignmentId = claimAs($deptEmail[$deptCode], $appId);
         $officer = authAs($deptEmail[$deptCode]);
+
+        $assignmentId = ApplicationAssignment::where('application_id', $appId)
+            ->whereHas('department', fn ($d) => $d->where('code', $deptCode))
+            ->value('id');
 
         $this->withHeaders($officer)
             ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'ok'])

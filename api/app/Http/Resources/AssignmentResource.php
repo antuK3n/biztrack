@@ -5,7 +5,6 @@ namespace App\Http\Resources;
 use App\Enums\ClearanceStatus;
 use App\Models\ApplicationReturnNote;
 use App\Support\ApplicationVisibility;
-use App\Support\CaseHolder;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -304,7 +303,8 @@ class AssignmentResource extends JsonResource
             'scheduled_at' => optional($visit->scheduled_at)->toISOString(),
             'inspector_name' => $visit->inspector_name,
             'can_name_inspector' => $user !== null
-                && CaseHolder::mayAct($user, $this->resource)
+                && $user->department_id !== null
+                && $user->department_id === $this->department_id
                 && $user->hasPermission('inspection.manage')
                 && $permit?->pivot?->status === ClearanceStatus::ForInspection
                 && ! $this->application->isDecided(),
@@ -325,13 +325,18 @@ class AssignmentResource extends JsonResource
     /**
      * May this reader work the case — approve, return, check, classify?
      *
-     * `CaseHolder::mayAct`, the same question every door on the API asks: the
-     * holder, or anyone in BPLO while nobody holds it. The pairing is
-     * deliberate — a screen that offered a button the server then refused
-     * would be worse than no button.
+     * Unheld counts: acting on a case nobody holds claims it, which is the rule
+     * AssignmentController::authorizeHolder applies. This mirrors that method,
+     * and the pairing is deliberate — a screen that offered a button the server
+     * then refused would be worse than no button.
      */
     private function canAct(Request $request): bool
     {
-        return CaseHolder::mayAct($request->user(), $this->resource);
+        $user = $request->user();
+
+        return $user !== null
+            && $user->department_id !== null
+            && $user->department_id === $this->department_id
+            && ($this->officer_user_id === null || $this->officer_user_id === $user->id);
     }
 }

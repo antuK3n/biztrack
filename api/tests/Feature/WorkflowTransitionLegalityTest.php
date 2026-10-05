@@ -128,21 +128,6 @@ function legalityFiling(array $openCodes, string $name): Application
         ])->assertSuccessful();
     }
 
-    /*
-     * And each routed office's officer presses Assign to Me. Since the request
-     * of 6 October 2026 an office other than BPLO refuses every act on a case
-     * nobody holds (CaseHolder::UNCLAIMED) — a 403 that would stand in front
-     * of the transition each case below means to reach. BPLO is left as it
-     * was: unheld, and claimed by acting. See claimAs() in Pest.php.
-     */
-    $routed = ApplicationAssignment::where('application_id', $appId)
-        ->with('department')->get()
-        ->pluck('department.code')
-        ->reject(fn ($code) => $code === 'BPLO');
-    foreach ($routed as $office) {
-        claimAs(officerEmail($office), $appId);
-    }
-
     return Application::findOrFail($appId);
 }
 

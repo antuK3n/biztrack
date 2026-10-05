@@ -33,22 +33,10 @@ use App\Support\MalabonGeo;
  * And the boundary: an office may only correct a filing it can already read.
  */
 
-/**
- * The filing scopedAssignmentFiling builds, as an Application — with CHO's
- * officer holding it.
- *
- * The claim is new with the request of 6 October 2026: outside BPLO an
- * unheld case cannot be edited at all (CaseHolder::UNCLAIMED), so "a filing
- * they hold", which the cases below already said, now has to be made true
- * rather than assumed. Done here and not in scopedAssignmentFiling, which
- * OfficerInChargeTest needs unheld to test claiming itself.
- */
+/** The filing scopedAssignmentFiling builds, as an Application. */
 function filingForOfficerEdit(string $name): Application
 {
-    $appId = scopedAssignmentFiling($name);
-    claimAs('sanitary@biztrack.local', $appId);
-
-    return Application::findOrFail($appId);
+    return Application::findOrFail(scopedAssignmentFiling($name));
 }
 
 /** Everything `validateBusiness` requires, so a case can vary one field. */

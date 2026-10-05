@@ -247,9 +247,7 @@ it('keeps an office reply out of the other offices on the same filing', function
  */
 it('reads only the conversation the panel opens on when no office is named', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70011');
-    // Held by CHO's officer, not merely routed: since the request of 6 October
-    // 2026 nobody in CHO writes on a case nobody holds (CaseHolder).
-    $choId = takeFiling($appId, 'CHO');
+    $choId = assignOffice($appId, 'CHO');
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'CHO: bring the water test', 'department_id' => $choId])
@@ -355,7 +353,7 @@ it('keeps the general enquiry apart from the filing conversations', function () 
  * Every other test in this file assigns the office first, which is exactly why
  * none of them caught it.
  */
-it('lets an office other than BPLO read a filing it was written to once an officer there holds it, and lists it then', function () {
+it('lets an office read a filing it was written to, and lists it once routed', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70011');
 
     /*
@@ -391,26 +389,13 @@ it('lets an office other than BPLO read a filing it was written to once an offic
         'body' => 'Health question on an unrouted filing.',
     ]);
 
-    /*
-     * ---- Readable by the holder, and by nobody until there is one ---------
-     *
-     * This asserted the health office could read it straight away, unrouted.
-     * Since the request of 6 October 2026 a filing's conversation outside
-     * BPLO belongs to the officer HOLDING that office's case, all of it, and
-     * to nobody else in the office (MessageController::scopeMessagesToReader).
-     * An unrouted filing has no case and so no holder: the endpoint still
-     * opens — there is nothing of the office's to refuse — but shows nothing.
-     *
-     * What the old assertion protected still holds, one step later: the
-     * message is not lost. It is read in full by whoever takes the case once
-     * it is routed, asserted at the end.
-     */
+    // The health office can open it and finds its own conversation.
     $seen = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/applications/{$appId}/messages")
         ->assertOk()
         ->json('data');
 
-    expect(collect($seen)->pluck('body'))->not->toContain('Health question on an unrouted filing.');
+    expect(collect($seen)->pluck('body'))->toContain('Health question on an unrouted filing.');
 
     /*
      * ---- The inbox row is gone, and that is now the point ----------------
@@ -429,36 +414,21 @@ it('lets an office other than BPLO read a filing it was written to once an offic
      * The message above could only be written by a client aiming straight at
      * the endpoint, which is why the test has to construct it that way.
      *
-     * Nothing already sent becomes unreadable: authorizeParticipant still
-     * lets the office open the transcript, and since 6 October 2026 what is
-     * in it is shown to the officer who takes the case once the routing
-     * catches up — which is also when it returns to the inbox.
+     * Reading is untouched - authorizeParticipant still lets the office open
+     * the transcript, asserted just above - so nothing already sent becomes
+     * unreadable. It returns to the inbox when the routing catches up.
      */
     $rows = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data');
 
     expect(collect($rows)->firstWhere('application_id', $appId))->toBeNull();
 
-    /*
-     * Routed but unheld: still not on the page. Outside BPLO the inbox lists
-     * what the officer holds now (request of 6 October 2026); it listed every
-     * unheld case of the office until then.
-     */
     assignOffice($appId, 'CHO');
 
     $rows = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data');
 
-    expect(collect($rows)->firstWhere('application_id', $appId))->toBeNull();
-
-    // Taken: listed, and the whole conversation is theirs to read.
-    claimAs('sanitary@biztrack.local', $appId);
-
-    $rows = test()->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data');
     expect(collect($rows)->firstWhere('application_id', $appId))->not->toBeNull();
-
-    $seen = test()->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data');
-    expect(collect($seen)->pluck('body'))->toContain('Health question on an unrouted filing.');
 
     // The fire office, written to by nobody, still sees nothing.
     $fireRows = test()->withHeaders(authAs('fire@biztrack.local'))

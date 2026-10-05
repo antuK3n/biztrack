@@ -784,9 +784,9 @@ function fromAssignment(item: Assignment): QueueItem {
     canClaim: item.can_claim === true,
     canAct: item.can_act === true,
     /*
-     * Held by THIS reader. `can_act` is true on an unheld BPLO case too —
-     * acting on one claims it — so it cannot answer "is this mine", and the
-     * give-back control must not appear on a case nobody holds.
+     * Held by THIS reader. `can_act` is true on an unheld case too — acting on
+     * one claims it — so it cannot answer "is this mine", and the give-back
+     * control must not appear on a case nobody holds.
      */
     mine: item.officer !== null && item.can_act === true,
   }
@@ -1324,14 +1324,7 @@ function QueueRow({
      * cards in a row would end with their footers at three different heights.
      */
     <li className="flex flex-col overflow-hidden rounded-lg bg-white shadow-card transition-shadow has-[>a:hover]:shadow-raised">
-      {/*
-        * Not a link while it waits to be taken, outside BPLO: the officer
-        * presses Assign to Me first, and only then can the case be opened —
-        * by its holder to work, by colleagues to read (request of 6 October
-        * 2026; the API refuses the same, see CaseHolder). An unheld case the
-        * reader may act on is BPLO's, where acting on it claims it.
-        */}
-      {item.href && !(item.officer === null && item.canClaim && !item.canAct) ? (
+      {item.href ? (
         <Link
           to={item.href}
           className={`${CARD} focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal`}

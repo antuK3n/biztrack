@@ -275,14 +275,8 @@ it('refuses BPLO accepting the form of a held filing', function () {
     expect($app->fresh()->status)->toBe(ApplicationStatus::ForApproval);
 });
 
-/*
- * The cases from here that act as CHO start from a filing sanitary@ already
- * holds (scopedFilingHeldByCho): since the request of 6 October 2026 an
- * unheld CHO case refuses every act with 403 before the hold is even asked
- * about, and the hold is what these cases are testing.
- */
 it('refuses an office approving a held filing\'s permit', function () {
-    $appId = scopedFilingHeldByCho('Held Approval Shop');
+    $appId = scopedAssignmentFiling('Held Approval Shop');
     holdSetStatus(Application::findOrFail($appId)->business_id, 'suspended')->assertOk();
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
@@ -296,7 +290,7 @@ it('refuses an office approving a held filing\'s permit', function () {
 });
 
 it('refuses a passing visit on a held filing and issues nothing, but still records a failed one', function () {
-    $appId = scopedFilingHeldByCho('Held Visit Shop');
+    $appId = scopedAssignmentFiling('Held Visit Shop');
     $app = Application::findOrFail($appId);
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
@@ -322,7 +316,7 @@ it('refuses a passing visit on a held filing and issues nothing, but still recor
 });
 
 it('refuses booking, moving or re-booking a visit on a held filing', function () {
-    $appId = scopedFilingHeldByCho('Held Booking Shop');
+    $appId = scopedAssignmentFiling('Held Booking Shop');
     $app = Application::findOrFail($appId);
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
@@ -346,7 +340,7 @@ it('refuses booking, moving or re-booking a visit on a held filing', function ()
 });
 
 it('refuses booking the first visit on a held filing', function () {
-    $appId = scopedFilingHeldByCho('Held First Visit Shop');
+    $appId = scopedAssignmentFiling('Held First Visit Shop');
     $app = Application::findOrFail($appId);
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();
@@ -402,7 +396,7 @@ it('keeps a held filing waiting when its last clearance is in, and closes it onc
 });
 
 it('refuses the Debug panel paying for, or passing a visit on, a held filing', function () {
-    $appId = scopedFilingHeldByCho('Held Debug Shop');
+    $appId = scopedAssignmentFiling('Held Debug Shop');
     $app = Application::findOrFail($appId);
     authAs('sanitary@biztrack.local');
     test()->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve')->assertOk();

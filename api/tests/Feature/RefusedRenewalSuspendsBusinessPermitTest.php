@@ -85,9 +85,7 @@ function rrsRefusedSanitaryRenewal(int $businessId, Permit $sanitary): Applicati
 
     $app = Application::findOrFail($appId);
     $cho = $app->assignments()->where('department_id', PermitType::where('code', 'SANITARY')->value('issuing_department_id'))->value('id');
-    // Assign to Me first: outside BPLO an unheld case is not worked (request
-    // of 6 October 2026; claimAs in Pest.php).
-    claimAs('sanitary@biztrack.local', $appId);
+    authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$cho}/approve")->assertOk();
     test()->postJson("/api/v1/assignments/{$cho}/reject", [
         'reason' => 'No potable water.',
@@ -107,8 +105,7 @@ function rrsReapplyAndPass(Application $app): void
         ->assertSuccessful();
 
     $cho = $app->assignments()->where('department_id', PermitType::where('code', 'SANITARY')->value('issuing_department_id'))->value('id');
-    // Assign to Me first (request of 6 October 2026), as above.
-    claimAs('sanitary@biztrack.local', $app->id);
+    authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$cho}/approve")->assertOk();
     $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", [
         'scheduled_at' => now()->toDateTimeString(),
@@ -204,8 +201,7 @@ it('never lifts BPLO’s own suspension of a paper Business Permit when a renewa
 
     $app = Application::findOrFail($appId);
     $cho = $app->assignments()->where('department_id', PermitType::where('code', 'SANITARY')->value('issuing_department_id'))->value('id');
-    // Assign to Me first (request of 6 October 2026), as above.
-    claimAs('sanitary@biztrack.local', $appId);
+    authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$cho}/approve")->assertOk();
     $visitId = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
         'scheduled_at' => now()->toDateTimeString(),

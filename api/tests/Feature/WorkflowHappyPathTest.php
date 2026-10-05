@@ -166,11 +166,6 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
             ->whereHas('department', fn ($d) => $d->where('code', $deptCode))
             ->value('id');
 
-        // Each office's officer presses Assign to Me before working it — the
-        // step the request of 6 October 2026 put in front of every office but
-        // BPLO (claimAs in Pest.php). Part of the happy path now, so pressed
-        // here rather than assumed.
-        expect(claimAs($email, $appId))->toBe($assignmentId);
         $officer = authAs($email);
         $this->withHeaders($officer)
             ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'ok'])

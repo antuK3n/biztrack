@@ -13,7 +13,6 @@ use App\Services\NotificationService;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
-use App\Support\CaseHolder;
 use App\Support\DenrRequirements;
 use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
@@ -50,8 +49,6 @@ class OfficerRequestController extends Controller
             $application,
             'You may not raise a requirement on another office’s application.'
         );
-        // And only the officer holding the office's case (CaseHolder).
-        CaseHolder::authorizeOn($request->user(), $application);
 
         // Compat: web/mobile send subject/body (docs/api-contract.md); the paper
         // schema uses title/description. Accept either name for each.
@@ -647,8 +644,6 @@ class OfficerRequestController extends Controller
                 403,
                 'This requirement was raised by another office, so only that office can close it.'
             );
-            // And within the office, only the officer holding the case.
-            CaseHolder::authorizeOn($user, $officerRequest->application);
         }
 
         $data = $request->validate([

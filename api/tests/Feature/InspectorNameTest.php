@@ -75,10 +75,7 @@ function filingWithSanitaryVisitBooked(?string $scheduledAt = null, ?string $ins
     $app = Application::findOrFail($appId);
     $assignment = $app->assignments()->whereRelation('department', 'code', 'CHO')->firstOrFail();
 
-    // CHO's officer presses Assign to Me before working the case — required
-    // outside BPLO since the request of 6 October 2026 (claimAs in Pest.php).
-    // Held, they are also the only one in CHO who may name the inspector.
-    claimAs('sanitary@biztrack.local', $appId);
+    authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", array_filter([
         'scheduled_at' => $scheduledAt ?? now()->toDateString(),

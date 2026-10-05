@@ -268,9 +268,7 @@ function driveClearanceToApproved(Application $app, string $code): void
     // takes both — see handInClearance.
     handInClearance($app, $code);
 
-    // Assign to Me before working it: outside BPLO an unheld case is not
-    // worked (request of 6 October 2026; claimAs in Pest.php).
-    claimAs($officer, $app->id);
+    authAs($officer);
     $assignment = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', $departmentId)->firstOrFail();
     test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
@@ -500,8 +498,7 @@ it('keeps the stage open when an office returns its own permit, and shut when BP
         ->where('department_id', Department::where('code', 'CPDO')->firstOrFail()->id)
         ->firstOrFail();
 
-    // CPDO's officer takes the case first (request of 6 October 2026).
-    claimAs('zoning@biztrack.local', $paid->id);
+    authAs('zoning@biztrack.local');
     $this->postJson("/api/v1/assignments/{$cpdo->id}/return", ['remarks' => 'The site plan is unreadable.'])
         ->assertOk();
 
@@ -1084,8 +1081,7 @@ it('reports a permit as approved only once its inspection has passed', function 
     $assignment = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', $cpdo->id)->firstOrFail();
 
-    // CPDO's officer takes the case first (request of 6 October 2026).
-    claimAs('zoning@biztrack.local', $app->id);
+    authAs('zoning@biztrack.local');
     $this->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
 
     // The office has read it and booked nothing yet: still not granted.

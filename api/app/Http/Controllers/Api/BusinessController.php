@@ -15,7 +15,6 @@ use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
-use App\Support\CaseHolder;
 use App\Support\MalabonGeo;
 use App\Support\Numbering;
 use App\Support\RenewablePermit;
@@ -267,17 +266,17 @@ class BusinessController extends Controller
         );
 
         /*
-         * The holder rule every door asks (CaseHolder): the holder edits; an
-         * unheld case is open to BPLO and must be claimed first elsewhere.
+         * The holder rule approve() uses (AssignmentController::authorizeHolder):
+         * an unclaimed case is open to the office, a claimed one to its holder.
          */
-        $review = $application->assignments()
+        $holderId = $application->assignments()
             ->where('department_id', $user->department_id)
-            ->first();
-        if ($review !== null && ! CaseHolder::mayAct($user, $review)) {
-            abort(403, $review->officer_user_id === null
-                ? CaseHolder::UNCLAIMED
-                : 'Only the officer handling this filing can edit it.');
-        }
+            ->value('officer_user_id');
+        abort_unless(
+            $holderId === null || $holderId === $user->id,
+            403,
+            'Only the officer handling this filing can edit it.'
+        );
 
         $business = $application->business;
         abort_unless($business !== null, 422, 'This filing has no business on the register.');

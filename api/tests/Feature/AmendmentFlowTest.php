@@ -745,9 +745,6 @@ it('defers a move’s Zoning Clearance fee to the next Business Permit renewal',
     $cpdo = ApplicationAssignment::where('application_id', $appId)
         ->where('department_id', Department::where('code', 'CPDO')->value('id'))
         ->firstOrFail();
-    // CPDO's officer takes the case before working it (request of 6 October
-    // 2026; claimAs in Pest.php).
-    claimAs('zoning@biztrack.local', $appId);
     test()->withHeaders(authAs('zoning@biztrack.local'))
         ->postJson("/api/v1/assignments/{$cpdo->id}/approve")->assertOk();
     $visitId = test()->withHeaders(authAs('zoning@biztrack.local'))
@@ -1676,9 +1673,6 @@ it('supersedes the old Zoning Clearance when the move’s new one is issued', fu
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/assignments/{$bplo->id}/approve")->assertStatus(422);
 
-    // CPDO's officer takes the case before working it (request of 6 October
-    // 2026; claimAs in Pest.php).
-    claimAs('zoning@biztrack.local', $appId);
     test()->withHeaders(authAs('zoning@biztrack.local'))
         ->postJson("/api/v1/assignments/{$cpdo->id}/approve")->assertOk();
     $visitId = test()->withHeaders(authAs('zoning@biztrack.local'))

@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
-use App\Support\CaseHolder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -167,10 +166,7 @@ class Inspection extends Model
             && $user->hasPermission('inspection.manage')
             && (($user->department_id !== null && $user->department_id === $this->department_id)
                 || ($this->inspector_user_id !== null && $this->inspector_user_id === $user->id))
-            && $this->inspectorNameEditable()
-            // Only the officer holding the office's case (CaseHolder).
-            && ($this->application === null || ($case = CaseHolder::caseOf($user, $this->application)) === null
-                || CaseHolder::mayAct($user, $case));
+            && $this->inspectorNameEditable();
     }
 
     /**

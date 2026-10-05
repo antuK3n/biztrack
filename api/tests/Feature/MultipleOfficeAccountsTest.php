@@ -21,16 +21,12 @@ use Illuminate\Support\Facades\DB;
  *
  * What this file pins, for each named feature:
  *
- *  - COMMUNICATE ONLINE: a general enquiry to the City Health Office reaches
- *    every City Health account. A filing's conversation, since the request of
- *    6 October 2026, reaches the account HOLDING City Health's case on it and
- *    nobody else in the office — and passes whole to the next holder, so a
- *    reply from whichever account holds it is still the office speaking.
- *    (It reached every account until that date.)
+ *  - COMMUNICATE ONLINE: a message sent to the City Health Office reaches every
+ *    City Health account, not only whoever happened to be named on the thread,
+ *    and a reply from either of them is the office speaking.
  *  - CREATE OTHER REQUIREMENTS: a requirement raised by one officer is the
- *    OFFICE's requirement — a colleague sees it, and rules on it once the case
- *    is handed to them — while staying invisible to every other office. (Any
- *    colleague could rule on it until 6 October 2026.)
+ *    OFFICE's requirement — a colleague sees it and can rule on it — while
+ *    staying invisible to every other office.
  *  - The office boundary itself does not soften as accounts are added.
  */
 
@@ -120,37 +116,19 @@ function filingRoutedTo(array $codes, string $registrationNumber): int
     return $appId;
 }
 
-/*
- * ── Two accounts, one case: since 6 October 2026 the holder works it ───────
- *
- * The three cases that follow said, until that day, that every account in an
- * office read the office's mail on a filing, answered it, and ruled on its
- * requirements. The request of 6 October 2026 changed that for every office
- * but BPLO: "The officer must click 'Assign to Me' before they can access and
- * process the application. Once assigned, other officers can only view the
- * application", and a filing's conversation is its holder's alone — "only the
- * newly assigned officer can access the conversation" once it changes hands.
- *
- * What survives of "an office is a place, not a person" is what the cases now
- * pin: the office's GENERAL enquiry still reaches every account in it; the
- * conversation and the requirements belong to the office's CASE, so they pass
- * whole to whichever account holds it next; and the applicant still sees one
- * office, never two people. BPLO, which kept the older rule, is pinned in
- * ClaimBeforeWorkTest and OfficerTenureTest.
- */
-it('gives a filing’s conversation to the account holding the case, and the office’s general enquiry to every account', function () {
+it('gives every account in an office the same inbox', function () {
     extraOfficer('CHO', 'sanitary_officer', 'cho.second@biztrack.local');
     $appId = filingRoutedTo(['CHO', 'BFP'], 'DTI-93001');
-    $cho = Department::where('code', 'CHO')->value('id');
 
     /*
-     * sanitary@ takes the case and opens the conversation; the owner answers
-     * (an owner may not start one with an office nobody there holds the filing
-     * for, checklist 2026-09-27 apply item 23 — it is held here, but the
-     * office speaking first is the order the old case had).
+     * The applicant writes to the City Health Office, answering it: nobody
+     * there has taken the filing, so the owner could not have started this
+     * conversation (checklist 2026-09-27, apply item 23), but may reply to one
+     * the office opened.
      */
-    claimAs('sanitary@biztrack.local', $appId);
-    test()->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Please send the water result.'])
+    $cho = Department::where('code', 'CHO')->value('id');
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Please send the water result.'])
         ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
@@ -158,102 +136,69 @@ it('gives a filing’s conversation to the account holding the case, and the off
             'department_id' => $cho,
         ])->assertCreated();
 
-    // The holder reads it.
-    $holderBodies = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
+    /*
+     * Both City Health accounts read it. Mail addressed to an office that only
+     * its longest-serving account could open would make every handover a
+     * support ticket.
+     */
+    foreach (['sanitary@biztrack.local', 'cho.second@biztrack.local'] as $email) {
+        $bodies = collect(test()->withHeaders(authAs($email))
+            ->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data'))
+            ->pluck('body');
+
+        expect($bodies)->toContain('Attaching the water potability result.');
+    }
+
+    // The fire office, routed to the same filing, reads none of it.
+    $fireBodies = collect(test()->withHeaders(authAs('fire@biztrack.local'))
         ->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data'))
         ->pluck('body');
-    expect($holderBodies)->toContain('Attaching the water potability result.');
-
-    // The colleague does not: the case is not theirs. Refused outright rather
-    // than shown an empty thread, and the filing is not in their inbox.
-    test()->withHeaders(authAs('cho.second@biztrack.local'))
-        ->getJson("/api/v1/applications/{$appId}/messages")
-        ->assertForbidden();
-    $colleagueRows = collect(test()->getJson('/api/v1/message-threads')->assertOk()->json('data'));
-    expect($colleagueRows->where('kind', '!=', 'general')->pluck('application.id'))->not->toContain($appId);
-
-    // The fire office, routed to the same filing and holding its own case
-    // there, reads none of City Health's.
-    claimAs('fire@biztrack.local', $appId);
-    $fireBodies = collect(test()->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data'))
-        ->pluck('body');
     expect($fireBodies)->not->toContain('Attaching the water potability result.');
-
-    /*
-     * A general enquiry has no filing and so no holder: both City Health
-     * accounts read it, which is the part of "the same inbox" the request did
-     * not touch.
-     */
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/general-messages', ['department_id' => $cho, 'body' => 'A question for City Health.'])
-        ->assertCreated();
-    foreach (['sanitary@biztrack.local', 'cho.second@biztrack.local'] as $email) {
-        $enquiry = collect(test()->withHeaders(authAs($email))
-            ->getJson('/api/v1/message-threads')->assertOk()->json('data'))
-            ->where('kind', 'general')
-            ->firstWhere('last_message.body', 'A question for City Health.');
-
-        expect($enquiry)->not->toBeNull();
-    }
 });
 
-it('lets only the account holding the case answer for the office, and the account that takes it over after', function () {
+it('lets either account in an office answer as that office', function () {
     extraOfficer('CHO', 'sanitary_officer', 'cho.second@biztrack.local');
     $appId = filingRoutedTo(['CHO'], 'DTI-93002');
     $cho = Department::where('code', 'CHO')->value('id');
-    $assignmentId = claimAs('sanitary@biztrack.local', $appId);
 
-    // The holder opens the conversation and the owner answers.
-    test()->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Any questions on the sanitary permit?'])
+    // The office opens the conversation; nobody there holds the filing, so
+    // the owner may answer but not start it (apply item 23).
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Any questions on the sanitary permit?'])
         ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Question.', 'department_id' => $cho])
         ->assertCreated();
 
-    // The colleague may not answer while the case is with somebody else.
+    // The colleague replies — not the officer the applicant happened to reach.
     test()->withHeaders(authAs('cho.second@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Not mine to answer.'])
-        ->assertForbidden();
-
-    // Handed over: the holder puts it back, the colleague takes it.
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->postJson("/api/v1/assignments/{$assignmentId}/release")->assertOk();
-    claimAs('cho.second@biztrack.local', $appId);
-
-    // Now the colleague answers as the office, with the whole conversation in
-    // front of them — the stretch before they held it included.
-    test()->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'City Health here — send the lab result.'])
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'City Health here — send the lab result.'])
         ->assertCreated();
-    $asSecond = collect(test()->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data'))
-        ->pluck('body');
-    expect($asSecond)
-        ->toContain('Any questions on the sanitary permit?')
-        ->toContain('Question.')
-        ->toContain('City Health here — send the lab result.');
 
-    // The applicant still sees one office conversation, not two people.
+    // The applicant sees one office conversation, not two people.
     $thread = collect(test()->withHeaders(authAs('owner@biztrack.local'))
         ->getJson("/api/v1/applications/{$appId}/messages?department_id={$cho}")->assertOk()->json('data'));
+
     expect($thread->pluck('body'))
         ->toContain('Question.')
         ->toContain('City Health here — send the lab result.');
 
-    // And the officer who handed it on keeps nothing of it.
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/applications/{$appId}/messages")
-        ->assertForbidden();
+    // And the first officer sees their colleague's reply in the same thread.
+    $asFirst = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('data'))->pluck('body');
+    expect($asFirst)->toContain('City Health here — send the lab result.');
 });
 
-it('keeps a requirement with the office across a handover, for whichever account holds the case to rule on', function () {
+it('makes a requirement the office’s, not the individual officer’s', function () {
     extraOfficer('CHO', 'sanitary_officer', 'cho.second@biztrack.local');
     $appId = filingRoutedTo(['CHO', 'BFP'], 'DTI-93003');
-    $assignmentId = claimAs('sanitary@biztrack.local', $appId);
 
-    $requestId = test()->postJson("/api/v1/applications/{$appId}/requests", [
-        'request_type' => 'document',
-        'title' => 'Water potability result',
-        'description' => 'Please upload the latest laboratory result.',
-    ])->assertCreated()->json('data.id');
+    $requestId = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", [
+            'request_type' => 'document',
+            'title' => 'Water potability result',
+            'description' => 'Please upload the latest laboratory result.',
+        ])->assertCreated()->json('data.id');
 
     // The colleague sees it in their list…
     $colleagueList = collect(test()->withHeaders(authAs('cho.second@biztrack.local'))
@@ -270,24 +215,16 @@ it('keeps a requirement with the office across a handover, for whichever account
         ->postJson("/api/v1/requests/{$requestId}/respond", ['body' => 'Attached.'])
         ->assertOk();
 
-    // While sanitary@ holds the case, the colleague may only read it.
-    test()->withHeaders(authAs('cho.second@biztrack.local'))
-        ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'fulfilled'])
-        ->assertForbidden();
-
     /*
-     * Whoever raised a requirement may be on leave by the time it is answered.
-     * Before 6 October any colleague could rule on it; now the case is handed
-     * over and the requirement goes with it — it is the office's, not the
-     * person's, so the new holder rules on what the old one raised.
+     * And the colleague can rule on it. Whoever raised a requirement may be on
+     * leave by the time it is answered; if only they could close it, the filing
+     * would sit blocked on one person's absence.
      */
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->postJson("/api/v1/assignments/{$assignmentId}/release")->assertOk();
-    claimAs('cho.second@biztrack.local', $appId);
-    test()->postJson("/api/v1/requests/{$requestId}/close", [
-        'outcome' => 'needs_resubmission',
-        'remarks' => 'The result is dated last year — send the current one.',
-    ])->assertOk();
+    test()->withHeaders(authAs('cho.second@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", [
+            'outcome' => 'needs_resubmission',
+            'remarks' => 'The result is dated last year — send the current one.',
+        ])->assertOk();
 
     $seen = collect(test()->withHeaders(authAs('owner@biztrack.local'))
         ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))
@@ -302,8 +239,6 @@ it('keeps a requirement with the office across a handover, for whichever account
 it('does not let another office rule on a requirement, however many accounts it has', function () {
     extraOfficer('BFP', 'fire_inspector', 'bfp.second@biztrack.local');
     $appId = filingRoutedTo(['CHO', 'BFP'], 'DTI-93004');
-    // City Health's officer holds its case, so may raise (6 October 2026).
-    claimAs('sanitary@biztrack.local', $appId);
 
     $requestId = test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/requests", [

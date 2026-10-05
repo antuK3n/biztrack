@@ -640,10 +640,8 @@ it('counts the enquiries it merges in, so the inbox total is never short', funct
  */
 it('clears only the opened office’s unread count, not every office on the filing', function () {
     $appId = requirementFilingForInbox();
-    // Taken, not just routed: since the request of 6 October 2026 an office
-    // other than BPLO writes only on a case one of its officers holds.
-    $choId = takeFiling($appId, 'CHO');
-    $bfpId = takeFiling($appId, 'BFP');
+    $choId = assignOffice($appId, 'CHO');
+    $bfpId = assignOffice($appId, 'BFP');
 
     foreach (['sanitary@biztrack.local' => $choId, 'fire@biztrack.local' => $bfpId] as $email => $dept) {
         test()->withHeaders(authAs($email))->postJson("/api/v1/applications/{$appId}/messages", [

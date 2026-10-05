@@ -12,7 +12,6 @@ use App\Models\Inspection;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\Audit;
-use App\Support\CaseHolder;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -109,7 +108,6 @@ class InspectionController extends Controller
     public function conduct(Request $request, Inspection $inspection): JsonResponse
     {
         $this->authorizeDepartment($request, $inspection);
-        $this->authorizeHolder($request, $inspection);
 
         $data = $request->validate([
             'result' => ['required', 'in:passed,failed,conditional'],
@@ -181,7 +179,6 @@ class InspectionController extends Controller
             403,
             'This permit is issued by another office.'
         );
-        CaseHolder::authorizeOn($user, $application);
 
         $row = ApplicationPermitType::where('application_id', $application->id)
             ->where('permit_type_id', $type->id)
@@ -205,7 +202,6 @@ class InspectionController extends Controller
     public function reschedule(Request $request, Inspection $inspection): JsonResponse
     {
         $this->authorizeDepartment($request, $inspection);
-        $this->authorizeHolder($request, $inspection);
         $this->workflow->refuseWhileOnHold($inspection->application?->business);
 
         $data = $request->validate([
@@ -241,7 +237,6 @@ class InspectionController extends Controller
     public function reinspect(Request $request, Inspection $inspection): JsonResponse
     {
         $this->authorizeDepartment($request, $inspection);
-        $this->authorizeHolder($request, $inspection);
 
         $data = $request->validate([
             'scheduled_at' => $this->visitRules(),
@@ -346,7 +341,6 @@ class InspectionController extends Controller
     public function nameInspector(Request $request, Inspection $inspection): JsonResponse
     {
         $this->authorizeDepartment($request, $inspection);
-        $this->authorizeHolder($request, $inspection);
 
         $data = $request->validate([
             'inspector_name' => ['present', 'nullable', 'string', 'max:120'],
@@ -424,18 +418,6 @@ class InspectionController extends Controller
      * `nameInspector`), so the disjunct only ever matches older rows and the
      * finding shrinks with them; it is still un-fixed.
      */
-    /**
-     * Within the office, only the officer holding the case books, decides or
-     * names the visit's inspector — the same CaseHolder rule as the review
-     * (request of 6 October 2026). Colleagues may still open it to read.
-     */
-    private function authorizeHolder(Request $request, Inspection $inspection): void
-    {
-        if ($inspection->application !== null) {
-            CaseHolder::authorizeOn($request->user(), $inspection->application);
-        }
-    }
-
     private function authorizeDepartment(Request $request, Inspection $inspection): void
     {
         $user = $request->user();

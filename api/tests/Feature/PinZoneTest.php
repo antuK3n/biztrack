@@ -293,9 +293,7 @@ it('puts the zone at the pin on CPDD’s sheet alone, and nothing where it is un
         bploApprovesForm($id);
         $department = assignOffice($id, 'CPDO');
         $assignment = ApplicationAssignment::where('application_id', $id)->where('department_id', $department)->value('id');
-        // CPDO opens a case only once its officer holds it (request of 6
-        // October 2026; claimAs in Pest.php), which leaves zoning@ signed in.
-        claimAs('zoning@biztrack.local', $id);
+        authAs('zoning@biztrack.local');
 
         return collect($this->getJson("/api/v1/assignments/{$assignment}")->assertOk()->json('data.application.office_forms'))
             ->mapWithKeys(fn ($form) => [$form['permit_type_code'] => $form['zone_at_pin'] ?? null])

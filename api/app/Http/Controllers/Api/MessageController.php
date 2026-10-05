@@ -15,7 +15,6 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
-use App\Support\CaseHolder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -375,34 +374,6 @@ class MessageController extends Controller
          * null on both, and the clause above has already confined this to
          * threads addressed to the reader's own office.
          */
-        /*
-         * ---- Outside BPLO: the whole conversation, to its holder only ----
-         *
-         * Request of 6 October 2026, for the offices other than BPLO: an
-         * officer sees the conversations of the applications assigned to
-         * them, and when a case is unassigned and taken by somebody else,
-         * "only the newly assigned officer can access the conversation" —
-         * all of it, chosen over the stretch-per-officer rule below. The
-         * officer who handed it on keeps nothing. General enquiries and the
-         * administrator's line have no filing, so the whole office reads them.
-         *
-         * BPLO keeps the 30 September rule that follows.
-         */
-        if (CaseHolder::claimRequiredFor($deptId)) {
-            $query->whereExists(fn ($sub) => $sub->selectRaw('1')
-                ->from('message_threads as ht')
-                ->whereColumn('ht.id', 'messages.thread_id')
-                ->where(fn ($held) => $held
-                    ->whereNull('ht.application_id')
-                    ->orWhereExists(fn ($a) => $a->selectRaw('1')
-                        ->from('application_assignments as ha')
-                        ->whereColumn('ha.application_id', 'ht.application_id')
-                        ->where('ha.department_id', $deptId)
-                        ->where('ha.officer_user_id', $user->id))));
-
-            return;
-        }
-
         $query->where(fn ($who) => $who
             ->whereNull('messages.handled_by_user_id')
             ->orWhere('messages.handled_by_user_id', $user->id));
@@ -554,51 +525,40 @@ class MessageController extends Controller
              * routed to the office they are addressed to - which is the state
              * in which somebody there can actually act on them.
              */
-            /*
-             * Outside BPLO, only what this officer holds now — not the unheld
-             * cases, and not the ones they used to hold (request of 6 October
-             * 2026; see scopeMessagesToReader). BPLO keeps both.
-             */
-            if (CaseHolder::claimRequiredFor($user->department_id)) {
-                $query->whereHas('assignments', fn ($a) => $a
-                    ->where('application_assignments.department_id', $user->department_id)
-                    ->where('application_assignments.officer_user_id', $user->id));
-            } else {
-                $query->where(function ($mine) use ($user) {
-                    $mine->whereHas('assignments', function ($a) use ($user) {
-                        /*
-                         * -1 rather than null: a seat with no office matches
-                         * nothing, where `where(col, null)` becomes `IS NULL` and
-                         * would match every unrouted assignment instead.
-                         */
-                        $a->where('application_assignments.department_id', $user->department_id ?? -1);
-                        $a->where(fn ($who) => $who
-                            ->whereNull('application_assignments.officer_user_id')
-                            ->orWhere('application_assignments.officer_user_id', $user->id));
-                    });
-
+            $query->where(function ($mine) use ($user) {
+                $mine->whereHas('assignments', function ($a) use ($user) {
                     /*
-                     * ---- And a case they used to hold, for reading -------------
-                     *
-                     * "Once na in-unassign na, magsstay pa rin ang convo pero di
-                     * nya na ma-cha-chat, like for viewing na lang" [client, 30
-                     * September 2026].
-                     *
-                     * Keyed on their own stretch of the conversation rather than
-                     * on a record of the handover, because there is none: an
-                     * assignment's `officer_user_id` is overwritten in place, so
-                     * by the time somebody is unassigned nothing says they ever
-                     * were. `messages.handled_by_user_id` does say, on every
-                     * message they were answerable for, and it does not move.
-                     *
-                     * An officer who held a case and never wrote on it has no
-                     * stretch and no row. That is right: there is no conversation
-                     * to keep for viewing, which is what this clause preserves.
+                     * -1 rather than null: a seat with no office matches
+                     * nothing, where `where(col, null)` becomes `IS NULL` and
+                     * would match every unrouted assignment instead.
                      */
-                    $mine->orWhereHas('messageThreads.messages', fn ($m) => $m
-                        ->where('messages.handled_by_user_id', $user->id));
+                    $a->where('application_assignments.department_id', $user->department_id ?? -1);
+                    $a->where(fn ($who) => $who
+                        ->whereNull('application_assignments.officer_user_id')
+                        ->orWhere('application_assignments.officer_user_id', $user->id));
                 });
-            }
+
+                /*
+                 * ---- And a case they used to hold, for reading -------------
+                 *
+                 * "Once na in-unassign na, magsstay pa rin ang convo pero di
+                 * nya na ma-cha-chat, like for viewing na lang" [client, 30
+                 * September 2026].
+                 *
+                 * Keyed on their own stretch of the conversation rather than
+                 * on a record of the handover, because there is none: an
+                 * assignment's `officer_user_id` is overwritten in place, so
+                 * by the time somebody is unassigned nothing says they ever
+                 * were. `messages.handled_by_user_id` does say, on every
+                 * message they were answerable for, and it does not move.
+                 *
+                 * An officer who held a case and never wrote on it has no
+                 * stretch and no row. That is right: there is no conversation
+                 * to keep for viewing, which is what this clause preserves.
+                 */
+                $mine->orWhereHas('messageThreads.messages', fn ($m) => $m
+                    ->where('messages.handled_by_user_id', $user->id));
+            });
         } else {
             /*
              * An applicant who has not said anything yet still needs a way in,
@@ -2779,17 +2739,6 @@ class MessageController extends Controller
         $user = $request->user();
 
         /*
-         * Outside BPLO, a filing's conversation is its holder's alone (request
-         * of 6 October 2026; see scopeMessagesToReader). An office with a case
-         * on the filing opens it only through the officer holding that case.
-         */
-        if ($user->hasPermission(ApplicationVisibility::VIEW_ALL)
-            && CaseHolder::claimRequiredFor($user->department_id)
-        ) {
-            CaseHolder::authorizeOn($user, $application);
-        }
-
-        /*
          * An office that has been WRITTEN TO may open that filing's messages,
          * even though the filing was never routed to it.
          *
@@ -2910,8 +2859,6 @@ class MessageController extends Controller
 
         $holder = $this->holderOf($application, $departmentId);
 
-        // Unheld is writable only where no claim is required (BPLO).
-        return $holder === $user->id
-            || ($holder === null && ! CaseHolder::claimRequiredFor($departmentId));
+        return $holder === null || $holder === $user->id;
     }
 }

@@ -876,16 +876,9 @@ export function InspectionDecisionPanel({
   filingStatus,
   onChanged,
   book,
-  holderMayAct = true,
   className = '',
 }: {
   inspections: Inspection[]
-  /**
-   * Does the reader hold this office's case? False for a colleague reading a
-   * case another officer holds: they see the visits and decide none of them
-   * (request of 6 October 2026 — the API's CaseHolder refuses the same).
-   */
-  holderMayAct?: boolean
   /**
    * The FILING's status, e.g. `for_inspection`.
    *
@@ -946,7 +939,6 @@ export function InspectionDecisionPanel({
   function canAct(item: Inspection): boolean {
     if (!user) return false
     if (user.roles.includes('admin')) return true
-    if (!holderMayAct) return false
     if (user.department && item.department && user.department.code === item.department.code) return true
     return item.inspector?.id === user.id
   }

@@ -33,28 +33,10 @@ use Illuminate\Support\Collection;
  *
  * `messages.handled_by_user_id` is what carries all three. See the migration
  * 2026_09_30_000100 for why it had to be recorded per message.
- *
- * ── Since 6 October 2026 that is BPLO's rule, and only BPLO's ─────────────
- *
- * The request of that day, for every office but BPLO: an officer sees the
- * conversations of the applications assigned to them, and when a case is
- * unassigned and taken by somebody else "only the newly assigned officer can
- * access the conversation". So outside BPLO the third claim above is reversed:
- * the holder reads the WHOLE conversation, the predecessor keeps none of it,
- * and a case nobody holds is read and written by nobody in the office
- * (`App\Support\CaseHolder`). The applicant's side — one conversation,
- * unbroken, a name that changes — is the same in both.
- *
- * So the cases below come in two kinds. Those about the stretch-per-officer
- * rule run on BPLO, which kept it; they ran on City Health until that date.
- * Those about the new rule run on City Health, and say so in their names.
  */
 
-/**
- * A filed application of the owner's, routed to the health office — or to the
- * office named, which for BPLO is the assignment `submit` already made.
- */
-function tenureFiling(string $officeCode = 'CHO'): array
+/** A filed application of the owner's, routed to the health office. */
+function tenureFiling(): array
 {
     static $n = 0;
     $n++;
@@ -80,14 +62,14 @@ function tenureFiling(string $officeCode = 'CHO'): array
     attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
-    $office = Department::where('code', $officeCode)->value('id');
+    $cho = Department::where('code', 'CHO')->value('id');
 
     $assignment = ApplicationAssignment::firstOrCreate([
         'application_id' => $appId,
-        'department_id' => $office,
+        'department_id' => $cho,
     ]);
 
-    return [$appId, $assignment, $office];
+    return [$appId, $assignment, $cho];
 }
 
 /** Hand the case to this officer. */
@@ -105,30 +87,19 @@ function handTo(ApplicationAssignment $assignment, string $email): User
 /** A second seat in the health office, because the seed gives each office one. */
 function secondHealthSeat(): User
 {
-    return tenureSecondSeat('CHO', 'sanitary_officer');
-}
-
-/** A second seat in BPLO, for the cases on the rule BPLO kept (6 October 2026). */
-function secondBploSeat(): User
-{
-    return tenureSecondSeat('BPLO', 'bplo_staff');
-}
-
-function tenureSecondSeat(string $officeCode, string $role): User
-{
     $user = User::create([
-        'name' => "Second {$officeCode} Seat",
+        'name' => 'Second Health Seat',
         'first_name' => 'Second',
         'last_name' => 'Seat',
         'gender' => 'F',
-        'email' => 'second.'.strtolower($officeCode).'.'.random_int(10000, 99999).'@biztrack.local',
+        'email' => 'second.health.'.random_int(10000, 99999).'@biztrack.local',
         'mobile_number' => '09170000003',
         'password' => 'biztrack1',
-        'department_id' => Department::where('code', $officeCode)->value('id'),
+        'department_id' => Department::where('code', 'CHO')->value('id'),
         'is_active' => true,
         'email_verified_at' => now(),
     ]);
-    $user->roles()->sync(Role::where('name', $role)->pluck('id'));
+    $user->roles()->sync(Role::where('name', 'sanitary_officer')->pluck('id'));
 
     return $user->fresh();
 }
@@ -189,71 +160,21 @@ it('refuses an officer the case has been taken from', function () {
         ])->assertForbidden();
 });
 
-it('lets anyone in BPLO answer while nobody holds the case', function () {
-    [$appId, , $bplo] = tenureFiling('BPLO');
-
-    /*
-     * A filing routed to BPLO and claimed by nobody. Somebody has to be able
-     * to answer the applicant's first question, or it waits for a claim that
-     * may be waiting on the answer.
-     *
-     * Ran on City Health until 6 October 2026; BPLO is the office that kept
-     * the rule (see the case below for the others).
-     */
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'The office can still answer.', 'department_id' => $bplo,
-        ])->assertCreated();
-});
-
-it('lets nobody in an office other than BPLO write on a case before somebody holds it', function () {
+it('lets anyone in the office answer while nobody holds the case', function () {
     [$appId, , $cho] = tenureFiling();
 
     /*
-     * Request of 6 October 2026: outside BPLO the officer presses Assign to Me
-     * before they can access the application, and its conversation is part of
-     * it. Until then the office answered an unheld case; now the answer is to
-     * take it first.
+     * A filing routed to the office and claimed by nobody. Somebody has to be
+     * able to answer the applicant's first question, or it waits for a claim
+     * that may be waiting on the answer.
      */
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Nobody holds this yet.', 'department_id' => $cho,
-        ])->assertForbidden();
-    test()->getJson("/api/v1/applications/{$appId}/messages")->assertForbidden();
-});
-
-it('says on BPLO’s row whether the composer is open', function () {
-    /*
-     * On BPLO, because only there does a predecessor still OPEN the
-     * conversation to be told the composer is shut: outside BPLO they are
-     * refused it outright since 6 October 2026 (the City Health case after
-     * this one). Ran on City Health until that date.
-     */
-    [$appId, $assignment, $bplo] = tenureFiling('BPLO');
-    handTo($assignment, 'bplo@biztrack.local');
-
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Mine for now.', 'department_id' => $bplo,
+            'body' => 'The office can still answer.', 'department_id' => $cho,
         ])->assertCreated();
-
-    $office = fn (string $email) => collect(
-        test()->withHeaders(authAs($email))
-            ->getJson("/api/v1/applications/{$appId}/messages")
-            ->assertOk()->json('meta.offices')
-    )->firstWhere('department_id', $bplo);
-
-    expect($office('bplo@biztrack.local')['can_message'])->toBeTrue();
-
-    handTo($assignment, secondBploSeat()->email);
-
-    // The screen closes its composer from this, and the server refuses the
-    // POST from the same rule — see 'refuses an officer the case has been
-    // taken from' above.
-    expect($office('bplo@biztrack.local')['can_message'])->toBeFalse();
 });
 
-it('shuts an office other than BPLO out of a case it handed on, composer and conversation both', function () {
+it('says on the row whether the composer is open', function () {
     [$appId, $assignment, $cho] = tenureFiling();
     handTo($assignment, 'sanitary@biztrack.local');
 
@@ -262,39 +183,40 @@ it('shuts an office other than BPLO out of a case it handed on, composer and con
             'body' => 'Mine for now.', 'department_id' => $cho,
         ])->assertCreated();
 
-    $row = collect(test()->getJson("/api/v1/applications/{$appId}/messages")->assertOk()->json('meta.offices'))
-        ->firstWhere('department_id', $cho);
-    expect($row['can_message'])->toBeTrue();
+    $office = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson("/api/v1/applications/{$appId}/messages")
+            ->assertOk()->json('meta.offices')
+    )->firstWhere('department_id', $cho);
+
+    expect($office('sanitary@biztrack.local')['can_message'])->toBeTrue();
 
     handTo($assignment, secondHealthSeat()->email);
 
-    // "Only the newly assigned officer can access the conversation" (request
-    // of 6 October 2026): not read-only, refused.
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/applications/{$appId}/messages")
-        ->assertForbidden();
+    // The screen closes its composer from this, and the server refuses the
+    // POST from the same rule — see the test above.
+    expect($office('sanitary@biztrack.local')['can_message'])->toBeFalse();
 });
 
 // ─────────────────────────────────────────────────────────────────────────
 // Reading: one conversation, a stretch each.
 // ─────────────────────────────────────────────────────────────────────────
 
-it('gives BPLO’s successor an empty conversation, and the applicant an unbroken one', function () {
-    // BPLO's rule since 6 October 2026; it ran on City Health until then.
-    [$appId, $assignment, $bplo] = tenureFiling('BPLO');
+it('gives the successor an empty conversation, and the applicant an unbroken one', function () {
+    [$appId, $assignment, $cho] = tenureFiling();
 
-    $first = handTo($assignment, 'bplo@biztrack.local');
+    $first = handTo($assignment, 'sanitary@biztrack.local');
 
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Applicant asks the first officer.', 'department_id' => $bplo,
+            'body' => 'Applicant asks the first officer.', 'department_id' => $cho,
         ])->assertCreated();
     test()->withHeaders(authAs($first->email))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'First officer answers.', 'department_id' => $bplo,
+            'body' => 'First officer answers.', 'department_id' => $cho,
         ])->assertCreated();
 
-    $second = handTo($assignment, secondBploSeat()->email);
+    $second = handTo($assignment, secondHealthSeat()->email);
 
     /*
      * "Sa end naman ng bagong officer in charge, wala yung dating convo —
@@ -318,7 +240,7 @@ it('gives BPLO’s successor an empty conversation, and the applicant an unbroke
     // What the successor writes is theirs, and is not the predecessor's.
     test()->withHeaders(authAs($second->email))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'The new officer starts again.', 'department_id' => $bplo,
+            'body' => 'The new officer starts again.', 'department_id' => $cho,
         ])->assertCreated();
 
     expect(transcriptFor($second->email, $appId))->toContain('The new officer starts again.');
@@ -330,60 +252,16 @@ it('gives BPLO’s successor an empty conversation, and the applicant an unbroke
         ->toContain('The new officer starts again.');
 });
 
-it('gives the successor in an office other than BPLO the whole conversation, and the predecessor none of it', function () {
-    /*
-     * The case above, turned round by the request of 6 October 2026: "only
-     * the newly assigned officer can access the conversation", all of it,
-     * chosen over a stretch each. The applicant's side does not change.
-     */
+it('keeps the released case in the old officer’s inbox', function () {
     [$appId, $assignment, $cho] = tenureFiling();
-
     $first = handTo($assignment, 'sanitary@biztrack.local');
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Applicant asks the first officer.', 'department_id' => $cho,
-        ])->assertCreated();
     test()->withHeaders(authAs($first->email))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'First officer answers.', 'department_id' => $cho,
+            'body' => 'Something was said here.', 'department_id' => $cho,
         ])->assertCreated();
 
-    $second = handTo($assignment, secondHealthSeat()->email);
-
-    // The successor opens on everything said before them.
-    expect(transcriptFor($second->email, $appId))
-        ->toContain('Applicant asks the first officer.')
-        ->toContain('First officer answers.');
-
-    // The predecessor is refused it, not shown their part.
-    test()->withHeaders(authAs($first->email))
-        ->getJson("/api/v1/applications/{$appId}/messages")
-        ->assertForbidden();
-
-    test()->withHeaders(authAs($second->email))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'The new officer carries on.', 'department_id' => $cho,
-        ])->assertCreated();
-
-    // The applicant sees one conversation, unbroken, both officers in it.
-    expect(transcriptFor('owner@biztrack.local', $appId))
-        ->toContain('Applicant asks the first officer.')
-        ->toContain('First officer answers.')
-        ->toContain('The new officer carries on.');
-});
-
-it('keeps the released case in the old BPLO officer’s inbox', function () {
-    // BPLO's rule since 6 October 2026; it ran on City Health until then.
-    [$appId, $assignment, $bplo] = tenureFiling('BPLO');
-    $first = handTo($assignment, 'bplo@biztrack.local');
-
-    test()->withHeaders(authAs($first->email))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Something was said here.', 'department_id' => $bplo,
-        ])->assertCreated();
-
-    handTo($assignment, secondBploSeat()->email);
+    handTo($assignment, secondHealthSeat()->email);
 
     /*
      * The row stays, keyed on their own stretch of the conversation rather
@@ -394,24 +272,6 @@ it('keeps the released case in the old BPLO officer’s inbox', function () {
 
     expect($row)->not->toBeNull()
         ->and($row['messages_count'])->toBe(1);
-});
-
-it('drops a handed-on case from the old officer’s inbox in an office other than BPLO', function () {
-    // The case above, outside BPLO since 6 October 2026: the inbox lists only
-    // what the officer holds now, whatever they wrote on it before.
-    [$appId, $assignment, $cho] = tenureFiling();
-    $first = handTo($assignment, 'sanitary@biztrack.local');
-
-    test()->withHeaders(authAs($first->email))
-        ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Something was said here.', 'department_id' => $cho,
-        ])->assertCreated();
-    expect(inboxFor($first->email)->firstWhere('application_id', $appId))->not->toBeNull();
-
-    $second = handTo($assignment, secondHealthSeat()->email);
-
-    expect(inboxFor($first->email)->firstWhere('application_id', $appId))->toBeNull()
-        ->and(inboxFor($second->email)->firstWhere('application_id', $appId))->not->toBeNull();
 });
 
 it('does not keep a case the old officer never wrote on', function () {
@@ -429,29 +289,23 @@ it('does not keep a case the old officer never wrote on', function () {
     expect(inboxFor($first->email)->firstWhere('application_id', $appId))->toBeNull();
 });
 
-it('leaves BPLO’s messages from before anybody held the case readable by whoever takes it', function () {
-    /*
-     * BPLO's alone since 6 October 2026, and it ran on City Health until then.
-     * Outside BPLO nobody writes on an unheld case any more (see 'lets nobody
-     * in an office other than BPLO write…'), and the holder reads the whole
-     * conversation in any case, so there is no unowned stretch to lose.
-     */
-    [$appId, $assignment, $bplo] = tenureFiling('BPLO');
+it('leaves an unclaimed office’s messages readable by whoever takes the case', function () {
+    [$appId, $assignment, $cho] = tenureFiling();
 
     /*
      * Written before anybody claimed it: nobody's stretch owns these. The
      * office opens it - an owner may answer an unclaimed office but not start
      * a conversation with one (checklist 2026-09-27, apply item 23).
      */
-    test()->withHeaders(authAs('bplo@biztrack.local'))
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Any questions before we start?'])
         ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
-            'body' => 'Asked before anybody picked it up.', 'department_id' => $bplo,
+            'body' => 'Asked before anybody picked it up.', 'department_id' => $cho,
         ])->assertCreated();
 
-    $officer = handTo($assignment, secondBploSeat()->email);
+    $officer = handTo($assignment, 'sanitary@biztrack.local');
 
     /*
      * Hiding these would lose the applicant's first question to the office —
