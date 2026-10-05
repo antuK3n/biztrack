@@ -117,7 +117,7 @@ class ChatbotFacts
             • My Permits: the permits issued to the owner's businesses.
             • Messages: write to the office handling an application, or send BPLO a general enquiry.
             • Drafts: applications started and not yet submitted.
-            • Profile (from the avatar): account details and Payment History, where receipts are kept.
+            • Profile (from the avatar): account details and Payment History, where invoices are kept.
             Numbers: a tracking number reads like BIZ-2026-00123 (an application in progress), a permit number like MCB-2026-000001, a business account number like BP-2026-0001.
             TEXT;
     }
@@ -225,7 +225,7 @@ class ChatbotFacts
 
         return "PAYING\nPay once BPLO has approved the application and its Tax Order of Payment is ready: open the application in Track and press Pay Online. {$online} "
             .'You can also pay in person at the BPLO counter at Malabon City Hall, and BPLO marks the bill paid in BizTrack. '
-            .'Receipts are kept in Payment History on Profile.';
+            .'Invoices are kept in Payment History on Profile.';
     }
 
     /*

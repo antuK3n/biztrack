@@ -2823,18 +2823,19 @@ function CecFields({
 
          - "Application for Renewal / New Business" — the officer reads the BPLO
            form beside this sheet;
-         - "Tax Order of Payment and Official Receipt" — BizTrack ISSUES both.
-           Payment is in-system only and `PaymentController::receipt` renders the
-           PDF, so an upload would ask the applicant to fetch a document this
-           system produced and hand it straight back — and CENRO can open it
-           regardless (client, 9 September 2026);
+         - "Tax Order of Payment and Official Receipt" — BizTrack issues the
+           Tax Order of Payment and an invoice (`PaymentController::receipt`),
+           which CENRO can open regardless (client, 9 September 2026). The
+           Official Receipt comes from the City Treasurer, not BizTrack, so
+           this item no longer rests only on what BizTrack produces;
          - "Business permit" — a new business does not have one; it is what this
            filing is FOR;
          - "Certificate of Environmental Compliance (Previous Year)" — renewals
            only, and renewals are not built yet.
 
         If any of that stops being true — an offline payment method, an office
-        that cannot reach the receipt — this is the block to bring back.
+        that cannot reach the invoice, CENRO wanting the Treasurer's Official
+        Receipt — this is the block to bring back.
       */}
 
       <DenrRequirementsPanel data={data} />

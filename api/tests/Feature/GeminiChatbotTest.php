@@ -301,6 +301,8 @@ it('grounds Gemini in BizTrack\'s own permits, rules and switches, and in nothin
         ->toContain('3 working days for simple, 7 working days for complex, 20 working days for highly technical')
         ->toContain('Monday to Friday, 08:00 to 17:00')
         ->toContain('The receipt is issued at once.')
+        ->toContain('Invoices are kept in Payment History on Profile.')
+        ->not->toContain('Receipts are kept')
         ->not->toContain('simulated')
         ->not->toContain('no real money')
         ->toContain('BPLO counter at Malabon City Hall')
