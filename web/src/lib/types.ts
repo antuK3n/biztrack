@@ -745,6 +745,13 @@ export interface FeeLineItem {
 }
 
 export interface FeeAssessment {
+  /**
+   * The Tax Order of Payment's own number, `TOP-YYYY-NNNNNN`
+   * (Numbering::taxOrderReference on the API) — never the tracking ID, which
+   * names the filing, not the bill. Absent on the fee preview, which is
+   * computed and thrown away, so no bill exists to number.
+   */
+  reference_number?: string
   line_items: FeeLineItem[]
   total_amount: string
   /**

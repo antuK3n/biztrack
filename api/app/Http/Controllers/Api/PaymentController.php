@@ -16,6 +16,7 @@ use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\Numbering;
 use App\Support\OtherRequirementRules;
 use App\Support\PaymentMode;
 use App\Support\PdfFile;
@@ -70,6 +71,8 @@ class PaymentController extends Controller
 
         return response()->json([
             'data' => [
+                // Same shape as ApplicationResource's fee_assessment, number included.
+                'reference_number' => Numbering::taxOrderReference($fee),
                 'line_items' => $fee->line_items,
                 'total_amount' => $fee->total_amount,
             ],

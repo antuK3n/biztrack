@@ -349,7 +349,8 @@ function FeeDialog({ app, onClose }: { app: Application; onClose: () => void }) 
           </button>
         </div>
         <p className="display-serif mt-4 text-lg text-ink">
-          Reference No: <span className="ml-3">{app.tracking_id}</span>
+          {/* The bill's own number, not the tracking ID; a dash until a bill exists. */}
+          Reference No: <span className="tnum ml-3">{fee?.reference_number ?? '—'}</span>
         </p>
         <div className="display-serif mt-5 flex items-baseline justify-between border-b border-ink/40 pb-2 text-lg text-ink">
           <span>Description</span>

@@ -72,6 +72,25 @@ export async function makeBilledApplication(page: Page): Promise<number> {
         lines: [{ psic_code_id: psic[0].id, category: 'retailer', capitalization: 500000 }],
       },
     })
+    /*
+     * Submit refuses a filing missing a required document (RequiredDocuments,
+     * whose list turns on the business's own circumstances), so upload every
+     * business-permit document rather than guess which apply — real PDF
+     * bytes, since the API sniffs `mimes:pdf`.
+     */
+    const pdf = '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n'
+    const businessType = permitTypes.find((pt: { code: string }) => pt.code === 'BUSINESS')
+    for (const dt of businessType.document_types as { id: number; code: string }[]) {
+      const body = new FormData()
+      body.append('document_type_id', String(dt.id))
+      body.append('file', new File([pdf], `${dt.code}.pdf`, { type: 'application/pdf' }))
+      const up = await fetch(`/api/v1/applications/${app.id}/documents`, {
+        method: 'POST',
+        headers: { Accept: owner.Accept, Authorization: owner.Authorization },
+        body,
+      })
+      if (!up.ok) throw new Error(`uploading ${dt.code} answered ${up.status}: ${await up.text()}`)
+    }
     await call(`/api/v1/applications/${app.id}/submit`, owner, {})
 
     const queue = await call(

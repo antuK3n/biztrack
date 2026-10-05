@@ -14,6 +14,8 @@ class FeeAssessment extends Model
     protected $casts = [
         'line_items' => 'array',
         'total_amount' => 'decimal:2',
+        // Read as a date by Numbering::taxOrderReference, which takes its year.
+        'assessed_at' => 'datetime',
     ];
 
     public function application(): BelongsTo

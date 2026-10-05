@@ -400,7 +400,8 @@ export function PayPage() {
       <ProtoCard className="px-8 py-7 sm:px-10">
         <h1 className="text-xl font-bold text-ink">Tax Order of Payment</h1>
         <p className="display-serif mt-4 text-lg text-ink">
-          Reference No: <span className="ml-3">{app.tracking_id}</span>
+          {/* The bill's own number, not the tracking ID; a dash until a bill exists. */}
+          Reference No: <span className="tnum ml-3">{assessment?.reference_number ?? '—'}</span>
         </p>
         <div className="display-serif mt-6 flex items-baseline justify-between border-b border-ink/40 pb-2 text-lg text-ink">
           <span>Description</span>

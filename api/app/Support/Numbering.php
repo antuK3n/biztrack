@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Application;
 use App\Models\Business;
+use App\Models\FeeAssessment;
 use App\Models\Payment;
 use App\Models\Permit;
 use Illuminate\Database\Eloquent\Builder;
@@ -51,6 +52,35 @@ class Numbering
         return sprintf('PAY-%d-%06d', $year, self::next(
             Payment::query(), 'reference_number', "PAY-{$year}-"
         ));
+    }
+
+    /**
+     * The Tax Order of Payment's own number — `TOP-YYYY-NNNNNN`.
+     *
+     * The bill printed the filing's tracking ID as its Reference No., so the
+     * bill and the filing read as one record (Ken, October 2026: "Reference
+     * No. should not be the same as the Tracking ID"). The tracking ID names
+     * the filing; this names the bill raised on it.
+     *
+     * DERIVED, not issued: the year the assessment was made (`assessed_at`,
+     * else when the row was written) and the `fee_assessments` id, padded to
+     * six. Unlike the numbers above it needs no column and no "one past the
+     * highest" lookup — the row id is already unique — so it adds nothing to
+     * the frozen schema. It follows whichever row is the filing's current
+     * assessment: `assessFees` re-prices that one row in place, so the number
+     * holds, and a filing whose assessment is replaced by a new row takes the
+     * new row's number, which is right — it is a different bill. If BPLO ever wants these
+     * to run 1, 2, 3 within a year, this becomes a stored, issued number like
+     * `paymentReference`, and that needs a column.
+     *
+     * Every screen that shows the number gets it from here, through the API;
+     * the web never builds it.
+     */
+    public static function taxOrderReference(FeeAssessment $fee): string
+    {
+        $at = $fee->assessed_at ?? $fee->created_at ?? now();
+
+        return sprintf('TOP-%d-%06d', $at->year, $fee->id);
     }
 
     /**

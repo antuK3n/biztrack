@@ -11,6 +11,7 @@ use App\Models\UnbilledPermitFee;
 use App\Support\AmendableFields;
 use App\Support\ApplicationVisibility;
 use App\Support\ClearanceStanding;
+use App\Support\Numbering;
 use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
 use App\Support\ReturnTargets;
@@ -452,7 +453,11 @@ class ApplicationResource extends JsonResource
                     })->values()
                 : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment
-                ? $this->feeAssessmentFor($request)
+                ? [
+                    // The bill's own number, never the tracking ID (Numbering::taxOrderReference).
+                    'reference_number' => Numbering::taxOrderReference($this->feeAssessment),
+                    ...$this->feeAssessmentFor($request),
+                ]
                 : null,
             /*
              * What an amendment costs, for the review sheet's Assessed Fee.
