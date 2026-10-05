@@ -160,7 +160,7 @@ it('does not hand one office a permit certificate issued by another', function (
     // Fire finishes: paperwork approved, visit booked, visit passed, permit out.
     $workflow = app(WorkflowService::class);
     $workflow->approveClearance($fsicRow->fresh());
-    $visit = $workflow->scheduleClearanceInspection($fsicRow->fresh(), now()->addWeekdays(2));
+    $visit = $workflow->scheduleClearanceInspection($fsicRow->fresh(), now());
     $workflow->recordInspection($visit, InspectionResult::Passed, 'All clear.');
 
     expect($app->fresh()->permits()->count())->toBe(1, 'the fire permit was not issued');
