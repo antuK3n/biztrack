@@ -119,7 +119,8 @@ class ApplicationController extends Controller
         // it ApplicationListResource emits a null recipient and the request
         // composer cannot name who it is writing to (item 89).
         $query = Application::with([
-            'business:id,name', 'applicant:id,name', 'permitTypes:id,code,name',
+            // `ban` for the register's Business Account No. column.
+            'business:id,name,ban', 'applicant:id,name', 'permitTypes:id,code,name',
             // The issued certificates, for the Track row to say "Suspended" on
             // a Mayor's Permit whose pivot still reads approved (5 October 2026).
             'permits:id,application_id,permit_type_id,status,suspended_for_permit_type_id',
@@ -164,7 +165,7 @@ class ApplicationController extends Controller
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
                 $sub->whereLike('tracking_id', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%")->orWhereLike('ban', "%{$q}%"));
             });
         }
 

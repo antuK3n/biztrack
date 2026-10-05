@@ -236,6 +236,8 @@ class BusinessStatusController extends Controller
             ->map(fn (Business $b) => [
                 'id' => $b->id,
                 'name' => $b->name,
+                // The Business Account Number, for the Records table's column.
+                'ban' => $b->ban,
                 /*
                  * The business number under the name on the table — and it is
                  * a FILING's, which is the thing to be careful about.

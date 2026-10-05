@@ -661,7 +661,8 @@ export interface ApplicationListItem {
    * blanked the page. It hides the same way it hid last time — the newest rows
    * are clean, so nothing shows until a list runs deep enough to reach one.
    */
-  business: { id: number; name: string } | null
+  /** `ban`: the Business Account Number (BP-YYYY-NNNN), when loaded. */
+  business: { id: number; name: string; ban?: string | null } | null
   /**
    * Who filed it. Null when the account has been removed — `User` soft-deletes
    * and its filings stay, the same way `business` above outlives its register
@@ -3139,6 +3140,8 @@ export interface OwnerHistoryEntry {
 export interface AdminBusiness {
   id: number
   name: string
+  /** The Business Account Number (BP-YYYY-NNNN). */
+  ban?: string | null
   /**
    * The business number under the name on the table — a FILING's `BIZ-2026-…`.
    *
