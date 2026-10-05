@@ -107,7 +107,7 @@ function issueClearanceOnRenewal(Application $app, string $code): void
 
     $visit = $workflow->scheduleClearanceInspection(
         $workflow->pivotFor($app->fresh(), $code),
-        now()->addDays(3),
+        now(),
     );
     $workflow->recordInspection($visit, InspectionResult::Passed, 'Compliant.');
 }
