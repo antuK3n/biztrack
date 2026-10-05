@@ -820,6 +820,26 @@ the Business Permit alone, and no office would ever see the premises.
 with "Tick the other permits this business needs." If BPLO names a case for
 zero, the refusal is lifted (`WorkflowService::refuseUnsetOtherPermits`) and
 the filing closes on payment.
+
+## A33. Whose name goes on the permit's "Name of Owner": the proprietor, or whoever filed?
+
+**The question.** The application form names the owner (items 10–13 for a
+sole proprietor, item 12 for a corporation's president), and the person who
+files online may be someone else — a corporation's filer is not its president.
+Which of the two should the certificate print?
+
+**Why it matters.** Since 5 October 2026 an approved change of ownership
+rewrites the named owner, and the permit has to print the new one even when
+the buyer has no BizTrack account yet. Before that the permit printed the
+filing account's name, so an approved transfer reissued a certificate still
+naming the seller.
+
+**What we assumed meanwhile.** The permit prints the named owner from the
+application form, and the filing account's name only where no owner was ever
+named (`PermitFace::ownerName`). Permits already issued keep the name they were
+signed with. If BPLO wants the filer instead, that one method changes, and an
+approved change of ownership would then have to move the account before the
+reissued permit is printed.
 ---
 
 # B. For MISD — systems, data, hosting, accounts

@@ -6,6 +6,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
+use App\Models\BusinessOwner;
 use App\Models\DocumentType;
 use App\Models\OfficerRequest;
 use App\Models\OfficerRequestResponse;
@@ -299,6 +300,19 @@ it('finds a permit by its BAN and by its owner name', function () {
 
     $byOwner = collect(registerRows(['q' => $permit->business->owner->last_name]))->pluck('id')->all();
     expect($byOwner)->toContain($permit->id);
+});
+
+it('finds a permit by the named owner it prints, not only the account holder', function () {
+    // After a change of ownership the two differ, and the permit prints the
+    // named owner (PermitFace::ownerName).
+    $permit = Permit::whereHas('business')->firstOrFail();
+    BusinessOwner::updateOrCreate(
+        ['business_id' => $permit->business_id, 'is_primary' => true],
+        ['surname' => 'Zabarte', 'given_name' => 'Ligaya'],
+    );
+
+    $bySurname = collect(registerRows(['q' => 'Zabarte']))->pluck('id')->all();
+    expect($bySurname)->toContain($permit->id);
 });
 
 /**

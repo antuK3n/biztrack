@@ -19,4 +19,15 @@ class BusinessOwner extends Model
     {
         return $this->belongsTo(Business::class);
     }
+
+    /**
+     * "Given Middle Surname Suffix", the order `User::fullName()` prints, so a
+     * permit reads the same whichever of the two it names. Empty when no part
+     * is held.
+     */
+    public function fullName(): string
+    {
+        return trim(collect([$this->given_name, $this->middle_name, $this->surname, $this->suffix])
+            ->filter()->implode(' '));
+    }
 }

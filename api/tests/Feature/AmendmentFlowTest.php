@@ -2,6 +2,7 @@
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
+use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\ApplicationAmendment;
 use App\Models\ApplicationAssignment;
@@ -11,6 +12,7 @@ use App\Models\ApplicationPermitType;
 use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Business;
+use App\Models\BusinessOwner;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\Permit;
@@ -879,7 +881,7 @@ it('carries a new zoning clearance when an amendment changes the trade or enlarg
 
     // Nor is a new owner: Annex A 63, a change of tenants or proprietors is
     // not a change of occupancy.
-    [$ownerId] = amendmentFiling(['owner_name' => 'Juana Dela Cruz']);
+    [$ownerId] = amendmentFiling(['owner_surname' => 'Dela Cruz', 'owner_given_name' => 'Juana']);
     attachRequiredDocuments($ownerId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$ownerId}/submit")->assertOk();
     expect($codes($ownerId))->toBe([PermitType::OUTCOME_CODE]);
@@ -1024,7 +1026,8 @@ it('lays the amendable details out as FO-003’s four boxes', function () {
         'line_of_business', 'other_amendment',
         'address_house_bldg_no', 'address_street', 'address_barangay_id',
         'address_pin', 'address_details',
-        'owner_name', 'ownership_details',
+        'owner_surname', 'owner_given_name', 'owner_middle_name', 'owner_suffix',
+        'ownership_details',
         'trade_name', 'trade_name_details',
     ] as $field) {
         expect($rows->firstWhere('field', $field))->not->toBeNull("missing: {$field}");
@@ -1145,16 +1148,20 @@ it('does not re-rate a change of trade, and says which detail the fee is for', f
         ->and($fee->description)->toContain('Change of line of business');
 });
 
-it('records a change of ownership and tells BPLO to move the account', function () {
+it('names the new owner on the business and on the reissued permit, and tells BPLO to move the account', function () {
     /*
-     * The permit prints `business->owner->fullName()` — the ACCOUNT's name —
-     * and the new owner may hold no BizTrack account at all. Client's
-     * decision, 21 September 2026: *"Write the owner's name, BPLO moves the
-     * account."* So approval must NOT reassign the business on its own, and
-     * must not let the outstanding half go unsaid.
+     * Request of 5 October 2026: approving a change of owner "should replace
+     * the owner name of the business and the name in the permit itself". It
+     * did neither — the name was recorded and the permit kept printing the
+     * account holder, who is the seller.
+     *
+     * The ACCOUNT still does not move on its own: only BPLO can say which
+     * account is the buyer's, and the buyer may have none.
      */
     [$appId, $businessId] = amendmentFiling([
-        'owner_name' => 'Maria Reyes',
+        'owner_surname' => 'Reyes',
+        'owner_given_name' => 'Maria',
+        'owner_middle_name' => 'Santos',
         'ownership_details' => 'Sold to the buyer named on the attached deed.',
     ]);
 
@@ -1167,17 +1174,29 @@ it('records a change of ownership and tells BPLO to move the account', function 
         ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
-    // The account did NOT move on its own.
-    expect(Business::findOrFail($businessId)->owner_user_id)->toBe($ownerBefore);
+    // The business names the new owner, part by part.
+    $named = BusinessOwner::where('business_id', $businessId)->where('is_primary', true)->firstOrFail();
+    expect($named->surname)->toBe('Reyes')
+        ->and($named->given_name)->toBe('Maria')
+        ->and($named->middle_name)->toBe('Santos');
 
-    // The request is on the record, so the counter can act on it.
+    // The reissued permit prints them, and the one it superseded does not.
+    $reissued = Permit::where('application_id', $appId)->firstOrFail();
+    expect($reissued->issued_details['owner_name'])->toBe('Maria Santos Reyes')
+        ->and($reissued->priorPermit->status)->toBe(PermitStatus::Superseded);
+
+    // Every part was applied, not merely recorded.
     expect(
         ApplicationAmendment::where('application_id', $appId)
-            ->where('field', 'owner_name')
-            ->value('new_value')
-    )->toBe('Maria Reyes');
+            ->whereIn('field', ['owner_surname', 'owner_given_name', 'owner_middle_name'])
+            ->whereNull('applied_at')
+            ->exists()
+    )->toBeFalse();
 
-    // And BPLO was told, by name, that the transfer is theirs to finish.
+    // The account did NOT move on its own…
+    expect(Business::findOrFail($businessId)->owner_user_id)->toBe($ownerBefore);
+
+    // …and BPLO was told, by name, that moving it is theirs to do.
     $notice = AppNotification::where('user_id', $bplo->id)
         ->where('type', 'amendment')
         ->latest('id')
@@ -1185,7 +1204,44 @@ it('records a change of ownership and tells BPLO to move the account', function 
 
     expect(AppNotification::where('user_id', $bplo->id)->count())
         ->toBeGreaterThan($noticesBefore)
-        ->and($notice->body)->toContain('Maria Reyes');
+        ->and($notice->body)->toContain('Maria Santos Reyes');
+});
+
+it('replaces the named owner whole, so the previous owner’s middle name does not carry over', function () {
+    /*
+     * A change of ownership names a different PERSON. A part the new owner
+     * left blank is cleared, not kept — otherwise "Maria Reyes" would inherit
+     * the seller's middle name and suffix.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'owner_surname' => 'Reyes',
+        'owner_given_name' => 'Maria',
+    ]);
+    BusinessOwner::updateOrCreate(
+        ['business_id' => $businessId, 'is_primary' => true],
+        ['surname' => 'Seller', 'given_name' => 'Old', 'middle_name' => 'Kept', 'suffix' => 'Jr.', 'gender' => 'M'],
+    );
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $named = BusinessOwner::where('business_id', $businessId)->where('is_primary', true)->firstOrFail();
+    expect($named->fullName())->toBe('Maria Reyes')
+        ->and($named->middle_name)->toBeNull()
+        ->and($named->suffix)->toBeNull()
+        ->and($named->gender)->toBeNull();
+});
+
+it('refuses to submit a new owner without both a surname and a given name', function () {
+    [$appId] = amendmentFiling(['owner_surname' => 'Reyes']);
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonPath('errors.requested_changes.0', 'The Given Name field is required.');
 });
 
 it('recomposes line1, so a later business edit cannot undo the move', function () {

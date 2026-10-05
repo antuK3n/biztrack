@@ -5233,37 +5233,37 @@ class WorkflowService
     }
 
     /**
-     * A CHANGE OF OWNERSHIP is the one amendment approval cannot finish.
+     * A CHANGE OF OWNERSHIP leaves one thing for a person: moving the account.
      *
-     * Client's decision, 21 September 2026: *"Write the owner's name, BPLO
-     * moves the account."* The permit prints `business->owner->fullName()` —
-     * the ACCOUNT's name — and the new owner may hold no BizTrack account at
-     * all, so `AmendableFields` records `owner_name` and applies nothing.
+     * Approval now writes the new owner as the business's named owner, and
+     * the reissued permit prints them (see AmendableFields and
+     * `PermitFace::ownerName`). What it cannot do is decide which BizTrack
+     * account is the new owner's — they may hold none — so the business is
+     * still FILED by the seller's account until BPLO moves it. That is the
+     * half this tells BPLO about.
      *
-     * Which leaves a gap that has to be closed by a person, and a gap closed
-     * by a person is a gap that needs telling. Without this the approval is
-     * silent, the reissued certificate prints the OLD owner, and the only
-     * record that anything is outstanding is a row in
-     * `application_amendments` nobody is looking at.
+     * The notice used to add that the certificate still named the previous
+     * owner. True when the permit printed the account's name; false since it
+     * prints the named owner, so the clause went rather than mislead.
      *
      * Sent to BPLO rather than the applicant: it is BPLO's action, on BPLO's
      * screen, and the applicant has already been told their amendment was
-     * approved.
-     *
-     * The link is Owner Status, which is where the transfer lives:
+     * approved. The link is Owner Status, where
      * `BusinessStatusController::transferOwner` takes the new owner's e-mail
-     * and a reason, and the page offers it per business.
+     * and a reason.
      *
-     * This used to say the transfer did not exist. True when written, false
-     * once it shipped, and left standing long enough to mislead — see the note
-     * on AmendableFields for what that cost.
+     * Reads the four name parts, or a legacy `owner_name` row on a filing made
+     * before the parts existed.
      */
     private function tellBploToMoveTheAccount(Application $app): void
     {
-        $owner = $app->requestedChanges()
-            ->where('field', 'owner_name')
+        $requested = $app->requestedChanges()
             ->whereNotNull('new_value')
-            ->value('new_value');
+            ->pluck('new_value', 'field')
+            ->all();
+
+        $owner = AmendableFields::requestedOwnerName($requested)
+            ?? ($requested['owner_name'] ?? null);
 
         if ($owner === null) {
             return;
@@ -5280,9 +5280,7 @@ class WorkflowService
                 $officer,
                 'amendment',
                 'An approved amendment needs the account moved',
-                "{$name} was transferred to {$owner}. The permit prints the account holder’s "
-                .'name, so reassign the business on the Reassign screen — until then the '
-                .'certificate still names the previous owner.',
+                "{$name} was transferred to {$owner}.",
                 '/staff/admin/owners',
             );
         }
@@ -5360,7 +5358,7 @@ class WorkflowService
             'issued_at' => now(),
             'issued_by_user_id' => Auth::id(),
             'issued_details' => PermitFace::capture(
-                $app->business?->fresh()?->load(['address.barangay', 'owner', 'lines.psicCode'])
+                $app->business?->fresh()?->load(['address.barangay', 'owner', 'owners', 'lines.psicCode'])
             ),
         ]);
 
@@ -5550,12 +5548,10 @@ class WorkflowService
             /*
              * `applied_at` only where something was actually written.
              *
-             * `owner_name` is declared `writes: null` — the permit prints the
-             * ACCOUNT holder's name and BPLO moves the account by hand — so
-             * stamping it marked a transfer as done while the business still
-             * belonged to the previous account. The old value is still
-             * recorded: "recorded, pending the transfer" is a real state and
-             * a null `applied_at` is how it reads.
+             * A note blank writes nothing, and neither does a legacy
+             * `owner_name` row (recorded, never applied — see AmendableFields),
+             * so stamping either would claim a change that did not happen. The
+             * old value is still recorded.
              */
             $applied = AmendableFields::writesToRecord($row->field);
             $row->update([

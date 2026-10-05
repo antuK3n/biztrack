@@ -394,7 +394,13 @@ class PermitController extends Controller
                         ->orWhereLike('ban', "%{$q}%")
                         ->orWhereHas('owner', fn ($o) => $o
                             ->whereLike('first_name', "%{$q}%")
-                            ->orWhereLike('last_name', "%{$q}%")))
+                            ->orWhereLike('last_name', "%{$q}%"))
+                        // The named owner too: it is the name the permit
+                        // prints (PermitFace::ownerName), and after a change
+                        // of ownership it is not the account holder's.
+                        ->orWhereHas('owners', fn ($o) => $o
+                            ->whereLike('given_name', "%{$q}%")
+                            ->orWhereLike('surname', "%{$q}%")))
                     ->orWhereHas('application', fn ($a) => $a->whereLike('tracking_id', "%{$q}%"))
                     ->orWhereHas('permitType', fn ($t) => $t
                         ->whereLike('name', "%{$q}%")
