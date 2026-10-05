@@ -247,15 +247,15 @@ test.describe('the administrator’s own shelf', () => {
     }
 
     /*
-     * The segment shows the ABBREVIATION and announces the full name: "Admin"
-     * is only legible because two other segments sit beside it, and a screen
-     * reader has no such context.
+     * The segment shows the ABBREVIATION and announces the full name: "Super
+     * Admin" is only legible because two other segments sit beside it, and a
+     * screen reader has no such context.
      *
      * The count is a badge when anything is unread and absent otherwise — a
      * permanent "0" beside every shelf teaches the eye to skip the number
      * that matters.
      */
-    await expect(shelf).toHaveText(/^Admin\d*$/)
+    await expect(shelf).toHaveText(/^Super Admin\d*$/)
   })
 })
 
