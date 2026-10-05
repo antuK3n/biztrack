@@ -6,6 +6,7 @@ use App\Enums\ApplicationType;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
+use Illuminate\Support\Carbon;
 
 /**
  * The answers an office sheet carries that nobody types.
@@ -327,6 +328,29 @@ final class OfficeFormAnswers
         //
         // OCCUPANCY's own "application_type" is Full vs Partial occupancy — a
         // real applicant decision, not the new/renewal the system already knows.
+
+        if ($permitTypeCode === 'OCCUPANCY') {
+            /*
+             * Date of Completion: the day the applicant submits this sheet,
+             * today while it is still being filled in — the filing date's own
+             * rule above, read off the Occupancy clearance's row because the
+             * sheet is submitted at the clearance stage, after payment.
+             *
+             * It was a free date box (request of 6 October 2026: "what do you
+             * mean I can set it to anything"). Derived keys always win, so a
+             * date typed by an older client is ignored on read rather than
+             * trusted. If OBO wants the building's actual completion date
+             * instead, this is the line that changes — and it becomes a
+             * question for them, not a box anyone may fill freely.
+             */
+            $submitted = $application->permitTypes()
+                ->where('code', 'OCCUPANCY')
+                ->first()?->pivot?->submitted_at;
+
+            $derived['completion_date'] = ($submitted !== null
+                ? Carbon::parse($submitted)
+                : now())->toDateString();
+        }
 
         return $derived + $formData;
     }

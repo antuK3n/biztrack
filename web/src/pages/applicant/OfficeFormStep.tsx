@@ -851,7 +851,7 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('building_storeys')) missing.push('No. of Storeys')
     if (!has('building_units')) missing.push('No. of Units')
     if (!has('total_floor_area_sqm')) missing.push('Total Floor Area')
-    if (!has('completion_date')) missing.push('Date of Completion')
+    // Date of Completion is not asked: the API sets it (see the field).
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
@@ -3268,17 +3268,25 @@ function OccupancyFields({
             />
             <CarriedTag field="total_floor_area_sqm" />
           </label>
-          <label className="block shrink-0">
-            <FieldLabel required>Date of Completion</FieldLabel>
-            <input
-              type="date"
-              value={get(data, 'completion_date')}
-              onChange={(e) => set('completion_date', e.target.value)}
-              readOnly={ro}
-              className={`${inputCls} w-[11rem]`}
-            />
-            <CarriedTag field="completion_date" />
-          </label>
+          {/*
+            Set by the system, never typed: the day this sheet is submitted,
+            and today while it is being filled in (OfficeFormAnswers::derive).
+            It was a free date box, which let an applicant claim any date at
+            all — request of 6 October 2026.
+          */}
+          <DerivedField
+            className="shrink-0"
+            label={
+              <>
+                Date of Completion
+                <AutoTag />
+              </>
+            }
+            value={(() => {
+              const raw = get(data, 'completion_date')
+              return raw === '' ? '' : formatDate(raw)
+            })()}
+          />
         </div>
       </section>
     </div>
