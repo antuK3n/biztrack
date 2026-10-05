@@ -124,6 +124,15 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
         $workflow->submitClearanceForm($app, $type);
     }
 
+    /*
+     * And each routed office has taken it. The owner may write to an office
+     * only once an officer there holds the filing (checklist 2026-09-27,
+     * apply item 23), and the message cases below start with the owner.
+     */
+    foreach (ApplicationAssignment::where('application_id', $appId)->with('department')->get() as $routed) {
+        takeFiling($appId, $routed->department->code);
+    }
+
     return ['id' => $appId, 'business_id' => $businessId];
 }
 
@@ -699,17 +708,22 @@ it('names the office every message turn belongs to', function () {
  * office written to gets the message, and an office nobody wrote to gets
  * nothing. Widening the addressee list is only safe because that stayed shut.
  */
-it('lets an applicant write to any office, and only that office reads it', function () {
+it('refuses an applicant writing to an office nobody there has taken it for, and only the addressed office reads the rest', function () {
     $app = fileRoutedApplication('Scoping Wrong Office Cafe', ['BUSINESS', 'SANITARY']);
     $owner = authAs('owner@biztrack.local');
 
-    // The fire office holds no assignment on this filing. Writing to it is now
-    // accepted rather than refused.
+    /*
+     * The fire office holds no assignment on this filing. Writing to it was
+     * accepted for a while; it is refused now that an owner writes only to an
+     * office whose officer has taken the filing (checklist 2026-09-27, apply
+     * item 23) - and nobody in the fire office has.
+     */
     test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$app['id']}/messages", [
             'body' => 'Let me talk to the fire office.', 'department_id' => officeId('BFP'),
         ])
-        ->assertCreated();
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'You can message this office once an officer takes your filing.');
 
     foreach (['CHO', 'BPLO'] as $code) {
         test()->withHeaders($owner)
@@ -718,15 +732,14 @@ it('lets an applicant write to any office, and only that office reads it', funct
             ])->assertCreated();
     }
 
-    // The office written to can read its own words, despite no assignment.
-    $fire = collect(test()->withHeaders(authAs('fire@biztrack.local'))
+    // The health office reads its own question and nothing addressed to BPLO.
+    $health = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data'))
         ->pluck('body');
 
-    expect($fire)->toContain('Let me talk to the fire office.')
-        // And nothing addressed to anybody else.
-        ->not->toContain('Question for CHO.')
-        ->not->toContain('Question for BPLO.');
+    expect($health)->toContain('Question for CHO.')
+        ->not->toContain('Question for BPLO.')
+        ->not->toContain('Let me talk to the fire office.');
 });
 
 /*
@@ -765,9 +778,9 @@ it('offers an applicant the offices that are on their filing', function () {
         ->and($offices->count())->toBeLessThan(Department::count())
         ->and($offices->pluck('can_message')->all())->each->toBeTrue();
 
-    // Route the fire office and it joins the list, because now somebody there
-    // would actually be shown what is written.
-    assignOffice($app['id'], 'BFP');
+    // Route the fire office and it joins the list once an officer there takes
+    // it, because now somebody there would actually be shown what is written.
+    takeFiling($app['id'], 'BFP');
 
     $offices = collect(
         test()->withHeaders(authAs('owner@biztrack.local'))

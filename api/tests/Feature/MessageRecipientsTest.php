@@ -74,6 +74,20 @@ function recipientsSeat(string $code, string $email, bool $active = true): User
     return $seat;
 }
 
+/**
+ * An office opens the conversation. Where nobody there holds the filing the
+ * owner may only answer one the office started (checklist 2026-09-27, apply
+ * item 23), so the unclaimed-office cases below begin with the office.
+ */
+function recipientsOpen(int $appId, string $email, string $office): void
+{
+    authAs($email);
+    test()->postJson("/api/v1/applications/{$appId}/messages", [
+        'body' => 'Opening the conversation.',
+        'department_id' => recipientsDept($office),
+    ])->assertCreated();
+}
+
 function recipientsWrite(int $appId, string $body, ?string $office = null): void
 {
     authAs('owner@biztrack.local');
@@ -86,6 +100,8 @@ function recipientsWrite(int $appId, string $body, ?string $office = null): void
 it('never tells the owner about the message they just sent', function () {
     Bus::fake([SendOwnerUpdateEmail::class]);
     $appId = recipientsFiling();
+    recipientsOpen($appId, 'bplo@biztrack.local', 'BPLO');
+    recipientsOpen($appId, 'sanitary@biztrack.local', 'CHO');
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $mailToOwner = fn () => Bus::dispatched(SendOwnerUpdateEmail::class, fn ($job) => $job->owner->is($owner))->count();
     $before = $owner->notifications()->count();
@@ -101,6 +117,7 @@ it('never tells the owner about the message they just sent', function () {
 
 it('tells the active accounts of the office written to when nobody there holds the case', function () {
     $appId = recipientsFiling();
+    recipientsOpen($appId, 'sanitary@biztrack.local', 'CHO');
     $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     $sanitary = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
     $otherCho = recipientsSeat('CHO', 'recipients.cho2@biztrack.local');

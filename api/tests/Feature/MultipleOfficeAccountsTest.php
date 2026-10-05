@@ -1,6 +1,5 @@
 <?php
 
-use Illuminate\Support\Facades\DB;
 use App\Enums\ClearanceStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
@@ -8,6 +7,7 @@ use App\Models\Department;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /*
  * An office is a place, not a person.
@@ -120,8 +120,16 @@ it('gives every account in an office the same inbox', function () {
     extraOfficer('CHO', 'sanitary_officer', 'cho.second@biztrack.local');
     $appId = filingRoutedTo(['CHO', 'BFP'], 'DTI-93001');
 
-    // The applicant writes to the City Health Office.
+    /*
+     * The applicant writes to the City Health Office, answering it: nobody
+     * there has taken the filing, so the owner could not have started this
+     * conversation (checklist 2026-09-27, apply item 23), but may reply to one
+     * the office opened.
+     */
     $cho = Department::where('code', 'CHO')->value('id');
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Please send the water result.'])
+        ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
             'body' => 'Attaching the water potability result.',
@@ -153,6 +161,11 @@ it('lets either account in an office answer as that office', function () {
     $appId = filingRoutedTo(['CHO'], 'DTI-93002');
     $cho = Department::where('code', 'CHO')->value('id');
 
+    // The office opens the conversation; nobody there holds the filing, so
+    // the owner may answer but not start it (apply item 23).
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Any questions on the sanitary permit?'])
+        ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Question.', 'department_id' => $cho])
         ->assertCreated();

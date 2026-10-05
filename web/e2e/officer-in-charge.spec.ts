@@ -623,6 +623,30 @@ test.describe('the business owner is told who holds their filing', () => {
     await panel.getByRole('link', { name: /message an office about this application/i }).click()
     await expect(page).toHaveURL(/\/messages\?application=777/)
   })
+
+  /*
+   * Before any office has taken the filing there is nobody to message
+   * (checklist 2026-09-27, apply item 23): no link, and no Messages panel
+   * opening on an empty conversation. The server refuses the message too.
+   */
+  test('offers no messaging until an officer takes the filing', async ({ page }) => {
+    await page.route('**/api/v1/applications/777', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { ...FILING, assignments: FILING.assignments.map((a) => ({ ...a, officer: null })) },
+        }),
+      })
+    })
+    await page.goto('/applications/777')
+
+    const panel = page.locator('section[aria-labelledby="handling-heading"]')
+    await expect(panel).toBeVisible({ timeout: 30_000 })
+    await expect(panel.getByRole('listitem').filter({ hasText: OFFICE.name })).toContainText('Not yet taken')
+    await expect(panel.getByRole('link', { name: /message an office about this application/i })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Messages', exact: true })).toHaveCount(0)
+  })
 })
 
 /* ── Reassign on Officer Assignment: Scope is the permits held ────────────── */

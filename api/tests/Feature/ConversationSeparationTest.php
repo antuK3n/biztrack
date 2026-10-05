@@ -5,6 +5,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\Message;
+use App\Models\MessageThread;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 
@@ -53,7 +54,7 @@ function separationApplication(string $businessName, string $registrationNumber)
 /** Put an office on a filing so the owner is allowed to address it. */
 it('keeps a message to the health office out of an unrelated office inbox', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70001');
-    $choId = assignOffice($appId, 'CHO');
+    $choId = takeFiling($appId, 'CHO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
@@ -92,7 +93,7 @@ it('keeps a message to the health office out of an unrelated office inbox', func
  */
 it('keeps a conversation with one office out of BPLO', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70008');
-    $choId = assignOffice($appId, 'CHO');
+    $choId = takeFiling($appId, 'CHO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
@@ -116,7 +117,7 @@ it('keeps a conversation with one office out of BPLO', function () {
  */
 it('keeps every conversation out of a seat that holds no office', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70009');
-    $choId = assignOffice($appId, 'CHO');
+    $choId = takeFiling($appId, 'CHO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
@@ -161,7 +162,16 @@ it('offers the owner the offices that are actually on the filing', function () {
 
     authAs('owner@biztrack.local');
 
-    // submit() hands the form to BPLO and to nobody else.
+    /*
+     * submit() hands the form to BPLO and to nobody else, and BPLO is offered
+     * once an officer there takes it - not while it waits in the queue
+     * (checklist 2026-09-27, apply item 23).
+     */
+    expect($this->getJson("/api/v1/applications/{$appId}/messages")
+        ->assertOk()->json('meta.offices'))->toBe([]);
+
+    takeFiling($appId, 'BPLO');
+
     $offices = $this->getJson("/api/v1/applications/{$appId}/messages")
         ->assertOk()->json('meta.offices');
 
@@ -169,9 +179,9 @@ it('offers the owner the offices that are actually on the filing', function () {
         ->and(collect($offices)->pluck('code'))->not->toContain('CPDO')
         ->and(collect($offices)->every(fn ($o) => $o['can_message']))->toBeTrue();
 
-    // Route two more, and they appear - there is somebody to read them now.
-    $cho = assignOffice($appId, 'CHO');
-    $bfp = assignOffice($appId, 'BFP');
+    // Route two more, and they appear once taken - there is somebody to read them now.
+    $cho = takeFiling($appId, 'CHO');
+    $bfp = takeFiling($appId, 'BFP');
 
     $offices = $this->getJson("/api/v1/applications/{$appId}/messages")
         ->assertOk()->json('meta.offices');
@@ -196,7 +206,7 @@ it('offers the owner the offices that are actually on the filing', function () {
 
 it('keeps an office reply out of the other offices on the same filing', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70002');
-    $choId = assignOffice($appId, 'CHO');
+    $choId = takeFiling($appId, 'CHO');
     assignOffice($appId, 'BFP');
 
     authAs('owner@biztrack.local');
@@ -262,6 +272,8 @@ it('reads only the conversation the panel opens on when no office is named', fun
 it('never mixes the conversations of two different filings', function () {
     [$firstId, $firstTracking] = separationApplication('ABC Store', 'DTI-70003');
     [$secondId, $secondTracking] = separationApplication('XYZ Cafe', 'DTI-70004');
+    takeFiling($firstId, 'BPLO');
+    takeFiling($secondId, 'BPLO');
 
     expect($firstTracking)->not->toBe($secondTracking);
 
@@ -281,6 +293,8 @@ it('never mixes the conversations of two different filings', function () {
 it('names the business and the filing on each inbox row so two are told apart', function () {
     [$firstId, $firstTracking] = separationApplication('ABC Store', 'DTI-70005');
     [$secondId, $secondTracking] = separationApplication('XYZ Cafe', 'DTI-70006');
+    takeFiling($firstId, 'BPLO');
+    takeFiling($secondId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$firstId}/messages", ['body' => 'One.'])->assertCreated();
@@ -301,6 +315,7 @@ it('names the business and the filing on each inbox row so two are told apart', 
 
 it('keeps the general enquiry apart from the filing conversations', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70007');
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'About my filing.'])
@@ -355,11 +370,24 @@ it('lets an office read a filing it was written to, and lists it once routed', f
         ->and(ApplicationAssignment::where('application_id', $appId)
             ->where('department_id', $cho)->exists())->toBeFalse();
 
+    /*
+     * The owner can no longer start it: nobody in City Health holds the
+     * filing (checklist 2026-09-27, apply item 23). The conversation below is
+     * one already in the register from before that rule, written straight to
+     * the table, and reading it is what this test is about.
+     */
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
         'body' => 'Health question on an unrouted filing.',
         'department_id' => $cho,
-    ])->assertCreated();
+    ])->assertStatus(422)
+        ->assertJsonPath('message', 'You can message this office once an officer takes your filing.');
+
+    Message::create([
+        'thread_id' => MessageThread::create(['application_id' => $appId, 'department_id' => $cho])->id,
+        'sender_user_id' => Application::find($appId)->applicant_user_id,
+        'body' => 'Health question on an unrouted filing.',
+    ]);
 
     // The health office can open it and finds its own conversation.
     $seen = test()->withHeaders(authAs('sanitary@biztrack.local'))

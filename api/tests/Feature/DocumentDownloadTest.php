@@ -204,6 +204,9 @@ it('keeps message attachments behind the same participant check', function () {
     // for is getting the filing off the draft so a message can be posted on it;
     // the participant check under test does not read the status at all.
     Application::findOrFail($appId)->update(['status' => 'for_approval']);
+    // And taken at BPLO: an owner writes to an office once an officer there
+    // holds the filing (checklist 2026-09-27, apply item 23).
+    takeFiling($appId, 'BPLO');
 
     $attachmentId = test()->withHeaders($owner)->post("/api/v1/applications/{$appId}/messages", [
         'body' => 'Here is the signed copy.',

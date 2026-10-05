@@ -618,6 +618,13 @@ export function ApplicationDetailPage() {
       officer: a.officer?.name ?? null,
       withheld: a.officer_withheld === true,
     }))
+  /*
+   * Messaging opens once an officer has taken the filing for some office
+   * (checklist 2026-09-27, apply item 23). Before that nobody is there to
+   * answer, and the server refuses the message and offers no office - so the
+   * link and the panel wait too, rather than opening on an empty conversation.
+   */
+  const taken = handling.some((row) => row.officer !== null || row.withheld)
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -979,13 +986,15 @@ export function ApplicationDetailPage() {
                 * inside it, so one link is right here — a link per office would
                 * be six links to the same screen.
                 */}
-              <Link
-                to={`/messages?application=${app.id}`}
-                className="inline-flex items-center gap-1.5 font-semibold text-royal hover:underline"
-              >
-                <MessageIcon size={16} />
-                Message an office about this application
-              </Link>
+              {taken && (
+                <Link
+                  to={`/messages?application=${app.id}`}
+                  className="inline-flex items-center gap-1.5 font-semibold text-royal hover:underline"
+                >
+                  <MessageIcon size={16} />
+                  Message an office about this application
+                </Link>
+              )}
             </p>
           </section>
         )}
@@ -1356,7 +1365,7 @@ export function ApplicationDetailPage() {
         */}
 
         {/* ── Messages thread (v2) ─────────────────────────────────────── */}
-        {status !== 'draft' && <MessagesPanel applicationId={app.id} />}
+        {status !== 'draft' && taken && <MessagesPanel applicationId={app.id} />}
       </div>
 
       {showFees && <FeeDialog app={app} onClose={() => setShowFees(false)} />}

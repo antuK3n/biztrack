@@ -206,7 +206,20 @@ class MessageController extends Controller
              * the list to their own office above.
              */
             ->filter(fn (Department $d) => $user->hasPermission(ApplicationVisibility::VIEW_ALL)
-                || $application->assignments->contains('department_id', $d->id));
+                || $application->assignments->contains(
+                    /*
+                     * ---- And only once somebody there has TAKEN it ------
+                     *
+                     * "There should be no messaging when there is no officer
+                     * assigned yet" (checklist 2026-09-27, apply item 23). An
+                     * office whose queue still holds the filing unclaimed is
+                     * not offered; it appears the moment an officer of that
+                     * office takes the case. The loop below still puts back
+                     * an office that already has a conversation here, so a
+                     * thread the office started stays answerable.
+                     */
+                    fn ($a) => $a->department_id == $d->id && $a->officer_user_id !== null
+                ));
 
         foreach ($this->readableThreads($application, $user) as $thread) {
             if ($thread->department && ! $offices->has($thread->department_id)) {
@@ -252,6 +265,23 @@ class MessageController extends Controller
             $office !== null && $this->readsThread($user, $office->id),
             403,
             'That office is not handling this application, so it cannot be messaged about it.'
+        );
+
+        /*
+         * ---- An owner writes once an officer of that office has the case --
+         *
+         * The rule behind visibleOffices() hiding an untaken office (checklist
+         * 2026-09-27, apply item 23), enforced here because a hidden composer
+         * stops nothing that posts by hand. A conversation that already exists
+         * stays open to a reply: the office started it, or it predates the
+         * rule, and either way somebody there is waiting on the answer.
+         */
+        abort_unless(
+            $user->hasPermission(ApplicationVisibility::VIEW_ALL)
+                || $this->holderOf($application, $office->id) !== null
+                || $application->messageThreads()->where('department_id', $office->id)->exists(),
+            422,
+            'You can message this office once an officer takes your filing.'
         );
 
         /*
@@ -532,14 +562,18 @@ class MessageController extends Controller
         } else {
             /*
              * An applicant who has not said anything yet still needs a way in,
-             * so their filed applications appear whether or not a thread exists.
+             * so a filing appears once an officer has taken it for some office,
+             * whether or not a thread exists. Before that there is nobody to
+             * write to (checklist 2026-09-27, apply item 23; see
+             * visibleOffices()), and a row would open on a conversation with
+             * no office in it. It used to be every filing past draft.
+             *
              * A conversation that already exists always appears, draft or not —
-             * a draft can be messaged about before it is filed, and dropping the
-             * row would lose the thread rather than hide it.
+             * dropping the row would lose the thread rather than hide it.
              */
             $query->where(fn ($q) => $q
                 ->whereHas('messageThreads')
-                ->orWhere('status', '!=', 'draft'));
+                ->orWhereHas('assignments', fn ($a) => $a->whereNotNull('application_assignments.officer_user_id')));
         }
 
         $this->applyNarrow($query, $user, $narrow);

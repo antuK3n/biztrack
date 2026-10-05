@@ -81,6 +81,30 @@ function assignOffice(int $applicationId, string $departmentCode): int
     return $department->id;
 }
 
+/**
+ * Route a filing to an office AND have that office's seeded officer take it,
+ * answering with the office's id.
+ *
+ * An owner may message an office about a filing only once an officer there
+ * holds it (checklist 2026-09-27, apply item 23), so a fixture in which the
+ * owner writes first has to put somebody on the case. assignOffice() alone
+ * leaves the queue unclaimed, which is the state the owner is refused in.
+ */
+function takeFiling(int $applicationId, string $departmentCode): int
+{
+    $departmentId = assignOffice($applicationId, $departmentCode);
+    $officer = User::where('department_id', $departmentId)
+        ->where('is_active', true)
+        ->orderBy('id')
+        ->firstOrFail();
+
+    ApplicationAssignment::where('application_id', $applicationId)
+        ->where('department_id', $departmentId)
+        ->update(['officer_user_id' => $officer->id, 'assigned_at' => now()]);
+
+    return $departmentId;
+}
+
 function portalFor(string $email): string
 {
     $user = User::where('email', $email)->first();

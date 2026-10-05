@@ -292,7 +292,14 @@ it('does not keep a case the old officer never wrote on', function () {
 it('leaves an unclaimed office’s messages readable by whoever takes the case', function () {
     [$appId, $assignment, $cho] = tenureFiling();
 
-    // Written before anybody claimed it: nobody's stretch owns these.
+    /*
+     * Written before anybody claimed it: nobody's stretch owns these. The
+     * office opens it - an owner may answer an unclaimed office but not start
+     * a conversation with one (checklist 2026-09-27, apply item 23).
+     */
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Any questions before we start?'])
+        ->assertCreated();
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$appId}/messages", [
             'body' => 'Asked before anybody picked it up.', 'department_id' => $cho,

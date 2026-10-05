@@ -3,6 +3,8 @@
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
+use App\Models\Message;
+use App\Models\MessageThread;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
@@ -71,12 +73,15 @@ function requirementFilingForInbox(): int
     // Filed, so it carries a tracking number and an office can see it at all.
     attachRequiredDocuments($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // And taken at BPLO, so the owner may write to it (apply item 23).
+    takeFiling($appId, 'BPLO');
 
     return $appId;
 }
 
 it('lists the applicant’s own conversations, newest first', function () {
     $appId = ownerApplicationId();
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Is my zoning page enough?'])
@@ -100,6 +105,7 @@ it('lists the applicant’s own conversations, newest first', function () {
 
 it('never shows one applicant the conversations of another', function () {
     $appId = ownerApplicationId();
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Private note.'])
@@ -120,7 +126,7 @@ it('names the conversation after the applicant for a reviewing officer', functio
      * caseload now [client, 28 September 2026], which means an unrouted filing
      * is on nobody's. Writing to an office used to be enough to put it there.
      */
-    assignOffice($appId, 'BPLO');
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
@@ -172,9 +178,22 @@ it('leaves the responsible office null while nothing is routed yet', function ()
     // naming one would be inventing it.
     $appId = ownerApplicationId();
 
+    /*
+     * The owner can no longer write here - nobody holds it (apply item 23) -
+     * so the conversation is one from before that rule, put straight in the
+     * table. Such threads are in the register and still get an inbox row.
+     */
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Early question.'])
-        ->assertCreated();
+        ->assertStatus(422);
+    Message::create([
+        'thread_id' => MessageThread::create([
+            'application_id' => $appId,
+            'department_id' => Department::where('code', 'BPLO')->value('id'),
+        ])->id,
+        'sender_user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
+        'body' => 'Early question.',
+    ]);
 
     $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
         ->firstWhere('application_id', $appId);
@@ -182,12 +201,22 @@ it('leaves the responsible office null while nothing is routed yet', function ()
     expect($row['responsible_office'])->toBeNull();
 });
 
-it('offers the applicant a way in before anyone has said anything', function () {
+it('offers the applicant a way in once an officer takes the filing, before anyone has said anything', function () {
     $appId = ownerApplicationId();
 
     authAs('owner@biztrack.local');
     attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    /*
+     * Filed but waiting in BPLO's queue: there is nobody to write to yet, so
+     * no row (checklist 2026-09-27, apply item 23). It used to appear the
+     * moment the filing left draft.
+     */
+    expect(collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
+        ->firstWhere('application_id', $appId))->toBeNull();
+
+    takeFiling($appId, 'BPLO');
 
     $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
         ->firstWhere('application_id', $appId);
@@ -217,8 +246,9 @@ it('names the offices an applicant may talk to on each inbox row', function () {
      * those clearances — and the point of this test is that the row names the
      * offices that are ON the filing, so it needs more than one of them.
      */
-    assignOffice($appId, 'CHO');
-    assignOffice($appId, 'BFP');
+    takeFiling($appId, 'BPLO');
+    takeFiling($appId, 'CHO');
+    takeFiling($appId, 'BFP');
 
     $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
         ->firstWhere('application_id', $appId);
@@ -254,6 +284,7 @@ it('names the offices an applicant may talk to on each inbox row', function () {
 
 it('counts each office’s conversation separately on the inbox row', function () {
     $appId = ownerApplicationId();
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'First question.'])
@@ -282,6 +313,7 @@ it('shows an officer which filing and which office a conversation belongs to', f
     // that, not by the internal id.
     attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    takeFiling($appId, 'BPLO');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
         ->assertCreated();
 
@@ -305,6 +337,7 @@ it('shows an officer which filing and which office a conversation belongs to', f
  */
 it('never counts the reader’s own turns as unread to them', function () {
     $appId = ownerApplicationId();
+    takeFiling($appId, 'BPLO');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Is my zoning page enough?'])
@@ -325,6 +358,7 @@ it('counts what the other side wrote as unread until the conversation is opened'
     authAs('owner@biztrack.local');
     attachRequiredDocuments($appId);
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    takeFiling($appId, 'BPLO');
     $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
         ->assertCreated();
 
@@ -420,8 +454,8 @@ it('never calls a conversation unread because ANOTHER office has mail on it', fu
     $appId = requirementFilingForInbox();
     // Both offices are handed the filing, or neither has an inbox row on it to
     // be wrongly marked unread - an office's page is its caseload now.
-    $choId = assignOffice($appId, 'CHO');
-    $bfpId = assignOffice($appId, 'BFP');
+    $choId = takeFiling($appId, 'CHO');
+    $bfpId = takeFiling($appId, 'BFP');
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [
