@@ -1794,9 +1794,23 @@ function LinesStep({
          * Replaces rather than appends, which is the whole of this step's
          * one-trade rule. See the long note above on why `lines` stays an
          * array even though this wizard writes exactly one.
+         *
+         * Products / Services is carried over from the trade being replaced.
+         * It used to be blanked, and since the map waits for it
+         * (`mapLockReason`), changing the trade locked the map over a pin
+         * and a barangay that were both still there: Ken found he could not
+         * pin any more and read it as the barangay being lost. Changing the
+         * trade is a correction to step ① alone; the barangay and the pin
+         * stay, and the zoning box judges the pin again for the new trade.
          */
         onPick={(code) =>
-          onChange([{ psic_code_id: code.id, line_of_business: '', products_services: '' }])
+          onChange([
+            {
+              psic_code_id: code.id,
+              line_of_business: '',
+              products_services: lines[0]?.products_services ?? '',
+            },
+          ])
         }
         label="Search for the one line of business you are registering"
         required
