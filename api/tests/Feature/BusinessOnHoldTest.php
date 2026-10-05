@@ -185,7 +185,7 @@ it('holds money that lands while the owner is blacklisted, and moves it on when 
         ->and(holdBusinessPermit($app)?->status)->toBe(PermitStatus::Active);
 });
 
-it('moves on a held filing of the owner\'s other business when the blacklisting is lifted from one', function () {
+it('moves on a held filing of the owner\'s other business when the owner is reinstated on Owner Status', function () {
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
     $first = Business::where('owner_user_id', $owner->id)->orderBy('id')->firstOrFail();
     $app = holdFiling(holdSecondBusiness());
@@ -194,8 +194,15 @@ it('moves on a held filing of the owner\'s other business when the blacklisting 
     holdPaid($payment);
     expect($app->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
 
-    // Setting the first back to Active lifts the owner, and the cascade with it.
-    holdSetStatus($first, 'active')->assertOk();
+    /*
+     * A business stays locked while its owner is blacklisted (Mike's Owner
+     * Status, client 5 October 2026), so the way back is the owner's row:
+     * reinstating the person returns the businesses the blacklisting
+     * suspended, and the filing held on one of them moves on.
+     */
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/owners/{$owner->id}/status", ['status' => 'active', 'reason' => 'Finding withdrawn.'])
+        ->assertOk();
 
     expect($app->business->fresh()->status)->toBe('active')
         ->and($app->fresh()->status)->toBe(ApplicationStatus::Approved);

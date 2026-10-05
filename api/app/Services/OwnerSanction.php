@@ -140,6 +140,9 @@ class OwnerSanction
                 ]);
 
                 $this->workflow->restorePermitsForBusiness($business);
+                // And what the blacklisting held moves on: a payment that
+                // landed during it, a filing that became ready during it.
+                $this->workflow->releaseHeldFilings($business);
             }
 
             return $back->values();
