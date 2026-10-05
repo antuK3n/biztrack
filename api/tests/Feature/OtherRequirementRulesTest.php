@@ -61,26 +61,21 @@ it('raises a system requirement for each rule the declared flags turn on', funct
     $app = filingDeclaring(['sells_liquor', 'employees_need_health_certificates']);
 
     $raised = ruleRequestsOn($app);
-    expect($raised->pluck('system_key')->all())->toBe(['rule.liquor_permit', 'rule.health_certificates']);
-
-    $liquor = $raised->firstWhere('system_key', 'rule.liquor_permit');
-    expect($liquor->requested_by_user_id)->toBeNull()
-        ->and($liquor->request_type)->toBe('message')
-        ->and($liquor->title)->toBe('Liquor Permit')
-        ->and($liquor->department_id)->toBe(Department::where('code', 'BPLO')->value('id'))
-        ->and($liquor->description)->toContain('Sec. 3T.04');
+    // The Liquor Permit is told, not asked (5 October 2026), so only Health Certificates are raised.
+    expect($raised->pluck('system_key')->all())->toBe(['rule.health_certificates']);
 
     // The Health Certificates are the City Health Office's to see, and a file.
     $health = $raised->firstWhere('system_key', 'rule.health_certificates');
-    expect($health->request_type)->toBe('document')
+    expect($health->requested_by_user_id)->toBeNull()
+        ->and($health->request_type)->toBe('document')
         ->and($health->department_id)->toBe(Department::where('code', 'CHO')->value('id'));
 
     // Each is on the record as the system's doing, naming the article behind it.
     $audits = AuditLog::where('action', 'request.raised_by_system')
         ->where('changes->application_id', $app->id)
         ->get();
-    expect($audits)->toHaveCount(2)
-        ->and($audits->pluck('changes.rule')->all())->toContain('Revenue Code Art. T, Sec. 3T.01');
+    expect($audits)->toHaveCount(1)
+        ->and($audits->pluck('changes.rule')->all())->toContain('Revenue Code Art. 4D (Sanitary Inspection and Health Certificate Fees)');
 });
 
 it('raises nothing for a business that declared none of them', function () {
@@ -170,7 +165,7 @@ it('hands the wizard the same list beside the fee estimate', function () {
         ->json('data.other_requirements');
 
     expect(array_column($preview, 'key'))->toBe(['liquor_permit', 'tobacco_permit', 'ambulant_vendor'])
-        ->and(array_column($preview, 'asks'))->toBe([true, false, false])
+        ->and(array_column($preview, 'asks'))->toBe([false, false, false])
         ->and($preview[0])->toHaveKeys(['title', 'article', 'summary']);
 
     // And nothing declared is nothing listed — the key is always present.
