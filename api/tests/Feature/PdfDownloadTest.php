@@ -22,16 +22,21 @@ use Smalot\PdfParser\Parser;
  */
 function brokenFlateStreams(string $pdf): int
 {
+    /*
+     * Each stream is read by the /Length its own dictionary declares. Trimming
+     * line breaks off the end instead, as this once did, cut a stream whose
+     * compressed bytes happen to end in 0x0A or 0x0D and reported a sound
+     * certificate as broken (Mike's office certificates, 5 October 2026).
+     */
     $broken = 0;
-    preg_match_all('/>>\s*stream\r?\n/', $pdf, $matches, PREG_OFFSET_CAPTURE);
-    foreach ($matches[0] as [$match, $at]) {
-        $dictAt = max(0, $at - 800);
-        if (! str_contains(substr($pdf, $dictAt, $at - $dictAt), '/FlateDecode')) {
+    preg_match_all('/<<((?:(?!<<|>>).|<<(?:(?!<<|>>).)*>>)*)>>\s*stream\r?\n/s', $pdf, $matches, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+    foreach ($matches as $m) {
+        [$whole, $at] = $m[0];
+        $dict = $m[1][0];
+        if (! str_contains($dict, '/FlateDecode') || ! preg_match('/\/Length\s+(\d+)(?!\s+\d+\s+R)/', $dict, $len)) {
             continue;
         }
-        $bodyAt = $at + strlen($match);
-        $end = strpos($pdf, 'endstream', $bodyAt);
-        if ($end !== false && @gzuncompress(rtrim(substr($pdf, $bodyAt, $end - $bodyAt), "\r\n")) === false) {
+        if (@gzuncompress(substr($pdf, $at + strlen($whole), (int) $len[1])) === false) {
             $broken++;
         }
     }
