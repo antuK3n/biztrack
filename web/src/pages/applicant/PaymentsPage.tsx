@@ -195,7 +195,7 @@ export function PaymentHistory() {
     setReceiptBusy({ id: p.id, act: 'save' })
     setReceiptError(null)
     try {
-      await payments.receipt(p.id, `receipt-${p.reference_number}.pdf`)
+      await payments.receipt(p.id, `invoice-${p.reference_number}.pdf`)
     } catch (err) {
       setReceiptError(toApiError(err).message)
     } finally {
@@ -251,7 +251,7 @@ export function PaymentHistory() {
         <EmptyState
           icon={PaymentsIcon}
           title="No payments yet"
-          description="Once an application reaches the payment stage and you pay, receipts appear here."
+          description="Once an application reaches the payment stage and you pay, invoices appear here."
         />
       ) : (
         <>
@@ -320,6 +320,11 @@ export function PaymentHistory() {
                   {/*
                     * Two actions, and the reading one leads.
                     *
+                    * "Invoice", not "Receipt" — request of 6 October 2026: the
+                    * system must not issue an Official Receipt. Only the City
+                    * Treasurer does, so what BizTrack prints for a payment is
+                    * an invoice, and the buttons name it that.
+                    *
                     * "Receipt" used to be a single button that saved a file,
                     * which answered the rarer need. Checking a charge is what
                     * brings somebody to this screen, and it should cost a look
@@ -348,13 +353,13 @@ export function PaymentHistory() {
                         <SearchIcon size={14} />
                         {receiptBusy?.id === p.id && receiptBusy.act === 'view'
                           ? 'Opening…'
-                          : 'View Receipt'}
+                          : 'View Invoice'}
                       </button>
                       <button
                         type="button"
                         onClick={() => downloadReceipt(p)}
                         disabled={receiptBusy?.id === p.id}
-                        aria-label={`Save receipt ${p.reference_number} as a PDF`}
+                        aria-label={`Save invoice ${p.reference_number} as a PDF`}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
                       >
                         <DownloadIcon size={14} />
