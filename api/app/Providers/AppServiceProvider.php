@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Services\Sms\LogSmsChannel;
 use App\Services\Sms\SmsChannel;
+use App\Services\Sms\SmsGateChannel;
 use App\Support\ReportViews;
 use App\Support\SystemSwitches;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -25,9 +26,10 @@ class AppServiceProvider extends ServiceProvider
         // System switches read once per request or job (SystemSwitches::stored).
         $this->app->scoped(SystemSwitches::MEMO, fn () => new \ArrayObject);
 
-        // SMS channel driver — swap via SMS_DRIVER env (only `log` in the demo).
+        // SMS channel driver, chosen by SMS_DRIVER: `log` (default) or `smsgate`.
         $this->app->bind(SmsChannel::class, function () {
             return match (config('services.sms.driver', env('SMS_DRIVER', 'log'))) {
+                'smsgate' => SmsGateChannel::fromConfig(),
                 default => new LogSmsChannel,
             };
         });

@@ -3,8 +3,8 @@
 namespace App\Services\Sms;
 
 /**
- * Outbound SMS abstraction (master plan §5.5). One interface, swappable for a
- * real gateway (Twilio/Semaphore) later with no call-site change.
+ * Outbound SMS (master plan §5.5), chosen by SMS_DRIVER. send() throws when
+ * the text did not go, so the job sending it can retry.
  */
 interface SmsChannel
 {
