@@ -6,6 +6,7 @@ use App\Models\ApplicationDocument;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\User;
+use App\Support\FsicRequirements;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -125,4 +126,73 @@ it('refuses a reviewer with no department at all', function () {
 
     authAs('sanitary@biztrack.local');
     $this->get("/api/v1/documents/{$doc['id']}/download")->assertStatus(403);
+});
+
+/*
+ * Checklist, Manage Applications 3: "each office should only view the
+ * application form for their office only".
+ *
+ * An upload into an office sheet's own checklist — BFP's FSIC_REQ_* rows here —
+ * carries no `permit_type_id`, so the list filter and the download both let it
+ * through to every office routed to the filing. The CHO officer on a filing
+ * BFP also works was handed BFP's files, and could download each.
+ */
+
+/** A file in BFP's FSIC checklist on RxCare's filing, which CHO and BFP both work. */
+function fsicChecklistFile(): array
+{
+    ['application' => $app] = scopedDocument();
+
+    $path = "private/documents/{$app->id}/fsmr.pdf";
+    Storage::disk('local')->put($path, '%PDF-1.4 fire safety maintenance report');
+    $doc = ApplicationDocument::create([
+        'application_id' => $app->id,
+        'document_type_id' => FsicRequirements::documentType(FsicRequirements::CODE_PREFIX.'FSMR')->id,
+        'original_filename' => 'fsmr.pdf',
+        'stored_path' => $path,
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 39,
+    ]);
+
+    return ['application' => $app, 'document' => $doc];
+}
+
+/** The ids of the attachments GET /applications/{id} hands this reader. */
+function listedDocumentIds(string $email, Application $app): array
+{
+    return collect(test()->withHeaders(authAs($email))
+        ->getJson("/api/v1/applications/{$app->id}")->assertOk()->json('data.documents'))
+        ->pluck('id')->all();
+}
+
+it('does not list one office’s checklist file to another office on the same filing', function () {
+    ['application' => $app, 'document' => $doc] = fsicChecklistFile();
+    $shared = ApplicationDocument::where('application_id', $app->id)
+        ->whereHas('documentType', fn ($t) => $t->where('code', 'BRGY_CLEARANCE'))
+        ->value('id');
+
+    // CHO keeps the shared barangay clearance and loses BFP's file.
+    expect(listedDocumentIds('sanitary@biztrack.local', $app))
+        ->toContain($shared)
+        ->not->toContain($doc->id);
+
+    // BFP, whose checklist it is, keeps it — and so do BPLO, the super admin
+    // and the applicant who uploaded it.
+    foreach (['fire@biztrack.local', 'bplo@biztrack.local', 'admin@biztrack.local', $app->applicant->email] as $reader) {
+        expect(listedDocumentIds($reader, $app))->toContain($doc->id, $shared);
+    }
+});
+
+it('refuses the download of one office’s checklist file to another office', function () {
+    ['application' => $app, 'document' => $doc] = fsicChecklistFile();
+
+    authAs('sanitary@biztrack.local');
+    $this->get("/api/v1/documents/{$doc->id}/download")
+        ->assertForbidden()
+        ->assertJsonPath('message', 'You may not access this document.');
+
+    foreach (['fire@biztrack.local', 'bplo@biztrack.local', 'admin@biztrack.local', $app->applicant->email] as $reader) {
+        authAs($reader);
+        $this->get("/api/v1/documents/{$doc->id}/download")->assertOk();
+    }
 });

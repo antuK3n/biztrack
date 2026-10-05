@@ -176,18 +176,19 @@ class DocumentController extends Controller
          * one typed id away from a Fire Safety Inspection Certificate the list
          * correctly declined to show them. Document ids are sequential.
          *
-         * Attachments with no permit type are shared requirements and are
-         * untouched: `readsOfficeSheet` is only consulted when there is an
-         * office to consult it about.
+         * An upload into an office sheet's checklist (FSIC_REQ_* and the
+         * like) is that office's too, though it carries no permit type; the
+         * list hid nothing of it and this door let it through (checklist,
+         * Manage Applications 3). Shared requirements are untouched: they
+         * belong to no one office. `readsDocument` is the one predicate the
+         * list and this door both ask.
          */
         abort_unless(
-            $document->permit_type_id === null
-                || ApplicationVisibility::readsOfficeSheet(
-                    $request->user(),
-                    $document->loadMissing('permitType')->permitType?->issuing_department_id,
-                ),
+            ApplicationVisibility::readsDocument($request->user(), $document),
             403,
-            'This certificate was filed with another office.'
+            $document->permit_type_id !== null
+                ? 'This certificate was filed with another office.'
+                : 'You may not access this document.'
         );
 
         abort_unless(Storage::disk('local')->exists($document->stored_path), 404, 'File not found.');

@@ -74,6 +74,27 @@ final class SheetRequirements
         ];
     }
 
+    /**
+     * The sheet a document type is an upload INTO, by its code — or null for
+     * a requirement every office on the filing shares.
+     *
+     * Read off the code's prefix rather than off `accepts()`, because a slot
+     * can leave a checklist while files filed into it stay on the register:
+     * the FSIC certificate-of-occupancy rows went on 5 October 2026 and their
+     * uploads are still BFP's evidence, not everybody's. CEC's sheet has one
+     * slot and no prefix constant, so it is matched by that slot.
+     */
+    public static function sheetOf(string $documentTypeCode): ?string
+    {
+        return match (true) {
+            str_starts_with($documentTypeCode, ZoningRequirements::CODE_PREFIX) => 'ZONING',
+            str_starts_with($documentTypeCode, FsicRequirements::CODE_PREFIX) => 'FSIC',
+            str_starts_with($documentTypeCode, OccupancyRequirements::CODE_PREFIX) => 'OCCUPANCY',
+            CecRequirements::accepts($documentTypeCode) => 'CEC',
+            default => null,
+        };
+    }
+
     /** The document type behind one slot, created on demand. */
     public static function documentType(string $permitTypeCode, string $code): DocumentType
     {

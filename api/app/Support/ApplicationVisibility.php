@@ -3,7 +3,9 @@
 namespace App\Support;
 
 use App\Models\Application;
+use App\Models\ApplicationDocument;
 use App\Models\Inspection;
+use App\Models\PermitType;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -160,6 +162,51 @@ final class ApplicationVisibility
 
         return $user->department_id !== null
             && $user->department_id === $issuingDepartmentId;
+    }
+
+    /**
+     * May this reader see ONE attachment on a filing they can open?
+     *
+     * The same boundary as readsOfficeSheet, for the files. Most attachments
+     * are the applicant's own particulars — the barangay clearance, the lease,
+     * the valid ID — which every office on the filing needs; those carry no
+     * office and everyone who can open the filing reads them. Two kinds belong
+     * to ONE office, and only that office (with BPLO, the super admin and the
+     * applicant) reads them:
+     *
+     *  - a permit the applicant already holds, filed instead of applying for
+     *    it (`permit_type_id` set; HeldPermits), and
+     *  - an upload into an office sheet's own checklist — FSIC_REQ_*,
+     *    ZONING_REQ_*, OCC_REQ_*, CEC_REQ_PREVIOUS — which carries no
+     *    `permit_type_id` and is placed by its code (SheetRequirements::sheetOf).
+     *
+     * The second kind was missing until checklist Manage Applications 3: the
+     * list filtered on `permit_type_id` alone, so every office routed to a
+     * filing was handed every other office's checklist files — a CHO session
+     * got 24 FSIC, zoning and occupancy uploads on one filing and could
+     * download each. The list (ApplicationResource) and the download
+     * (DocumentController) both ask this, so they cannot disagree.
+     *
+     * Fails closed on an office it cannot name, like readsOfficeSheet.
+     */
+    public static function readsDocument(?User $user, ApplicationDocument $document): bool
+    {
+        if ($document->permit_type_id !== null) {
+            return self::readsOfficeSheet(
+                $user,
+                $document->loadMissing('permitType')->permitType?->issuing_department_id,
+            );
+        }
+
+        $sheet = SheetRequirements::sheetOf((string) $document->loadMissing('documentType')->documentType?->code);
+        if ($sheet === null) {
+            return true;
+        }
+
+        // One read of the five offices per request, not one per attachment.
+        $offices = once(fn () => PermitType::pluck('issuing_department_id', 'code')->all());
+
+        return self::readsOfficeSheet($user, $offices[$sheet] ?? null);
     }
 
     /**

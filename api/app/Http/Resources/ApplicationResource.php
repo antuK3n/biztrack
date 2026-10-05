@@ -120,7 +120,8 @@ class ApplicationResource extends JsonResource
              * guide line and a different queue tab for the two, so it needs
              * the answer rather than a rule for deriving it. See
              * `Application::isDecided()`.
-             */            'decided' => $this->resource->isDecided(),
+             */
+            'decided' => $this->resource->isDecided(),
             'business' => $this->whenLoaded('business', fn () => new BusinessResource($this->business)),
             'applicant' => $this->relationLoaded('applicant') && $this->applicant ? [
                 'id' => $this->applicant->id,
@@ -292,14 +293,18 @@ class ApplicationResource extends JsonResource
              * right while every attachment really was shared. It stopped being
              * enough the moment half the evidence on a filing became
              * office-specific.
+             *
+             * And `permit_type_id` alone was not enough either: an upload into
+             * an office sheet's checklist (FSIC_REQ_* and the like) carries
+             * none, so it went to every office. ApplicationVisibility::
+             * readsDocument places it by its code (checklist, Manage
+             * Applications 3).
              */
             'documents' => $this->relationLoaded('documents')
                 ? DocumentResource::collection(
-                    $this->documents->filter(fn ($doc) => $doc->permit_type_id === null
-                        || ApplicationVisibility::readsOfficeSheet(
-                            $request->user(),
-                            $doc->permitType?->issuing_department_id,
-                        ))->values()
+                    $this->documents
+                        ->filter(fn ($doc) => ApplicationVisibility::readsDocument($request->user(), $doc))
+                        ->values()
                 )
                 : [],
             'fee_profile' => $this->fee_profile,
