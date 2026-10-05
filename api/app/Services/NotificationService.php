@@ -547,8 +547,8 @@ class NotificationService
             'New message',
             "You have a new message on {$app->tracking_id}.",
             // The one notification here whose recipient can be EITHER side:
-            // MessageController::counterparty() answers with the applicant when
-            // an officer wrote, and with the office's assigned officer when the
+            // MessageController::recipients() answers with the applicant when
+            // an officer wrote, and with the office's officers when the
             // applicant did. Hard-coding the citizen path sent every officer
             // reply-notification to a screen their token does not reach.
             $this->filingLink($recipient, $app),

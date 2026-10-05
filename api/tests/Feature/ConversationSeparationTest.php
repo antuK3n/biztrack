@@ -144,10 +144,9 @@ it('keeps every conversation out of a seat that holds no office', function () {
  *   "sa business owner side lahat na ng offices may general inquiry"
  *
  * An office's Messages page is its caseload, so an office that is not on this
- * filing will never be shown a message about it - not in its inbox, and not by
- * notification either, since counterparty() has no officer to name and falls
- * back to the applicant. Offering that office here would be offering a message
- * that is accepted, stored, and read by nobody.
+ * filing will never be shown a message about it in its inbox. Offering that
+ * office here would be offering a message that lands outside the one screen
+ * that office works from.
  *
  * The owner has not lost the ability to reach it. That is what the general
  * enquiry is for, and every office now has one. What they cannot do is raise it

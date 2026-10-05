@@ -1809,13 +1809,13 @@ class MessageController extends Controller
 
         Audit::log('message.sent', $message);
         /*
-         * No counterparty is a real state, not an impossible one: User is
+         * Nobody to tell is a real state, not an impossible one: User is
          * soft-deletable, so an officer replying on the filing of a since-removed
-         * account has nobody to notify. counterparty() is typed ?User now and
-         * this skips the ping — sending the message must not 500 because the
-         * notification had nowhere to go.
+         * account has nobody to notify, and an office can have no active
+         * account at all. An empty list skips the ping — sending the message
+         * must not 500 because the notification had nowhere to go.
          */
-        if ($recipient = $this->counterparty($request, $application, $office)) {
+        foreach ($this->recipients($request, $application, $office) as $recipient) {
             $this->notify->newMessage($application, $recipient);
         }
 
@@ -2718,43 +2718,58 @@ class MessageController extends Controller
     }
 
     /**
-     * The other side of the thread relative to the sender, if there is one.
+     * Who is told that this message has arrived.
      *
      * Now that a message is addressed, the applicant's reply pings the office
      * they actually wrote to rather than whichever officer happened to have
      * been assigned most recently — sending a question to the fire office and
      * notifying the sanitary officer is the same defect as the shared thread,
      * one layer down.
+     *
+     * ---- When nobody in that office is holding the case ------------------
+     *
+     * This used to fall back to ANY officer on the filing, and failing that to
+     * the applicant. Both were wrong in a way a tester could see: a question to
+     * CHO pinged the BPLO officer, who is refused the CHO conversation, and an
+     * owner writing before anyone had claimed the case was told "You have a
+     * new message" about the message they had just sent. A deactivated holder
+     * was told too, and nobody who could answer was.
+     *
+     * The rule now [Ken, 5 October 2026]: the officer holding the case for
+     * THAT office, while their account is active; otherwise every active
+     * account of that office, the same seats a general enquiry tells (see
+     * notifyEnquiry()). Never another office, never the sender.
+     *
+     * @return Collection<int, User>
      */
-    private function counterparty(Request $request, Application $application, Department $office): ?User
+    private function recipients(Request $request, Application $application, Department $office): Collection
     {
+        $sender = $request->user();
         $application->loadMissing('applicant');
-        // Officer sent → notify applicant. Applicant sent → notify the office they wrote to.
-        if ($request->user()->id === $application->applicant_user_id) {
-            $officer = $this->assignedOfficer($application, $office->id);
-            if ($officer) {
-                return $officer;
-            }
+
+        // Officer sent → the applicant, while the account still exists.
+        if ($sender->id !== $application->applicant_user_id) {
+            return collect([$application->applicant])->filter()->values();
         }
 
-        return $application->applicant;
+        $holderId = $this->holderOf($application, $office->id);
+        $holder = $holderId !== null ? User::find($holderId) : null;
+        if ($holder !== null && $holder->is_active && $holder->id !== $sender->id) {
+            return collect([$holder]);
+        }
+
+        return User::where('department_id', $office->id)
+            ->where('is_active', true)
+            ->whereKeyNot($sender->id)
+            ->get()
+            ->toBase();
     }
 
     /**
-     * Whoever in $departmentId holds this filing, else anybody who does.
-     *
-     * The fallback is deliberate and narrow: a message to an office nobody in
-     * it has picked up yet still has to reach a person, and the applicant is
-     * owed a reply more than the routing is owed purity. BPLO, which is always
-     * addressable, frequently has no named officer on an unrouted filing.
-     */
-    /**
      * Who is holding this filing for this office right now, if anybody.
      *
-     * The id alone, and one query. `assignedOfficer()` below answers the same
-     * question with the whole User loaded, for the places that print a name;
-     * this is on the write path of every message and wants neither the model
-     * nor its relations.
+     * The id alone, and one query: this is on the write path of every message
+     * and wants neither the model nor its relations.
      */
     private function holderOf(Application $application, int $departmentId): ?int
     {
@@ -2790,21 +2805,5 @@ class MessageController extends Controller
         $holder = $this->holderOf($application, $departmentId);
 
         return $holder === null || $holder === $user->id;
-    }
-
-    private function assignedOfficer(Application $application, ?int $departmentId = null): ?User
-    {
-        $forOffice = $departmentId === null ? null : $application->assignments()
-            ->where('department_id', $departmentId)
-            ->whereNotNull('officer_user_id')
-            ->orderByDesc('assigned_at')
-            ->value('officer_user_id');
-
-        $officerId = $forOffice ?? $application->assignments()
-            ->whereNotNull('officer_user_id')
-            ->orderByDesc('assigned_at')
-            ->value('officer_user_id');
-
-        return $officerId ? User::find($officerId) : null;
     }
 }

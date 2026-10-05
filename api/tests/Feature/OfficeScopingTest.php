@@ -744,9 +744,8 @@ it('lets an applicant write to any office, and only that office reads it', funct
  *   "sa business owner side lahat na ng offices may general inquiry"
  *
  * An office that is not on this filing will never be SHOWN a message about it
- * — not in its inbox, and not by notification, since counterparty() has no
- * officer to name and falls back to the applicant. Offering that office here
- * would be offering a message that is accepted, stored, and read by nobody.
+ * in its inbox. Offering that office here would be offering a message that
+ * lands outside the one screen that office works from.
  *
  * The owner has not lost the office. Every one of them has a general enquiry
  * now, which is where a question that is not about a particular permit
