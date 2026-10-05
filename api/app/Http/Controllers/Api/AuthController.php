@@ -267,6 +267,16 @@ class AuthController extends Controller
 
     public function register(Request $request): JsonResponse
     {
+        /*
+         * Lowercased BEFORE the unique check, as it is stored. Checked as
+         * typed, "Owner@BizTrack.local" passed beside owner@biztrack.local
+         * and then hit the unique index: a 500 instead of the sentence below
+         * (scenario run, 5 October 2026).
+         */
+        if (is_string($request->input('email'))) {
+            $request->merge(['email' => strtolower(trim($request->input('email')))]);
+        }
+
         $data = $request->validate([
             'first_name' => ['required', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],

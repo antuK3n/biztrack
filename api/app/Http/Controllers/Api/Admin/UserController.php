@@ -947,6 +947,12 @@ class UserController extends Controller
             $request->merge(['roles' => [$this->roleFromTypedTitle($request)]]);
         }
 
+        // Lowercased before the unique check, as it is stored — see
+        // AuthController::register for the 500 this answered when it was not.
+        if (is_string($request->input('email'))) {
+            $request->merge(['email' => strtolower(trim($request->input('email')))]);
+        }
+
         $data = $request->validate([
             'first_name' => [$required, 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
