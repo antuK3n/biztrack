@@ -2,10 +2,10 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\User;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -35,11 +35,22 @@ function scopedDocument(): array
         ->whereHas('business', fn ($b) => $b->where('name', 'RxCare Pharmacy'))
         ->firstOrFail();
 
-    authAs($app->applicant->email);
-    $doc = test()->postJson("/api/v1/applications/{$app->id}/documents", [
+    /*
+     * Written straight to the register rather than uploaded: the filing is
+     * past submit, and the upload door is closed there unless the filing is
+     * returned (DocumentUploadWindowTest). What is under test is the
+     * download, which does not care how the row got there.
+     */
+    $path = "private/documents/{$app->id}/barangay-clearance.pdf";
+    Storage::disk('local')->put($path, '%PDF-1.4 barangay clearance');
+    $doc = ApplicationDocument::create([
+        'application_id' => $app->id,
         'document_type_id' => DocumentType::where('code', 'BRGY_CLEARANCE')->firstOrFail()->id,
-        'file' => UploadedFile::fake()->create('barangay-clearance.pdf', 14, 'application/pdf'),
-    ])->assertCreated()->json('data');
+        'original_filename' => 'barangay-clearance.pdf',
+        'stored_path' => $path,
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 27,
+    ])->toArray();
 
     return ['application' => $app, 'document' => $doc];
 }

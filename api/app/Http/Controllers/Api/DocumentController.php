@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\DocumentResource;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
-use App\Models\PermitType;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\OcrLite;
@@ -28,6 +28,27 @@ class DocumentController extends Controller
             $application->applicant_user_id === $request->user()->id,
             403,
             'This application is not yours.'
+        );
+
+        /*
+         * ── Open while the owner holds the filing, and only then ─────────
+         *
+         * This checked ownership alone, so a new requirement was accepted
+         * while BPLO read the filing and again after it was Completed: a file
+         * landing under a review that had already been made [Ken, 5 October
+         * 2026]. A draft takes files; after submit, only a filing returned to
+         * the owner, or one whose clearance an office returned — that return
+         * can name a main-form document, and this is the door it comes back
+         * through. An office sheet's own checklist slots are not this door;
+         * they close with the sheet (OfficeFormController::ownerMayEdit).
+         */
+        abort_unless(
+            in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)
+                || $application->permitTypes()
+                    ->wherePivot('status', ClearanceStatus::Returned->value)
+                    ->exists(),
+            422,
+            'You can change this once the filing is returned to you.'
         );
 
         $data = $request->validate([
@@ -111,7 +132,6 @@ class DocumentController extends Controller
         ]);
 
         Audit::log('document.uploaded', $doc);
-
 
         $payload = ['data' => new DocumentResource($doc->load('documentType'))];
 

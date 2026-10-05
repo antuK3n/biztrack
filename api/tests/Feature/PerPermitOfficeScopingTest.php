@@ -1,17 +1,16 @@
 <?php
 
-use App\Enums\ApplicationType;
 use App\Enums\ApplicationStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Models\Application;
+use App\Models\ApplicationDocument;
 use App\Models\ApplicationPermitType;
 use App\Models\Business;
 use App\Models\DocumentType;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Services\WorkflowService;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -252,11 +251,18 @@ it('still shows every office the shared requirements the applicant uploaded', fu
     $app = paidFilingForScoping();
     officeWorksPermit($app, 'SANITARY', 'CHO working it.');
 
-    authAs('owner@biztrack.local');
-    $doc = test()->postJson("/api/v1/applications/{$app->id}/documents", [
+    // Written straight to the register: the filing is past submit, where the
+    // upload door is closed unless it is returned (DocumentUploadWindowTest).
+    $path = "private/documents/{$app->id}/brgy.pdf";
+    Storage::disk('local')->put($path, '%PDF-1.4 barangay clearance');
+    $doc = ApplicationDocument::create([
+        'application_id' => $app->id,
         'document_type_id' => DocumentType::where('code', 'BRGY_CLEARANCE')->firstOrFail()->id,
-        'file' => UploadedFile::fake()->create('brgy.pdf', 20, 'application/pdf'),
-    ])->assertCreated()->json('data');
+        'original_filename' => 'brgy.pdf',
+        'stored_path' => $path,
+        'mime_type' => 'application/pdf',
+        'size_bytes' => 27,
+    ])->toArray();
 
     /*
      * The other half of the rule, and the one that would be easy to break while
