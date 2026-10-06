@@ -60,7 +60,7 @@ final class Playbook
     ];
 
     /** The name each office types as its inspector when it books a visit. */
-    private const INSPECTORS = [
+    public const INSPECTORS = [
         'SANITARY' => 'Ma. Teresa Lacsamana',
         'FSIC' => 'FO2 Rodrigo Pineda',
         'CEC' => 'Arnold Sevilla',

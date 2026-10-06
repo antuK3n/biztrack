@@ -97,6 +97,18 @@ final class Clock
         return $this->set($this->now->addMinutes(2 + $this->ticks % 3));
     }
 
+    /**
+     * Stand the clock so the NEXT request lands at `$when` exactly.
+     *
+     * For a history written as a list of moments ("submitted Mon 5 Oct,
+     * 2:15 PM") rather than as days after a start: every request ticks the
+     * clock before it is sent, so the clock is set that one tick short.
+     */
+    public function landNextAt(CarbonImmutable $when): CarbonImmutable
+    {
+        return $this->set($when->subMinutes(2 + ($this->ticks + 1) % 3));
+    }
+
     public function now(): CarbonImmutable
     {
         return $this->now;

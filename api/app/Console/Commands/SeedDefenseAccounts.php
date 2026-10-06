@@ -83,7 +83,7 @@ class SeedDefenseAccounts extends Command
     protected $description = 'Build the owner accounts: real, sign-in-able owners in sixteen states, through the app’s own rules.';
 
     /** The role each office's account holds, by department code. */
-    private const OFFICE_ROLES = [
+    public const OFFICE_ROLES = [
         'BPLO' => 'bplo_staff',
         'CHO' => 'sanitary_officer',
         'BFP' => 'fire_inspector',
@@ -111,7 +111,7 @@ class SeedDefenseAccounts extends Command
             return self::FAILURE;
         }
 
-        $offices = $this->offices();
+        $offices = self::offices();
         $admin = User::where('is_active', true)->whereHas('roles', fn ($r) => $r->where('name', 'admin'))->orderBy('id')->first();
         if (count($offices) < count(self::OFFICE_ROLES) || $admin === null) {
             $this->error('Each of the six offices needs an active account, and there must be an active super admin. Missing: '
@@ -212,7 +212,7 @@ class SeedDefenseAccounts extends Command
      *
      * @return array<string, User>
      */
-    private function offices(): array
+    public static function offices(): array
     {
         $out = [];
         foreach (self::OFFICE_ROLES as $code => $role) {
