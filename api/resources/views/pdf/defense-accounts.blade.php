@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>BizTrack — Defense Accounts</title>
+    <title>BizTrack — Accounts</title>
     <style>
         @page { margin: 40px 36px 48px; }
         * { font-family: DejaVu Sans, sans-serif; }
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <h1>BizTrack — Defense Accounts</h1>
+    <h1>BizTrack — Accounts</h1>
     <div class="meta">Generated {{ $generated }}</div>
 
     <div class="box">

@@ -80,7 +80,7 @@ class SeedDefenseAccounts extends Command
         {--dry-run : Print the plan and write nothing}
         {--pdf= : Write the accounts PDF to this path}';
 
-    protected $description = 'Build the defense accounts: real, sign-in-able owners in sixteen states, through the app’s own rules.';
+    protected $description = 'Build the owner accounts: real, sign-in-able owners in sixteen states, through the app’s own rules.';
 
     /** The role each office's account holds, by department code. */
     private const OFFICE_ROLES = [

@@ -12,6 +12,10 @@ namespace App\Support\DefenseAccounts;
  * dompdf because a run uploads several hundred of these and dompdf spends a
  * font load on each; dompdf renders the roster PDF, where layout matters.
  *
+ * No footer: an earlier version stamped each page as a specimen, and Ken
+ * (6 October 2026) wants nothing in the register that reads as made-up
+ * data — the page is titled for the document it stands for, and that is all.
+ *
  * Helvetica in WinAnsiEncoding covers what Malabon's names need (ñ, the em
  * dash); anything outside it is transliterated.
  */
@@ -26,7 +30,6 @@ final class DocumentPdf
             $text .= "BT /F1 11 Tf 56 {$y} Td (".self::escape($line).") Tj ET\n";
             $y -= 18;
         }
-        $text .= "BT /F1 8 Tf 56 60 Td (Specimen prepared for the BizTrack defense accounts. Not an official document.) Tj ET\n";
 
         $objects = [
             '<< /Type /Catalog /Pages 2 0 R >>',

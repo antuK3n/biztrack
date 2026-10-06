@@ -59,6 +59,15 @@ final class Playbook
         'revoked' => 6, 'blacklisted' => 6, 'open-requirement' => 3, 'messages' => 1,
     ];
 
+    /** The name each office types as its inspector when it books a visit. */
+    private const INSPECTORS = [
+        'SANITARY' => 'Ma. Teresa Lacsamana',
+        'FSIC' => 'FO2 Rodrigo Pineda',
+        'CEC' => 'Arnold Sevilla',
+        'OCCUPANCY' => 'Engr. Victor Malonzo',
+        'ZONING' => 'Engr. Lorna Bautista',
+    ];
+
     private CarbonImmutable $start;
 
     private ?User $owner = null;
@@ -165,10 +174,17 @@ final class Playbook
         $id = $this->filed();
         $this->day(1, '09:15');
         $assignment = $this->take('BPLO', $id);
+        [$target, $remarks, $note] = $this->pick([
+            ['form:telephone', 'Please add the shop’s landline or another contact number, then resubmit.', 'No landline or second contact number for the shop.'],
+            ['form:emergency_contact_name', 'Kindly add an emergency contact person for the business and resubmit po.', 'Emergency contact person is blank.'],
+            ['form:telephone', 'Pakilagay po ang telephone number ng tindahan. Mobile lang po ang nakalagay.', 'Only a mobile number is given.'],
+            ['form:emergency_contact_number', 'Please give an emergency contact number we can call if the owner cannot be reached.', 'Emergency contact number is missing.'],
+            ['form:emergency_contact_name', 'Missing emergency contact. Please fill it in so we can process your permit.', 'No emergency contact given.'],
+        ]);
         $this->api->post('BPLO returns the form', "assignments/{$assignment}/return", [
-            'remarks' => 'Please add the shop’s telephone or a second contact number, then resubmit.',
-            'remarks_target' => 'form:telephone',
-            'remarks_notes' => ['form:telephone' => 'No telephone or alternate contact number is given for the shop.'],
+            'remarks' => $remarks,
+            'remarks_target' => $target,
+            'remarks_notes' => [$target => $note],
         ]);
     }
 
@@ -236,7 +252,7 @@ final class Playbook
             }
             $this->api->post("{$code} records a passed visit", "inspections/{$visit}/conduct", [
                 'result' => 'passed',
-                'findings' => 'Premises inspected. Compliant.',
+                'findings' => $this->pick(['Compliant.', 'Premises inspected. No violations.', 'Ok. Clean and orderly.', 'Passed. Owner present during inspection.', 'No findings.']),
             ]);
         }
 
@@ -279,8 +295,13 @@ final class Playbook
         $this->day(1, '09:15');
         $this->take('BPLO', $id);
         $this->api->post('BPLO rejects the application', "applications/{$id}/reject", [
-            'reason' => 'The business name on the DTI certificate does not match the name on the application. '
-                .'File a new application under the registered business name.',
+            'reason' => $this->pick([
+                'The business name on the DTI certificate does not match the name on the application. Please file again under the registered name.',
+                'The DTI certificate uploaded has already expired. Renew your business name registration first, then file a new application.',
+                'The TIN on the form belongs to a different taxpayer per our records. Please file again with your own TIN.',
+                'The address on the application is a residential unit in a subdivision that does not allow stores. Kindly file again once you have a new location.',
+                'Duplicate filing. This business already has an application in process under the same owner.',
+            ]),
         ]);
     }
 
@@ -337,8 +358,14 @@ final class Playbook
         $this->applicationIds[] = $id;
         $owner->post('state the new trade name', "applications/{$id}/amendments", [
             'changes' => [
-                ['field' => 'trade_name', 'new_value' => $this->plan['last_name'].' General Merchandise'],
-                ['field' => 'trade_name_details', 'new_value' => 'The shop now sells general merchandise and is registered under the new trade name.'],
+                ['field' => 'trade_name', 'new_value' => $this->plan['business']['new_trade_name']],
+                ['field' => 'trade_name_details', 'new_value' => $this->pick([
+                    'We changed the name on our signage when we renovated the shop.',
+                    'Pinalitan po namin ang pangalan ng tindahan para mas madaling makilala ng customers.',
+                    'New signage after we took over the space next door.',
+                    'My children are now helping run the business so we renamed it.',
+                    'The old name was too similar to another shop on our street.',
+                ])],
             ],
         ]);
         $this->uploadRequired($id);
@@ -348,7 +375,7 @@ final class Playbook
         $assignment = $this->take('BPLO', $id);
         if ($approve) {
             $this->api->post('BPLO approves the amendment', "assignments/{$assignment}/approve", [
-                'remarks' => 'Change of trade name verified against the DTI certificate.',
+                'remarks' => $this->pick(['New trade name checked against the affidavit. OK.', 'Change of trade name verified.', 'Approved. Signage name updated.']),
             ]);
         }
     }
@@ -358,7 +385,13 @@ final class Playbook
         $id = $this->approvedHistory();
         $this->day(6, '14:00');
         $this->asOffice(PermitType::OUTCOME_CODE)->post('BPLO revokes the Mayor’s Permit', 'permits/'.$this->businessPermit($id)->id.'/revoke', [
-            'reason' => 'Operating a second line of business not declared on the permit, after a written warning.',
+            'reason' => $this->pick([
+                'Operating a second line of business not declared on the permit, after a written warning.',
+                'Repeated violation of the closure order issued after the fire safety inspection.',
+                'Business found operating at a different address from the one on the permit.',
+                'Failure to correct the sanitation findings despite two notices of violation.',
+                'Permit used by a different operator. The registered owner no longer runs the business.',
+            ]),
         ]);
     }
 
@@ -368,7 +401,13 @@ final class Playbook
         $this->day(6, '15:00');
         $this->api->as($this->admin)->post('the super admin blacklists the owner', 'admin/businesses/'.Application::findOrFail($id)->business_id.'/status', [
             'status' => 'blacklisted',
-            'reason' => 'Fraudulent documents: the lease contract submitted was found to be falsified.',
+            'reason' => $this->pick([
+                'The lease contract submitted was found to be falsified.',
+                'Submitted a forged fire safety inspection certificate.',
+                'Used another person’s TIN and DTI registration.',
+                'Altered tax declaration attached to the application.',
+                'Falsified barangay clearance, confirmed by the barangay.',
+            ]),
         ]);
     }
 
@@ -403,18 +442,39 @@ final class Playbook
 
         $this->day(1, '10:00');
         $this->take('BPLO', $id);
-        $this->asOwner()->post('the owner writes to BPLO', "applications/{$id}/messages", [
-            'body' => 'Good morning po. May I ask how long the review usually takes? I would like to open the shop next week.',
-            'department_id' => $bplo,
-        ]);
-        $this->asOffice(PermitType::OUTCOME_CODE)->post('BPLO replies', "applications/{$id}/messages", [
-            'body' => 'Good morning. Your application is being reviewed now. If the form is complete you will receive the Tax Order of Payment within three working days.',
-            'department_id' => $bplo,
-        ]);
-        $this->asOwner()->post('the owner replies', "applications/{$id}/messages", [
-            'body' => 'Thank you po. I will wait for the Tax Order of Payment.',
-            'department_id' => $bplo,
-        ]);
+        foreach ($this->pick([
+            [
+                'Good morning po. Gaano po katagal usually ang review? Balak ko po sana mag-open next week.',
+                'Good morning. We are checking your application now. If complete, you will get the Tax Order of Payment within three working days.',
+                'Salamat po. Hintayin ko na lang po.',
+            ],
+            [
+                'Hello po, pwede po ba sa counter na lang magbayad pag lumabas na yung bill?',
+                'Yes po, pwede sa BPLO counter, ground floor ng City Hall. Dalhin lang po ang tracking number.',
+                'Noted po, thank you!',
+            ],
+            [
+                'Good afternoon. I uploaded the wrong photo for the location sketch. Should I upload again?',
+                'Good afternoon. Okay lang po, we can see the correct one. No need to upload again.',
+                'Thank you po sa reply.',
+            ],
+            [
+                'Hi po. Kailangan pa po ba ng barangay clearance bago ma-approve?',
+                'Hi. Not for this step. We will tell you if anything else is needed after review.',
+                'Ok po, thank you.',
+            ],
+            [
+                'Good morning. Is there anything missing in my application? Para po maayos ko agad.',
+                'Good morning. Everything is complete so far. You will be notified once it is approved.',
+                'Salamat po, God bless.',
+            ],
+        ]) as $turn => $body) {
+            ($turn === 1 ? $this->asOffice(PermitType::OUTCOME_CODE) : $this->asOwner())
+                ->post($turn === 1 ? 'BPLO replies' : 'the owner writes to BPLO', "applications/{$id}/messages", [
+                    'body' => $body,
+                    'department_id' => $bplo,
+                ]);
+        }
     }
 
     /* ── The steps ───────────────────────────────────────────────────── */
@@ -459,10 +519,11 @@ final class Playbook
         $plan = $this->plan;
         $b = $plan['business'];
         $owner = $this->asOwner();
+        $this->zoningBoxIsGreen();
 
         $business = $owner->post('save the business', 'businesses', [
             'name' => $b['name'],
-            'trade_name' => $b['name'],
+            'trade_name' => $b['trade_name'],
             'registration_type' => $b['registration_type'],
             'registration_number' => $b['registration_number'],
             'tin' => $b['tin'],
@@ -503,6 +564,38 @@ final class Playbook
         return $id;
     }
 
+    /**
+     * Ask what the location step asks as the pin settles, and stop where the
+     * owner would be stopped.
+     *
+     * Since 6 October 2026 a red zoning box holds every way forward in the
+     * wizard, not only Next (40e042d7), and the zones were redrawn the same
+     * day (b30f2f06, b18c837a). Roster picks a pin it reads as green; this
+     * asks the two endpoints the screen draws the box from — the zone under
+     * the pin with its refusal sentence, and the ordinance's verdict for the
+     * trade — as the owner, so a pin the redrawn map no longer greens is
+     * refused here with the screen's own answer instead of filed under a box
+     * no owner could have got past.
+     */
+    private function zoningBoxIsGreen(): void
+    {
+        $b = $this->plan['business'];
+        [$lat, $lng] = $b['pin'];
+        $psic = $this->psicId();
+
+        $zone = $this->asOwner()->get('drop the pin', 'zone-at-pin', [
+            'latitude' => $lat, 'longitude' => $lng, 'barangay_id' => $b['barangay_id'], 'psic_code_ids' => [$psic],
+        ])['data'] ?? [];
+        $insights = $this->asOwner()->get('read the zoning box', 'location-insights', [
+            'latitude' => $lat, 'longitude' => $lng, 'barangay_id' => $b['barangay_id'], 'psic_code_id' => $psic,
+        ])['data'] ?? [];
+
+        $verdict = $insights['zoning']['verdict'] ?? null;
+        if (($zone['refusal'] ?? null) !== null || $verdict !== 'listed') {
+            throw new StepRefused('read the zoning box', 422, (string) ($zone['refusal'] ?? "the zoning box reads {$verdict}, not green"));
+        }
+    }
+
     /** Upload what the Documents step asks for, as one generated PDF each. */
     private function uploadRequired(int $id, ?int $limit = null): void
     {
@@ -520,7 +613,7 @@ final class Playbook
     {
         $assignment = $this->take('BPLO', $id);
         $this->api->post('BPLO approves and ticks the other permits', "assignments/{$assignment}/approve", [
-            'remarks' => 'Form and documents complete.',
+            'remarks' => $this->pick(['Complete. For payment.', 'Form and documents complete.', 'Checked, ok.', 'Documents verified. Proceed to payment.', 'All good. Ticked the other permits needed.']),
             'permit_type_ids' => array_map(fn (string $code) => $this->typeIds[$code], $this->ticks()),
         ]);
     }
@@ -568,15 +661,22 @@ final class Playbook
     {
         $assignment = $this->take($this->issuer[$code], $id);
         $this->api->post("{$code} approves the papers", "assignments/{$assignment}/approve", [
-            'remarks' => 'Requirements complete. For inspection.',
+            'remarks' => $this->pick(['Requirements complete. For inspection.', 'Complete. Schedule inspection.', 'Papers ok, for site visit.', 'Checked. For ocular inspection.', 'Complete po. Inspection next.']),
         ]);
     }
 
-    /** The office books its visit; answers the inspection id. */
+    /**
+     * The office books its visit, typing the inspector's name in the booking
+     * form as it has since 6 October 2026 (55e3c602). Answers the inspection
+     * id. The names are one per office, as a small office sends the same
+     * inspector out; the field is free text the office types, so these are
+     * plausible names rather than anyone on the City's staff list.
+     */
     private function book(int $id, string $code, CarbonImmutable $when): int
     {
         return $this->asOffice($code)->post("{$code} books its visit", "applications/{$id}/permits/{$code}/inspection", [
             'scheduled_at' => $when->format('Y-m-d H:i:s'),
+            'inspector_name' => self::INSPECTORS[$code] ?? null,
         ])['data']['id'];
     }
 
@@ -627,6 +727,21 @@ final class Playbook
     private function asOffice(string $permitCode): AppClient
     {
         return $this->api->as($this->offices[$this->issuer[$permitCode]]);
+    }
+
+    /**
+     * One of several ways a person would put it, picked by the owner's place
+     * in the scenario, so five owners in one state do not read five copies
+     * of one sentence — and a second run picks the same.
+     *
+     * @template T
+     *
+     * @param  list<T>  $options
+     * @return T
+     */
+    private function pick(array $options): mixed
+    {
+        return $options[($this->plan['n'] - 1) % count($options)];
     }
 
     /** @return list<string> */
@@ -730,7 +845,7 @@ final class Playbook
             'PRIOR_PERMIT' => ["Mayor's Permit ".$this->businessPermitNumber($id)." — {$b['name']}", $this->addressLines()],
             'AMEND_AFFIDAVIT' => ["Affidavit requesting the amendment — {$b['name']}", [
                 "Affiant: {$owner}",
-                "Requested change: trade name to {$this->plan['last_name']} General Merchandise",
+                "Requested change: trade name to {$this->plan['business']['new_trade_name']}",
             ]],
             default => ["{$type->name} — {$b['name']}", $this->addressLines()],
         };

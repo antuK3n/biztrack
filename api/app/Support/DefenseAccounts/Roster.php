@@ -9,7 +9,7 @@ use App\Support\Zoning\PinZone;
 use App\Support\ZoningConformance;
 
 /**
- * Who the defense accounts are: names, businesses, places, numbers.
+ * Who the owners are: names, businesses, places, numbers.
  *
  * ── Deterministic, so a second run asks for the same people ─────────────────
  *
@@ -19,12 +19,29 @@ use App\Support\ZoningConformance;
  * the same e-mail addresses, finds them already registered and skips them,
  * instead of minting a fresh set of strangers beside the first.
  *
- * ── Plausible, not real ─────────────────────────────────────────────────────
+ * ── Like real people and real shops ─────────────────────────────────────────
  *
- * Ken: "none of these is to be dummy data" — meaning every account must sign
- * in and every filing must have gone through the rules, not that the people
- * exist. The names are common Filipino names put together by position; the
- * DTI numbers, TINs and mobile numbers are generated (the mobiles in the
+ * Ken, 5 October 2026: "none of these is to be dummy data" — every account
+ * signs in and every filing went through the rules. And 6 October: they must
+ * also LOOK like Malabon's register — natural Filipino names, shops named
+ * the way shops there are ("Aling Nena's Sari-Sari Store", "R. Castillo Auto
+ * Repair", "Kusina ni Lola Cora"), nothing that reads as generated.
+ *
+ * So the given names are a pool of forty per gender with the nickname a
+ * neighbour would use (Corazon → Cora, Ricardo → Carding), and each owner
+ * takes one name from it once: the pool is walked with a stride that has no
+ * factor in common with its size, so no name repeats inside a run of eighty
+ * and neighbours in the list are not neighbours in the alphabet. Each trade
+ * has six ways a shop of that kind is named; an owner takes the next one no
+ * shop in the run has, sign or trade name.
+ *
+ * The streets are Malabon's own: named roads from OpenStreetMap (6 October
+ * 2026), placed in barangays by the same outlines the map draws
+ * (`streets.json`). The shop's street is the named road nearest its pin, so
+ * the address and the pin agree; the owner's home is on a street of their
+ * home barangay.
+ *
+ * The DTI numbers, TINs and mobile numbers are generated (the mobiles in the
  * 0999 000 0001 range so they are recognisable as such: "generate numbers
  * since anything won't be sent to them").
  */
@@ -53,14 +70,27 @@ final class Roster
         'messages' => ['Messages', 'With a BPLO officer; messages exchanged'],
     ];
 
+    /** Given name => the name the street calls them by. */
     private const MEN = [
-        'Juan', 'Jose', 'Antonio', 'Ricardo', 'Eduardo', 'Ramon', 'Rogelio', 'Danilo', 'Ernesto', 'Romeo',
-        'Mark Anthony', 'John Paul', 'Christian', 'Jerome', 'Rodel', 'Arnel', 'Noel', 'Reynaldo', 'Alfredo', 'Benjamin',
+        'Ricardo' => 'Carding', 'Eduardo' => 'Eddie', 'Rogelio' => 'Roger', 'Danilo' => 'Danny', 'Jose Mari' => 'Jom',
+        'Mark Anthony' => 'Mac', 'John Paul' => 'JP', 'Rodel' => 'Dels', 'Arnel' => 'Arnel', 'Noel' => 'Noel',
+        'Reynaldo' => 'Rey', 'Alfredo' => 'Fred', 'Benjamin' => 'Benjie', 'Ernesto' => 'Ernie', 'Romeo' => 'Romy',
+        'Antonio' => 'Tonyo', 'Christian' => 'Ian', 'Raymond' => 'Ray', 'Joel' => 'Joel', 'Dennis' => 'Dennis',
+        'Edgardo' => 'Ed', 'Manuel' => 'Maning', 'Vicente' => 'Enteng', 'Rolando' => 'Lando', 'Wilfredo' => 'Willy',
+        'Gerardo' => 'Gerry', 'Jayson' => 'Jay', 'Michael' => 'Mike', 'Rommel' => 'Mel', 'Nestor' => 'Nestor',
+        'Feliciano' => 'Ciano', 'Aurelio' => 'Rely', 'Bienvenido' => 'Ben', 'Teodoro' => 'Teddy', 'Lorenzo' => 'Enzo',
+        'Pablo' => 'Pabling', 'Isidro' => 'Sidro', 'Jerome' => 'Jerome', 'Ramon' => 'Mon', 'Florencio' => 'Ensyo',
     ];
 
     private const WOMEN = [
-        'Maria', 'Rosario', 'Teresita', 'Lourdes', 'Corazon', 'Erlinda', 'Marites', 'Josefina', 'Analyn', 'Rowena',
-        'Kristine', 'Mary Grace', 'Jocelyn', 'Liza', 'Marilou', 'Evangeline', 'Cristina', 'Aileen', 'Rachelle', 'Divina',
+        'Nenita' => 'Nena', 'Corazon' => 'Cora', 'Rosario' => 'Rosing', 'Teresita' => 'Tess', 'Erlinda' => 'Linda',
+        'Josefina' => 'Pina', 'Remedios' => 'Medy', 'Carmelita' => 'Mely', 'Leonora' => 'Nora', 'Gloria' => 'Glo',
+        'Evangeline' => 'Vangie', 'Marilou' => 'Malou', 'Jocelyn' => 'Joy', 'Cristina' => 'Tina', 'Maria Lourdes' => 'Lulu',
+        'Analyn' => 'Ana', 'Rowena' => 'Weng', 'Kristine' => 'Tin', 'Mary Grace' => 'Grace', 'Liza' => 'Liza',
+        'Aileen' => 'Aileen', 'Rachelle' => 'Chelle', 'Divina' => 'Vina', 'Imelda' => 'Melda', 'Mylene' => 'Mylene',
+        'Charmaine' => 'Cha', 'Jennifer' => 'Jen', 'Sheila' => 'Sheila', 'Lorna' => 'Lorna', 'Precious' => 'Precious',
+        'Angelica' => 'Gel', 'Rhea' => 'Rhea', 'Maricel' => 'Cel', 'Normita' => 'Norma', 'Concepcion' => 'Connie',
+        'Felicidad' => 'Fely', 'Milagros' => 'Mila', 'Estrella' => 'Esting', 'Rebecca' => 'Becky', 'Luzviminda' => 'Luz',
     ];
 
     private const SURNAMES = [
@@ -72,41 +102,54 @@ final class Roster
         'Lim', 'Sarmiento', 'Cabrera', 'Estrada', 'Morales', 'Santiago', 'Fajardo', 'Alcantara', 'Padilla', 'Tiongson',
     ];
 
-    private const STREETS = [
-        'Gov. Pascual Ave.', 'M.H. Del Pilar St.', 'Gen. Luna St.', 'Rizal Ave. Ext.', 'Sanciangco St.',
-        'P. Aquino Ave.', 'C. Arellano St.', 'Leono St.', 'F. Sevilla Blvd.', 'Hernandez St.',
-        'Estrella St.', 'Mabini St.', 'Bonifacio St.', 'Burgos St.', 'Sampaguita St.',
-        'Ilang-Ilang St.', 'Kapalaran St.', 'Pampano St.', 'Bangus St.', 'Dagat-Dagatan St.',
-    ];
-
     /**
-     * The trades, by PSIC code: how a Malabon shop of that kind is named, and
-     * which of the five other permits BPLO ticks for it. BPLO decides those
-     * ticks with no rule behind them (client, 5 October 2026: "BPLO decides,
-     * no rules"); these are what a clerk would plausibly tick — the health
-     * office for anything selling food or touching people, fire for every
-     * premises, the environment office for anything with waste water or
-     * smoke, the building official for a shop with a structure of its own.
+     * The trades, by PSIC code: six ways a Malabon shop of that kind is
+     * named, the name an incorporated one is registered under, and which of
+     * the five other permits BPLO ticks for it. BPLO decides those ticks with
+     * no rule behind them (client, 5 October 2026: "BPLO decides, no rules");
+     * these are what a clerk would plausibly tick — the health office for
+     * anything selling food or touching people, fire for every premises, the
+     * environment office for anything with waste water or smoke, the building
+     * official for a shop with a structure of its own.
      *
-     * @var array<string, array{0: list<string>, 1: list<string>}>
+     * In the names: {S} surname, {N} nickname, {I} initials ("JM", or "R."),
+     * {B} barangay, {A} Aling/Mang, {T} Tita/Tito, {L} Lola/Lolo, {K} Ate/Kuya.
+     *
+     * @var array<string, array{0: list<string>, 1: string, 2: list<string>}>
      */
     private const TRADES = [
-        '47111' => [['{S} Sari-Sari Store', 'Tindahan ni {A} {G}'], ['ZONING', 'SANITARY', 'FSIC']],
-        '56101' => [['Kusina ni {G}', '{S} Carinderia'], ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
-        '10711' => [['Panaderia {S}', '{B} Bakeshop'], ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY']],
-        '47521' => [['{S} Hardware and Construction Supply', '{S} Builders Hardware'], ['ZONING', 'FSIC', 'OCCUPANCY']],
-        '96200' => [['{S} Laundry Hub', 'Labada Express {B}'], ['ZONING', 'FSIC', 'CEC']],
-        '36000' => [['Aqua {S} Water Refilling Station', '{B} Purified Water Station'], ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
-        '47721' => [['Botika {S}', '{S} Family Pharmacy'], ['ZONING', 'SANITARY', 'FSIC']],
-        '96120' => [['{G} Beauty Salon', '{S} Beauty Lounge'], ['ZONING', 'SANITARY', 'FSIC']],
-        '45201' => [['{S} Vulcanizing and Auto Repair', '{S} Vulcanizing Shop'], ['ZONING', 'FSIC', 'CEC']],
-        '96110' => [['{S} Barbershop', 'Gupit {G} Barber Shop'], ['ZONING', 'SANITARY', 'FSIC']],
-        '47211' => [['Bigasan ni {G}', '{S} Rice Dealer'], ['ZONING', 'SANITARY', 'FSIC']],
-        '47214' => [['{S} Fish Dealer', '{B} Isdaan ni {G}'], ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
-        '18120' => [['{S} Printing Services', '{G} Print and Copy Center'], ['ZONING', 'FSIC', 'CEC']],
-        '47412' => [['{G} Cellphone and Accessories', '{S} Mobile Shop'], ['ZONING', 'FSIC']],
-        '47610' => [['{S} School and Office Supplies', '{G} Bookstore'], ['ZONING', 'FSIC']],
-        '95110' => [['{S} Computer Repair Services', '{G} PC Clinic'], ['ZONING', 'FSIC']],
+        '47111' => [["{A} {N}'s Sari-Sari Store", '{S} Sari-Sari Store', 'Tindahan ni {A} {N}', '{B} Variety Store', '{I} {S} General Merchandise', "{N}'s Mini Mart"],
+            '{S} Consumer Goods Trading Corp.', ['ZONING', 'SANITARY', 'FSIC']],
+        '56101' => [["{T} {N}'s Carinderia", 'Kusina ni {L} {N}', 'Pancit Malabon ni {A} {N}', "{S}'s Lutong Bahay", '{B} Panciteria', "{N}'s Eatery"],
+            '{S} Food Services Inc.', ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
+        '10711' => [['Golden Crust Bakeshop', '{S} Bakery', 'Panaderia ni {A} {N}', "{N}'s Bake House", 'Bagong Luto Bakeshop', '{B} Pandesal Bakery'],
+            '{S} Bakeries Inc.', ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY']],
+        '47521' => [['{I} {S} Hardware & Construction Supply', '{S} Builders Supply', '{B} Hardware', 'Matibay Construction Supply', "{N}'s Hardware & Electrical", '{S} Lumber & Hardware'],
+            '{S} Construction Supply Corp.', ['ZONING', 'FSIC', 'OCCUPANCY']],
+        '96200' => [['Sparkle Laundry Hub', "{N}'s Laundry Shop", 'Labada ni {A} {N}', 'Fresh & Fold Laundry', '{B} Wash & Dry', '{S} Laundromat'],
+            '{S} Laundry Services Inc.', ['ZONING', 'FSIC', 'CEC']],
+        '36000' => [['Malabon Aqua Refilling Station', '{S} Purified Water Station', 'Agua {N} Water Refilling', '{B} Water Refilling Station', 'Crystal Drop Water Station', '{I} {S} Water Station'],
+            '{S} Water Corporation', ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
+        '47721' => [['{S} Pharmacy', 'Botika ni {A} {N}', '{B} Drugstore', '{I} {S} Drug Store', 'Mabuhay Botika', "{N}'s Family Pharmacy"],
+            '{S} Pharma Distributors Inc.', ['ZONING', 'SANITARY', 'FSIC']],
+        '96120' => [["{N}'s Beauty Salon", 'Ganda ni {N} Salon', '{S} Hair & Nail Studio', 'Beauty Corner by {N}', '{B} Beauty Parlor', 'Bella {N} Salon'],
+            '{S} Beauty Services Inc.', ['ZONING', 'SANITARY', 'FSIC']],
+        '45201' => [['{I} {S} Auto Repair', "{K} {N}'s Vulcanizing Shop", '{B} Vulcanizing & Auto Supply', '{S} Motor Works', "{N}'s Tire & Vulcanizing", 'Tibay Vulcanizing'],
+            '{S} Automotive Services Inc.', ['ZONING', 'FSIC', 'CEC']],
+        '96110' => [["{N}'s Barbershop", 'Gupitan ni {A} {N}', '{S} Barber Shop', 'Classic Cuts Barbershop', '{B} Barbershop', "{K} {N}'s Barbershop"],
+            '{S} Grooming Services Inc.', ['ZONING', 'SANITARY', 'FSIC']],
+        '47211' => [['{B} Rice Dealer', '{S} Bigasan', 'Bigasan ni {A} {N}', '{I} {S} Rice Trading', 'Bagong Ani Rice Center', "{N}'s Rice Store"],
+            '{S} Grains Trading Corp.', ['ZONING', 'SANITARY', 'FSIC']],
+        '47214' => [['{S} Fish Dealer', '{B} Fresh Fish', 'Isdaan ni {A} {N}', 'Malabon Bay Seafood Trading', "{N}'s Fish & Seafood", '{I} {S} Fish Trading'],
+            '{S} Seafood Trading Corp.', ['ZONING', 'SANITARY', 'FSIC', 'CEC']],
+        '18120' => [['{I} {S} Printing Services', '{S} Printing Press', "{N}'s Print & Copy", 'Print Hub {B}', 'Tinta {N} Printing', '{B} Xerox & Printing'],
+            '{S} Printing Corp.', ['ZONING', 'FSIC', 'CEC']],
+        '47412' => [["{N}'s Cellphone & Accessories", '{B} Mobile Shop', '{I} {S} Gadget Center', 'Konek Cellphone Repair & Accessories', '{S} Cellphone Center', 'Load & Gadgets ni {N}'],
+            '{S} Mobile Trading Inc.', ['ZONING', 'FSIC']],
+        '47610' => [['{S} School & Office Supplies', "{N}'s Bookstore", '{B} School Supplies', "{T} {N}'s Gift & School Supplies", 'Lapis at Papel School Supplies', '{I} {S} Office Supplies'],
+            '{S} Book & Supplies Corp.', ['ZONING', 'FSIC']],
+        '95110' => [['{I} {S} Computer Services', "{N}'s PC Clinic", '{S} Computer Repair', '{B} Laptop & PC Repair', 'TechFix {B}', '{N} Computer Shop'],
+            '{S} IT Solutions Inc.', ['ZONING', 'FSIC']],
     ];
 
     /**
@@ -119,6 +162,21 @@ final class Roster
     /** @var array<string, array<string, list<array{0: float, 1: float}>>> grid points by barangay, then zone */
     private array $zonePoints = [];
 
+    /** @var array<string, int> how many shops of each trade this run has named */
+    private array $named = [];
+
+    /**
+     * Every shop and trade name given out so far. Two shops of one name would
+     * be one shop to a clerk reading the queue, so an owner takes the next of
+     * the trade's names nobody has; past the sixth, the barangay is added.
+     *
+     * @var list<string>
+     */
+    private array $taken = [];
+
+    /** @var array<string, array<string, list<array{0: float, 1: float}>>>|null barangay => street => points */
+    private static ?array $streets = null;
+
     /**
      * Every owner for this run, in order.
      *
@@ -129,18 +187,14 @@ final class Roster
         [$local, $domain] = explode('@', strtolower(trim($emailBase)), 2);
         $local = explode('+', $local)[0];
 
+        $this->named = [];
+        $this->taken = [];
         $out = [];
         $index = 0;
         foreach (array_keys(self::SCENARIOS) as $s => $slug) {
             for ($n = 1; $n <= $perScenario; $n++) {
                 $index++;
                 $owner = $this->owner($index, $s, $slug, $n, "{$local}+bt-{$slug}-{$n}@{$domain}");
-                // Two shops of one name would be one shop to a clerk reading
-                // the queue; the second is named for its barangay, as a
-                // branch would be.
-                if (in_array($owner['business']['name'], array_map(fn ($o) => $o['business']['name'], $out), true)) {
-                    $owner['business']['name'] .= ' - '.$owner['business']['barangay'];
-                }
                 $out[] = $owner;
             }
         }
@@ -157,16 +211,25 @@ final class Roster
     private function owner(int $index, int $s, string $slug, int $n, string $email): array
     {
         $female = $index % 2 === 0;
-        // Halved because the genders alternate; with the surname's stride of
-        // 13 over 60 no two owners in a run of 120 share a full name.
-        $given = ($female ? self::WOMEN : self::MEN)[(intdiv($index, 2) * 7) % 20];
-        $surname = self::SURNAMES[($index * 13) % count(self::SURNAMES)];
-        $middle = self::SURNAMES[($index * 13 + 29) % count(self::SURNAMES)];
+        $pool = $female ? self::WOMEN : self::MEN;
+        $givens = array_keys($pool);
+        // 17 and 40 share no factor, so the first forty of a gender each get
+        // a different given name; 23 and 60 likewise for the surnames.
+        $given = $givens[(intdiv($index - 1, 2) * 17 + 5) % count($givens)];
+        $nick = $pool[$given];
+        $surname = self::SURNAMES[($index * 23 + 7) % count(self::SURNAMES)];
+        // A stride of its own for the middle name, nudged every thirteenth
+        // owner, so a surname and middle name never pair the same way twice.
+        $middle = self::SURNAMES[($index * 7 + intdiv($index, 13) * 3 + 11) % count(self::SURNAMES)];
+        if ($middle === $surname) {
+            $middle = self::SURNAMES[($index * 7 + intdiv($index, 13) * 3 + 12) % count(self::SURNAMES)];
+        }
 
         $barangays = Barangay::orderBy('id')->pluck('name', 'id')->all();
         $barangayIds = array_keys($barangays);
         $homeBarangay = $barangays[$barangayIds[($index * 5) % count($barangayIds)]];
         $barangayId = $barangayIds[($index * 8 + $s) % count($barangayIds)];
+        $barangay = $barangays[$barangayId];
 
         $codes = array_keys(self::TRADES);
         $trade = (string) $codes[($index * 7) % count($codes)];
@@ -179,24 +242,47 @@ final class Roster
             }
             $trade = self::nextTrade($trade);
         }
-        [$names, $ticks] = self::TRADES[$trade];
+        [$names, $corporateName, $ticks] = self::TRADES[$trade];
+
+        $use = $this->named[$trade] = ($this->named[$trade] ?? -1) + 1;
+        // "Precious' Bookstore", not "Precious's".
+        $fill = fn (string $template) => preg_replace("/s's\\b/", "s'", strtr($template, [
+            '{S}' => $surname,
+            '{N}' => $nick,
+            '{I}' => str_contains($given, ' ') ? implode('', array_map(fn ($w) => $w[0], explode(' ', $given))) : $given[0].'.',
+            '{B}' => $barangay,
+            '{A}' => $female ? 'Aling' : 'Mang',
+            '{T}' => $female ? 'Tita' : 'Tito',
+            '{L}' => $female ? 'Lola' : 'Lolo',
+            '{K}' => $female ? 'Ate' : 'Kuya',
+        ]));
 
         // A shop of four in five is a sole proprietorship registered with DTI;
-        // the rest are incorporated with SEC, under the family name.
+        // the rest are incorporated with SEC under the family name and trade
+        // under the name on the sign. A sole proprietor's DTI name usually IS
+        // the sign, so only one in three gives a separate trade name.
         $corporate = $index % 5 === 0;
-        $template = $corporate
-            ? collect($names)->first(fn (string $t) => str_contains($t, '{S}')).' Inc.'
-            : $names[$index % count($names)];
+        $free = function (int $from) use ($names, $fill): ?string {
+            for ($k = 0; $k < count($names); $k++) {
+                $candidate = $fill($names[($from + $k) % count($names)]);
+                if (! in_array($candidate, $this->taken, true)) {
+                    return $candidate;
+                }
+            }
 
-        $short = explode(' ', $given)[0];
-        $name = strtr($template, [
-            '{S}' => $surname,
-            '{G}' => $short,
-            '{A}' => $female ? 'Aling' : 'Mang',
-            '{B}' => $barangays[$barangayId],
-        ]);
+            return null;
+        };
+        $sign = $free($use) ?? $fill($names[$use % count($names)]).' - '.$barangay;
+        $this->taken[] = $sign;
+        $name = $corporate ? $fill($corporateName) : $sign;
+        $tradeName = $corporate ? $sign : ($index % 3 === 0 ? $free($use + 3) : null);
+        $this->taken[] = $name;
+        if ($tradeName !== null) {
+            $this->taken[] = $tradeName;
+        }
 
         $seed = crc32($email);
+        $street = self::streetNear($barangay, $pin);
 
         return [
             'index' => $index,
@@ -204,14 +290,19 @@ final class Roster
             'n' => $n,
             'email' => $email,
             'first_name' => $given,
+            'nickname' => $nick,
             'middle_name' => $middle,
             'last_name' => $surname,
             'gender' => $female ? 'F' : 'M',
             'mobile' => sprintf('0999000%04d', $index),
-            'home_street' => (10 + ($seed % 290)).' '.self::STREETS[($index * 3) % count(self::STREETS)],
+            'home_street' => (3 + ($seed % 180)).' '.self::streetIn($homeBarangay, $index),
             'home_barangay' => $homeBarangay,
             'business' => [
                 'name' => $name,
+                'trade_name' => $tradeName,
+                // What an amendment renames the shop to: another of its
+                // trade's names, as when an owner rebrands.
+                'new_trade_name' => $fill($names[($use + 2) % count($names)]),
                 'psic' => $trade,
                 'ticks' => $ticks,
                 'registration_type' => $corporate ? 'corporation' : 'sole_proprietorship',
@@ -220,15 +311,56 @@ final class Roster
                     : sprintf('%07d', 3000000 + $seed % 6999999),
                 'tin' => sprintf('%03d-%03d-%03d-000', 100 + $seed % 800, ($seed >> 8) % 1000, ($seed >> 16) % 1000),
                 'barangay_id' => $barangayId,
-                'barangay' => $barangays[$barangayId],
+                'barangay' => $barangay,
                 'pin' => $pin,
                 'house_no' => (string) (1 + ($seed >> 4) % 250),
-                'street' => self::STREETS[($index * 7 + 3) % count(self::STREETS)],
+                'street' => $street,
                 'capital' => [50000, 80000, 120000, 150000, 250000, 400000][$index % 6],
                 'floor_area' => [12, 18, 24, 30, 45, 60][($index + 1) % 6],
                 'employees' => 1 + $index % 4,
             ],
         ];
+    }
+
+    /**
+     * The named road nearest the pin, among those inside the barangay — the
+     * street a shop at that spot gives as its address.
+     *
+     * @param  array{0: float, 1: float}|null  $pin
+     */
+    public static function streetNear(string $barangay, ?array $pin): string
+    {
+        $streets = self::streets()[$barangay] ?? [];
+        if ($pin === null || $streets === []) {
+            return self::streetIn($barangay, 0);
+        }
+
+        $best = null;
+        $bestDistance = INF;
+        foreach ($streets as $name => $points) {
+            foreach ($points as [$lat, $lng]) {
+                $d = ($lat - $pin[0]) ** 2 + (($lng - $pin[1]) * cos(deg2rad($lat))) ** 2;
+                if ($d < $bestDistance) {
+                    [$best, $bestDistance] = [$name, $d];
+                }
+            }
+        }
+
+        return (string) $best;
+    }
+
+    /** One of the barangay's streets, picked by `$k`. */
+    public static function streetIn(string $barangay, int $k): string
+    {
+        $names = array_keys(self::streets()[$barangay] ?? []);
+
+        return $names === [] ? 'M.H. Del Pilar St.' : $names[($k * 7) % count($names)];
+    }
+
+    /** @return array<string, array<string, list<array{0: float, 1: float}>>> */
+    private static function streets(): array
+    {
+        return self::$streets ??= json_decode((string) file_get_contents(__DIR__.'/streets.json'), true);
     }
 
     /**

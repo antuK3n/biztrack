@@ -84,7 +84,7 @@ final class AppClient
     /** A multipart POST carrying one PDF, as a file picker sends it. */
     public function upload(string $step, string $uri, array $data, string $filename, string $pdf, string $field = 'file'): array
     {
-        $path = tempnam(sys_get_temp_dir(), 'bt-defense-');
+        $path = tempnam(sys_get_temp_dir(), 'bt-upload-');
         file_put_contents($path, $pdf);
 
         try {
@@ -192,7 +192,11 @@ final class AppClient
         $key = $user->id.'|'.CarbonImmutable::now()->toDateString();
 
         if (! isset($this->tokens[$key])) {
-            $token = $user->createToken('biztrack:seed-defense-accounts');
+            // Named as the sign-in screen names a token ("web:<portal>"), so
+            // nothing an admin could see of the run's sessions reads as a
+            // script; they are deleted at the end in any case.
+            $portal = $user->hasRole('admin') ? 'admin' : ($user->hasRole('business_owner') ? 'public' : 'staff');
+            $token = $user->createToken("web:{$portal}");
             $this->minted[] = $token->accessToken->getKey();
             $this->tokens[$key] = $token->plainTextToken;
         }

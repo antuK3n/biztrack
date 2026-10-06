@@ -10,6 +10,7 @@ use App\Models\OfficerRequest;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\DefenseAccounts\Roster;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -105,7 +106,9 @@ it('builds one owner per scenario, each in the state the scenario names', functi
 
     [, $amended] = defenseFilings('amendment-approved');
     expect($amended->status)->toBe(ApplicationStatus::Approved)
-        ->and($amended->business->trade_name)->toEndWith('General Merchandise')
+        // Renamed to the name the roster planned for this owner's rebrand.
+        ->and($amended->business->trade_name)->toBe(collect((new Roster)->owners('kenjohnvianneym@gmail.com', 1))
+        ->firstWhere('scenario', 'amendment-approved')['business']['new_trade_name'])
         ->and(Permit::whereHas('business', fn ($b) => $b->where('owner_user_id', defenseOwner('amendment-approved')->id))
             ->where('status', PermitStatus::Superseded->value)->exists())->toBeTrue();
 
