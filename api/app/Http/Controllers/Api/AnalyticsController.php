@@ -66,6 +66,26 @@ class AnalyticsController extends Controller
         ]);
     }
 
+    /**
+     * Fees Collected this month, for the office admin's home tile.
+     *
+     * Same office rule as dashboard() — AnalyticsOffice::forRequest, so an
+     * office account is answered with its own office and refused any other —
+     * and the same arithmetic (DashboardAnalytics::feesThisMonth runs the
+     * dashboard's own fee facts). Live rather than from the nightly snapshot:
+     * it is one query over this year's payments, and a tile that lags the
+     * counter by a day reads as a payment that did not land.
+     */
+    public function feesMonth(Request $request): JsonResponse
+    {
+        $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
+
+        return response()->json([
+            'data' => DashboardAnalytics::feesThisMonth($office),
+            'scope' => AnalyticsOffice::describe($request->user(), $office),
+        ]);
+    }
+
     public function dashboardReport(Request $request): Response
     {
         $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));

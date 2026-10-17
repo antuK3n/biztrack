@@ -1965,6 +1965,16 @@ export interface AnalyticsScope {
   offices: { code: string; name: string }[]
 }
 
+/** `analytics/fees-month`: Fees Collected this month, for the office home tile. */
+export interface FeesMonth {
+  /** Manila dates: the 1st of this month, and today. */
+  month_start: string
+  today: string
+  /** Pesos received this month for the permits this office issues. */
+  month_total: number
+  payments_month: number
+}
+
 export interface ScopedComputed<T> extends Computed<T> {
   scope: AnalyticsScope
 }
