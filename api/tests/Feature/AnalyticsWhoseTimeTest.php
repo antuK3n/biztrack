@@ -1,15 +1,16 @@
 <?php
 
 use App\Support\AnalyticsOffice;
-use App\Support\DashboardAnalytics;
 use App\Support\LguReports;
 use Carbon\CarbonImmutable;
 
 /*
  * Whose time a filing's time was (App\Support\FilingClock).
  *
- * Two rules, pinned on the dashboard's RA 11032 tier panel and on the
- * processing-time report, which must agree:
+ * Two rules, pinned on the Reports tab's processing-time report. They were
+ * also pinned on the dashboard's RA 11032 tier panel until that panel was
+ * removed on 18 October 2026 (it rested on a complexity tier BPLO no longer
+ * sets); the report still reads FilingClock, so the rules still hold there:
  *
  *  - one office is judged on its own review, not on the whole filing;
  *  - nobody is charged for the time a filing sat with its applicant
@@ -40,12 +41,9 @@ it('judges an office on its own review, not on the filing’s whole lifetime', f
         'completed_at' => '2031-03-18 01:00:00',
     ]);
 
-    $simple = collect(DashboardAnalytics::build(12, $office['code'])['processing_tiers'])->firstWhere('tier', 'simple');
     $reported = whoseTimeReport('pending-processing', $office['code'])['sections'][0]['rows'][0];
 
-    expect($simple['observations'])->toBe(1)
-        ->and($simple['mean_working_days'])->toEqual(1.0)
-        ->and($simple['within_statutory'])->toBe(1)
+    expect($reported['decided'])->toBe(1)
         ->and($reported['mean_days'])->toEqual(1.0)
         ->and($reported['within'])->toBe(1);
 });
@@ -65,13 +63,10 @@ it('leaves the applicant’s time out of the whole register’s processing time'
         ['approved', '2031-03-19 01:00:00'],               // the offices took two
     ]);
 
-    $simple = collect(DashboardAnalytics::build()['processing_tiers'])->firstWhere('tier', 'simple');
     $reported = whoseTimeReport('pending-processing', null)['sections'][0]['rows'][0];
 
-    expect($simple['observations'])->toBe(1)
-        ->and($simple['mean_working_days'])->toEqual(3.0)
-        ->and($simple['within_statutory'])->toBe(1)
-        ->and($reported['decided'])->toBe(1)
+    expect($reported['decided'])->toBe(1)
+        ->and($reported['within'])->toBe(1)
         ->and($reported['mean_days'])->toEqual(3.0);
 });
 
@@ -94,11 +89,9 @@ it('times BPLO by the days at its own desk, not by its re-stamped review', funct
     anaAssignment($filing, 'BPLO', ['assigned_at' => '2031-03-03 01:00:00', 'completed_at' => '2031-03-11 01:00:00']);
 
     $reported = whoseTimeReport('pending-processing', 'BPLO')['sections'][0]['rows'][0];
-    $simple = collect(DashboardAnalytics::build(12, 'BPLO')['processing_tiers'])->firstWhere('tier', 'simple');
 
     expect($reported['decided'])->toBe(1)
-        ->and($reported['mean_days'])->toEqual(3.0)
-        ->and($simple['mean_working_days'])->toEqual(3.0);
+        ->and($reported['mean_days'])->toEqual(3.0);
 });
 
 it('does not count an office’s review of a dead filing as pending', function () {

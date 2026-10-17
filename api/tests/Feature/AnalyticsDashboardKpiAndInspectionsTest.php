@@ -159,23 +159,20 @@ function backdateAFilingToLastYear(): CarbonImmutable
     return $lastYear;
 }
 
-it('counts the whole register on the yearly KPI, not the year to date', function () {
+it('counts the whole register on the all-time KPI, not the year to date', function () {
     /*
-     * The key is still `applications_ytd` and the figure under it is the whole
-     * register, which is a mismatch this test exists to pin rather than to
-     * excuse. It could not be renamed while R echoed the name verbatim and the
-     * parity check was byte-strict on data keys; that is no longer true, so the
-     * rename is now this codebase's to make. It has not been made because the
-     * name travels — stored snapshots, the golden baseline, the PDF and the
-     * client all carry it — and renaming it is a coordinated change, not a
-     * tidy-up. See DashboardAnalytics::kpiFacts().
+     * The tile reads `applications_all_time` since 18 October 2026: every
+     * filing that is not a draft, of every type. It read `applications_ytd`,
+     * which despite its name was the full term too, but only of filings with
+     * a submission date. See DashboardAnalytics::kpiFacts().
      */
     backdateAFilingToLastYear();
 
     $total = Application::whereNull('deleted_at')
-        ->where('created_at', '<=', CarbonImmutable::now())
+        ->where('status', '!=', 'draft')
         ->count();
     $thisYear = Application::whereNull('deleted_at')
+        ->where('status', '!=', 'draft')
         ->where('created_at', '>=', CarbonImmutable::now()->startOfYear())
         ->count();
 
@@ -183,7 +180,24 @@ it('counts the whole register on the yearly KPI, not the year to date', function
     // with the cutoff restored, and this test would be worth nothing.
     expect($total)->toBeGreaterThan($thisYear);
 
-    expect(DashboardAnalytics::build()['kpis']['applications_ytd'])->toBe($total);
+    expect(DashboardAnalytics::build()['kpis']['applications_all_time'])->toBe($total);
+});
+
+it('counts every non-draft filing of every type on the all-time KPI, dated or not', function () {
+    $before = DashboardAnalytics::build()['kpis']['applications_all_time'];
+    $business = anaBusiness();
+
+    anaFiling($business, ['application_type' => 'new', 'status' => 'approved', 'submitted_at' => now()->subYears(2)->toDateTimeString()]);
+    anaFiling($business, ['application_type' => 'renewal', 'status' => 'for_approval', 'submitted_at' => now()->subDay()->toDateTimeString()]);
+    anaFiling($business, ['application_type' => 'amendment', 'status' => 'returned', 'submitted_at' => now()->subDay()->toDateTimeString()]);
+    // Approved with no submission date — what the portfolio flow writes. It
+    // was left off the tile, which is why the tile read 18 of 26.
+    anaFiling($business, ['application_type' => 'new', 'status' => 'approved', 'submitted_at' => null]);
+    // Neither of these is a filing on record.
+    anaFiling($business, ['status' => 'draft', 'submitted_at' => null]);
+    anaFiling($business, ['status' => 'approved', 'submitted_at' => now()->subDay()->toDateTimeString(), 'deleted_at' => now()->toDateTimeString()]);
+
+    expect(DashboardAnalytics::build()['kpis']['applications_all_time'])->toBe($before + 4);
 });
 
 it('keeps the full-term and this-month KPIs distinguishable', function () {
@@ -193,5 +207,5 @@ it('keeps the full-term and this-month KPIs distinguishable', function () {
 
     // Not one figure printed twice under two headings: "This Month" still means
     // this month, and it is a strict subset of the term.
-    expect($kpis['applications_this_month'])->toBeLessThan($kpis['applications_ytd']);
+    expect($kpis['applications_this_month'])->toBeLessThan($kpis['applications_all_time']);
 });

@@ -696,8 +696,9 @@ class ClearanceService
      * the filing with no office ever seeing it.
      *
      * The objection to apply-time routing under the old ordering was real:
-     * `assigned_at` starts the service-time clock that ProcessingTimeAnalytics,
-     * StaffingSimulation and DashboardAnalytics measure an office by, and
+     * `assigned_at` starts the service-time clock that ProcessingTimeAnalytics
+     * and StaffingSimulation measure an office by (DashboardAnalytics did too
+     * until 18 October 2026; it now reads the permit's own history), and
      * stamping it inside somebody's unfinished draft charged the office for the
      * days the applicant spent typing.
      *

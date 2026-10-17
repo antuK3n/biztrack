@@ -109,9 +109,12 @@ final class OfficePerformanceAnalytics
      * "Never Color Alone" applied to an absence: an unexplained gap is a
      * colour-only signal made of whitespace.
      *
-     * Public because the dashboard and the reports ask the same question —
-     * whose recorded review time is not their own step — and must not keep a
-     * second list (FilingClock::bplo, DashboardAnalytics::stageObservations).
+     * Public because the reports ask the same question — whose recorded review
+     * time is not their own step — and must not keep a second list
+     * (FilingClock::bplo). The dashboard asked it too until 18 October 2026;
+     * its Time in Office reads each permit's own history instead of the
+     * assignment, so BPLO's time there IS its own step and it is drawn
+     * (DashboardAnalytics::stageObservations).
      *
      * @var array<string, string>
      */

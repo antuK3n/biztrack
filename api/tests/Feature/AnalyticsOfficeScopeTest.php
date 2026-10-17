@@ -101,7 +101,7 @@ it('serves an office admin the figures computed for their office, not the city',
     $city = DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
 
     expect($body['data']['kpis'])->toEqual($cho['kpis'])
-        ->and($body['data']['kpis']['applications_ytd'])->toBeLessThan($city['kpis']['applications_ytd']);
+        ->and($body['data']['kpis']['applications_all_time'])->toBeLessThan($city['kpis']['applications_all_time']);
 
     // Only the office's own visits, and only its own permit type (if the seed
     // has issued any: the column list is read from permits actually on file).

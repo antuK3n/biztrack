@@ -34,9 +34,9 @@ import type {
   LineOfBusinessRow,
   MapPoint,
   RankedShareRow,
-  RenewalForecast,
-  StageRow,
+  SuspendedPermits,
 } from '../../lib/types'
+import { formatMoney } from '../../lib/format'
 import { AnalyticsError } from './AnalyticsError'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
@@ -58,13 +58,18 @@ import type { OfficePermit } from './officePermit'
  *    reason — "No filings on record", "Cannot be computed" — never as 0 or 0%. A
  *    dash is honest; a zero is a claim nobody computed.
  *
- * 2. Each panel says which window it used. The KPI cards, volume and outcomes are
- *    this month or year-to-date; the means and rates run on a trailing window; the
- *    rankings and the map are as of today. Nothing here implies one clock.
+ * 2. Each panel says which window it used. Volume and outcomes are this month;
+ *    fees are this month and this year; the means and rates run on a trailing
+ *    window; the rankings, suspended permits and the map are as of today.
+ *    Nothing here implies one clock.
  *
- * 3. A statutory breach must be impossible to skim past. RA 11032's 3/7/20-day
- *    limits are law, not service targets. See TierPanel for how that is drawn
- *    and why it is drawn that way.
+ * 3. Only what the register records. On 18 October 2026 the client took off
+ *    every panel resting on something nobody fills in: the RA 11032 tier panel
+ *    and its compliance card (a tier BPLO no longer sets), the renewal estimate
+ *    (too little history), response time and meetings (nothing records them),
+ *    and the Cancelled outcome (applicants can no longer cancel). Fees Collected
+ *    and Suspended Permits came on, and the department panel became Time in
+ *    Office. Do not put a panel back without the data under it.
  *
  * THE CHART TYPES ARE NOT A STYLE CHOICE. The client's "R INTEGRATION DRAFTS"
  * names a required visualisation per report, and it was written down because
@@ -73,13 +78,14 @@ import type { OfficePermit } from './officePermit'
  *
  *   Application Volume                        vertical bar chart
  *   Decision Outcomes                         donut, approval rate in the hole
- *   Average Processing Time (RA 11032)        horizontal bar chart
- *   Average Processing Time by Department     horizontal bar chart
- *   Compliance Rate                           three KPI cards
+ *   Time in Office                            horizontal bar chart
+ *   Fees Collected                            two KPI cards and a table
+ *   Compliance Rate                           two KPI cards
+ *   Suspended Permits                         two KPI cards and a short list
  *   Top Five Barangays / Business Categories  vertical bar charts
  *   Form of Organization                      pie chart
  *   Inspections                               horizontal STACKED bar chart
- *   Officer Activity                          three KPI cards
+ *   Messages & Requests                       two KPI cards
  *
  * Every one of them goes through components/charts, which is what supplies the
  * accessible name and the sr-only table of the underlying numbers. A chart
@@ -105,12 +111,13 @@ import type { OfficePermit } from './officePermit'
  */
 
 /*
- * The breach tone. Deliberately NOT #bd0000: DESIGN.md reserves that for errors
- * and destructive actions and forbids it as a chart data colour. A statutory
- * breach is a finding about the office, not a system error — so it reads as a
- * heavy amber that clears 4.5:1 on white, and every breach also carries a word
- * and an icon, because colour alone would fail both WCAG 2.1 AA and the Never
- * Color Alone rule.
+ * The "needs attention" tone — a suspension past 30 days, since the RA 11032
+ * tier panel that introduced it was removed (18 October 2026). Deliberately NOT
+ * #bd0000: DESIGN.md reserves that for errors and destructive actions and
+ * forbids it as a data colour. A long suspension is a finding about the
+ * backlog, not a system error — so it reads as a heavy amber that clears 4.5:1
+ * on white, and it also carries a word and an icon, because colour alone would
+ * fail both WCAG 2.1 AA and the Never Color Alone rule.
  */
 const BREACH = CHART_AMBER
 const BREACH_TINT = '#fdf1e3'
@@ -184,25 +191,11 @@ function windowFrom(value: string | null): string {
   return PERIOD_OPTIONS.some((option) => option.value === value) ? (value as string) : '12'
 }
 
-/**
- * A wait in office hours, as a reader would say it.
- *
- * Under an hour it is minutes. "0.0h" was what a 20-minute reply printed: a
- * figure that reads as instant, or as broken, and is neither. The API measures
- * office time only (OfficeHours::hoursBetween), so this is office minutes too.
+/*
+ * officeWait() and waitText() formatted the officer response time, removed on
+ * 18 October 2026 with the figure (nothing records replies). They are in git
+ * history if a reply-time figure comes back.
  */
-function officeWait(hours: number): { value: string; unit: string } {
-  if (hours < 1) {
-    const minutes = Math.round(hours * 60)
-    return minutes < 1 ? { value: 'Under 1', unit: ' min' } : { value: String(minutes), unit: ' min' }
-  }
-  return { value: hours.toFixed(1), unit: ' office hours' }
-}
-
-function waitText(hours: number): string {
-  const { value, unit } = officeWait(hours)
-  return `${value.toLowerCase()}${unit}`
-}
 
 function pct(value: number | null): string {
   return value === null ? '—' : `${value.toFixed(1)}%`
@@ -401,7 +394,6 @@ const OUTCOME_COLORS: Record<string, string> = {
   returned: CHART_AMBER,
   rejected: CHART_PURPLE,
   pending: CHART_MUTED,
-  cancelled: CHART_SLATE,
 }
 
 function DecisionsPanel({ report }: { report: DashboardReport }) {
@@ -420,13 +412,12 @@ function DecisionsPanel({ report }: { report: DashboardReport }) {
     )
   }
   /*
-   * Cancelled only earns a slice once it has happened — otherwise it is a
-   * permanent zero explaining nothing. Zero-count outcomes are dropped from the
-   * plot for the same reason: recharts renders them as an invisible wedge with
-   * a visible legend entry, which reads as "we lost this one".
+   * Zero-count outcomes are dropped from the plot: recharts renders them as an
+   * invisible wedge with a visible legend entry, which reads as "we lost this
+   * one". There is no Cancelled row to hide any more — the server stopped
+   * sending it on 18 October 2026, since applicants can no longer cancel.
    */
-  const visible = rows.filter((row) => row.outcome !== 'cancelled' || row.count > 0)
-  const plotted = visible.filter((row) => row.count > 0)
+  const plotted = rows.filter((row) => row.count > 0)
 
   const slices: ShareSlice[] = plotted.map((row) => ({
     key: row.outcome,
@@ -470,177 +461,23 @@ function DecisionsPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Average Processing Time (RA 11032) ────────────────────────────────── */
+/* ── Time in Office ────────────────────────────────────────────────────── */
 
-/**
- * The three statutory tiers against their legal limits, as a horizontal bar
- * chart — the visualisation the client's spec names for this report.
- *
- * THE AXIS IS A PERCENTAGE OF EACH TIER'S OWN LIMIT, AND THAT IS THE WHOLE
- * DESIGN. Read this before "fixing" it to plot days.
- *
- * RA 11032 gives simple transactions 3 working days, complex 7, and highly
- * technical 20. Plot the means on one shared day-axis and the highly-technical
- * bar is seven times the length of the simple one no matter how each is
- * performing: a simple tier running 83% over the law renders as a stub, and a
- * highly-technical tier comfortably inside its own limit renders as the longest
- * bar on the chart. That is a chart which hides breaches, on a panel whose only
- * job is to surface them.
- *
- * Scaling each bar by its own limit puts the legal threshold at 100% for all
- * three, so one dashed reference line governs every row and crossing it means
- * the same thing everywhere. The actual figure is not lost: the day value and
- * its limit are written at the end of each bar, and the sr-only table carries
- * both in full.
- *
- * A breach then gets four independent signals, because one is skippable and
- * colour alone is not accessible: the bar visibly crosses a marked line, the bar
- * changes tone, the row below carries a warning icon, and the overage is written
- * out in working days. Nothing here softens how a breach reads.
+/*
+ * TierPanel stood before this, drawing each RA 11032 tier against its legal
+ * limit. It went on 18 October 2026 with its compliance card: both rested on a
+ * complexity tier BPLO has not set since 27 September, so every bar was a
+ * statement about a column nobody fills. It is in git history if a tier that
+ * someone sets comes back.
  */
-function TierPanel({ report }: { report: DashboardReport }) {
-  const tiers = report.processing_tiers
-  const measured = tiers.filter((t) => t.mean_working_days !== null)
-  const breaching = tiers.filter((t) => t.breaching)
-
-  /*
-   * Tiers whose own recorded deadline is more generous than the law allows. The
-   * workflow stamps every filing with a flat ten-working-day deadline, so a
-   * simple transaction can be comfortably "on time" against the system and
-   * still be more than three times over the statute. Anyone reading a high
-   * on-time figure elsewhere in the product has to be told that.
-   */
-  const lenient = measured.filter(
-    (t) =>
-      t.recorded_deadline_working_days !== null &&
-      t.recorded_deadline_working_days > t.statutory_working_days,
-  )
-
-  const data: BarDatum[] = measured.map((row) => {
-    const mean = row.mean_working_days as number
-    /*
-     * The unit is written on every figure: WORKING days here, because RA 11032
-     * sets its limits in working days. The department panel beside this one is
-     * in OFFICE days, a different clock, and a bare "8.7d" beside a bare
-     * "2.2d" invited reading the two as the same measure.
-     */
-    return {
-      key: row.tier,
-      label: `${row.label} · ${row.statutory_working_days}-day limit`,
-      value: Number(((mean / row.statutory_working_days) * 100).toFixed(1)),
-      valueText: `${mean.toFixed(1)} working days`,
-      note: `${row.statutory_working_days} working days`,
-      color: row.breaching ? BREACH : CHART_ROYAL,
-    }
-  })
-
-  const unmeasured = tiers.filter((t) => t.mean_working_days === null)
-
-  return (
-    <ProtoCard className="px-4 pb-3 pt-4">
-      {data.length === 0 ? (
-        <p className="py-3 text-[13px] text-ink-secondary">
-          Nothing has been decided in this window, so there is no average to set against the legal
-          limits.
-        </p>
-      ) : (
-        <HorizontalBars
-          title="Average processing time per RA 11032 tier, as a percentage of that tier's own legal limit"
-          data={data}
-          categoryHeading="Tier and legal limit"
-          valueHeading="Average working days"
-          noteHeading="Legal limit"
-          categoryWidth={108}
-          rowHeight={34}
-          reference={{ value: 100, label: 'Legal limit', color: '#1a1f2b' }}
-          /*
-           * Head-room past the reference line so a breaching bar has somewhere
-           * to overshoot into. Without it the worst tier pins to the right edge
-           * and stops looking worse than the one just over the line.
-           */
-          domainMax={Math.max(130, ...data.map((row) => row.value * 1.15))}
-          tooltipUnit="% of the legal limit"
-        />
-      )}
-
-      {/*
-        Per-tier findings, one line each. This is the text half of "never colour
-        alone": the amber bar above says breach to someone who can see it, this
-        says it to everyone else — and it carries the two figures the bar cannot,
-        the overage in working days and the share of individual filings that met
-        the limit.
-      */}
-      <ul className="mt-2.5 space-y-1 border-t border-line pt-2.5">
-        {measured.map((row) => (
-          <li key={row.tier} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-            {row.breaching ? (
-              <span
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-bold"
-                style={{ color: BREACH, backgroundColor: BREACH_TINT }}
-              >
-                <WarningGlyph />
-                {row.label}: {row.overage_days?.toFixed(1)} working days over
-              </span>
-            ) : (
-              <span className="font-semibold text-ink-secondary">
-                {row.label}: {Math.abs(row.overage_days ?? 0).toFixed(1)} working days inside
-              </span>
-            )}
-            <span className="text-ink-muted">
-              {num(row.within_statutory)} of {num(row.observations)} decided inside the limit (
-              {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)} calendar days
-            </span>
-          </li>
-        ))}
-        {unmeasured.map((row) => (
-          <li key={row.tier} className="text-[11px] text-ink-muted">
-            {row.label}: nothing decided in this window, so there is no average against the{' '}
-            {row.statutory_working_days}-day limit.
-          </li>
-        ))}
-      </ul>
-
-      {/*
-        The two sentences that may not be cut. RA 11032's limits are law, and
-        this system stamps a different deadline on every filing — a reader who
-        takes the on-time figures elsewhere in the product as compliance with the
-        statute is reading the wrong number. Both are stated plainly and once.
-      */}
-      <p className="mt-2 text-[11px] leading-snug text-ink-muted">
-        Limits are in <strong className="font-semibold">working days</strong> and set by law, not by
-        the office.
-        {breaching.length > 0 && (
-          <span className="font-semibold text-ink">
-            {' '}
-            {breaching.length} of {measured.length} measured{' '}
-            {measured.length === 1 ? 'tier is' : 'tiers are'} over the legal limit.
-          </span>
-        )}
-        {lenient.length > 0 && (
-          <>
-            {' '}
-            <strong className="font-semibold text-ink">
-              The deadline this system records is not the legal one
-            </strong>{' '}
-            — every filing gets {lenient[0].recorded_deadline_working_days} working days, so on-time
-            figures elsewhere are more forgiving than RA 11032.
-          </>
-        )}
-      </p>
-    </ProtoCard>
-  )
-}
-
-/* ── Average Processing Time by Department ─────────────────────────────── */
 
 /**
- * Department headings in the paper's words.
+ * Office headings in the paper's words.
  *
  * The register stores each office's full legal name ("Bureau of Fire
- * Protection"), too long for a 128px label, so the code was rendered instead —
- * leaving the panel reading BFP/CHO/CPDO where the paper reads Fire
- * Protection/City Health/Zoning. Officers read codes fluently; this panel is
- * for LGU leadership, who do not. Full name stays in the `title` tooltip.
+ * Protection"), too long for a 104px label. Officers read codes fluently; this
+ * panel is for LGU leadership, who do not. Full name stays in the sentence
+ * under the chart.
  *
  * Unmapped codes fall back to the code, so a new office is visibly unmapped
  * rather than silently mislabelled.
@@ -655,91 +492,155 @@ const DEPARTMENT_HEADINGS: Record<string, string> = {
 }
 
 /**
- * A mean over one or two reviews is not a department's processing time, it is
- * an anecdote. Three offices each hold a single review left over from earlier
- * manual testing, all reading 0.0d, and they were crowding out the four
- * departments this panel exists to report on. Same threshold the control chart
- * applies for the same reason (Spc::MIN_COMPLETIONS_PER_WEEK).
+ * Time in Office: working days from the day an office receives a permit to the
+ * day it issues or refuses it (client, 18 October 2026).
+ *
+ * It replaced "Average Processing Time by Department", which timed review
+ * assignments that close at routing — every office read 0 days and the panel
+ * announced "CHO 0 days" as the bottleneck. The review, the wait for the visit
+ * and the visit are all inside now, and BPLO is drawn beside the others.
+ *
+ * Who is drawn, and whether a slowest office is named, are both decided by the
+ * server (`drawn`, `bottleneck`): an office with too few permits is left off
+ * the chart, and a slowest office is named only when it is at least a day and a
+ * quarter above the average. With no name, the panel says nothing about speed —
+ * a tie broken alphabetically is not a finding.
  */
-const MIN_REVIEWS_FOR_STAGE = 3
-
-function StagePanel({ report }: { report: DashboardReport }) {
+function TimeInOfficePanel({ report }: { report: DashboardReport }) {
   const { rows: allRows, bottleneck, mean_days } = report.stages
-  const rows = allRows.filter((r: StageRow) => r.reviews >= MIN_REVIEWS_FOR_STAGE)
+  const rows = allRows.filter((r) => r.drawn)
 
   if (rows.length === 0) {
     return (
       <ProtoCard className="px-5 py-4">
         <p className="text-[13px] text-ink-secondary">
-          No review was finished in this window, so there is no department time to report.
+          {allRows.length === 0
+            ? 'No office issued or refused a permit in this window.'
+            : `Too few permits per office to average yet (fewer than ${report.stages.min_reviews} each).`}
         </p>
       </ProtoCard>
     )
   }
 
-  /*
-   * The slowest office takes the royal; the rest take the muted blue. Length
-   * already ranks them, so colour is only pointing at the answer to "who is the
-   * bottleneck" — which is the question this panel exists for.
-   */
-  /*
-   * OFFICE days, said on every figure. Since bcf16a3 the API counts only the
-   * hours City Hall is open (Monday to Friday, 8:00 to 17:00 Manila) and
-   * reports them in office days of 9 office hours — not the working days of
-   * the RA 11032 panel beside this one, and not calendar days.
-   */
   const data: BarDatum[] = rows.map((row) => ({
     key: row.code,
     label: DEPARTMENT_HEADINGS[row.code] ?? row.code,
     value: row.mean_days,
-    valueText: `${row.mean_days.toFixed(1)} office days`,
-    note: `${num(row.reviews)} reviews`,
+    valueText: `${row.mean_days.toFixed(1)} working days`,
+    note: `${num(row.reviews)} permits`,
+    // Royal only when the server named it slowest; otherwise one tone, so
+    // colour does not point at a difference nobody claimed.
     color: row.code === bottleneck?.code ? CHART_ROYAL : CHART_MUTED,
   }))
 
   return (
     <ProtoCard className="px-4 pb-3 pt-4">
       <HorizontalBars
-        title="Average office days a review spends with each department"
+        title="Average working days a permit spends with each office"
         data={data}
-        categoryHeading="Department"
-        valueHeading="Average office days per review"
-        noteHeading="Reviews completed"
+        categoryHeading="Office"
+        valueHeading="Average working days"
+        noteHeading="Permits issued or refused"
         categoryWidth={104}
-        tooltipUnit="office days per review"
-        /*
-         * Assembled from the computed values, never a fixed sentence: a
-         * hardcoded "Fire Protection is the bottleneck" would keep reading as
-         * true long after Fire Protection got faster.
-         */
+        tooltipUnit="working days"
         footer={
-          bottleneck && (
+          bottleneck ? (
             <>
               <strong className="font-semibold text-ink">{bottleneck.name}</strong> is the slowest at{' '}
-              {bottleneck.mean_days.toFixed(1)} office days
-              {bottleneck.above_average_days !== null && bottleneck.above_average_days > 0 && (
-                <> ({bottleneck.above_average_days.toFixed(1)} over the {mean_days?.toFixed(1)}-day
-                  average)</>
-              )}
-              , handling {bottleneck.share_of_reviews.toFixed(1)}% of reviews. An office day is 9 office
-              hours, Monday to Friday.
+              {bottleneck.mean_days.toFixed(1)} working days, {bottleneck.above_average_days.toFixed(1)} over
+              the {mean_days?.toFixed(1)}-day average.
             </>
-          )
+          ) : undefined
         }
       />
     </ProtoCard>
   )
 }
 
+/* ── Fees Collected ────────────────────────────────────────────────────── */
+
+/** Short permit names for the fee rows; the register's full name is the fallback. */
+const FEE_HEADINGS: Record<string, string> = {
+  BUSINESS: 'Business Permit',
+  SANITARY: 'Sanitary',
+  FSIC: 'FSIC',
+  ZONING: 'Zoning',
+  OCCUPANCY: 'Occupancy',
+  CEC: 'CEC',
+  OTHER: 'Other',
+}
+
+/*
+ * Money received, this month and this year (client's picker, 18 October 2026).
+ * Two totals a Treasurer reads first, then a row per permit — a table, not a
+ * chart, because these are figures to copy into a report. Every row is shown
+ * at ₱0.00 too, so an empty row reads as nothing collected rather than missing.
+ */
+function FeesPanel({ report }: { report: DashboardReport }) {
+  const fees = report.fees_collected
+  const year = fees.year_start.slice(0, 4)
+
+  return (
+    <div className="space-y-3">
+      {/*
+        Not StatCard: its 26px figure does not fit "₱1,234,567.89" in half a
+        phone-width row. Same card, a size smaller, allowed to wrap.
+      */}
+      <div className="grid grid-cols-2 gap-4">
+        {[
+          { key: 'month', label: 'This month', total: fees.month_total, payments: fees.payments_month },
+          { key: 'year', label: `This year (${year})`, total: fees.year_total, payments: fees.payments_year },
+        ].map((card) => (
+          <ProtoCard key={card.key} className="px-4 py-3.5">
+            <p className="text-[11px] uppercase tracking-wide text-ink-muted">{card.label}</p>
+            <p className="tnum mt-1 break-words text-[20px] font-bold leading-tight text-royal sm:text-[24px]">
+              {formatMoney(card.total)}
+            </p>
+            <p className="mt-1 text-[11px] text-ink-muted">
+              {num(card.payments)} {card.payments === 1 ? 'payment' : 'payments'}
+            </p>
+          </ProtoCard>
+        ))}
+      </div>
+      <ProtoCard className="overflow-hidden">
+        <table className="w-full text-left">
+          <caption className="sr-only">Fees collected by permit, this month and this year</caption>
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="px-4 py-2 font-semibold">Permit</th>
+              <th scope="col" className="px-3 py-2 text-right font-semibold">This month</th>
+              <th scope="col" className="px-4 py-2 text-right font-semibold">This year</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fees.rows.map((row) => (
+              <tr key={row.code} className="border-b border-line/60 last:border-0">
+                <th scope="row" className="px-4 py-1.5 text-[14px] font-normal text-ink" title={row.label}>
+                  {FEE_HEADINGS[row.code] ?? row.label}
+                </th>
+                <td className="tnum px-3 py-1.5 text-right text-[14px] text-ink">{formatMoney(row.month)}</td>
+                <td className="tnum px-4 py-1.5 text-right text-[14px] text-ink-secondary">
+                  {formatMoney(row.year)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ProtoCard>
+    </div>
+  )
+}
+
 /* ── Compliance Rate ───────────────────────────────────────────────────── */
 
 /**
- * One compliance indicator, one card — the spec asks for three KPI cards here
- * and the separation is load-bearing, not cosmetic. The three rates count three
- * different populations (decided filings, businesses ever issued a permit,
- * permits due for renewal), so anything that presents them as one series
- * invites a reader to average or compare them. Each card states its own
- * denominator underneath for the same reason.
+ * One compliance indicator, one card, and the separation is load-bearing, not
+ * cosmetic. The two rates count different populations (businesses ever issued
+ * a permit, permits due for renewal), so anything that presents them as one
+ * series invites a reader to average or compare them. Each card states its own
+ * denominator underneath for the same reason. The spec's third card, RA 11032
+ * processing, went on 18 October 2026: it judged filings by a complexity tier
+ * BPLO no longer sets.
  */
 /*
  * The words each card is printed with, for the office on screen.
@@ -808,7 +709,7 @@ function ComplianceCard({
       unit={unavailable ? undefined : '%'}
       unavailable={unavailable}
       label={words.label}
-      // Keyed off the row's own identifier rather than a literal, so the three
+      // Keyed off the row's own identifier rather than a literal, so the
       // indicators cannot be wired to each other's definitions.
       metric={`compliance.${indicator.indicator}`}
       detail={
@@ -822,11 +723,10 @@ function ComplianceCard({
 }
 
 /*
- * Each card states its own window, and the heading states none. The three do
- * not share one: RA 11032 processing and renewals count the trailing months
- * the filter sets, while permit validity is a fact about today. A heading
- * reading "Last 12 months" over all three put a twelve-month label on an
- * as-of-today figure.
+ * Each card states its own window, and the heading states none. The two do
+ * not share one: renewals count the trailing months the filter sets, while
+ * permit validity is a fact about today. A heading reading "Last 12 months"
+ * over both would put a twelve-month label on an as-of-today figure.
  */
 function CompliancePanel({
   report,
@@ -842,7 +742,7 @@ function CompliancePanel({
   asOf: string
 }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2">
       {report.compliance.map((indicator) => (
         <ComplianceCard
           key={indicator.indicator}
@@ -958,80 +858,124 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Renewal Estimate ──────────────────────────────────────────────────── */
+/* ── Suspended Permits ─────────────────────────────────────────────────── */
 
 /*
- * The coming January's Business Permit renewals: each permit's chance of
- * renewing on time, late or not at all, summed (App\Support\RenewalForecast).
- * An estimate, and labelled as one; the arithmetic and what it learns from are
- * on the server. Nothing is drawn when the history is too thin to learn from —
- * a made-up number would look exactly like a real one.
+ * RenewalForecastPanel stood here: the coming January's renewals, estimated.
+ * It went on 18 October 2026 (client's picker) — the register had too little
+ * renewal history for it to estimate anything, so it only ever said so.
  */
-function RenewalForecastPanel({ forecast }: { forecast: RenewalForecast }) {
-  const { expected, shares } = forecast
 
-  if (forecast.unavailable !== null || expected === null || shares === null) {
+/*
+ * Permits suspended today (client's picker, 18 October 2026). A suspended
+ * Mayor's Permit is a business that cannot trade until another office is
+ * satisfied, and after 30 days BPLO may revoke it — so the count, the long
+ * ones in the "needs attention" tone with a word and an icon (Never Color
+ * Alone), and the oldest five with the office each waits on.
+ *
+ * The links open the permits register on the same filter the count uses
+ * (`suspended_over_days`), for the readers whose register shows Mayor's
+ * Permits: BPLO and the two who read every office. A clearance office's
+ * register is its own permits, where these do not appear, so it gets the list
+ * here and no link to an empty table.
+ */
+function SuspendedPanel({ suspended, registerLink }: { suspended: SuspendedPermits; registerLink: string | null }) {
+  if (suspended.total === 0) {
     return (
-      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
-        {forecast.unavailable === 'no_permits'
-          ? `No Business Permit expires on ${dateLabel(forecast.expires_on)}.`
-          : 'Not enough renewal history yet to estimate this.'}
-      </ProtoCard>
+      <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">No permit is suspended.</ProtoCard>
     )
   }
 
   return (
-    <>
-      <div
-        className={`grid items-start gap-4 ${forecast.barangays.length > 0 ? 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}`}
-      >
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard
-            value={num(expected.on_time)}
-            label={`On time (by ${dateLabel(forecast.on_time_until)})`}
-            detail={pct(shares.on_time)}
-          />
-          <StatCard value={num(expected.late)} label="Late" detail={pct(shares.late)} />
-          <StatCard value={num(expected.not_renewed)} label="Not renewed" detail={pct(shares.not_renewed)} />
-        </div>
-
-        {forecast.barangays.length > 0 && (
-          <ProtoCard className="overflow-hidden">
-            <table className="w-full text-left">
-              <caption className="px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-                Most expected non-renewals
-              </caption>
-              <thead>
-                <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
-                  <th scope="col" className="px-4 py-2 font-semibold">Barangay</th>
-                  <th scope="col" className="px-3 py-2 text-right font-semibold">Expected not renewed</th>
-                  <th scope="col" className="px-4 py-2 text-right font-semibold">Permits due</th>
-                </tr>
-              </thead>
-              <tbody>
-                {forecast.barangays.map((row) => (
-                  <tr key={row.barangay} className="border-b border-line/60 last:border-0">
-                    <th scope="row" className="px-4 py-1.5 text-[14px] font-normal text-ink">
-                      {row.barangay}
-                    </th>
-                    <td className="tnum px-3 py-1.5 text-right text-[14px] font-semibold text-ink">
-                      {num(row.not_renewed)}
-                    </td>
-                    <td className="tnum px-4 py-1.5 text-right text-[14px] text-ink-secondary">
-                      {num(row.permits)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ProtoCard>
-        )}
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard
+          label="Suspended"
+          metric="suspended_permits"
+          value={num(suspended.total)}
+          detail={suspended.undated > 0 ? `${num(suspended.undated)} with no date on record` : 'permits today'}
+        />
+        <ProtoCard className="px-4 py-3.5">
+          <p className="text-[11px] uppercase tracking-wide text-ink-muted">
+            Over {suspended.long_after_days} days
+            <Info metric="suspended_permits.long" />
+          </p>
+          <p
+            className="tnum mt-1 text-[26px] font-bold leading-none"
+            style={{ color: suspended.long > 0 ? BREACH : undefined }}
+          >
+            {num(suspended.long)}
+          </p>
+          <p className="mt-1.5 flex items-center gap-1 text-[11px] text-ink-muted">
+            {suspended.long > 0 ? (
+              <span
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-semibold"
+                style={{ color: BREACH, backgroundColor: BREACH_TINT }}
+              >
+                <WarningGlyph />
+                BPLO may revoke
+              </span>
+            ) : (
+              'none yet'
+            )}
+          </p>
+        </ProtoCard>
       </div>
-      <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
-        Estimated from how {num(forecast.history)} past permits were renewed, by the business’s years with a
-        permit and whether its last renewal was late.
-      </p>
-    </>
+
+      <ProtoCard className="overflow-hidden">
+        <table className="w-full text-left">
+          <caption className="px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+            Oldest
+          </caption>
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="px-4 py-2 font-semibold">Business</th>
+              <th scope="col" className="px-3 py-2 font-semibold">Since</th>
+              <th scope="col" className="px-4 py-2 font-semibold">Waiting on</th>
+            </tr>
+          </thead>
+          <tbody>
+            {suspended.oldest.map((row) => (
+              <tr key={row.permit_id} className="border-b border-line/60 align-top last:border-0">
+                <th scope="row" className="px-4 py-1.5 text-[14px] font-normal text-ink">
+                  {row.business}
+                  <span className="block text-[11px] text-ink-muted">{row.permit_number}</span>
+                </th>
+                <td className="px-3 py-1.5 text-[13px] text-ink">
+                  {row.suspended_on === null ? '—' : dateLabel(row.suspended_on)}
+                  {row.days !== null && (
+                    <span
+                      className={`block text-[11px] ${row.long ? 'font-semibold' : 'text-ink-muted'}`}
+                      style={row.long ? { color: BREACH } : undefined}
+                    >
+                      {num(row.days)} {row.days === 1 ? 'day' : 'days'}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-1.5 text-[13px] text-ink-secondary">
+                  {row.waits_on?.office ?? row.waits_on?.permit ?? '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {registerLink && (
+          <p className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-[12px]">
+            <Link to={`${registerLink}?status=suspended`} className="font-semibold text-royal hover:underline">
+              All suspended
+            </Link>
+            {suspended.long > 0 && (
+              <Link
+                to={`${registerLink}?status=suspended_30`}
+                className="font-semibold text-royal hover:underline"
+              >
+                Over {suspended.long_after_days} days
+              </Link>
+            )}
+          </p>
+        )}
+      </ProtoCard>
+    </div>
   )
 }
 
@@ -1055,7 +999,7 @@ function monthTick(month: string): string {
 function MovementPanel({ report }: { report: DashboardReport }) {
   const movement = report.business_movement
 
-  if (!movement || movement.rows.length === 0) {
+  if (movement.rows.length === 0) {
     return (
       <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">
         Nothing to draw yet. These figures arrive with the next refresh.
@@ -1089,7 +1033,12 @@ function MovementPanel({ report }: { report: DashboardReport }) {
             color: CHART_PURPLE,
           },
         ]}
-        footer="A closure is a removal from the register or a blacklisting, dated when it was recorded."
+        /*
+         * Real openings and closures only, since 18 October 2026: the line
+         * counted every business record created and removed, so test records
+         * read as 34 openings and 22 closures on a register of 24.
+         */
+        footer="New: first application submitted. Closed: Mayor's Permit retired, or blacklisted. Removed records count in neither."
       >
         <LineChart data={data} margin={{ top: 8, right: 14, bottom: 4, left: 0 }}>
           <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" vertical={false} />
@@ -1359,57 +1308,34 @@ function InspectionsPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Officer Activity ──────────────────────────────────────────────────── */
+/* ── Messages & Requests ───────────────────────────────────────────────── */
 
-function OfficerPanel({ report }: { report: DashboardReport }) {
+function MessagesPanel({ report }: { report: DashboardReport }) {
   const a = report.officer_activity
 
   return (
     /*
-     * TWO cards, where the client's paper asks for three. This is a deliberate
-     * deviation and it is recorded here so nobody "fixes" it back.
+     * "Officer Activity" until 18 October 2026, with a response-time card and,
+     * before that, meeting participation. Both went because nothing in the
+     * product records them: there is no meetings feature, and the live register
+     * had no answered thread to time. The client asked for the metrics nothing
+     * records to come off (picker, item 6).
      *
-     * The paper lists Officer Activity as "average response time, fulfilled
-     * requests, and meeting participation". BizTrack has no meetings feature.
-     * `RequestType` in lib/types.ts is 'document' | 'message' — the officer who
-     * raises a request cannot pick "meeting", there is no scheduler, no
-     * calendar, and no attendance record anywhere in the product. The third
-     * figure was therefore measuring nothing an officer or an applicant had
-     * ever done: every meeting row on the register was written by
-     * AnalyticsHistorySeeder to reproduce the paper's own illustration, and the
-     * card duly reported 18 of 18 attended, 100%. A defence-facing screen
-     * cannot carry a number whose only source is a seeder reproducing the
-     * document it is being checked against.
-     *
-     * If a meetings feature is ever built — a real scheduler with a real
-     * attendance record — this card comes back, and it comes back reading
-     * attendance rather than "an applicant left a reply against it". The server
-     * side is still there to restore it from: see the note in
-     * DashboardAnalytics::officerActivityFacts().
-     *
-     * The split across cards is still the point the client made about this
-     * panel: "officer activity" averages unrelated measures under one label —
-     * how fast staff answer, how many requests they close. Neither is a
-     * breakdown of the other, so neither shares a denominator or a card. Two of
-     * those still hold at two cards, and the grid says two rather than leaving
-     * a third of the row empty where the removed card used to sit.
+     * What is left earns a slim panel of its own: officer requests are used,
+     * and a conversation where the applicant wrote last is a question someone
+     * at the office owns. Two separate cards, because neither is a breakdown of
+     * the other — the split the adviser asked for (docs/r-integration-
+     * revisions.md §1.11) still holds.
      */
     <div className="grid gap-4 sm:grid-cols-2">
       <StatCard
-        label="Response time"
-        metric="officer_activity.mean_response_hours"
-        unavailable={a.mean_response_hours === null}
-        value={a.mean_response_hours === null ? 'No replies yet' : officeWait(a.mean_response_hours).value}
-        unit={a.mean_response_hours === null ? undefined : officeWait(a.mean_response_hours).unit}
+        label="Awaiting reply"
+        metric="officer_activity.threads_awaiting_reply"
+        value={num(a.threads_awaiting_reply)}
         detail={
-          (a.mean_response_hours === null
-            ? 'No applicant message has been answered in this window.'
-            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}${
-                a.median_response_hours === null ? '' : `; middle wait ${waitText(a.median_response_hours)}`
-              }. Office hours only.`) +
-          (a.threads_awaiting_reply > 0
-            ? ` ${num(a.threads_awaiting_reply)} still waiting.`
-            : '')
+          a.threads_awaiting_reply === 1
+            ? 'conversation where the applicant wrote last'
+            : 'conversations where the applicant wrote last'
         }
       />
 
@@ -1420,7 +1346,7 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         value={a.requests_total === 0 ? 'None raised' : num(a.requests_fulfilled)}
         detail={
           a.requests_total === 0
-            ? 'No officer request was raised in this window.'
+            ? 'No request was raised in this window.'
             : `${num(a.requests_fulfilled)} of ${num(a.requests_total)} raised (${pct(a.requests_fulfilled_rate)}).`
         }
       />
@@ -1786,24 +1712,18 @@ export function AnalyticsPage() {
               metric="kpis.active_businesses"
             />
             {/*
-              FULL TERM, NOT YEAR TO DATE. The client's note was "do not put YTD
-              only; it should be the full term", so this counts every filing on
-              record. `data.ytd_start` is deliberately no longer read here — the
-              old sub-line said "since Jan 1, 2026" and a 1 January cutoff is
-              exactly what stopped being true. The payload still carries
-              `ytd_start`; see DashboardAnalytics::kpiFacts().
-
-              `applications_ytd` is the wire key, not the meaning. Label, hint
-              and the info popover (AnalyticsDefinitions) all say all-time. The
-              key survives its own name because renaming it means renaming it in
-              the snapshot payloads already stored, and a misleading key behind
-              three honest labels is the cheaper of the two.
+              FULL TERM, NOT YEAR TO DATE — the client's note was "do not put YTD
+              only; it should be the full term". Since 18 October 2026 it reads
+              `applications_all_time`: every filing that is not a draft, of every
+              type. It read `applications_ytd`, which left out filings with no
+              submission date — 18 of 26 on the live register, under a label
+              that said all time. See DashboardAnalytics::kpiFacts().
             */}
             <Kpi
-              value={num(data.kpis.applications_ytd)}
+              value={num(data.kpis.applications_all_time)}
               label="Applications (all time)"
               hint="every filing on record"
-              metric="kpis.applications_ytd"
+              metric="kpis.applications_all_time"
             />
             <Kpi
               value={num(data.kpis.applications_this_month)}
@@ -1843,16 +1763,27 @@ export function AnalyticsPage() {
               <DecisionsPanel report={data} />
             </section>
 
+            {/*
+              Time in Office and Fees Collected took the row the RA 11032 tier
+              panel and the department panel shared (18 October 2026). The
+              one-line note is the client's own wording of what is measured.
+            */}
             <section>
-              <SectionHeading note={trailing} metric="processing_tiers">
-                Average Processing Time (RA 11032)
-              </SectionHeading>
-              <TierPanel report={data} />
+              <SectionHeading note={trailing} metric="stages">Time in Office</SectionHeading>
+              <p className="-mt-1 mb-1.5 text-[12px] text-ink-secondary">
+                From the day an office receives a permit to the day it issues or refuses it.
+              </p>
+              <TimeInOfficePanel report={data} />
             </section>
 
             <section>
-              <SectionHeading note={trailing} metric="stages">Average Processing Time by Department</SectionHeading>
-              <StagePanel report={data} />
+              <SectionHeading
+                note={`This month and since ${dateLabel(data.fees_collected.year_start)}`}
+                metric="fees_collected"
+              >
+                Fees Collected
+              </SectionHeading>
+              <FeesPanel report={data} />
             </section>
           </div>
 
@@ -1860,47 +1791,43 @@ export function AnalyticsPage() {
             {/*
               The paper's §1 term is "Compliance Rate". The adviser's own note
               (docs/r-integration-revisions.md §1.5) proposed "Compliance
-              Monitoring Rate through RA 11032", which was never applied — and
-              could not be, because only the first of these three cards is about
-              RA 11032 at all. Her substantive demand there was that the three
-              indicators be split apart with their own denominators, and that is
-              what CompliancePanel does.
+              Monitoring Rate through RA 11032", which was never applied, and
+              the one card about RA 11032 is gone now (18 October 2026). Her
+              substantive demand there was that the indicators be split apart
+              with their own denominators, and that is what CompliancePanel does.
             */}
             <SectionHeading>Compliance Rate</SectionHeading>
             <CompliancePanel report={data} permit={permit} scoped={scoped} trailing={trailing} asOf={asOf} />
           </section>
 
           {/*
-            Full width, both: the expiry table carries a column per permit type
-            (six on this register) and was unreadable squeezed into half a row.
+            Full width: the expiry table carries a column per permit type (six
+            on this register) and was unreadable squeezed into half a row.
           */}
-          <div className="mt-5 grid gap-y-5 *:min-w-0">
-            <section>
-              <SectionHeading note={asOf} metric="expiry">
-                Permits Approaching Expiry
-              </SectionHeading>
-              <ExpiryPanel report={data} />
-            </section>
+          <section className="mt-5 min-w-0">
+            <SectionHeading note={asOf} metric="expiry">
+              Permits Approaching Expiry
+            </SectionHeading>
+            <ExpiryPanel report={data} />
+          </section>
 
-            {/*
-              BPLO's and the whole city's only: the Business Permit is BPLO's,
-              so an office that does not issue it is sent null and gets no
-              section [Ken, 5 October 2026: one panel, no new page].
-            */}
-            {data.renewal_forecast && (
-              <section>
-                <SectionHeading
-                  note={
-                    data.renewal_forecast.permits > 0
-                      ? `${num(data.renewal_forecast.permits)} Business Permit${data.renewal_forecast.permits === 1 ? '' : 's'} expiring ${dateLabel(data.renewal_forecast.expires_on)}`
-                      : undefined
-                  }
-                >
-                  Renewal Estimate
-                </SectionHeading>
-                <RenewalForecastPanel forecast={data.renewal_forecast} />
-              </section>
-            )}
+          {/*
+            Suspended Permits took the Renewal Estimate's place (18 October
+            2026), beside New and Closed Businesses: both are about businesses
+            that cannot, or no longer, trade.
+          */}
+          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
+            <section>
+              <SectionHeading note={asOf}>Suspended Permits</SectionHeading>
+              <SuspendedPanel
+                suspended={data.suspended_permits}
+                registerLink={
+                  scope?.can_switch || scope?.office === 'BPLO'
+                    ? portalPath(activePortal(), '/admin/permits')
+                    : null
+                }
+              />
+            </section>
 
             <section>
               <SectionHeading note={trailing} metric="business_movement">
@@ -1915,7 +1842,7 @@ export function AnalyticsPage() {
             runs to the full width rather than leaving a hole. "Permits
             Approaching Expiry" used to lead this block; it came back from
             Renewal Risk Prediction (checklist 2026-09-27, item 6) and sits in its
-            own row above, beside New and Closed Businesses.
+            own row above.
           */}
           <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
             {/*
@@ -1982,24 +1909,15 @@ export function AnalyticsPage() {
 
             <section>
               {/*
-                ADVISER OVERRIDE, RECORDED — do not "fix" this back to "Staff
-                Activity".
-
-                docs/r-integration-revisions.md §1.11 has the adviser asking for
-                both a rename and a split: "Ano 'yung Officer Activity? …  If I
-                were you, hindi Officer Activity ang ilalagay ko dito", and
-                "Sino ba si officer — si staff?". The paper's §1 table names the
-                report "Officer Activity", the client was shown the conflict, and
-                the client chose the paper.
-
-                THE SPLIT IS NOT PART OF THE OVERRIDE and stays exactly as she
-                asked. Her actual complaint was that three unrelated measures
-                were being averaged under one label; OfficerPanel below still
-                breaks them into three separately named cards with three
-                separate denominators. Only the heading reverted.
+                "Officer Activity" was the paper's name, kept over the
+                adviser's objection (docs/r-integration-revisions.md §1.11).
+                With response time and meetings gone the panel is about
+                messages and requests, and the client named it that
+                (18 October 2026) — which also answers her question of who
+                "officer" was.
               */}
-              <SectionHeading note={trailing}>Officer Activity</SectionHeading>
-              <OfficerPanel report={data} />
+              <SectionHeading note={trailing}>Messages &amp; Requests</SectionHeading>
+              <MessagesPanel report={data} />
             </section>
           </div>
 

@@ -48,29 +48,28 @@
 
     <div class="note">
         Every figure is computed from the register. Panels use different windows and each says which:
-        application volume and decision outcomes cover the current month, the processing-time,
-        department, compliance, inspection and officer figures cover the trailing window, and the
-        rankings and permit-expiry counts are as of the date above. Where a figure cannot be derived it
-        is left blank with the reason stated, never filled in with a zero.
+        application volume and decision outcomes cover the current month, fees collected cover this
+        month and this year, time in office, compliance, inspection and message figures cover the
+        trailing window, and the suspended permits, rankings and permit-expiry counts are as of the
+        date above. Where a figure cannot be derived it is left blank with the reason stated, never
+        filled in with a zero.
     </div>
 
     <h2>Headline figures</h2>
     <table>
         <tr>
             <th>Active businesses</th>
-            {{-- Full term, not year to date. The payload key still reads
-                 `applications_ytd`: it is a wire name older clients and the
-                 dashboard screen already read, so it was left alone when the
-                 figure widened. The number under it is every filing on record.
-                 Renaming the key is now this codebase's own call to make — see
-                 DashboardAnalytics::kpiFacts(). --}}
+            {{-- Every filing that is not a draft, of every type. This read
+                 `applications_ytd`, which left out filings with no submission
+                 date — 18 of 26 on the live register on 18 October 2026, under
+                 a heading that said "all time". See DashboardAnalytics::kpiFacts(). --}}
             <th>Applications (all time)</th>
             <th>This month</th>
             <th>Compliance rate</th>
         </tr>
         <tr>
             <td class="num">{{ number_format($report['kpis']['active_businesses']) }}</td>
-            <td class="num">{{ number_format($report['kpis']['applications_ytd']) }}</td>
+            <td class="num">{{ number_format($report['kpis']['applications_all_time']) }}</td>
             <td class="num">{{ number_format($report['kpis']['applications_this_month']) }}</td>
             <td class="num">
                 @if ($report['kpis']['compliance_rate'] === null)
@@ -99,7 +98,6 @@
     <h2>Decision outcomes <span class="window">(this month)</span></h2>
     <table>
         @foreach ($report['decisions']['rows'] as $row)
-            @continue($row['outcome'] === 'cancelled' && $row['count'] === 0)
             <tr>
                 <td>{{ $row['label'] }}@unless ($row['decisioned']) <span class="window">— excluded from the rate</span>@endunless</td>
                 <td class="num">{{ number_format($row['count']) }}</td>
@@ -124,95 +122,73 @@
         </div>
     @endif
 
-    <h2>Average processing time by RA 11032 tier <span class="window">(trailing window, working days)</span></h2>
-    <table>
-        <tr>
-            <th>Tier</th>
-            <th class="num">Statutory limit</th>
-            <th class="num">Mean (working)</th>
-            <th class="num">Mean (calendar)</th>
-            <th class="num">Decided</th>
-            <th>Against the limit</th>
-        </tr>
-        @foreach ($report['processing_tiers'] as $tier)
-            <tr>
-                <td>{{ $tier['label'] }}</td>
-                <td class="num">{{ $tier['statutory_working_days'] }} days</td>
-                @if ($tier['mean_working_days'] === null)
-                    <td class="num unavailable">—</td>
-                    <td class="num unavailable">—</td>
-                    <td class="num">0</td>
-                    <td class="unavailable">No filing on record in this window</td>
-                @else
-                    <td class="num @if ($tier['breaching']) breach @endif">{{ number_format($tier['mean_working_days'], 1) }}</td>
-                    <td class="num">{{ number_format($tier['mean_calendar_days'], 1) }}</td>
-                    <td class="num">{{ number_format($tier['observations']) }}</td>
-                    <td @if ($tier['breaching']) class="breach" @endif>
-                        @if ($tier['breaching'])
-                            OVER THE STATUTORY LIMIT by {{ number_format($tier['overage_days'], 1) }} working days
-                        @else
-                            Within the limit by {{ number_format(abs($tier['overage_days']), 1) }} working days
-                        @endif
-                    </td>
-                @endif
-            </tr>
-        @endforeach
-    </table>
-    <div class="empty">
-        Republic Act 11032 sets these limits in working days, so the means are measured in working days;
-        weekends are excluded and public holidays are not modelled. Tier comes from each application's
-        recorded complexity.
-    </div>
-
     {{--
-        Office days, not days. Time at an office counts only the hours City Hall
-        is open (Monday to Friday, 8:00 to 17:00 Manila), and one office day is
-        those 9 hours — see App\Support\OfficeHours. A bare "days" here would be
-        read as calendar days, beside a tier table that is in working days.
+        Time in office, in working days, replaced two sections on 18 October
+        2026: the RA 11032 tier table (it rested on a complexity tier BPLO no
+        longer sets) and "Average processing time by department" (timed from
+        review assignments that close at routing, so every office read 0).
+        See DashboardAnalytics::stageObservations().
     --}}
-    <h2>Average processing time by department <span class="window">(trailing window, office days of 9 office hours)</span></h2>
+    <h2>Time in office <span class="window">(trailing window, working days)</span></h2>
+    <div class="empty">From the day an office receives a permit to the day it issues or refuses it.</div>
     @if (count($report['stages']['rows']) === 0)
-        <div class="empty">No review assignment was completed in this window.</div>
+        <div class="empty">No office issued or refused a permit in this window.</div>
     @else
         <table>
             <tr>
-                <th>Department</th>
-                <th class="num">Reviews</th>
-                <th class="num">Mean office days</th>
+                <th>Office</th>
+                <th class="num">Permits</th>
+                <th class="num">Average working days</th>
             </tr>
             @foreach ($report['stages']['rows'] as $row)
                 <tr>
                     <td>{{ $row['name'] }} ({{ $row['code'] }})</td>
                     <td class="num">{{ number_format($row['reviews']) }}</td>
-                    <td class="num">{{ number_format($row['mean_days'], 1) }}</td>
+                    <td class="num">
+                        @if ($row['drawn'])
+                            {{ number_format($row['mean_days'], 1) }}
+                        @else
+                            <span class="unavailable">too few to average</span>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </table>
+        {{-- Named only when it clearly stands out: a day and a quarter above the average. --}}
         @if ($report['stages']['bottleneck'])
-            @php
-                $bottleneck = $report['stages']['bottleneck'];
-                /*
-                 * Built here rather than inline. Blade only reads `@if` as a
-                 * directive when it does not follow a letter, so the inline
-                 * "per review@if (…)" printed itself — condition, `@endif` and
-                 * all — onto the page.
-                 */
-                $aboveAverage = $bottleneck['above_average_days'] !== null && $bottleneck['above_average_days'] > 0
-                    ? sprintf(
-                        ', %s office days above the %s-office-day all-office average',
-                        number_format($bottleneck['above_average_days'], 1),
-                        number_format((float) $report['stages']['mean_days'], 1),
-                    )
-                    : '';
-            @endphp
+            @php $bottleneck = $report['stages']['bottleneck']; @endphp
             <div class="empty">
                 {{ $bottleneck['name'] }} is the slowest at
-                {{ number_format($bottleneck['mean_days'], 1) }} office days per review{{ $aboveAverage }},
-                handling {{ number_format($bottleneck['share_of_reviews'], 1) }}% of
-                {{ number_format($report['stages']['reviews']) }} completed reviews.
+                {{ number_format($bottleneck['mean_days'], 1) }} working days per permit,
+                {{ number_format($bottleneck['above_average_days'], 1) }} above the
+                {{ number_format((float) $report['stages']['mean_days'], 1) }}-day average.
             </div>
         @endif
     @endif
+
+    <h2>Fees collected <span class="window">(this month from {{ $report['fees_collected']['month_start'] }}; this year from {{ $report['fees_collected']['year_start'] }})</span></h2>
+    <table>
+        <tr>
+            <th>Permit</th>
+            <th class="num">This month (PHP)</th>
+            <th class="num">This year (PHP)</th>
+        </tr>
+        @foreach ($report['fees_collected']['rows'] as $row)
+            <tr>
+                <td>{{ $row['label'] }}</td>
+                <td class="num">{{ number_format($row['month'], 2) }}</td>
+                <td class="num">{{ number_format($row['year'], 2) }}</td>
+            </tr>
+        @endforeach
+        <tr class="total">
+            <td>Total</td>
+            <td class="num">{{ number_format($report['fees_collected']['month_total'], 2) }}</td>
+            <td class="num">{{ number_format($report['fees_collected']['year_total'], 2) }}</td>
+        </tr>
+    </table>
+    <div class="empty">
+        Completed payments only. A permit fee carried over onto a later bill counts under its own permit.
+    </div>
 
     <h2>Compliance monitoring <span class="window">(trailing window)</span></h2>
     <table>
@@ -263,6 +239,28 @@
             </tr>
         @endforeach
     </table>
+
+    @php $suspended = $report['suspended_permits']; @endphp
+    <h2>Suspended permits <span class="window">(as of {{ $report['today'] }})</span></h2>
+    @if ($suspended['total'] === 0)
+        <div class="empty">No permit is suspended.</div>
+    @else
+        <div class="empty">
+            {{ number_format($suspended['total']) }} suspended,
+            {{ number_format($suspended['long']) }} of them for over {{ $suspended['long_after_days'] }} days.
+        </div>
+        <table>
+            <tr><th>Business</th><th>Permit</th><th>Suspended since</th><th>Waiting on</th></tr>
+            @foreach ($suspended['oldest'] as $row)
+                <tr>
+                    <td>{{ $row['business'] }}</td>
+                    <td>{{ $row['permit_number'] }}</td>
+                    <td>{{ $row['suspended_on'] ?? '—' }}</td>
+                    <td>{{ $row['waits_on']['office'] ?? $row['waits_on']['permit'] ?? '—' }}</td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
 
     <h2>Top barangays <span class="window">(active businesses, as of {{ $report['today'] }})</span></h2>
     @if (count($report['top_barangays']['rows']) === 0)
@@ -367,26 +365,24 @@
     </div>
     @endif
 
-    <h2>Officer activity <span class="window">(trailing window)</span></h2>
+    {{--
+        "Officer activity" until 18 October 2026. Its response-time row went,
+        as meeting participation had before it: nothing in BizTrack records
+        either, and a printed report is the worst place to leave a figure about
+        nothing — it is filed and quoted by a reader who cannot ask what it
+        counted. See DashboardAnalytics::officerActivityFacts().
+    --}}
+    <h2>Messages &amp; requests <span class="window">(trailing window)</span></h2>
     <table>
         <tr>
-            <td>Average response time</td>
-            <td>
-                @if ($report['officer_activity']['mean_response_hours'] === null)
-                    <span class="unavailable">No applicant message has been answered in this window</span>
-                @else
-                    {{-- Office hours: a message sent at night starts waiting when City Hall opens. --}}
-                    {{ number_format($report['officer_activity']['mean_response_hours'], 1) }} office hours
-                    over {{ number_format($report['officer_activity']['responses']) }} replies
-                    (median {{ number_format($report['officer_activity']['median_response_hours'], 1) }})
-                @endif
-            </td>
+            <td>Conversations awaiting a reply</td>
+            <td>{{ number_format($report['officer_activity']['threads_awaiting_reply']) }}</td>
         </tr>
         <tr>
-            <td>Fulfilled requests</td>
+            <td>Requests fulfilled</td>
             <td>
                 @if ($report['officer_activity']['requests_total'] === 0)
-                    <span class="unavailable">No officer request was raised in this window</span>
+                    <span class="unavailable">No request was raised in this window</span>
                 @else
                     {{ number_format($report['officer_activity']['requests_fulfilled']) }} of
                     {{ number_format($report['officer_activity']['requests_total']) }}
@@ -394,17 +390,6 @@
                 @endif
             </td>
         </tr>
-        {{--
-            Two rows, where the client's paper asks for three. The third was
-            "meeting participation", and it is gone from this report for the same
-            reason it is gone from the dashboard: BizTrack has no meetings
-            feature, so the figure reported nothing anyone had done. A printed
-            report is the worst place to leave one — it gets filed and quoted
-            months later by a reader who cannot ask what it was counting. See
-            OfficerPanel in web/src/pages/admin/AnalyticsPage.tsx and the note on
-            DashboardAnalytics::officerActivityFacts(). Restore alongside the
-            card, if a meetings feature is ever built.
-        --}}
     </table>
 
     <h2>GIS mapping</h2>

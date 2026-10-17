@@ -13,26 +13,10 @@
         60,
         90
     ],
-    "tiers": [
-        {
-            "tier": "simple",
-            "label": "Simple",
-            "statutory_working_days": 3
-        },
-        {
-            "tier": "complex",
-            "label": "Complex",
-            "statutory_working_days": 7
-        },
-        {
-            "tier": "highly_technical",
-            "label": "Highly technical",
-            "statutory_working_days": 20
-        }
-    ],
     "map_point_limit": 1000,
     "kpis": {
         "active_businesses": 20,
+        "applications_all_time": 131,
         "applications_ytd": 120,
         "applications_this_month": 16
     },
@@ -64,12 +48,12 @@
             "outcome": "returned",
             "label": "Returned for revision",
             "count": 2,
-            "decisioned": true
+            "decisioned": false
         },
         {
             "outcome": "rejected",
             "label": "Rejected",
-            "count": 2,
+            "count": 4,
             "decisioned": true
         },
         {
@@ -77,78 +61,6 @@
             "label": "Pending",
             "count": 4,
             "decisioned": false
-        },
-        {
-            "outcome": "cancelled",
-            "label": "Cancelled",
-            "count": 0,
-            "decisioned": false
-        }
-    ],
-    "tier_observations": [
-        {
-            "tier": "simple",
-            "working_days": 3,
-            "calendar_days": 4.5,
-            "within_statutory": true,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "simple",
-            "working_days": 4,
-            "calendar_days": 5.5,
-            "within_statutory": false,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "simple",
-            "working_days": 5,
-            "calendar_days": 6.5,
-            "within_statutory": false,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "simple",
-            "working_days": 5,
-            "calendar_days": 6.5,
-            "within_statutory": false,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "complex",
-            "working_days": 6,
-            "calendar_days": 8,
-            "within_statutory": true,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "complex",
-            "working_days": 6,
-            "calendar_days": 8,
-            "within_statutory": true,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "complex",
-            "working_days": 7,
-            "calendar_days": 9,
-            "within_statutory": true,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
-        },
-        {
-            "tier": "complex",
-            "working_days": 7,
-            "calendar_days": 9,
-            "within_statutory": true,
-            "within_recorded_deadline": true,
-            "recorded_deadline_working_days": 10
         }
     ],
     "stage_observations": [
@@ -178,6 +90,11 @@
             "days": 5
         },
         {
+            "code": "CHO",
+            "name": "City Health Office",
+            "days": 6
+        },
+        {
             "code": "OBO",
             "name": "Office of the Local Building Official",
             "days": 0
@@ -193,15 +110,12 @@
             "days": 0
         }
     ],
+    "stage_rules": {
+        "min_reviews": 3,
+        "bottleneck_min_days_above": 1,
+        "bottleneck_min_share_above": 0.25
+    },
     "compliance": [
-        {
-            "indicator": "ra11032_processing",
-            "label": "RA 11032 processing",
-            "numerator": 71,
-            "denominator": 100,
-            "numerator_label": "decided within the legal deadline",
-            "denominator_label": "decided filings"
-        },
         {
             "indicator": "permit_validity",
             "label": "Business permit compliance",
@@ -371,22 +285,182 @@
         }
     ],
     "officer_activity": {
-        "response_hours": [
-            1,
-            2,
-            3.5,
-            42
-        ],
         "threads_awaiting_reply": 2,
         "requests": {
             "total": 8,
             "fulfilled": 5
-        },
-        "meetings": {
-            "scheduled": 4,
-            "attended": 3
         }
     },
+    "fees": {
+        "month_start": "2026-07-01",
+        "year_start": "2026-01-01",
+        "types": [
+            {
+                "code": "BUSINESS",
+                "label": "Mayor's / Business Permit"
+            },
+            {
+                "code": "SANITARY",
+                "label": "Sanitary Permit"
+            },
+            {
+                "code": "FSIC",
+                "label": "Fire Safety Inspection Certificate"
+            },
+            {
+                "code": "ZONING",
+                "label": "Zoning Clearance"
+            },
+            {
+                "code": "OCCUPANCY",
+                "label": "Occupancy Permit"
+            },
+            {
+                "code": "CEC",
+                "label": "City Environmental Certificate"
+            },
+            {
+                "code": "OTHER",
+                "label": "Other"
+            }
+        ],
+        "amounts": {
+            "BUSINESS": {
+                "month": 1000.1,
+                "year": 4000.1
+            },
+            "SANITARY": {
+                "month": 0.2,
+                "year": 300.2
+            },
+            "FSIC": {
+                "month": 0,
+                "year": 500
+            },
+            "ZONING": {
+                "month": 250,
+                "year": 250
+            },
+            "OCCUPANCY": {
+                "month": 0,
+                "year": 0
+            },
+            "CEC": {
+                "month": 0,
+                "year": 0
+            },
+            "OTHER": {
+                "month": 49.95,
+                "year": 149.95
+            }
+        },
+        "payments": {
+            "month": 3,
+            "year": 9
+        }
+    },
+    "suspended_permits": [
+        {
+            "permit_id": 21,
+            "permit_number": "MP-2026-000021",
+            "business_id": 121,
+            "business": "Fixture Business 21",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-07-20",
+            "days": 10,
+            "long": false,
+            "waits_on": null
+        },
+        {
+            "permit_id": 22,
+            "permit_number": "MP-2026-000022",
+            "business_id": 122,
+            "business": "Fixture Business 22",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-05-01",
+            "days": 90,
+            "long": true,
+            "waits_on": {
+                "permit": "Sanitary Permit",
+                "office_code": "CHO",
+                "office": "City Health Office"
+            }
+        },
+        {
+            "permit_id": 23,
+            "permit_number": "MP-2026-000023",
+            "business_id": 123,
+            "business": "Fixture Business 23",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": null,
+            "days": null,
+            "long": false,
+            "waits_on": null
+        },
+        {
+            "permit_id": 24,
+            "permit_number": "MP-2026-000024",
+            "business_id": 124,
+            "business": "Fixture Business 24",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-06-01",
+            "days": 59,
+            "long": true,
+            "waits_on": {
+                "permit": "Fire Safety Inspection Certificate",
+                "office_code": "BFP",
+                "office": "Bureau of Fire Protection"
+            }
+        },
+        {
+            "permit_id": 25,
+            "permit_number": "MP-2026-000025",
+            "business_id": 125,
+            "business": "Fixture Business 25",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-06-01",
+            "days": 59,
+            "long": true,
+            "waits_on": {
+                "permit": "Zoning Clearance",
+                "office_code": "CPDO",
+                "office": "Planning/Zoning Office"
+            }
+        },
+        {
+            "permit_id": 26,
+            "permit_number": "MP-2026-000026",
+            "business_id": 126,
+            "business": "Fixture Business 26",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-07-01",
+            "days": 29,
+            "long": false,
+            "waits_on": null
+        },
+        {
+            "permit_id": 27,
+            "permit_number": "MP-2026-000027",
+            "business_id": 127,
+            "business": "Fixture Business 27",
+            "permit_code": "BUSINESS",
+            "permit": "Mayor's / Business Permit",
+            "suspended_on": "2026-03-15",
+            "days": 137,
+            "long": true,
+            "waits_on": {
+                "permit": "Sanitary Permit",
+                "office_code": "CHO",
+                "office": "City Health Office"
+            }
+        }
+    ],
     "map": {
         "mapped": 4,
         "total_businesses": 25,

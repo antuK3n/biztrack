@@ -478,6 +478,15 @@ export function PermitsPage() {
   const [params] = useSearchParams()
   const linkedQuery = params.get('q') ?? ''
   const linkedAllOffices = params.get('office') === 'all'
+  /*
+   * `?status=` opens the table already filtered — the dashboard's Suspended
+   * Permits panel links here with `suspended` and `suspended_30` (18 October
+   * 2026). Only a value the Filter menu offers is taken; anything else opens
+   * the whole table, as before.
+   */
+  const linkedStatusParam = params.get('status')
+  const linkedStatus: StatusFilter =
+    STATUS_FILTERS.find((option) => option.value === linkedStatusParam)?.value ?? ''
 
   /*
    * A reader who sees one office is locked to it. `null` falls back to the
@@ -488,7 +497,7 @@ export function PermitsPage() {
 
   const [search, setSearch] = useState(linkedQuery)
   const [query, setQuery] = useState(linkedQuery)
-  const [status, setStatus] = useState<StatusFilter>('')
+  const [status, setStatus] = useState<StatusFilter>(linkedStatus)
   const [retired, setRetired] = useState<RetiredFilter>('hide')
   /*
    * Table or Map. The map is BPLO's and the super admin's (the endpoint is

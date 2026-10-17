@@ -2159,15 +2159,25 @@ export interface OfficePerformanceReport {
  *    not 0%, and a screen that printed one would be asserting a finding nobody
  *    computed.
  *  - **Windows differ per panel** and each panel states which it used. Volume and
- *    decision outcomes are this month; tier times, stage times, compliance,
- *    inspections and officer activity run on a trailing window; the rest are as
- *    of today.
+ *    decision outcomes are this month; fees are this month and this year; time
+ *    in office, compliance, inspections and messages run on a trailing window;
+ *    the rest are as of today.
  *  - **Counts and their denominators both travel**, so a screen can show the
  *    fraction behind a percentage instead of asking the reader to trust it.
  */
 
 export interface DashboardKpis {
   active_businesses: number
+  /**
+   * Every filing that is not a draft, of every type — the "Applications (all
+   * time)" tile since 18 October 2026.
+   */
+  applications_all_time: number
+  /**
+   * Submitted filings over the full term. No tile reads it any more: it left
+   * out filings with no submission date (18 of 26 on the live register).
+   * Still on the payload for older readers.
+   */
   applications_ytd: number
   applications_this_month: number
   /** The permit-validity indicator, read off the compliance panel — not a fifth figure. */
@@ -2180,68 +2190,43 @@ export interface ApplicationVolumeRow {
   count: number
 }
 
+/** No Cancelled row since 18 October 2026: applicants can no longer cancel. */
 export interface DecisionOutcomeRow {
-  outcome: 'approved' | 'returned' | 'rejected' | 'pending' | 'cancelled'
+  outcome: 'approved' | 'returned' | 'rejected' | 'pending'
   label: string
   count: number
   /** Whether this bucket belongs in the Approval Rate denominator. */
   decisioned: boolean
 }
 
-/**
- * A statutory RA 11032 tier against its legal limit.
- *
- * `statutory_working_days` is a legal threshold (3 / 7 / 20) from the Ease of
- * Doing Business Act, not an internal service target, and `mean_working_days` is
- * measured in working days because that is how the statute sets the limit.
- * `observations: 0` with null means is a tier the register holds no decided filing
- * for — that is not a compliant tier and must not render as one.
+/*
+ * ProcessingTierRow went on 18 October 2026 with the RA 11032 tier panel: it
+ * rested on a complexity tier BPLO no longer sets.
  */
-export interface ProcessingTierRow {
-  tier: 'simple' | 'complex' | 'highly_technical'
-  label: string
-  statutory_working_days: number
-  observations: number
-  mean_working_days: number | null
-  mean_calendar_days: number | null
-  /**
-   * Filings that met RA 11032's limit for their own tier — the same yardstick as
-   * `breaching`, so the two can never contradict each other.
-   */
-  within_statutory: number
-  within_statutory_rate: number | null
-  /**
-   * Filings that met `applications.deadline_at`, which the workflow sets to a flat
-   * ten working days for every tier. A DIFFERENT and more lenient yardstick than
-   * the statute — for a simple transaction it is over three times what the law
-   * allows. It must never be labelled as statutory compliance.
-   */
-  within_recorded_deadline: number
-  /** The recorded deadline in working days, when uniform across the tier. */
-  recorded_deadline_working_days: number | null
-  /** Signed: how far the mean sits above (or below) the statutory limit. */
-  overage_days: number | null
-  breaching: boolean
-}
 
+/** One office's Time in Office. `reviews` is the old panel's name: permits issued or refused. */
 export interface StageRow {
   code: string
   name: string
   reviews: number
+  /** Average WORKING days from the office receiving a permit to issuing or refusing it. */
   mean_days: number
+  /** Enough permits to draw (`min_reviews`). */
+  drawn: boolean
 }
 
+/** Named only when it is at least a day and a quarter above the average; null otherwise. */
 export interface StageBottleneck {
   code: string
   name: string
   mean_days: number
   reviews: number
-  above_average_days: number | null
+  above_average_days: number
   share_of_reviews: number
 }
 
 export interface ComplianceIndicator {
-  indicator: 'ra11032_processing' | 'permit_validity' | 'renewal'
+  indicator: 'permit_validity' | 'renewal'
   label: string
   numerator: number
   denominator: number
@@ -2291,29 +2276,54 @@ export interface InspectionRow {
 }
 
 /**
- * The two figures the Officer Activity panel reports.
+ * Messages & Requests (the payload still calls it `officer_activity`).
  *
- * `meetings_scheduled`, `meetings_attended` and `meetings_attended_rate` are
- * deliberately NOT declared, and the payload still carries all three. BizTrack
- * has no meetings feature — `RequestType` below is 'document' | 'message', so
- * no officer can raise one — which made that figure a statistic about nothing.
- * The card was removed (see OfficerPanel in pages/admin/AnalyticsPage.tsx) and
- * the fields are left off this type so the compiler refuses any screen that
- * tries to read them back onto a page. They are still emitted server-side —
- * DashboardAnalytics::officerActivityFacts() computes them — and nothing pins
- * them there any more now that there is only one implementation of the
- * dashboard, so dropping them is an ordinary change against api/. Leaving them
- * off this type is what holds the line in the meantime, and would still be the
- * right shape even if the payload were trimmed tomorrow.
+ * Response time and meeting participation are gone from the payload as well as
+ * the screen since 18 October 2026: nothing in BizTrack records either.
  */
 export interface OfficerActivity {
-  responses: number
-  mean_response_hours: number | null
-  median_response_hours: number | null
   threads_awaiting_reply: number
   requests_total: number
   requests_fulfilled: number
   requests_fulfilled_rate: number | null
+}
+
+/** Fees Collected: completed payments by the permit each fee line was for. */
+export interface FeesCollected {
+  /** Manila dates the two windows start on. */
+  month_start: string
+  year_start: string
+  month_total: number
+  year_total: number
+  payments_month: number
+  payments_year: number
+  /** Every permit type in scope, zeros kept; `OTHER` last, and only for every office. */
+  rows: { code: string; label: string; month: number; year: number }[]
+}
+
+export interface SuspendedPermit {
+  permit_id: number
+  permit_number: string
+  business_id: number
+  business: string
+  permit_code: string
+  permit: string
+  /** Manila date, or null for a suspension recorded before dates were kept. */
+  suspended_on: string | null
+  days: number | null
+  long: boolean
+  /** The permit whose refusal holds it, and its office; null when no one permit was named. */
+  waits_on: { permit: string; office_code: string | null; office: string | null } | null
+}
+
+export interface SuspendedPermits {
+  total: number
+  /** Suspended for over `long_after_days` — the register's "Suspended over 30 days" list. */
+  long: number
+  long_after_days: number
+  undated: number
+  /** The oldest few, oldest first. */
+  oldest: SuspendedPermit[]
 }
 
 export interface MapPoint {
@@ -2325,27 +2335,14 @@ export interface MapPoint {
   permit_state: 'active' | 'lapsed'
 }
 
-export type RenewalOutcome = 'on_time' | 'late' | 'not_renewed'
-
-export interface RenewalForecast {
-  /** The 31 December the permits expire on, and the last penalty-free day after it. */
-  expires_on: string
-  on_time_until: string
-  horizon_days: number
-  /** Business Permits expiring on `expires_on`. */
-  permits: number
-  /** Past terms the estimate learned from. */
-  history: number
-  history_outcomes: Record<RenewalOutcome, number>
-  /** Why there is no estimate, or null when there is one. */
-  unavailable: 'no_permits' | 'thin_history' | null
-  /** Expected permits per outcome, whole numbers that add up to `permits`. */
-  expected: Record<RenewalOutcome, number> | null
-  shares: Record<RenewalOutcome, number> | null
-  barangays: { barangay: string; not_renewed: number; permits: number }[]
-}
+/*
+ * RenewalForecast went on 18 October 2026 with its panel (the register had too
+ * little renewal history for it to say anything).
+ */
 
 export interface DashboardReport {
+  /** The payload's shape; a stored snapshot of an older one is never served. */
+  schema_version: number
   generated_at: string
   window_months: number
   window_start: string
@@ -2362,14 +2359,18 @@ export interface DashboardReport {
     /** Approved ÷ decisioned × 100. The denominator EXCLUDES pending. */
     approval_rate: number | null
   }
-  processing_tiers: ProcessingTierRow[]
+  /** Time in Office. `stages` is the old panel's wire name. */
   stages: {
+    unit: 'working_days'
     rows: StageRow[]
     reviews: number
     mean_days: number | null
     bottleneck: StageBottleneck | null
+    min_reviews: number
   }
   compliance: ComplianceIndicator[]
+  fees_collected: FeesCollected
+  suspended_permits: SuspendedPermits
   /*
    * Back on the dashboard since Renewal Risk Prediction was removed (checklist
    * 2026-09-27, item 6). Three cumulative forward windows (30 ⊂ 60 ⊂ 90) and a
@@ -2387,20 +2388,15 @@ export interface DashboardReport {
     }[]
   }
   /*
-   * Moved from Business Growth Analysis's Closure Trend, with registrations
-   * beside it. Optional because a snapshot stored before the move lacks it.
+   * Real openings (first submitted filing, or first permit for a business from
+   * the old register) and real closures (a retired Mayor's Permit, a
+   * blacklisting); a removed business in neither, since 18 October 2026.
    */
-  business_movement?: {
+  business_movement: {
     rows: { month: string; registered: number; closed: number; net: number }[]
     registered: number
     closed: number
   }
-  /*
-   * The coming January's Business Permit renewals, estimated
-   * (App\Support\RenewalForecast). Null for an office that does not issue the
-   * Business Permit; absent on a snapshot stored before the panel existed.
-   */
-  renewal_forecast?: RenewalForecast | null
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
   top_lines_of_business: {
     rows: LineOfBusinessRow[]

@@ -35,6 +35,15 @@
  *
  * Do that only when the change was intended and is described in the commit. The
  * whole value of the baseline is that re-baselining is a deliberate act.
+ *
+ * RE-BASELINED 18 October 2026, deliberately (the client's dashboard picker):
+ * the tier panel, the RA 11032 compliance row, the Cancelled row, response
+ * time, meetings and the renewal forecast left the payload; Time in Office,
+ * Fees Collected, Suspended Permits, `applications_all_time` and
+ * `schema_version` joined it. The old baseline also named BPLO the slowest
+ * office at 0.1 days above the average — the callout the client asked to
+ * drop. Every other figure in dashboard.expected.json is unchanged.
+ * Written with two-space indents, as the R-era file was.
  */
 
 $dir = __DIR__;
@@ -42,65 +51,32 @@ $dir = __DIR__;
 /* ── dashboard ────────────────────────────────────────────────────────── */
 
 /*
- * Tier observations. Three branches, and the numbers are chosen not just to be
- * over or under a limit but to land on values that expose rounding:
+ * The tier observations that stood here went with the RA 11032 tier panel on
+ * 18 October 2026 (it rested on a complexity tier BPLO no longer sets). Their
+ * rounding traps — 4.25 → 4.2 half-to-even, an exact 6.5 — are kept alive by
+ * the Time in Office means below and by the processing-time fixture.
+ */
+
+/*
+ * Time in Office observations, in WORKING days (whole numbers, as
+ * ManilaCalendar counts them). BPLO and CHO differ, then three offices tie on
+ * BOTH mean (0 days) and permit count (1) — the shape that needs the code
+ * tie-break. Codes are given out of alphabetical order so a stable sort cannot
+ * pass by accident.
  *
- *   simple            mean of 3,4,5,5 = 4.25 working days against a 3-day limit.
- *                     BREACHING, and 4.25 rounds to 4.2 half-to-even and 4.3
- *                     under PHP's default rounding — the same trap the SPC
- *                     fixture caught. Overage is 1.25 -> 1.2.
- *   complex           mean of 6,6,7,7 = 6.5 against a 7-day limit. NOT
- *                     breaching, and 6.5 is another exact half.
- *   highly_technical  no observations at all: null means, and `breaching` must be
- *                     false rather than a comparison against null.
- */
-/*
- * The recorded deadline is a flat ten working days for every tier, exactly as the
- * workflow sets it. That is deliberately NOT the statutory limit, and the fixture
- * carries the gap so the two yardsticks stay testably distinct: for the simple
- * tier only one filing of four is inside the 3-day statute while all four are
- * inside the 10-day internal deadline. Reporting the second as RA 11032
- * compliance is the bug this fixture exists to prevent coming back.
- */
-$recordedDeadline = 10;
-
-$tierObservations = [];
-foreach ([3, 4, 5, 5] as $days) {
-    $tierObservations[] = [
-        'tier' => 'simple',
-        'working_days' => $days,
-        'calendar_days' => $days + 1.5,
-        'within_statutory' => $days <= 3,
-        'within_recorded_deadline' => $days <= $recordedDeadline,
-        'recorded_deadline_working_days' => $recordedDeadline,
-    ];
-}
-foreach ([6, 6, 7, 7] as $days) {
-    $tierObservations[] = [
-        'tier' => 'complex',
-        'working_days' => $days,
-        'calendar_days' => $days + 2.0,
-        'within_statutory' => $days <= 7,
-        'within_recorded_deadline' => $days <= $recordedDeadline,
-        'recorded_deadline_working_days' => $recordedDeadline,
-    ];
-}
-
-/*
- * Stage observations. BPLO and CHO differ, then three offices tie on BOTH mean
- * (0 days) and review count (1) — the exact shape that made PHP and R order the
- * table differently until a code tie-break was added to both. Codes are given out
- * of alphabetical order so a stable sort cannot pass by accident.
+ * CHO at 5.0 over 3 permits against an overall 21/9 = 2.33 → 2.3 is 2.7 days
+ * and over a quarter above: it is NAMED the slowest office. BPLO, drawn at 2.0,
+ * would not be. The not-named branches are pinned in AnalyticsDepartmentTimeTest.
  */
 $stageObservations = [];
-foreach ([1.0, 2.0, 3.0] as $days) {
+foreach ([1, 2, 3] as $days) {
     $stageObservations[] = ['code' => 'BPLO', 'name' => 'Business Permits and Licensing Office', 'days' => $days];
 }
-foreach ([4.0, 5.0] as $days) {
+foreach ([4, 5, 6] as $days) {
     $stageObservations[] = ['code' => 'CHO', 'name' => 'City Health Office', 'days' => $days];
 }
 foreach ([['OBO', 'Office of the Local Building Official'], ['CENRO', 'City Environment Office'], ['BFP', 'Bureau of Fire Protection']] as [$code, $name]) {
-    $stageObservations[] = ['code' => $code, 'name' => $name, 'days' => 0.0];
+    $stageObservations[] = ['code' => $code, 'name' => $name, 'days' => 0];
 }
 
 /*
@@ -166,19 +142,74 @@ $inspections = [
 ];
 
 /*
- * Officer activity. FOUR latencies, so the median is the midpoint of the two
- * central values — the branch a median implementation gets wrong. 2.0 and 3.5
- * average to 2.75, which rounds to 2.8 at one place. The mean of all four is
- * 12.125 -> 12.1.
+ * Messages & Requests (`officer_activity`). 5 of 8 fulfilled is 62.5% — an
+ * exact half at one place that must not round. Response latencies and
+ * meetings went on 18 October 2026: nothing in the product records them.
  */
 $officerActivity = [
-    'response_hours' => [1.0, 2.0, 3.5, 42.0],
     'threads_awaiting_reply' => 2,
     'requests' => ['total' => 8, 'fulfilled' => 5],
-    // Meetings scheduled AND partly attended, so the rate computes; the live
-    // register has none scheduled and covers the null branch.
-    'meetings' => ['scheduled' => 4, 'attended' => 3],
 ];
+
+/*
+ * Fees Collected. Values at two decimals whose sums would drift in binary
+ * floating point (0.10 + 0.20 sums to 0.30000000000000004) so the totals must
+ * be rounded, a type with nothing collected that must keep its zero row, and
+ * an Other row. Totals: month 1000.10 + 0.20 + 0 + 250.00 + 0 + 0 + 49.95 =
+ * 1300.25; year adds the February FSIC 500.
+ */
+$fees = [
+    'month_start' => '2026-07-01',
+    'year_start' => '2026-01-01',
+    'types' => [
+        ['code' => 'BUSINESS', 'label' => "Mayor's / Business Permit"],
+        ['code' => 'SANITARY', 'label' => 'Sanitary Permit'],
+        ['code' => 'FSIC', 'label' => 'Fire Safety Inspection Certificate'],
+        ['code' => 'ZONING', 'label' => 'Zoning Clearance'],
+        ['code' => 'OCCUPANCY', 'label' => 'Occupancy Permit'],
+        ['code' => 'CEC', 'label' => 'City Environmental Certificate'],
+        ['code' => 'OTHER', 'label' => 'Other'],
+    ],
+    'amounts' => [
+        'BUSINESS' => ['month' => 1000.10, 'year' => 4000.10],
+        'SANITARY' => ['month' => 0.20, 'year' => 300.20],
+        'FSIC' => ['month' => 0, 'year' => 500],
+        'ZONING' => ['month' => 250, 'year' => 250],
+        'OCCUPANCY' => ['month' => 0, 'year' => 0],
+        'CEC' => ['month' => 0, 'year' => 0],
+        'OTHER' => ['month' => 49.95, 'year' => 149.95],
+    ],
+    'payments' => ['month' => 3, 'year' => 9],
+];
+
+/*
+ * Suspended permits, given out of order. Seven, so the list is cut to the
+ * oldest five; one has no date (undated, never long, sorted last); two share a
+ * date so the permit id breaks the tie.
+ */
+$suspendedPermits = [];
+foreach ([
+    [21, '2026-07-20', 10, false, null],
+    [22, '2026-05-01', 90, true, ['permit' => 'Sanitary Permit', 'office_code' => 'CHO', 'office' => 'City Health Office']],
+    [23, null, null, false, null],
+    [24, '2026-06-01', 59, true, ['permit' => 'Fire Safety Inspection Certificate', 'office_code' => 'BFP', 'office' => 'Bureau of Fire Protection']],
+    [25, '2026-06-01', 59, true, ['permit' => 'Zoning Clearance', 'office_code' => 'CPDO', 'office' => 'Planning/Zoning Office']],
+    [26, '2026-07-01', 29, false, null],
+    [27, '2026-03-15', 137, true, ['permit' => 'Sanitary Permit', 'office_code' => 'CHO', 'office' => 'City Health Office']],
+] as [$id, $on, $days, $long, $waits]) {
+    $suspendedPermits[] = [
+        'permit_id' => $id,
+        'permit_number' => "MP-2026-0000{$id}",
+        'business_id' => $id + 100,
+        'business' => "Fixture Business {$id}",
+        'permit_code' => 'BUSINESS',
+        'permit' => "Mayor's / Business Permit",
+        'suspended_on' => $on,
+        'days' => $days,
+        'long' => $long,
+        'waits_on' => $waits,
+    ];
+}
 
 /*
  * Map points. Six decimal places, which is the precision jsonlite silently threw
@@ -203,15 +234,11 @@ $dashboard = [
     'month_start' => '2026-07-01',
     'top_n' => 5,
     'expiry_windows' => [30, 60, 90],
-    'tiers' => [
-        ['tier' => 'simple', 'label' => 'Simple', 'statutory_working_days' => 3],
-        ['tier' => 'complex', 'label' => 'Complex', 'statutory_working_days' => 7],
-        ['tier' => 'highly_technical', 'label' => 'Highly technical', 'statutory_working_days' => 20],
-    ],
     'map_point_limit' => 1000,
 
     'kpis' => [
         'active_businesses' => 20,
+        'applications_all_time' => 131,
         'applications_ytd' => 120,
         'applications_this_month' => 16,
     ],
@@ -225,37 +252,31 @@ $dashboard = [
     ],
 
     /*
-     * Approval rate = 8 / (8 + 2 + 2) = 66.666… -> 66.7. Pending is 4 and
-     * cancelled 0, and neither may reach the denominator: dividing by the grand
-     * total of 16 would give 50%, which is the mistake the spec warns about.
+     * Approval rate = 8 / (8 + 4) = 66.666… -> 66.7. Returned (2) and pending
+     * (4) may not reach the denominator: a returned filing is still owed a
+     * decision, and dividing by the grand total of 18 would give 44.4%, which
+     * is the mistake the spec warns about. No Cancelled row since 18 October
+     * 2026 — applicants can no longer cancel.
      */
     'decisions' => [
         ['outcome' => 'approved', 'label' => 'Approved', 'count' => 8, 'decisioned' => true],
-        ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => 2, 'decisioned' => true],
-        ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => 2, 'decisioned' => true],
+        ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => 2, 'decisioned' => false],
+        ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => 4, 'decisioned' => true],
         ['outcome' => 'pending', 'label' => 'Pending', 'count' => 4, 'decisioned' => false],
-        ['outcome' => 'cancelled', 'label' => 'Cancelled', 'count' => 0, 'decisioned' => false],
     ],
 
-    'tier_observations' => $tierObservations,
     'stage_observations' => $stageObservations,
+    'stage_rules' => ['min_reviews' => 3, 'bottleneck_min_days_above' => 1.0, 'bottleneck_min_share_above' => 0.25],
 
     /*
-     * The three ways a compliance indicator can end up:
-     *   computable            71 of 100 -> 71.0
+     * The two ways a compliance indicator can end up without a rate:
      *   empty denominator     null rate, no reason to give
      *   numerator unknowable  null rate WITH a reason, which is the case that
      *                         must never render as 0%
+     * The computable case (71 of 100) rode on the RA 11032 row, removed on
+     * 18 October 2026; a computed rate is pinned by the seeded-register tests.
      */
     'compliance' => [
-        [
-            'indicator' => 'ra11032_processing',
-            'label' => 'RA 11032 processing',
-            'numerator' => 71,
-            'denominator' => 100,
-            'numerator_label' => 'decided within the legal deadline',
-            'denominator_label' => 'decided filings',
-        ],
         [
             'indicator' => 'permit_validity',
             'label' => 'Business permit compliance',
@@ -288,6 +309,8 @@ $dashboard = [
     'organization_forms' => $organizationForms,
     'inspections' => $inspections,
     'officer_activity' => $officerActivity,
+    'fees' => $fees,
+    'suspended_permits' => $suspendedPermits,
     'map' => [
         'mapped' => 4,
         'total_businesses' => 25,

@@ -108,17 +108,18 @@ final class AnalyticsDefinitions
             ],
 
             /*
-             * The key still says ytd; the figure has not been year-to-date
-             * since the client asked for "the full term" instead. The key is a
-             * wire name the screens and the PDF already read, so it was left
-             * alone — see DashboardAnalytics::kpiFacts(). Every word a reader
-             * sees is about the whole register.
+             * The tile read `applications_ytd`, which left out every filing
+             * with no submission date — 18 of 26 on the live register. The
+             * client chose the all-time count (18 October 2026); see
+             * DashboardAnalytics::kpiFacts(). `applications_ytd` is still on
+             * the payload for older readers and has no definition because no
+             * screen shows it.
              */
-            'kpis.applications_ytd' => [
+            'kpis.applications_all_time' => [
                 'label' => 'Applications (all time)',
-                'formula' => 'Every submitted filing on record.',
-                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are left out, and so are filings removed from the register.',
-                'why' => 'The full-term workload figure: everything the office has ever been asked to process. It sits beside This Month so the total and the current load can be read together.',
+                'formula' => 'Every filing on record that is not a draft, of every type: new, renewal and amendment.',
+                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts and filings removed from the register are left out.',
+                'why' => 'Everything the City has been asked to process. It sits beside This Month so the total and the current load can be read together.',
             ],
 
             'kpis.applications_this_month' => [
@@ -145,56 +146,40 @@ final class AnalyticsDefinitions
             'decisions.approval_rate' => [
                 'label' => 'Approval rate',
                 'formula' => 'Approved filings ÷ decided filings (approved + rejected) × 100.',
-                'covers' => 'Decided filings only. Pending, returned and cancelled filings are left out: a returned filing is back with the applicant to fix and still owed a decision, and a withdrawn one is not a decision the office made.',
+                'covers' => 'Decided filings only. Pending and returned filings are left out: a returned filing is back with the applicant to fix and is still owed a decision.',
                 'why' => 'Measures how the office decides, not how fast. Leaving pending filings out is why a growing backlog does not move it.',
             ],
 
-            'processing_tiers' => [
-                // The paper's §1 term, exactly: "Average Processing Time (RA
-                // 11032)". It replaces "Average Processing Time for (RA 11032)
-                // Tier", which said "tier" twice over — once in the heading and
-                // again in every bar label underneath it.
-                'label' => 'Average Processing Time (RA 11032)',
-                'formula' => 'Average working days per complexity tier, against that tier\'s RA 11032 limit: 3 days simple, 7 complex, 20 highly technical. All offices: from submission to decision. One office: only its own review, from the filing reaching it to the office finishing. For BPLO, the days the filing sat at its desk (For Approval, With BPLO); filings from before September 2026, when every office reviewed at once, cannot show that and are left out of BPLO\'s view.',
-                /*
-                 * The holiday sentence read "never faster than shown", which
-                 * is backwards: a holiday counted as a working day makes the
-                 * figure LONGER than the truth, so the truth is never slower.
-                 */
-                'covers' => 'Filings decided, or one office\'s reviews finished, in the months set by the filter, with a tier on record. Days the filing waited on the applicant to pay or to resubmit are left out; a single permit sent back by its own office still counts against that office. Working days skip weekends. Holidays are not on the register and count as working days, so a real turnaround is never slower than shown.',
-                'why' => 'RA 11032 sets a legal deadline, not an office target: going over it breaks the law. The limit here is the statutory one, never the flat deadline this system stamps on a filing — that field does not change with the tier.',
-            ],
-
+            /*
+             * 'processing_tiers' and 'compliance.ra11032_processing' went on
+             * 18 October 2026 with the panel and the row they explained: both
+             * judged filings by an RA 11032 complexity tier that BPLO stopped
+             * setting on 27 September. Restore them only with a tier someone
+             * sets.
+             *
+             * 'stages' was "Average Processing Time by Department", timed from
+             * review assignments that close at routing — every office read 0
+             * days. It is Time in Office now (client, 18 October 2026).
+             */
             'stages' => [
-                // The paper reads "Average Processing Time by Department", and so
-                // did the heading on screen; this label did not. Both now say the
-                // same thing. The adviser's note here (§1.4) was to get rid of
-                // "Time-in-Stage", which stays gone.
-                'label' => 'Average Processing Time by Department',
-                'formula' => 'Average office days from a review reaching an office to that office finishing it. Only office hours count (Monday to Friday, 8:00 to 17:00): a review that arrives at 7 pm starts at 8 the next morning, weekends are not counted, and one office day is 9 office hours.',
-                'covers' => 'Reviews finished in the months set by the filter. An open review has no finish time and is left out, so an office that finishes nothing looks fast. An office with fewer than three finished reviews is not drawn. BPLO is left out: its record is stamped again at the final approval, so its time is the whole filing, not its own step.',
-                'why' => 'A permit waits on six offices in turn, so the slowest sets the total. This says which office to give people to.',
+                'label' => 'Time in Office',
+                'formula' => 'Average working days from the day an office receives a permit application to the day it issues or refuses the permit. The office\'s review, the wait for its inspection and the inspection are all inside.',
+                'covers' => 'Permits issued or refused in the months set by the filter. Days the permit was sent back to the applicant, and days waiting for the applicant to pay, are left out. An office with fewer than three permits is listed but not drawn. Weekends are not counted; holidays are not on the register and count as working days. Permits decided before 26 September 2026 have no record of when the office received them and are left out.',
+                'why' => 'A business waits on several offices, so the slowest one sets the pace. This shows where a permit spends its time.',
             ],
 
             'stages.bottleneck' => [
-                'label' => 'Slowest department',
-                'formula' => 'The department with the highest average, with how far above the all-department average it sits and what share of reviews it handled.',
-                'covers' => 'The same finished reviews as the panel above, and only the departments drawn there: one with fewer than three reviews is never named the slowest.',
-                'why' => 'Slowest can mean hardest or busiest. The share of reviews sits beside it so the two can be told apart before anyone is reassigned.',
-            ],
-
-            'compliance.ra11032_processing' => [
-                'label' => 'Processing Rate Compliance to RA 11032',
-                'formula' => 'Filings decided inside the legal deadline for their own tier ÷ decided filings that record a tier × 100.',
-                'covers' => 'The months set by the filter, timed as in Average Processing Time: the applicant\'s days are left out, and one office is judged on its own review only. Each filing is judged against its own tier, so a 20-day highly technical decision passes where a 20-day simple one fails.',
-                'why' => 'The pass rate against the law. It counts filings, so it cannot be averaged with the two cards beside it.',
+                'label' => 'Slowest office',
+                'formula' => 'Named only when the slowest office is at least one working day, and at least a quarter, above the average of all offices.',
+                'covers' => 'The same permits as the panel, and only the offices drawn there. When the offices are close, no office is named.',
+                'why' => 'A small gap is noise, not a queue. Naming an office only when it clearly stands out keeps the sentence worth acting on.',
             ],
 
             'compliance.permit_validity' => [
                 'label' => 'Business Permit Compliance',
                 'formula' => 'Businesses holding a valid permit of every type they have been issued ÷ businesses ever issued a permit × 100.',
                 'covers' => 'Every business with permit history. The test is per type: a current sanitary permit with a lapsed fire clearance still counts as non-compliant.',
-                'why' => 'How much of the register is covered right now. This counts businesses; the card beside it counts filings.',
+                'why' => 'How much of the register is covered right now. This counts businesses; the renewal card beside it counts permits.',
             ],
 
             'compliance.renewal' => [
@@ -222,11 +207,16 @@ final class AnalyticsDefinitions
              * From Business Growth Analysis's Closure Trend, which drew closures
              * alone. Moved with the new registrations beside it, because a
              * closure count only means something next to what came in.
+             *
+             * Redefined 18 October 2026: it counted every business record
+             * created and every one removed, so test records made and deleted
+             * in the same month showed as 34 openings and 22 closures on a
+             * register of 24. See DashboardAnalytics::movementFacts().
              */
             'business_movement' => [
                 'label' => 'New and Closed Businesses',
-                'formula' => 'Businesses registered each month, and businesses removed from the register or blacklisted each month, across the window.',
-                'covers' => 'A closure is dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record cannot be placed in a month and is left out. The first month is a part month, and so is the current one, which is marked as still running rather than read as a drop.',
+                'formula' => 'New: businesses whose first application was submitted that month (or, for one brought over from the old register, whose first permit is dated that month). Closed: businesses whose Mayor\'s Permit BPLO retired that month, or that were blacklisted that month.',
+                'covers' => 'Businesses removed from the register are counted in neither. A business record with no submitted application is not new. A suspension is not a closure. A blacklisting with no date on record is left out. The current month is marked as still running rather than read as a drop.',
                 'why' => 'Whether the register is growing or only replacing what it loses.',
             ],
 
@@ -274,11 +264,19 @@ final class AnalyticsDefinitions
                 'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog. A cancelled visit is not counted as scheduled; a rescheduled one is, because it is still owed.',
             ],
 
-            'officer_activity.mean_response_hours' => [
-                'label' => 'Response time',
-                'formula' => 'Average office hours from an unanswered applicant message to the next reply from an officer. Only office hours count (Monday to Friday, 8:00 to 17:00), so a message sent at night starts waiting when the office opens.',
-                'covers' => 'Replies sent in the months set by the filter. Only the first unanswered message starts the clock, so three follow-ups are one wait. Conversations still waiting are counted separately.',
-                'why' => 'How long an applicant waits to be spoken to. The middle wait and the number still waiting sit beside it, because an average hides both long waits and unanswered questions.',
+            /*
+             * "Officer Activity" became "Messages & Requests" on 18 October
+             * 2026. Its response-time card ('officer_activity.mean_response_hours')
+             * and, earlier, meeting participation were removed because nothing
+             * in the product records them: the live register had no answered
+             * thread and no meetings feature exists. Restore an entry only
+             * with a card for it.
+             */
+            'officer_activity.threads_awaiting_reply' => [
+                'label' => 'Awaiting reply',
+                'formula' => 'Conversations where the applicant wrote last and no one at the office has answered.',
+                'covers' => 'Messages sent in the months set by the filter. For one office, only its own conversations.',
+                'why' => 'Each one is a question an applicant is still waiting on.',
             ],
 
             'officer_activity.requests_fulfilled_rate' => [
@@ -288,24 +286,26 @@ final class AnalyticsDefinitions
                 'why' => 'Whether asking an applicant for something actually closes. Many raised and few fulfilled means filings are stalling on paperwork rather than on review.',
             ],
 
-            /*
-             * There is deliberately no 'officer_activity.meetings_attended_rate'
-             * entry here, and the paper asks for one.
-             *
-             * The client's paper lists a third Officer Activity figure, "meeting
-             * participation". BizTrack has no meetings feature — nothing in the
-             * product schedules one, and nothing records attendance — so the
-             * figure described nothing an officer had done, and the card has
-             * been removed from the dashboard. The reasoning in full is in
-             * OfficerPanel, web/src/pages/admin/AnalyticsPage.tsx.
-             *
-             * A definition is the sentence a reader is handed when they ask what
-             * a number in front of them means. With no number in front of them
-             * there is nothing to explain, and shipping the explanation anyway
-             * would keep "meeting participation" travelling to the client in
-             * meta.definitions after the screen had stopped saying it. Restore
-             * this entry only alongside the card.
-             */
+            'fees_collected' => [
+                'label' => 'Fees Collected',
+                'formula' => 'Payments received this month and this year, split by the permit each fee line was for. Business tax and other charges billed on the Mayor\'s Permit count under the Business Permit. A permit fee carried over onto a later bill counts under its own permit.',
+                'covers' => 'Completed payments only, dated by when they cleared (Manila time); pending, failed and refunded ones are left out, and so are payments on records removed from the register. Other is late-renewal surcharges, interest and fees that belong to no single permit.',
+                'why' => 'What each office\'s permits brought in, for the Treasurer\'s monthly and yearly report.',
+            ],
+
+            'suspended_permits' => [
+                'label' => 'Suspended Permits',
+                'formula' => 'Permits suspended today, how many of them for over 30 days, and the oldest five with the office each is waiting on.',
+                'covers' => 'Permits on businesses still on the register. A suspension recorded before 5 October 2026 may have no date; it is counted but has no age and is never called long.',
+                'why' => 'A suspended permit is a business that cannot trade. After 30 days unresolved BPLO may revoke it, so the long ones are the list to work through.',
+            ],
+
+            'suspended_permits.long' => [
+                'label' => 'Over 30 days',
+                'formula' => 'Suspended permits whose suspension started more than 30 days ago.',
+                'covers' => 'The same count as the permits register\'s "Suspended over 30 days" filter, which the link opens.',
+                'why' => 'BPLO may revoke these with a reason (client, 5 October 2026).',
+            ],
 
             'map' => [
                 'label' => 'Business locations',
@@ -485,6 +485,16 @@ final class AnalyticsDefinitions
         }
         if (isset($definitions['kpis.active_businesses'])) {
             $definitions['kpis.active_businesses']['formula'] = "Businesses holding a {$permit} still in force today.";
+        }
+        /*
+         * The two panels added on 18 October 2026, as one office reads them:
+         * its own permit's fees, and the permits held up by its own permit.
+         */
+        if (isset($definitions['fees_collected'])) {
+            $definitions['fees_collected']['formula'] = "Payments received this month and this year for the {$permit}, from the fee lines billed for it — including a {$permit} fee carried over onto a later bill.";
+        }
+        if (isset($definitions['suspended_permits'])) {
+            $definitions['suspended_permits']['formula'] = "Permits suspended today because of the {$permit}, plus this office's own permits suspended for another reason, with how many have been suspended over 30 days.";
         }
 
         return $definitions;

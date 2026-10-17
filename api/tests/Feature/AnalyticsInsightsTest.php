@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
 use App\Models\Department;
+use App\Support\DashboardAnalytics;
 use App\Support\Spc;
 use Carbon\CarbonImmutable;
 
@@ -234,21 +235,26 @@ it('returns every panel the dashboard spec asks for', function () {
         ->json();
 
     expect($body['data'])->toHaveKeys([
-        'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
+        'kpis', 'volume', 'decisions', 'stages', 'compliance', 'fees_collected', 'suspended_permits',
         'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
         'inspections', 'officer_activity', 'map',
     ]);
+
+    // Removed on 18 October 2026 (client's picker), and not left behind on
+    // the payload for a screen to pick back up.
+    expect($body['data'])->not->toHaveKeys(['processing_tiers', 'renewal_forecast']);
 
     // Provenance is mandatory on every analytics response: these are batch figures
     // and the screen has to be able to say when and by what they were computed.
     expect($body['meta'])->toHaveKeys(['source', 'engine', 'computed_at', 'fallback_reason']);
 
-    // The three compliance indicators the spec names, no more and no fewer.
+    // Two compliance indicators since 18 October 2026. "RA 11032 processing"
+    // judged filings by a complexity tier BPLO no longer sets, and went.
     expect(array_column($body['data']['compliance'], 'indicator'))
-        ->toBe(['ra11032_processing', 'permit_validity', 'renewal']);
+        ->toBe(['permit_validity', 'renewal']);
 });
 
-it('excludes pending filings from the approval rate denominator', function () {
+it('excludes pending filings from the approval rate denominator, and has no Cancelled row', function () {
     $decisions = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
@@ -256,11 +262,15 @@ it('excludes pending filings from the approval rate denominator', function () {
 
     $byOutcome = array_column($decisions['rows'], 'count', 'outcome');
 
-    // "Decisioned" is approved + returned + rejected. Pending and cancelled are
-    // in the table but must not reach the denominator — dividing by the grand
-    // total is the specific mistake the spec warns about.
+    // Applicants can no longer cancel; the row was a permanent zero and the
+    // client took it off (18 October 2026).
+    expect(array_keys($byOutcome))->toBe(['approved', 'returned', 'rejected', 'pending']);
+
+    // "Decisioned" is approved + rejected. Pending and returned are in the
+    // table but must not reach the denominator — dividing by the grand total
+    // is the specific mistake the spec warns about.
     expect($decisions['decisioned'])
-        ->toBe($byOutcome['approved'] + $byOutcome['returned'] + $byOutcome['rejected']);
+        ->toBe($byOutcome['approved'] + $byOutcome['rejected']);
     expect($decisions['total'])->toBe(array_sum($byOutcome));
 
     if ($decisions['decisioned'] === 0) {
@@ -271,43 +281,7 @@ it('excludes pending filings from the approval rate denominator', function () {
     }
 });
 
-it('measures RA 11032 tiers against the statute and not against the recorded deadline', function () {
-    $tiers = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/dashboard')
-        ->assertOk()
-        ->json('data.processing_tiers');
-
-    expect(array_column($tiers, 'tier'))->toBe(['simple', 'complex', 'highly_technical']);
-
-    // The statutory limits are law (RA 11032, the Ease of Doing Business Act), not
-    // configurable service targets.
-    expect(array_column($tiers, 'statutory_working_days'))->toBe([3, 7, 20]);
-
-    foreach ($tiers as $tier) {
-        if ($tier['observations'] === 0) {
-            // A tier with no decided filing has no mean, and MUST NOT report as
-            // compliant: a bar drawn at zero days against a 20-day limit would
-            // read as excellent performance rather than as absent data.
-            expect($tier['mean_working_days'])->toBeNull();
-            expect($tier['breaching'])->toBeFalse();
-            expect($tier['within_statutory_rate'])->toBeNull();
-
-            continue;
-        }
-
-        // `breaching` and `within_statutory` must be on the same yardstick, or the
-        // panel contradicts itself: a high pass rate beside a breach flag reads as
-        // a bug even when both numbers are individually right.
-        expect($tier['breaching'])->toBe($tier['mean_working_days'] > $tier['statutory_working_days']);
-        expect($tier['within_statutory'])->toBeLessThanOrEqual($tier['observations']);
-
-        // No tolerance band on a legal threshold.
-        expect($tier['overage_days'])
-            ->toBe(round($tier['mean_working_days'] - $tier['statutory_working_days'], 1));
-    }
-});
-
-it('derives the bottleneck from the computed means rather than naming an office', function () {
+it('names the slowest office only as the head of the table, and only when it stands out', function () {
     $stages = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
@@ -323,8 +297,14 @@ it('derives the bottleneck from the computed means rather than naming an office'
     // separately-decided answer that disagrees with the rows above it.
     $means = array_column($stages['rows'], 'mean_days');
     expect($means)->toBe(array_reverse(collect($means)->sort()->values()->all()));
-    expect($stages['bottleneck']['code'])->toBe($stages['rows'][0]['code']);
-    expect($stages['bottleneck']['mean_days'])->toBe($stages['rows'][0]['mean_days']);
+
+    if ($stages['bottleneck'] === null) {
+        return;
+    }
+    $head = collect($stages['rows'])->firstWhere('drawn', true);
+    expect($stages['bottleneck']['code'])->toBe($head['code'])
+        ->and($stages['bottleneck']['mean_days'])->toBe($head['mean_days'])
+        ->and($stages['bottleneck']['above_average_days'])->toBeGreaterThanOrEqual(DashboardAnalytics::BOTTLENECK_MIN_DAYS_ABOVE);
 });
 
 it('nests the permit expiry windows cumulatively', function () {

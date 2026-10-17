@@ -10,10 +10,11 @@ use Illuminate\Support\Facades\DB;
 /**
  * Whose time a filing's time was, for the RA 11032 figures.
  *
- * The dashboard's tier panel and compliance card, and the Reports tab's
- * processing-time report, all measure how long the City took. Two things
- * made that measure wrong, and both are answered here so the screen and the
- * printed report cannot answer them differently.
+ * The Reports tab's processing-time report measures how long the City took.
+ * (The dashboard's RA 11032 tier panel and compliance card read this too,
+ * until both were removed on 18 October 2026 — they rested on a complexity
+ * tier BPLO no longer sets.) Two things made that measure wrong, and both are
+ * answered here.
  *
  * ── 1. An office was judged on the whole filing ─────────────────────────────
  *

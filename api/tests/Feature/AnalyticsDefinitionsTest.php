@@ -54,11 +54,14 @@ function analyticsDefinitionSubjects(): array
          * `expiry` and `business_movement` came onto this screen when Renewal
          * Risk Prediction and Business Growth Analysis were removed (checklist
          * 2026-09-27, item 6), and are panels a reader sees again.
+         *
+         * 18 October 2026: `processing_tiers` went (it rested on a tier BPLO
+         * no longer sets); `fees_collected` and `suspended_permits` came.
          */
         AnalyticsDatasets::DASHBOARD => [
             'payload' => DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS),
             'panels' => [
-                'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
+                'kpis', 'volume', 'decisions', 'stages', 'compliance', 'fees_collected', 'suspended_permits',
                 'top_barangays', 'top_lines_of_business', 'organization_forms',
                 'inspections', 'officer_activity', 'map', 'expiry', 'business_movement',
             ],
