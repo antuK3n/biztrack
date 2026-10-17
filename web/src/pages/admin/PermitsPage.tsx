@@ -424,7 +424,16 @@ function OfficeTabs({
   )
 }
 
-export function PermitsPage() {
+export function PermitsPage({
+  embedded = false,
+}: {
+  /**
+   * Drawn inside the office home page's Permits tab (18 October 2026): the
+   * whole register and every control, without the page heading the tab
+   * already stands for. The /admin/permits route renders it without.
+   */
+  embedded?: boolean
+} = {}) {
   /*
    * ── Who is reading, and how many offices they can see ────────────────────
    *
@@ -761,11 +770,8 @@ export function PermitsPage() {
 
   const sortedColumn = sort ? columns.find((c) => c.sort === sort.key)?.label : null
 
-  return (
-    <div>
-      <PageTitle
-        right={
-          /* The table's controls; the map carries its own, so none of these would act on it. */
+  /* The table's controls; the map carries its own, so none of these would act on it. */
+  const controls =
           mode === 'map' ? undefined : (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
             {/*
@@ -856,10 +862,18 @@ export function PermitsPage() {
             </button>
           </span>
           )
-        }
-      >
-        Permits
-      </PageTitle>
+
+  return (
+    <div>
+      {embedded ? (
+        // The tab above is named "Permits"; a screen reader still gets a heading.
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+          <h2 className="sr-only">Permits</h2>
+          {controls}
+        </div>
+      ) : (
+        <PageTitle right={controls}>Permits</PageTitle>
+      )}
 
       {/*
         Table or Map, for the two readers the map is for. A tab strip in the

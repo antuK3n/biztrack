@@ -301,6 +301,34 @@ final class DashboardAnalytics
         return self::compute(self::dataset($windowMonths, $office));
     }
 
+    /**
+     * Fees Collected this month, and nothing else — the office admin's home
+     * tile (18 October 2026).
+     *
+     * The same feeFacts() and computeFees() the dashboard's panel runs, under
+     * the same office scope, so the tile and the panel are one figure. Only
+     * the frame is rebuilt here, exactly as dataset() builds it: Manila's
+     * today and the start of its month.
+     *
+     * @return array{month_start: string, today: string, month_total: float, payments_month: int}
+     */
+    public static function feesThisMonth(?string $office = null): array
+    {
+        $scope = AnalyticsOffice::scope($office);
+        $now = CarbonImmutable::now();
+        $today = ManilaCalendar::today($now);
+        $monthStart = ManilaCalendar::startOfDay($today->startOfMonth());
+
+        $fees = self::computeFees(self::feeFacts($today, $monthStart, $now, $scope));
+
+        return [
+            'month_start' => $fees['month_start'],
+            'today' => $today->toDateString(),
+            'month_total' => $fees['month_total'],
+            'payments_month' => $fees['payments_month'],
+        ];
+    }
+
     /* ── office scope ──────────────────────────────────────────────────── */
 
     /**

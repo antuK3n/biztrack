@@ -14,6 +14,12 @@ import {
   filingStatusMeta,
 } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
+import {
+  FOCUS_APPLICATION_STATUSES,
+  FOCUS_ASSIGNMENT_STATUSES,
+  FOCUS_LABEL,
+  type QueueFocus,
+} from './queueFocus'
 import { useAuth } from '../../stores/auth'
 import type {
   ApplicationListItem,
@@ -450,6 +456,8 @@ const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
  * is the same in all three: an assignment closes before the office's work does.
  */
 const OPEN_ASSIGNMENT_STATUSES = 'pending,in_progress,returned'
+
+/* QueueFocus — the home page tiles' narrowings — lives in ./queueFocus. */
 
 /**
  * Which statuses still owe money, for the chip on the right of every row.
@@ -977,6 +985,8 @@ async function loadPage(args: {
   type: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
+  /** Past the RA 11032 deadline only; see QueueFocus. Assignment feeds only. */
+  overdue?: boolean
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -1010,6 +1020,7 @@ async function loadPage(args: {
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
     ...(args.oic ? { oic: args.oic } : {}),
+    ...(args.overdue ? { overdue: 1 as const } : {}),
     page: args.page,
     per_page: args.perPage,
   })
@@ -1446,7 +1457,20 @@ function QueueRow({
  * paginator over the same query that produced the rows beside it; see the note
  * on `total` below for why it is not assembled out of anything else.
  */
-export function QueuePage() {
+export function QueuePage({
+  embedded = false,
+  focus: initialFocus,
+}: {
+  /**
+   * Drawn inside the office home page's Queue tab (18 October 2026): no page
+   * heading — the home page has one, and the tab already says "Queue" — but
+   * every control and the whole list, so the tab is this screen and not a
+   * second copy of it. The /queue route renders it without, unchanged.
+   */
+  embedded?: boolean
+  /** Open narrowed by a home-page tile; see QueueFocus. */
+  focus?: QueueFocus
+} = {}) {
   const canReadEveryOffice = useAuth((s) => Boolean(s.user?.permissions.includes(ANY_OFFICE)))
   /*
    * "Mark as paid" is BPLO staff's alone — not the super admin's, even though
@@ -1469,7 +1493,12 @@ export function QueuePage() {
    * not — which is the complaint the For Approval empty state already
    * carries a paragraph about.
    */
-  const [tab, setTab] = useState<Tab>('all')
+  /*
+   * A tile's narrowing lives inside For Approval, so arriving with one opens
+   * that stage; without one, All stages as above.
+   */
+  const [focus, setFocus] = useState<QueueFocus | null>(initialFocus ?? null)
+  const [tab, setTab] = useState<Tab>(initialFocus ? 'approval' : 'all')
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<QueueItem[]>([])
   const [search, setSearch] = useState('')
@@ -1593,9 +1622,13 @@ export function QueuePage() {
     tab === 'all'
       ? [...new Set(stageTabs.flatMap((v) => [...TAB_STATUSES[v]]))]
       : TAB_STATUSES[tab]
+  /* A home-page tile's narrowing, in force only on the stage it belongs to. */
+  const focused = focus !== null && tab === 'approval'
   const activeStatuses: readonly ApplicationStatus[] = statusFilter
     ? [statusFilter as ApplicationStatus]
-    : tabStatuses
+    : focused
+      ? FOCUS_APPLICATION_STATUSES
+      : tabStatuses
   const statuses = activeStatuses.join(',')
   /*
    * Which of the three server-side filters each tab needs, and — as important —
@@ -1624,7 +1657,9 @@ export function QueuePage() {
    * the "Showing N of M" line — counts the tab the officer is actually looking
    * at, rather than every assignment the office has ever held.
    */
-  const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
+  const assignmentStatuses =
+    tab === 'approval' ? (focused ? FOCUS_ASSIGNMENT_STATUSES : OPEN_ASSIGNMENT_STATUSES) : undefined
+  const overdue = focused && focus === 'overdue'
   const clearanceStatuses = tab === 'inspection' ? INSPECTION_CLEARANCE_STATUSES : undefined
   /*
    * Which end of the wire narrows by filing type, decided by which endpoint the
@@ -1675,6 +1710,7 @@ export function QueuePage() {
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
+        overdue,
         page,
         perPage,
       }
@@ -1698,6 +1734,7 @@ export function QueuePage() {
       // a request that would come back with exactly the same rows.
       serverType,
       holder,
+      overdue,
       page,
       perPage,
     ],
@@ -1763,6 +1800,8 @@ export function QueuePage() {
   function selectTab(next: Tab) {
     if (next === tab) return
     setTab(next)
+    // A tile's narrowing belongs to For Approval; see QueueFocus.
+    setFocus(null)
     // The status filter belongs to the tab it was chosen in — For Approval is
     // not one of the inspection tab's statuses, and carrying it across would
     // hand the server a status list that matches nothing.
@@ -2123,10 +2162,11 @@ export function QueuePage() {
    */
   const nothingToShow = visible.length === 0
 
-  return (
-    <div>
-      <PageTitle
-        right={
+  /*
+   * The search and the Sort/Filter pair, drawn beside the page heading on
+   * /queue and on a row of their own inside the home page's Queue tab.
+   */
+  const controls = (
           <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             {/*
               * A placeholder is not an accessible name — it vanishes on the
@@ -2149,10 +2189,23 @@ export function QueuePage() {
               filter={{ value: statusFilter, options: statusOptions, onChange: selectStatus }}
             />
           </span>
-        }
-      >
-        Manage Applications
-      </PageTitle>
+  )
+
+  return (
+    <div>
+      {embedded ? (
+        /*
+         * No heading of its own inside the home page — the tab above it is
+         * named "Queue" — so a screen reader still gets one, and a sighted
+         * reader gets the controls without a second title.
+         */
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+          <h2 className="sr-only">Manage Applications</h2>
+          {controls}
+        </div>
+      ) : (
+        <PageTitle right={controls}>Manage Applications</PageTitle>
+      )}
 
       {/*
         * ── The two rows stack, and the stage row never goes away ────────────
@@ -2338,6 +2391,31 @@ export function QueuePage() {
         </aside>
 
         <div className="min-w-0 flex-1">
+
+      {/*
+        * The home-page tile this list was opened from, named and clearable.
+        * Without it the reader sees For Approval holding fewer rows than it
+        * does from the rail, and no reason why.
+        */}
+      {focused && focus && (
+        <p className="mb-4 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+          <span className="rounded-full bg-royal-tint px-3 py-1 font-semibold text-royal-deep">
+            {FOCUS_LABEL[focus]}
+            {focus === 'overdue' && <span className="font-normal"> · past deadline</span>}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setFocus(null)
+              restart()
+            }}
+            aria-label={`Clear the ${FOCUS_LABEL[focus]} filter`}
+            className="rounded-full px-2 py-1 font-semibold text-royal hover:underline"
+          >
+            Clear
+          </button>
+        </p>
+      )}
 
       {claimMessage && (
         <p

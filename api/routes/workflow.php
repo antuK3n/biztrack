@@ -540,6 +540,15 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
         /*
+         * Fees collected this month, alone — the "Fees this month" tile on an
+         * office admin's home page (18 October 2026). The dashboard's own
+         * figure, computed by the same code under the same office boundary,
+         * but without the other twenty panels: the home page asks on every
+         * sign-in, and the full dashboard payload (map points included) is
+         * far more than one number is worth.
+         */
+        Route::get('analytics/fees-month', [AnalyticsController::class, 'feesMonth']);
+        /*
          * Report Generation (checklist 2026-09-27, item 7): five LGU-format
          * reports over a chosen period, as JSON for the printable screen and as
          * CSV. Same permission and the same office boundary as the dashboard —
