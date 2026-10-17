@@ -220,3 +220,59 @@ it('keeps message attachments behind the same participant check', function () {
     $res = $this->get("/api/v1/message-attachments/{$attachmentId}/download")->assertOk();
     expect($res->headers->get('Content-Disposition'))->toContain('signed.pdf');
 });
+
+/*
+ * ── WEBP, and the types the browser converts ────────────────────────────────
+ *
+ * Client, 18 October 2026: widen every documentary upload to HEIC/HEIF, WEBP
+ * and TIFF, "with conversions". HEIC and TIFF are converted in the browser and
+ * never reach the API, so the API's list grows by WEBP alone — and a WEBP has
+ * to come back typed as an image, or View in a new tab downloads it instead.
+ * `fake()->image` draws a real WEBP through GD, so the content check in
+ * `mimes:` is exercised, not just the file name.
+ */
+it('accepts a WEBP requirement and serves it back as image/webp', function () {
+    ['application_id' => $appId] = uploadedRequirement();
+    $owner = authAs('owner@biztrack.local');
+
+    $document = $this->withHeaders($owner)->post("/api/v1/applications/{$appId}/documents", [
+        'document_type_id' => DocumentType::first()->id,
+        'file' => UploadedFile::fake()->image('storefront.webp', 40, 40),
+    ])->assertCreated()->json('data');
+
+    $res = $this->get("/api/v1/documents/{$document['id']}/download")->assertOk();
+    expect($res->headers->get('Content-Type'))->toBe('image/webp');
+});
+
+it('refuses a GIF requirement, naming the files the app takes', function () {
+    ['application_id' => $appId] = uploadedRequirement();
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/documents", [
+            'document_type_id' => DocumentType::first()->id,
+            'file' => UploadedFile::fake()->image('animation.gif', 40, 40),
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.file.0', 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF file.');
+});
+
+it('takes a WEBP message attachment and refuses a GIF', function () {
+    ['application_id' => $appId] = uploadedRequirement();
+    $owner = authAs('owner@biztrack.local');
+    // Off the draft and held at BPLO, as in the participant case above, so
+    // the owner may write at all.
+    Application::findOrFail($appId)->update(['status' => 'for_approval']);
+    takeFiling($appId, 'BPLO');
+
+    test()->withHeaders($owner)->post("/api/v1/applications/{$appId}/messages", [
+        'body' => 'A photo of the signage.',
+        'attachment' => UploadedFile::fake()->image('signage.webp', 40, 40),
+    ])->assertCreated();
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/messages", [
+        'body' => 'And a moving one.',
+        'attachment' => UploadedFile::fake()->image('signage.gif', 40, 40),
+    ])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.attachment.0', 'Attach a PDF, JPG, PNG, WEBP, HEIC or TIFF file.');
+});

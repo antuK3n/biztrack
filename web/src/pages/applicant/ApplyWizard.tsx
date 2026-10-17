@@ -66,7 +66,13 @@ import {
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
+import {
+  ACCEPT_ATTR,
+  ACCEPTED_FILES_NOTE,
+  prepareUpload,
+  uploadErrorMessage,
+  useUploadConverting,
+} from './uploads'
 /*
  * ── One office sheet is imported here, and only one ──────────────────────
  *
@@ -3758,6 +3764,8 @@ export function ApplyWizard() {
   // "Other Requirements" allows multiple files (repeatable uploads).
   const [otherDocs, setOtherDocs] = useState<UploadedFile[]>([])
   const [uploadingType, setUploadingType] = useState<number | null>(null)
+  // A HEIC or TIFF being turned into a JPEG or PDF before it is sent.
+  const converting = useUploadConverting()
   const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
   /*
@@ -7755,7 +7763,9 @@ export function ApplyWizard() {
    *
    * The browser-side check runs first, for the reason `uploads.ts` gives: the
    * API's refusal of an empty PDF is "Upload a PDF, JPG, or PNG file", which
-   * is true of the file and useless to the person holding it.
+   * is true of the file and useless to the person holding it. It also turns a
+   * HEIC or TIFF into a JPEG or PDF (18 October 2026), inside the busy window,
+   * so the row says "Converting…" rather than nothing.
    */
   async function changeOfficeRequirement(
     code: OfficeFormCode,
@@ -7769,18 +7779,20 @@ export function ApplyWizard() {
     setOfficeReqBusy(documentCode)
     setOfficeError(null)
     try {
+      let upload: File | null = null
       if (file !== null) {
-        const rejection = fileRejection(file)
-        if (rejection !== null) {
-          setOfficeError(rejection)
+        const prepared = await prepareUpload(file)
+        if (prepared.error !== undefined) {
+          setOfficeError(prepared.error)
 
           return
         }
+        upload = prepared.file
       }
 
       const result =
-        file !== null
-          ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
+        upload !== null
+          ? await officeForms.uploadRequirement(applicationId, code, documentCode, upload)
           : await officeForms.removeRequirement(applicationId, code, documentCode, documentId)
 
       setOfficeReqs((all) => ({ ...all, [code]: result.requirements }))
@@ -9204,14 +9216,17 @@ export function ApplyWizard() {
     setUploadingType(docTypeId)
     setSubmitError(null)
     try {
-      for (const file of files) {
-        const rejection = fileRejection(file)
-        if (rejection) {
+      for (const chosen of files) {
+        const prepared = await prepareUpload(chosen)
+        if (prepared.error !== undefined) {
           // Named, because "a file was rejected" on a multi-file drop leaves the
           // applicant checking all of them to find out which.
-          setSubmitError(files.length > 1 ? `${file.name}: ${rejection}` : rejection)
+          setSubmitError(files.length > 1 ? `${chosen.name}: ${prepared.error}` : prepared.error)
           continue
         }
+        // The converted file when it was a HEIC or TIFF, so the row lists the
+        // name and size of what the office will actually open.
+        const file = prepared.file
 
         const doc = await documents.upload(applicationId, docTypeId, file)
         setUploaded((u) => ({
@@ -9244,16 +9259,19 @@ export function ApplyWizard() {
    */
 
   /** "Other Requirements": each upload APPENDS, so multiple files are kept. */
-  async function handleOtherUpload(file: File) {
+  async function handleOtherUpload(chosen: File) {
     if (!applicationId || !otherType) return
-    const rejection = fileRejection(file)
-    if (rejection) {
-      setSubmitError(rejection)
-      return
-    }
     setUploadingType(otherType.id)
     setSubmitError(null)
     try {
+      // Inside the busy window now, since a HEIC or TIFF takes a moment to
+      // convert and the tile should say so.
+      const prepared = await prepareUpload(chosen)
+      if (prepared.error !== undefined) {
+        setSubmitError(prepared.error)
+        return
+      }
+      const file = prepared.file
       const doc = await documents.upload(applicationId, otherType.id, file)
       setOtherDocs((d) => [...d, { id: doc.id, name: file.name, size: file.size }])
     } catch (err) {
@@ -12440,6 +12458,17 @@ export function ApplyWizard() {
               </button>
             </div>
           )}
+          {/*
+            Which files are allowed, said once for the whole list. Every
+            requirement carries its own help text, so the tile's fallback
+            ("file type: png, jpg, pdf only") was never actually shown — an
+            applicant learnt the rule only by having a file refused. Client,
+            18 October 2026: make sure the messages tell the applicant which
+            files are allowed.
+          */}
+          {requiredDocs.length > 0 && (
+            <p className="mt-2 text-xs text-ink-muted">Accepted files: {ACCEPTED_FILES_NOTE} each.</p>
+          )}
           <div className="mt-3 space-y-3.5">
             {requiredDocs.length === 0 ? (
               <p className="text-sm text-ink-secondary">
@@ -12507,7 +12536,9 @@ export function ApplyWizard() {
                         </span>
                         <span className="block truncate text-xs text-ink-muted">
                           {busy
-                            ? 'Uploading…'
+                            ? converting
+                              ? 'Converting…'
+                              : 'Uploading…'
                             : files.length > 0
                               ? /*
                                  * It said "click to replace", which was true and
@@ -12517,7 +12548,7 @@ export function ApplyWizard() {
                                  * applicant the earlier pages are still attached.
                                  */
                                 `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
-                              : dt.help_text || 'file type: png, jpg, pdf only'}
+                              : dt.help_text || ACCEPTED_FILES_NOTE}
                         </span>
                       </span>
                       {files.length > 0 && (
@@ -12663,7 +12694,9 @@ export function ApplyWizard() {
                 </span>
                 <span className="text-sm font-semibold text-royal">
                   {uploadingType === otherType.id
-                    ? 'Uploading…'
+                    ? converting
+                      ? 'Converting…'
+                      : 'Uploading…'
                     : otherDocs.length > 0
                       ? 'Add another file'
                       : 'Add a file'}

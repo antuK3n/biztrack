@@ -7,7 +7,7 @@ import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
-import { ACCEPT_ATTR, MAX_UPLOAD_BYTES } from './uploads'
+import { ACCEPT_ATTR, ACCEPTED_FILES_NOTE, useUploadConverting } from './uploads'
 
 /*
  * Per-office application form sheets (UI prototype Parts 4-7, pages 040-043).
@@ -535,6 +535,8 @@ export function WhatToCorrect({
 }) {
   const office = REQUIREMENTS_META[code]?.office ?? 'This office'
   /* The file just sent, per row — BPLO says "Uploaded <name>." */
+  /* A HEIC or TIFF being converted before it is sent (uploads.ts). */
+  const converting = useUploadConverting()
 
   /*
    * A target is either a checklist slot or an answer key. The checklist is
@@ -621,7 +623,7 @@ export function WhatToCorrect({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-semibold text-ink">
-                          {busy ? 'Uploading…' : 'Upload a replacement'}
+                          {busy ? (converting ? 'Converting…' : 'Uploading…') : 'Upload a replacement'}
                         </span>
                         {/*
                           The checklist row's own second line: the count once
@@ -630,7 +632,7 @@ export function WhatToCorrect({
                         <span className="mt-0.5 block text-xs text-ink-muted">
                           {files.length > 0
                             ? `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
-                            : `PDF, JPG or PNG, up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`}
+                            : `${ACCEPTED_FILES_NOTE}.`}
                         </span>
                       </span>
                       {files.length > 0 && !busy && (
@@ -2100,6 +2102,15 @@ function RequirementsChecklist({
                     outstanding === 1 ? 'it is' : 'they are'
                   } here.`}
         </p>
+        {/*
+          Which files are allowed, once for the checklist — a row shows the
+          office's note until something is attached, so this was nowhere on
+          the sheet (client, 18 October 2026: tell the applicant which files
+          are allowed).
+        */}
+        {!ro && (
+          <p className="mt-1 text-xs text-ink-muted">Accepted files: {ACCEPTED_FILES_NOTE} each.</p>
+        )}
       </div>
 
       {error !== null && (
@@ -2190,6 +2201,8 @@ function RequirementRow({
   onChange?: (documentCode: string, file: File | null, documentId?: number) => void | Promise<void>
   onDeclarationTemplate?: () => void
 }) {
+  /* A HEIC or TIFF being converted before it is sent (uploads.ts). */
+  const converting = useUploadConverting()
   /*
    * Any row but the sheet itself takes files — a carried one included.
    *
@@ -2326,7 +2339,9 @@ function RequirementRow({
             */}
             <span className="mt-0.5 block text-xs leading-relaxed text-ink-muted">
               {busy
-                ? 'Uploading…'
+                ? converting
+                  ? 'Converting…'
+                  : 'Uploading…'
                 : files.length > 0
                   ? `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
                   : row.note}

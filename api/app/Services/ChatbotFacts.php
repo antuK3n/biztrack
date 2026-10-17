@@ -159,7 +159,10 @@ class ChatbotFacts
     /** @param  iterable<PermitType>  $types */
     private function requirements(iterable $types): string
     {
-        $lines = ['DOCUMENT REQUIREMENTS (uploaded in the application; an office may ask for more under Other Requirements)'];
+        $lines = [
+            'DOCUMENT REQUIREMENTS (uploaded in the application; an office may ask for more under Other Requirements)',
+            'Files accepted: '.ChatbotResponder::UPLOAD_TYPES.'.',
+        ];
         foreach ($types as $type) {
             $lines[] = "{$type->name}:";
             $lines[] = $this->rules->checklist($type);

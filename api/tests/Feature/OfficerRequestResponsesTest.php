@@ -141,3 +141,28 @@ it('stops accepting responses once the officer closes the request', function () 
 
     expect($req->fresh()->responses)->toHaveCount(1);
 });
+
+/*
+ * WEBP joined the documentary types on 18 October 2026 (HEIC and TIFF are
+ * converted in the browser and never arrive); a GIF is still refused.
+ */
+it('takes a WEBP response document and refuses a GIF', function () {
+    Storage::fake('local');
+    $req = seededRequest();
+    $juan = authAs('juan@biztrack.local');
+
+    $this->withHeaders($juan)
+        ->postJson("/api/v1/requests/{$req->id}/respond", [
+            'document' => UploadedFile::fake()->image('clearance.gif', 40, 40),
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('document');
+
+    $res = $this->withHeaders($juan)
+        ->post("/api/v1/requests/{$req->id}/respond", [
+            'document' => UploadedFile::fake()->image('clearance.webp', 40, 40),
+        ])
+        ->assertOk();
+
+    expect($res->json('data.responses.0.document.filename'))->toBe('clearance.webp');
+});

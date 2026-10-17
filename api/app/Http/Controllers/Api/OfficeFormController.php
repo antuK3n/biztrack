@@ -200,11 +200,11 @@ class OfficeFormController extends Controller
         [$permitType] = $this->authorizeRequirementWrite($request, $application, $permitTypeCode, $documentCode);
 
         $request->validate([
-            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ], [
             'file.required' => 'Choose the file to upload.',
             'file.max' => 'The file may not be larger than 10MB.',
-            'file.mimes' => 'Upload a PDF, JPG, or PNG file.',
+            'file.mimes' => 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF file.',
         ]);
 
         $file = $request->file('file');

@@ -66,11 +66,22 @@ class DocumentController extends Controller
              * feature.
              */
             'document_type_id' => ['required', 'exists:document_types,id'],
-            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            /*
+             * WEBP added 18 October 2026, with HEIC/HEIF and TIFF, at the
+             * client's instruction to widen every documentary upload. Only
+             * WEBP reaches this rule: the browser turns a HEIC into a JPEG
+             * and a TIFF into a PDF before sending (web uploads.ts), because
+             * this PHP has no Imagick or libheif to read a HEIC and a TIFF
+             * opens in almost no browser. The refusal names all six, since
+             * that is what the applicant can pick in the app. The same list
+             * is on OfficeFormController, OfficerRequestController and
+             * MessageController.
+             */
+            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ], [
             'document_type_id.required' => 'Say which requirement this file is for.',
             'file.max' => 'The file may not be larger than 10MB.',
-            'file.mimes' => 'Upload a PDF, JPG, or PNG file.',
+            'file.mimes' => 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF file.',
         ]);
 
         $documentTypeId = (int) $data['document_type_id'];

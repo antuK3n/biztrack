@@ -223,5 +223,5 @@ it('accepts a PDF at the documented limit and refuses a type it cannot read', fu
             'file' => UploadedFile::fake()->create('installer.exe', 10, 'application/octet-stream'),
         ])
         ->assertStatus(422)
-        ->assertJsonPath('errors.file.0', 'Upload a PDF, JPG, or PNG file.');
+        ->assertJsonPath('errors.file.0', 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF file.');
 });

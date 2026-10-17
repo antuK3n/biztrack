@@ -40,6 +40,16 @@ use Illuminate\Support\Collection;
 class ChatbotResponder
 {
     /*
+     * The files a documentary upload takes, as the app says it everywhere
+     * (web uploads.ts, ACCEPTED_FILES_NOTE). Client, 18 October 2026: HEIC/HEIF,
+     * WEBP and TIFF were added, and every message telling the applicant which
+     * files are allowed was to say so — this one included, since "what file
+     * can I upload" is asked here as often as on the form. Written once;
+     * ChatbotFacts reads it for the model's own answers.
+     */
+    public const UPLOAD_TYPES = 'PDF, JPG, PNG, WEBP, HEIC or TIFF, up to 10 MB each';
+
+    /*
      * Five digits or more. Numbering pads the sequence to five and lets it grow
      * past them after 99,999 filings in a year, and `\d{5}` alone read
      * BIZ-2026-123456 as BIZ-2026-12345, answering for a different filing.
@@ -652,7 +662,7 @@ class ChatbotResponder
         if ($type) {
             return "{$type->name}, reviewed by the {$type->department?->name}, needs:\n"
                 .$this->checklist($type)."\n"
-                .'Upload these in the Documents step of your application. Name another permit and I will pull up its checklist.';
+                .'Upload these in the Documents step of your application ('.self::UPLOAD_TYPES.'). Name another permit and I will pull up its checklist.';
         }
 
         if ($broad) {
@@ -662,7 +672,7 @@ class ChatbotResponder
                     ->map(fn ($doc) => $doc->name.$this->docSuffix($doc))
                     ->implode(', ');
             }
-            $lines[] = 'You upload these in the Documents step of the application.';
+            $lines[] = 'You upload these in the Documents step of the application ('.self::UPLOAD_TYPES.').';
 
             return implode("\n", $lines);
         }
