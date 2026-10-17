@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ClipboardEvent, KeyboardEvent } from 'react'
+import { OptionalTag } from './ui/Proto'
 
 /*
  * ── Item 105 · the TIN, entered as four boxes ─────────────────────────────
@@ -95,6 +96,7 @@ export function TinInput({
   errorId,
   number,
   required = true,
+  optional = false,
   fill = false,
 }: {
   /** The dash-joined TIN the form holds — unchanged from the single-field days. */
@@ -116,6 +118,13 @@ export function TinInput({
    * rather than being stopped at the first step of the form.
    */
   required?: boolean
+  /**
+   * Print "(optional)" after the question, as every optional field in the
+   * application forms does (client, 17 October 2026). Separate from
+   * `required={false}`, because not asserting a requirement is a weaker claim
+   * than saying the question may be skipped.
+   */
+  optional?: boolean
   /**
    * Share the parent's width between the four boxes, up to 5rem each, instead
    * of drawing each at its fixed three-digit width.
@@ -317,14 +326,15 @@ export function TinInput({
         Tax Identification Number (TIN)
         {/*
           An "Optional" badge sat here from 27 September 2026 until the
-          client had it removed on the 29th.
+          client had it removed on the 29th: a pill on this one question made
+          the TIN look unlike every other field on the step.
 
-          Worth knowing why it existed: this is the only question in
-          Section A that may be skipped, and without the badge nothing on
-          the label says so — a required field carries a red asterisk and
-          the word "required" for a screen reader, so an optional one is
-          marked only by the absence of both. If that reads as an oversight
-          again, a badge is the fix that was tried.
+          The plain word came back on 17 October 2026, when the client asked
+          for "(optional)" on every optional field in the application forms,
+          in one style. That answers both concerns at once — the TIN says it
+          may be skipped, and says it exactly as the middle name, the website
+          and the landline beside it do. Not a badge: if a pill is proposed
+          again, the 29 September removal is why not.
         */}
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
         {required && (
@@ -333,6 +343,7 @@ export function TinInput({
             <span className="sr-only"> (required)</span>
           </>
         )}
+        {optional && !required && <OptionalTag />}
       </legend>
 
       <div

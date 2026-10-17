@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ClipboardEvent, KeyboardEvent } from 'react'
 import { canonicalMobile, mobileSubscriberDigits } from '../lib/phone'
+import { OptionalTag } from './ui/Proto'
 
 /*
  * ── Item 10 · the two numbers a business is reached on ────────────────────
@@ -410,6 +411,7 @@ function splitLandline(value: string): string[] {
 export function LandlineInput({
   legend,
   number,
+  optional = false,
   value,
   onChange,
   onBlur,
@@ -420,6 +422,12 @@ export function LandlineInput({
   legend: string
   /** The field's position on its step — see the mobile fieldset above. */
   number?: number
+  /**
+   * Print "(optional)" after the legend — the landline may be left blank
+   * (client, 9 September 2026), and every optional field in the application
+   * forms now says so in the same words (client, 17 October 2026).
+   */
+  optional?: boolean
   value: string
   onChange: (value: string) => void
   onBlur?: () => void
@@ -449,6 +457,7 @@ export function LandlineInput({
       <legend className={legendCls}>
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         {legend}
+        {optional && <OptionalTag />}
       </legend>
       <SegmentedDigits
         sizes={LANDLINE_SIZES}

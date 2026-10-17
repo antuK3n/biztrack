@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FieldError, FieldLabel, inputCls } from '../../components/ui/Proto'
+import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/ui/Proto'
 import type { ApplicationType, FeeProfile, FeeProfileLine } from '../../lib/types'
 
 /*
@@ -1167,6 +1167,7 @@ function FlagCheckbox({
 function NumberField({
   label,
   required,
+  optional,
   kind,
   value,
   onChange,
@@ -1180,6 +1181,8 @@ function NumberField({
 }: {
   label: string
   required?: boolean
+  /** May be left blank; prints "(optional)" (client, 17 October 2026). */
+  optional?: boolean
   kind: 'money' | 'area' | 'count'
   value: string
   onChange: (next: string) => void
@@ -1243,7 +1246,7 @@ function NumberField({
         label so it is not read as part of the field's name.
       */}
       <label className="block">
-        <FieldLabel required={required}>
+        <FieldLabel required={required} optional={optional}>
           {label}
           {hint && <span className="sr-only"> ({hint})</span>}
         </FieldLabel>
@@ -1949,13 +1952,23 @@ export function FeeProfileStep({
               as the ordinance's doing rather than as the form asking twice.
             */}
             <fieldset className="relative col-span-12 min-w-0 @xl:col-span-6">
-              <legend className="sr-only">Number of delivery units</legend>
+              {/*
+                Optional, both boxes — most of these businesses deliver
+                nothing, and `feeProfileIssues` checks the two counts only for
+                being whole numbers when filled. Said ONCE, on the group's own
+                heading and in its legend, rather than after each box: two
+                "(optional)"s side by side under one heading is the stacked
+                restatement AGENTS.md 6.4 warns against (client, 17 October
+                2026: "(optional)" on every optional field).
+              */}
+              <legend className="sr-only">Number of delivery units (optional)</legend>
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
               />
               <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
                 4. No. of Delivery Units
+                <OptionalTag />
               </p>
               {/* Halves of six columns: in quarters, under item 2's male and female counts. */}
               <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-2">
@@ -2019,7 +2032,7 @@ export function FeeProfileStep({
       {onExtras && hasBusiness && (
         <section>
           <div>
-            <FieldLabel>Which of these apply to your business?</FieldLabel>
+            <FieldLabel optional>Which of these apply to your business?</FieldLabel>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {BUSINESS_FLAGS.map((f) => (
                 <FlagCheckbox
