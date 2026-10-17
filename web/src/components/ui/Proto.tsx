@@ -998,13 +998,50 @@ export function FieldError({
  * sentence at the foot of each wizard step explains the convention for sighted
  * readers; this is the same sentence for everyone else.
  */
+/**
+ * "(optional)", after a question that may be left blank.
+ *
+ * Client, 17 October 2026: *"For all optional/non-required fields in ALL
+ * APPLICATION forms, put an '(optional)' (some already have this so just make
+ * sure they are of the same font/style)."* Some did — four hand-written spans
+ * in three slightly different spellings of the same classes, and one with a
+ * margin and a space both, so it sat further from its label than the rest.
+ * This is the one rendering, for FieldLabel's `optional`, for FieldShell's,
+ * and for every label that is not a FieldLabel (an upload tile's title, a
+ * fieldset legend, a group heading).
+ *
+ * Inherits its label's SIZE and sets only weight and colour, so it is the
+ * same relative to whatever it follows: regular weight in muted ink beside a
+ * semibold label, readable as a note about the question rather than part of
+ * its name.
+ *
+ * A real space inside the span, not `ml-1` on it. Two reasons: the space is
+ * where a long label in a narrow column may wrap — "Address(optional)" with
+ * no space between is one unbreakable word, which overflows its cell — and a
+ * screen reader joins inline text without inventing spaces, so the margin
+ * version was announced as "Website Address(optional)".
+ *
+ * Optional and required are opposites; a label carries one or the other or,
+ * for a read-only answer the system fills in, neither.
+ */
+export function OptionalTag() {
+  return <span className="font-normal text-ink-muted">{' (optional)'}</span>
+}
+
 export function FieldLabel({
   children,
   required,
+  optional,
   number,
 }: {
   children: ReactNode
   required?: boolean
+  /**
+   * The question may be left blank — no gate on its step ever asks for it.
+   * Renders `<OptionalTag />`; see there for why it looks the way it does.
+   * Never set together with `required`.
+   */
+  optional?: boolean
   /**
    * The field's position on its step, printed before the label.
    *
@@ -1042,6 +1079,7 @@ export function FieldLabel({
           <span className="sr-only"> (required)</span>
         </>
       )}
+      {optional && !required && <OptionalTag />}
     </span>
   )
 }

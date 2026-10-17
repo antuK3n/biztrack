@@ -3,7 +3,7 @@ import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
-import { FieldError, FieldLabel, inputCls } from '../../components/ui/Proto'
+import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/ui/Proto'
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
@@ -1465,7 +1465,7 @@ function ZoningFields({
           the lie (tester).
         */}
         <label className="block">
-          <FieldLabel>Home Address</FieldLabel>
+          <FieldLabel optional>Home Address</FieldLabel>
           <input
             value={get(data, 'zoning_home_address')}
             onChange={(e) => set('zoning_home_address', e.target.value)}
@@ -1518,7 +1518,7 @@ function ZoningFields({
 
         {/* VIII. PROJECT DESCRIPTION */}
         <label className="block">
-          <FieldLabel>Project Description</FieldLabel>
+          <FieldLabel optional>Project Description</FieldLabel>
           <textarea
             rows={3}
             value={get(data, 'zoning_project_description')}
@@ -1555,7 +1555,7 @@ function ZoningFields({
             exactly what happened to the lessor boxes below.
           */}
           <label className="block">
-            <FieldLabel>No. of Storey of Building</FieldLabel>
+            <FieldLabel optional>No. of Storey of Building</FieldLabel>
             <input
               value={get(data, 'building_storeys')}
               onChange={(e) => set('building_storeys', e.target.value)}
@@ -1569,6 +1569,13 @@ function ZoningFields({
           {/*
             VIII.C and VIII.D — "(if lessee)" on the paper, so they are blank on
             an owner-occupied site by design rather than by omission.
+
+            "(optional)" after the paper's condition, not instead of it (client,
+            17 October 2026). The condition says WHO answers; the mark says
+            nothing stops the sheet without it — `officeFormMissing` asks no
+            ZONING field, a renter's included. Whether CPDD wants these
+            REQUIRED of a renter is the open question; until then the label
+            tells the truth about the gate.
           */}
           {/*
             Asked here, not carried. They were read-only, derived from
@@ -1581,7 +1588,7 @@ function ZoningFields({
             forever.
           */}
           <label className="block">
-            <FieldLabel>Name of Lessor (if lessee)</FieldLabel>
+            <FieldLabel optional>Name of Lessor (if lessee)</FieldLabel>
             <input
               value={get(data, 'lessor_name')}
               onChange={(e) => set('lessor_name', e.target.value)}
@@ -1592,7 +1599,7 @@ function ZoningFields({
             <CarriedTag field="lessor_name" />
           </label>
           <label className="block">
-            <FieldLabel>Address of Lessor (if lessee)</FieldLabel>
+            <FieldLabel optional>Address of Lessor (if lessee)</FieldLabel>
             <input
               value={get(data, 'lessor_address')}
               onChange={(e) => set('lessor_address', e.target.value)}
@@ -1605,7 +1612,7 @@ function ZoningFields({
         </div>
 
         <div>
-          <FieldLabel>Type of Industrial Project</FieldLabel>
+          <FieldLabel optional>Type of Industrial Project</FieldLabel>
           <ChipRow
             label="Type of industrial project"
             options={ZONING_INDUSTRIAL_PROJECT_TYPES}
@@ -1638,7 +1645,7 @@ function ZoningFields({
           />
         ) : (
           <label className="block">
-            <FieldLabel>Authorized Representative</FieldLabel>
+            <FieldLabel optional>Authorized Representative</FieldLabel>
             <input
               value={get(data, 'authorized_representative')}
               onChange={(e) => set('authorized_representative', e.target.value)}
@@ -1692,7 +1699,9 @@ function SanitaryFields({
   const isFood = get(data, 'sanitary_classification') === 'Food Establishment'
   const select = (key: string, options: readonly string[], required = false) => (
     <label className="block">
-      <FieldLabel required={required}>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <FieldLabel required={required} optional={!required}>
+        {officeFormFieldLabel('SANITARY', key)}
+      </FieldLabel>
       <select
         value={get(data, key)}
         onChange={(e) => set(key, e.target.value)}
@@ -1712,7 +1721,7 @@ function SanitaryFields({
   )
   const yesNo = (key: string) => (
     <div>
-      <FieldLabel>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
+      <FieldLabel optional>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
       <ChipRow options={YES_NO} value={get(data, key)} onChange={(v) => set(key, v)} />
       <CarriedTag field={key} />
     </div>
@@ -1806,7 +1815,7 @@ function SanitaryFields({
             hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
           />
           <label className="block">
-            <FieldLabel>Operating Hours</FieldLabel>
+            <FieldLabel optional>Operating Hours</FieldLabel>
             <input
               value={get(data, 'operating_hours')}
               onChange={(e) => set('operating_hours', e.target.value)}
@@ -1846,7 +1855,7 @@ function SanitaryFields({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {select('pest_control', PEST_CONTROL_MEASURES)}
           <label className="block">
-            <FieldLabel>Last Pest Control Treatment</FieldLabel>
+            <FieldLabel optional>Last Pest Control Treatment</FieldLabel>
             <input
               type="date"
               max={todayISO()}
@@ -1870,7 +1879,7 @@ function SanitaryFields({
           <SectionMarker letter="D" label="Food Establishment" />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className="block">
-              <FieldLabel>Seating Capacity</FieldLabel>
+              <FieldLabel optional>Seating Capacity</FieldLabel>
               <input
                 inputMode="numeric"
                 value={get(data, 'seating_capacity')}
@@ -2218,6 +2227,25 @@ function RequirementRow({
    */
   const answeredByPermit = row.source === 'carried' && fromPermit.size > 0
   const takesFile = row.code !== null && !readOnly && onChange && !answeredByPermit
+  /*
+   * ── "(optional)" on a row that does not stop the submit ──────────────────
+   *
+   * Client, 17 October 2026: "(optional)" on every optional field of the
+   * application forms, in one style. A row is optional exactly when the
+   * server says it does not block — the same flag that draws the asterisk
+   * above and that `submitClearanceForm` enforces — so the mark and the gate
+   * cannot drift apart.
+   *
+   * Not on the sheet's own row, which is answered by submitting rather than
+   * by anyone choosing to skip it. And not on a row whose label already
+   * carries the paper's own condition — "Fire insurance (if necessary)",
+   * "As-built plans (if the building differs from the approved plan)":
+   * those are precisely the rows the server makes non-blocking BECAUSE of
+   * that wording (`ChecklistSupport::statedAsConditional`), so the paper has
+   * already said it, and "(if necessary) (optional)" says it twice.
+   */
+  const optionalRow =
+    row.blocking !== true && row.source !== 'sheet' && !row.label.includes('(if ')
 
   return (
     <div
@@ -2284,6 +2312,7 @@ function RequirementRow({
                 refuses the submit so the two cannot drift apart.
               */}
               {row.blocking === true && <span className="ml-1 text-s-red">*</span>}
+              {optionalRow && <OptionalTag />}
             </span>
             {/*
               The note when there is nothing yet, the count once there is —
@@ -2346,7 +2375,15 @@ function RequirementRow({
       ) : (
         <>
           <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-ink">
-            {row.label}
+            {/*
+              The label and its marker in one span: this row is a flex row
+              with a gap, so a loose "(optional)" would sit a full gap away
+              from the name it qualifies instead of a space.
+            */}
+            <span>
+              {row.label}
+              {optionalRow && <OptionalTag />}
+            </span>
             {row.blocking === true && <span className="-ml-1 text-s-red">*</span>}
             {answeredByPermit && (
               <span className="rounded-full bg-royal-tint px-2 py-0.5 text-[11px] font-semibold text-royal">
@@ -2769,7 +2806,7 @@ function CecFields({
         {/* BIRTHDAY | SEX */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="relative">
-            <FieldLabel>Birthday</FieldLabel>
+            <FieldLabel optional>Birthday</FieldLabel>
             {/* Birthdays can never be in the future: capped here, re-checked by the API. */}
             <input
               type="date"
@@ -2885,7 +2922,7 @@ function FsicFields({
             value={business.ownerName}
           />
           <label className="block grow basis-[14rem]">
-            <FieldLabel>Authorized Representative</FieldLabel>
+            <FieldLabel optional>Authorized Representative</FieldLabel>
             {/*
              * Item 70 — the placeholder used to carry the rule ("Auto-filled
              * from Business Permit if blank"), which is the one thing about this
@@ -2940,7 +2977,7 @@ function FsicFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className="block shrink-0">
+          <label className="block max-w-full shrink-0">
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3029,7 +3066,7 @@ function OccupancyFields({
           </div>
           <ApplicationDateField data={data} />
           <div>
-            <FieldLabel>Building Permit No.</FieldLabel>
+            <FieldLabel optional>Building Permit No.</FieldLabel>
             <input
               value={get(data, 'building_permit_no')}
               onChange={(e) => set('building_permit_no', e.target.value)}
@@ -3039,7 +3076,7 @@ function OccupancyFields({
             <CarriedTag field="building_permit_no" />
           </div>
           <div>
-            <FieldLabel>FSEC No.</FieldLabel>
+            <FieldLabel optional>FSEC No.</FieldLabel>
             <input
               value={get(data, 'fsec_no')}
               onChange={(e) => set('fsec_no', e.target.value)}
@@ -3053,8 +3090,8 @@ function OccupancyFields({
             each sits beside the number it belongs to — see the note on this
             change for why they are asked here and not on the officer's sheet.
           */}
-          <label className="block shrink-0">
-            <FieldLabel>Building Permit — Date Issued</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>Building Permit — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'building_permit_date')}
@@ -3064,8 +3101,8 @@ function OccupancyFields({
             />
             <CarriedTag field="building_permit_date" />
           </label>
-          <label className="block shrink-0">
-            <FieldLabel>FSEC — Date Issued</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>FSEC — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'fsec_date')}
@@ -3099,7 +3136,7 @@ function OccupancyFields({
             wrong answer on a form the Building Official posts to.
           */}
           <label className="block grow basis-[18rem]">
-            <FieldLabel>Address of Owner / Permittee</FieldLabel>
+            <FieldLabel optional>Address of Owner / Permittee</FieldLabel>
             <input
               value={get(data, 'owner_address')}
               onChange={(e) => set('owner_address', e.target.value)}
@@ -3110,8 +3147,8 @@ function OccupancyFields({
             <CarriedTag field="owner_address" />
           </label>
           {/* Printed beside the address on the paper; the OBO posts to it. */}
-          <label className="block shrink-0">
-            <FieldLabel>ZIP Code</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>ZIP Code</FieldLabel>
             <input
               inputMode="numeric"
               value={get(data, 'owner_zip')}
@@ -3132,8 +3169,8 @@ function OccupancyFields({
             every owner holds one today, and a blank the office can ask for is
             better than a gate that stops the sheet.
           */}
-          <label className="block shrink-0">
-            <FieldLabel>Tel. No.</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>Tel. No.</FieldLabel>
             <input
               inputMode="tel"
               value={get(data, 'owner_tel')}
@@ -3143,8 +3180,8 @@ function OccupancyFields({
             />
             <CarriedTag field="owner_tel" />
           </label>
-          <label className="block shrink-0">
-            <FieldLabel>Community Tax Certificate No.</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>Community Tax Certificate No.</FieldLabel>
             <input
               value={get(data, 'owner_ctc_no')}
               onChange={(e) => set('owner_ctc_no', e.target.value)}
@@ -3153,8 +3190,8 @@ function OccupancyFields({
             />
             <CarriedTag field="owner_ctc_no" />
           </label>
-          <label className="block shrink-0">
-            <FieldLabel>CTC — Date Issued</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>CTC — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'owner_ctc_date')}
@@ -3164,8 +3201,8 @@ function OccupancyFields({
             />
             <CarriedTag field="owner_ctc_date" />
           </label>
-          <label className="block shrink-0">
-            <FieldLabel>CTC — Place Issued</FieldLabel>
+          <label className="block max-w-full shrink-0">
+            <FieldLabel optional>CTC — Place Issued</FieldLabel>
             <input
               value={get(data, 'owner_ctc_place')}
               onChange={(e) => set('owner_ctc_place', e.target.value)}
@@ -3233,7 +3270,7 @@ function OccupancyFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className="block shrink-0">
+          <label className="block max-w-full shrink-0">
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3245,7 +3282,7 @@ function OccupancyFields({
             />
             <CarriedTag field="building_storeys" />
           </label>
-          <label className="block shrink-0">
+          <label className="block max-w-full shrink-0">
             <FieldLabel required>No. of Units</FieldLabel>
             <input
               inputMode="numeric"
@@ -3258,7 +3295,16 @@ function OccupancyFields({
             <CarriedTag field="building_units" />
           </label>
           {/* On both the unified form and the Certificate of Completion; it was asked on neither sheet here. */}
-          <label className="block shrink-0">
+          {/*
+            `max-w-full` on every `shrink-0` cell of these rows (17 October
+            2026). A cell that may not shrink is as wide as its longest line,
+            and on a phone this one's carried-answer note ("From your Business
+            Permit application — change it if it is wrong") was wider than the
+            screen, so the whole sheet scrolled sideways by 27px. Found while
+            checking that the new "(optional)" labels did not break the rows;
+            capping the cell lets the note and the label wrap instead.
+          */}
+          <label className="block max-w-full shrink-0">
             <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
             <input
               inputMode="decimal"

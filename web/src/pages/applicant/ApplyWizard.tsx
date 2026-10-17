@@ -47,6 +47,7 @@ import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldError,
   FieldLabel,
+  OptionalTag,
   PillButton,
   ProtoModal,
   inputCls,
@@ -10688,7 +10689,7 @@ export function ApplyWizard() {
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label className="block">
-                      <FieldLabel>House / Bldg. No.</FieldLabel>
+                      <FieldLabel optional>House / Bldg. No.</FieldLabel>
                       <input
                         value={form.house_bldg_no}
                         onChange={(e) => update('house_bldg_no', e.target.value)}
@@ -10754,7 +10755,7 @@ export function ApplyWizard() {
                */}
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="block">
-                  <FieldLabel>Block</FieldLabel>
+                  <FieldLabel optional>Block</FieldLabel>
                   <input
                     value={form.block}
                     onChange={(e) => update('block', e.target.value)}
@@ -10763,7 +10764,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block">
-                  <FieldLabel>Lot</FieldLabel>
+                  <FieldLabel optional>Lot</FieldLabel>
                   <input
                     value={form.lot}
                     onChange={(e) => update('lot', e.target.value)}
@@ -10773,7 +10774,7 @@ export function ApplyWizard() {
                 </label>
                 <div className="relative">
                   <label className="block">
-                    <FieldLabel>Lot Area (sq. m.)</FieldLabel>
+                    <FieldLabel optional>Lot Area (sq. m.)</FieldLabel>
                     <input
                       inputMode="decimal"
                       placeholder="120"
@@ -10792,7 +10793,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                  <FieldLabel>Locational Group/Landmark</FieldLabel>
+                  <FieldLabel optional>Locational Group/Landmark</FieldLabel>
                   <input
                     value={form.line2}
                     onChange={(e) => update('line2', e.target.value)}
@@ -11275,6 +11276,7 @@ export function ApplyWizard() {
                    */
                   number={3}
                   required={false}
+                  optional
                   value={form.tin}
                   onChange={(tin) => update('tin', tin)}
                   onBlur={() => touch('tin')}
@@ -11341,7 +11343,7 @@ export function ApplyWizard() {
               </div>
             <div className="col-span-12 @xl:col-span-6 @4xl:col-span-3">
               <label className="block">
-                <FieldLabel>5. Trade Name / Franchise</FieldLabel>
+                <FieldLabel optional>5. Trade Name / Franchise</FieldLabel>
                 <input
                   value={form.trade_name}
                   onChange={(e) => update('trade_name', e.target.value)}
@@ -11389,6 +11391,7 @@ export function ApplyWizard() {
                  */}
                 <LandlineInput
                   legend="6. Telephone (Landline)"
+                  optional
                   value={form.telephone}
                   onChange={(v) => update('telephone', v)}
                   onBlur={() => touch('telephone')}
@@ -11464,7 +11467,7 @@ export function ApplyWizard() {
                 </div>
               <div className="relative col-span-12 @xl:col-span-6 @4xl:col-span-3">
                 <label className="block">
-                  <FieldLabel>9. Website Address</FieldLabel>
+                  <FieldLabel optional>9. Website Address</FieldLabel>
                   <input
                     inputMode="url"
                     value={form.website}
@@ -11553,7 +11556,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
-                  <FieldLabel>12. Middle Name</FieldLabel>
+                  <FieldLabel optional>12. Middle Name</FieldLabel>
                   <input
                     value={form.owner_middle_name}
                     onChange={(e) => update('owner_middle_name', e.target.value)}
@@ -11561,7 +11564,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block col-span-12 @xl:col-span-6 @4xl:col-span-3">
-                  <FieldLabel>13. Suffix</FieldLabel>
+                  <FieldLabel optional>13. Suffix</FieldLabel>
                   <input
                     value={form.owner_suffix}
                     onChange={(e) => update('owner_suffix', e.target.value)}
@@ -12091,7 +12094,10 @@ export function ApplyWizard() {
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @3xl:col-span-6">
                 <label className="row-span-2 grid grid-rows-subgrid">
                   <span className="self-end">
-                    <FieldLabel required={applicationType === 'new'}>
+                    <FieldLabel
+                      required={applicationType === 'new'}
+                      optional={applicationType !== 'new'}
+                    >
                       6. Capital Investment (₱)
                     </FieldLabel>
                   </span>
@@ -12123,9 +12129,15 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
+                {/*
+                  "so this is optional" ended this sentence until 17 October
+                  2026; the label says it now, in the words every optional
+                  field uses (client: one "(optional)", one style). What the
+                  label cannot say is WHY, which is what is left here.
+                */}
                 {applicationType !== 'new' && (
                   <p className="mt-1 text-xs text-ink-secondary">
-                    A renewal is assessed on last year’s gross sales, so this is optional.
+                    A renewal is assessed on last year’s gross sales instead.
                   </p>
                 )}
               </div>
@@ -12147,7 +12159,7 @@ export function ApplyWizard() {
                */}
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
                 <span className="self-end">
-                  <FieldLabel>7. Tax incentives from a Government Entity?</FieldLabel>
+                  <FieldLabel optional>7. Tax incentives from a Government Entity?</FieldLabel>
                 </span>
                 <div
                   role="radiogroup"
@@ -12230,7 +12242,7 @@ export function ApplyWizard() {
                */}
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
                 <span className="self-end">
-                  <FieldLabel>8. Do you pay rent for the premises?</FieldLabel>
+                  <FieldLabel optional>8. Do you pay rent for the premises?</FieldLabel>
                 </span>
                 {/*
                     ── "Yes" and "No", in the paper's order ────────────────────
@@ -12474,8 +12486,15 @@ export function ApplyWizard() {
                             2026, having been added a few minutes earlier.
                           */}
                           {dt.name}
+                          {/*
+                            The shared marker since 17 October 2026 — this was
+                            the same words hand-set with a margin, a few pixels
+                            further from the name than the marker on every other
+                            optional question (client: "make sure they are of
+                            the same font/style").
+                          */}
                           {dt.is_required === false ? (
-                            <span className="ml-1 font-normal text-ink-muted">(optional)</span>
+                            <OptionalTag />
                           ) : (
                             <span>
                               <span className="text-s-red" aria-hidden="true">
@@ -12577,8 +12596,9 @@ export function ApplyWizard() {
           {/* Other Requirements — repeatable: add as many files as needed. */}
           {otherType && (
             <div className="mt-7">
-              <p className="mb-1.5 block text-[13px] font-semibold text-ink">
-                Other Requirements <span className="font-normal text-ink-muted">(optional)</span>
+              <p className="mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
+                Other Requirements
+                <OptionalTag />
               </p>
               <p className="mt-1 text-xs text-ink-muted">
                 Attach any other supporting documents. You can add more than one file.
@@ -12919,8 +12939,15 @@ export function ApplyWizard() {
             amendment.hasChanges === true &&
             amendment.ownership && (
               <fieldset className="mt-4 border-0 p-0">
+                {/*
+                  Optional: nothing gates it, and both boxes default to "Not
+                  changing" because a change of hands rarely changes the
+                  structure. Marked as every optional question is (client,
+                  17 October 2026).
+                */}
                 <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
                   3. Amendment
+                  <OptionalTag />
                 </legend>
                 <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
                   Only if the business converted from one legal structure to another. Leave both as

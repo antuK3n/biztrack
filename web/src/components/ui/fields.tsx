@@ -1,6 +1,7 @@
 import { forwardRef, useId, useState } from 'react'
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
 import { AlertCircleIcon, ChevronDownIcon, EyeIcon, EyeOffIcon } from '../icons'
+import { OptionalTag } from './Proto'
 
 /*
  * Form control vocabulary. Labels are always visible (placeholder-as-label is
@@ -33,7 +34,14 @@ function FieldShell({ id, label, optional, hint, hintId, error, errorId, childre
     <div>
       <label htmlFor={id} className="mb-1.5 block text-sm font-semibold text-ink">
         {label}
-        {optional && <span className="ml-1 font-normal text-ink-muted">{' (optional)'}</span>}
+        {/*
+          The application forms' own marker (Proto's OptionalTag), so the word
+          looks the same here as everywhere else. The label stays `text-sm`
+          (14px) where FieldLabel is 13px: these controls are used only on the
+          admin and password-reset screens, which are not application forms,
+          and resizing their labels was not asked for.
+        */}
+        {optional && <OptionalTag />}
       </label>
       {hint && (
         <p id={hintId} className="-mt-0.5 mb-1.5 text-sm text-ink-secondary">
