@@ -4,7 +4,12 @@ import type { SVGProps } from 'react'
 import { ArrowLeftIcon, CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../components/icons'
 import { TinInput } from '../components/TinInput'
 import { TIN_ERROR, tinValid } from '../lib/fieldRules'
-import { ACCEPT_ATTR, fileRejection } from './applicant/uploads'
+import {
+  ACCEPT_ATTR,
+  ACCEPTED_FILES_NOTE,
+  prepareUpload,
+  useUploadConverting,
+} from './applicant/uploads'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import {
   FieldLabel,
@@ -193,7 +198,27 @@ function SystemAnswer({
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const converting = useUploadConverting()
   const errorId = `answer-error-${request.id}`
+
+  /*
+   * Checked and, for a HEIC or TIFF, converted the moment it is chosen
+   * (18 October 2026) — so the tile names the file that will actually be
+   * sent, and a file that cannot be read is refused before Submit, not by it.
+   */
+  async function choose(chosen: File | null) {
+    setError(null)
+    if (chosen === null) return
+    setBusy(true)
+    const prepared = await prepareUpload(chosen)
+    setBusy(false)
+    if (prepared.error !== undefined) {
+      setFile(null)
+      setError(prepared.error)
+      return
+    }
+    setFile(prepared.file)
+  }
 
   async function submit() {
     if (busy) return
@@ -203,7 +228,7 @@ function SystemAnswer({
           ? null
           : TIN_ERROR
         : file
-          ? fileRejection(file)
+          ? null
           : 'Choose a file to upload.'
     setError(problem)
     if (problem) return
@@ -251,7 +276,7 @@ function SystemAnswer({
               <span className="ml-1 text-s-red" aria-hidden="true">*</span>
             </span>
             <span className="mt-0.5 block truncate text-xs text-ink-muted">
-              {file ? file.name : 'PDF, JPG or PNG, up to 10 MB'}
+              {busy && converting ? 'Converting…' : file ? file.name : ACCEPTED_FILES_NOTE}
             </span>
           </span>
           {file && (
@@ -266,8 +291,7 @@ function SystemAnswer({
             aria-invalid={Boolean(error) || undefined}
             aria-describedby={error ? errorId : undefined}
             onChange={(e) => {
-              setFile(e.target.files?.[0] ?? null)
-              setError(null)
+              void choose(e.target.files?.[0] ?? null)
               // Let the same file be picked again after a refusal.
               e.target.value = ''
             }}
@@ -317,6 +341,28 @@ function LetterView({
   const [replyFile, setReplyFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /* Why the file just picked for the reply was refused, shown beside Attach. */
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const converting = useUploadConverting()
+
+  /*
+   * The reply's document goes through the same rule as every documentary
+   * upload (uploads.ts): it had only the picker's `accept` list, so a renamed
+   * or oversized file was discovered by the API after Send. A HEIC or TIFF is
+   * converted here, and `busy` holds Send while it is.
+   */
+  async function attachReply(chosen: File | null) {
+    setAttachError(null)
+    if (chosen === null) return
+    setBusy(true)
+    const prepared = await prepareUpload(chosen)
+    setBusy(false)
+    if (prepared.error !== undefined) {
+      setAttachError(prepared.error)
+      return
+    }
+    setReplyFile(prepared.file)
+  }
 
   /*
    * The status the office is PROPOSING, and why. '' means nothing is being
@@ -939,6 +985,11 @@ function LetterView({
                 </button>
               </p>
             )}
+            {attachError && (
+              <p role="alert" className="mt-2 text-xs font-medium text-s-red">
+                {attachError}
+              </p>
+            )}
             <div className="mt-3 flex items-center gap-5">
               {/*
                 `aria-disabled`, never `disabled` (AGENTS.md 6.2): a disabled
@@ -961,13 +1012,13 @@ function LetterView({
                 aria-label="Attach a document"
               >
                 <ShareIcon size={22} />
-                Attach
+                {busy && converting ? 'Converting…' : 'Attach'}
                 <input
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept={ACCEPT_ATTR}
                   className="sr-only"
                   onChange={(e) => {
-                    setReplyFile(e.target.files?.[0] ?? null)
+                    void attachReply(e.target.files?.[0] ?? null)
                     e.target.value = ''
                   }}
                 />
@@ -978,6 +1029,7 @@ function LetterView({
                   setReplying(false)
                   setReplyText('')
                   setReplyFile(null)
+                  setAttachError(null)
                 }}
                 className="ml-auto text-sm font-semibold text-ink-muted underline hover:text-ink"
               >
@@ -1032,6 +1084,27 @@ function ComposeModal({
   const [reference, setReference] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const converting = useUploadConverting()
+
+  /*
+   * The office's reference file is a document the owner opens, so it follows
+   * the documentary rule too (18 October 2026): checked, and a HEIC or TIFF
+   * converted, when chosen rather than refused by the API on Create.
+   */
+  async function chooseReference(input: HTMLInputElement) {
+    const chosen = input.files?.[0] ?? null
+    setError(null)
+    setReference(null)
+    if (chosen === null) return
+    const prepared = await prepareUpload(chosen)
+    if (prepared.error !== undefined) {
+      setError(prepared.error)
+      // Clear the picker too, or it keeps naming a file that will not be sent.
+      input.value = ''
+      return
+    }
+    setReference(prepared.file)
+  }
 
   /*
    * The recipient, resolved from the chosen application. Shown, not chosen —
@@ -1048,7 +1121,7 @@ function ComposeModal({
     : ''
 
   async function submit() {
-    if (!appId || !subject.trim()) return
+    if (!appId || !subject.trim() || converting) return
     setBusy(true)
     setError(null)
     try {
@@ -1074,7 +1147,7 @@ function ComposeModal({
       confirmLabel="Create requirement request"
       onCancel={onClose}
       onConfirm={submit}
-      confirmDisabled={busy || !appId || !subject.trim()}
+      confirmDisabled={busy || converting || !appId || !subject.trim()}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
         Ask a business owner for a document your office needs.
@@ -1167,12 +1240,14 @@ function ComposeModal({
             <FieldLabel>Attachment / reference file</FieldLabel>
             <input
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              accept={ACCEPT_ATTR}
               className={inputCls}
-              onChange={(e) => setReference(e.target.files?.[0] ?? null)}
+              onChange={(e) => void chooseReference(e.currentTarget)}
             />
             <p className="mt-1.5 text-xs text-ink-secondary">
-              Optional — a blank form or a sample, for the owner to work from.
+              {converting
+                ? 'Converting…'
+                : `Optional — a blank form or a sample, for the owner to work from. ${ACCEPTED_FILES_NOTE}.`}
             </p>
           </label>
         </div>

@@ -4,7 +4,7 @@ import { toApiError } from '../../lib/api'
 import { clearances, officeForms } from '../../lib/resources'
 import type { OfficeFormRequirement } from '../../lib/types'
 import { WhatToCorrect, hasOfficeForm, type OfficeFormCode } from './OfficeFormStep'
-import { fileRejection, uploadErrorMessage } from './uploads'
+import { prepareUpload, uploadErrorMessage } from './uploads'
 
 /**
  * A returned clearance, answered without leaving the tracking page.
@@ -92,18 +92,23 @@ export function ClearanceCorrections({
     setBusyCode(documentCode)
     setError(null)
     try {
+      let upload: File | null = null
       if (file !== null) {
-        /* The form's own rule, run before the request rather than after it. */
-        const rejection = fileRejection(file)
-        if (rejection) {
-          setError(rejection)
+        /*
+         * The form's own rule, run before the request rather than after it —
+         * and since 18 October 2026 the HEIC/TIFF conversion with it.
+         */
+        const prepared = await prepareUpload(file)
+        if (prepared.error !== undefined) {
+          setError(prepared.error)
 
           return
         }
+        upload = prepared.file
       }
       const result =
-        file !== null
-          ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
+        upload !== null
+          ? await officeForms.uploadRequirement(applicationId, code, documentCode, upload)
           : await officeForms.removeRequirement(applicationId, code, documentCode, documentId)
       setRequirements(result.requirements)
     } catch (err) {

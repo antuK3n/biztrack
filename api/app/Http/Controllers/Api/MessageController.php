@@ -1796,7 +1796,7 @@ class MessageController extends Controller
 
         $data = $request->validate([
             'body' => ['required', 'string', 'max:5000'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
             /*
              * Optional, and its absence is not an error: an officer writing
              * from the review sheet is writing as their own office, and the
@@ -1808,7 +1808,7 @@ class MessageController extends Controller
             'department_id' => ['sometimes', 'nullable', 'integer'],
         ], [
             'attachment.max' => 'The attachment may not be larger than 10MB.',
-            'attachment.mimes' => 'Attach a PDF, JPG, or PNG file.',
+            'attachment.mimes' => 'Attach a PDF, JPG, PNG, WEBP, HEIC or TIFF file.',
         ]);
 
         $office = $this->resolveAddressee(
@@ -2114,10 +2114,10 @@ class MessageController extends Controller
 
         $data = $request->validate([
             'body' => ['required', 'string', 'max:5000'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ], [
             'attachment.max' => 'The attachment may not be larger than 10MB.',
-            'attachment.mimes' => 'Attach a PDF, JPG, or PNG file.',
+            'attachment.mimes' => 'Attach a PDF, JPG, PNG, WEBP, HEIC or TIFF file.',
         ]);
 
         $message = DB::transaction(function () use ($request, $reader, $thread, $data, $officer) {
@@ -2546,10 +2546,10 @@ class MessageController extends Controller
         $data = $request->validate([
             'department_id' => ['sometimes', 'nullable', 'integer'],
             'body' => ['required', 'string', 'max:5000'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
         ], [
             'attachment.max' => 'The attachment may not be larger than 10MB.',
-            'attachment.mimes' => 'Attach a PDF, JPG, or PNG file.',
+            'attachment.mimes' => 'Attach a PDF, JPG, PNG, WEBP, HEIC or TIFF file.',
         ]);
 
         $message = DB::transaction(function () use ($request, $reader, $thread, $data, $owner) {

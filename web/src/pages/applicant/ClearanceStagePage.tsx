@@ -18,7 +18,7 @@ import {
   type OfficeFormCode,
   type OfficeFormData,
 } from './OfficeFormStep'
-import { fileRejection, uploadErrorMessage } from './uploads'
+import { prepareUpload, uploadErrorMessage } from './uploads'
 import { carriedOverBusiness } from './carriedOver'
 import type {
   Application,
@@ -937,9 +937,10 @@ export function ClearanceStage({
    * on the row — and the server answers both with the full list precisely so the
    * screen never has to merge a row into its own copy.
    *
-   * The browser-side file check runs first (`fileRejection`), for the reason
+   * The browser-side file check runs first (`prepareUpload`), for the reason
    * `uploads.ts` gives: the API's refusal of an empty PDF is "Upload a PDF, JPG,
    * or PNG file", which is true of the file and useless to the person holding it.
+   * It converts a HEIC or TIFF too (18 October 2026), inside the busy window.
    */
   async function changeRequirement(
     code: string,
@@ -951,16 +952,18 @@ export function ClearanceStage({
     setReqBusy(documentCode)
     setReqError(null)
     try {
+      let upload: File | null = null
       if (file !== null) {
-        const rejection = fileRejection(file)
-        if (rejection) {
-          setReqError(rejection)
+        const prepared = await prepareUpload(file)
+        if (prepared.error !== undefined) {
+          setReqError(prepared.error)
           return
         }
+        upload = prepared.file
       }
       const result =
-        file !== null
-          ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
+        upload !== null
+          ? await officeForms.uploadRequirement(applicationId, code, documentCode, upload)
           : await officeForms.removeRequirement(applicationId, code, documentCode, documentId)
       setRequirements((prev) => ({ ...prev, [code]: result.requirements }))
     } catch (err) {

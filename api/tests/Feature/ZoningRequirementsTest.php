@@ -366,3 +366,25 @@ it('refuses a slot the paper does not have, and a sheet with no checklist', func
         ['file' => UploadedFile::fake()->create('anything.pdf', 10, 'application/pdf')],
     )->assertNotFound();
 });
+
+/*
+ * WEBP joined the documentary types on 18 October 2026 (HEIC and TIFF are
+ * converted in the browser and never arrive); a GIF is still refused, with
+ * the list the applicant can actually pick.
+ */
+it('takes a WEBP into a checklist slot and refuses a GIF', function () {
+    Storage::fake('local');
+    $app = zoningFiling(rented: false);
+    $owner = authAs('owner@biztrack.local');
+    $slot = "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION";
+
+    $this->withHeaders($owner)->post($slot, [
+        'file' => UploadedFile::fake()->image('tax-declaration.webp', 40, 40),
+    ])->assertCreated();
+
+    $this->withHeaders($owner)->postJson($slot, [
+        'file' => UploadedFile::fake()->image('tax-declaration.gif', 40, 40),
+    ])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.file.0', 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF file.');
+});

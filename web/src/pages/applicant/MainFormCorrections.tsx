@@ -12,7 +12,13 @@ import {
 import { applications, documents } from '../../lib/resources'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
 import type { Application, UploadedDocument } from '../../lib/types'
-import { ACCEPT_ATTR, MAX_UPLOAD_BYTES, fileRejection, uploadErrorMessage } from './uploads'
+import {
+  ACCEPT_ATTR,
+  ACCEPTED_FILES_NOTE,
+  prepareUpload,
+  uploadErrorMessage,
+  useUploadConverting,
+} from './uploads'
 
 /*
  * What BPLO sent back, and the controls to answer it.
@@ -150,7 +156,7 @@ function CorrectionInput({
  *
  * ── The same box Section C gave them ────────────────────────────────────────
  *
- * `fileRejection`, `ACCEPT_ATTR` and `MAX_UPLOAD_BYTES` are imported from
+ * `prepareUpload`, `ACCEPT_ATTR` and `ACCEPTED_FILES_NOTE` are imported from
  * `./uploads`, which is the module Section C's own uploader uses. Client,
  * 29 September 2026: *"the documentary requirement fields in the application
  * forms should have the same allowable file size with their resubmission
@@ -179,6 +185,8 @@ function DocumentCorrection({
   onUploaded: (code: string) => void
 }) {
   const [busy, setBusy] = useState(false)
+  /* A HEIC or TIFF being converted before it is sent (uploads.ts). */
+  const converting = useUploadConverting()
   const [error, setError] = useState<string | null>(null)
   /*
    * Every file sent in this sitting — the DOCUMENTS, not their names.
@@ -222,13 +230,13 @@ function DocumentCorrection({
        */
       for (const file of files) {
         /* The form's own rule, run before the request rather than after. */
-        const rejection = fileRejection(file)
-        if (rejection) {
-          setError(rejection)
+        const prepared = await prepareUpload(file)
+        if (prepared.error !== undefined) {
+          setError(prepared.error)
 
           return
         }
-        const stored = await documents.upload(applicationId, documentType.id, file)
+        const stored = await documents.upload(applicationId, documentType.id, prepared.file)
         setDone((prev) => [...prev, stored])
         onUploaded(documentType.code)
       }
@@ -277,7 +285,7 @@ function DocumentCorrection({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-ink">
-            {busy ? 'Uploading…' : 'Upload a replacement'}
+            {busy ? (converting ? 'Converting…' : 'Uploading…') : 'Upload a replacement'}
           </span>
           {/*
             Section C's own second line: the count once there are files,
@@ -287,7 +295,7 @@ function DocumentCorrection({
           <span className="mt-0.5 block text-xs text-ink-muted">
             {done.length > 0
               ? `${done.length} file${done.length === 1 ? '' : 's'} attached · click to add another`
-              : `PDF, JPG or PNG, up to ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`}
+              : `${ACCEPTED_FILES_NOTE}.`}
           </span>
         </span>
         {done.length > 0 && !busy && (

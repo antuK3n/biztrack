@@ -7,6 +7,7 @@ import { messages as messagesApi } from '../lib/resources'
 import { officeHoursNote } from '../lib/officeHours'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
+import { ACCEPT_ATTR, prepareUpload, useUploadConverting } from '../pages/applicant/uploads'
 import type { Message, MessageOffice, MessageTranscriptMeta } from '../lib/types'
 
 /**
@@ -509,6 +510,24 @@ export function MessageThreadView({
   const [composerFocused, setComposerFocused] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const converting = useUploadConverting()
+
+  /*
+   * An attachment is a document an office or an applicant opens, so it
+   * follows the documentary rule (uploads.ts) since 18 October 2026: checked
+   * when chosen, and a HEIC or TIFF converted to a JPEG or PDF, rather than
+   * refused by the API after Send. The picker had no `accept` list at all.
+   */
+  async function attach(chosen: File | null) {
+    setSendError(null)
+    if (chosen === null) return
+    const prepared = await prepareUpload(chosen)
+    if (prepared.error !== undefined) {
+      setSendError(prepared.error)
+      return
+    }
+    setAttachment(prepared.file)
+  }
   const endRef = useRef<HTMLDivElement | null>(null)
 
   /*
@@ -654,7 +673,7 @@ export function MessageThreadView({
      * nothing by itself - a press and the Enter key both still arrive here,
      * and this is where they are turned away.
      */
-    if (closed || sending) return
+    if (closed || sending || converting) return
     setSending(true)
     setSendError(null)
     try {
@@ -764,6 +783,11 @@ export function MessageThreadView({
           </p>
         )}
         {sendError && <p className="mb-2 text-xs font-medium text-s-red">{sendError}</p>}
+        {converting && (
+          <p className="mb-2 flex items-center gap-2 text-xs text-ink-secondary">
+            <PaperclipIcon size={14} /> Converting…
+          </p>
+        )}
         {attachment && (
           <div className="mb-2 flex items-center gap-2 text-xs text-ink-secondary">
             <PaperclipIcon size={14} />
@@ -835,6 +859,7 @@ export function MessageThreadView({
             <PaperclipIcon size={18} />
             <input
               type="file"
+              accept={ACCEPT_ATTR}
               className="sr-only"
               /*
                 The refusal is in the handler, not on the element. A disabled
@@ -844,7 +869,7 @@ export function MessageThreadView({
               */
               aria-disabled={closed || undefined}
               onChange={(e) => {
-                if (!closed) setAttachment(e.target.files?.[0] ?? null)
+                if (!closed) void attach(e.target.files?.[0] ?? null)
                 e.target.value = ''
               }}
             />
@@ -886,7 +911,7 @@ export function MessageThreadView({
               Playwright reads `aria-disabled` as disabled too, so the specs
               that wait for Send to come alive keep working unchanged.
             */
-            aria-disabled={closed || sending || (!body.trim() && !attachment) || undefined}
+            aria-disabled={closed || sending || converting || (!body.trim() && !attachment) || undefined}
             className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
           >
             {sending ? 'Sending…' : 'Send'}

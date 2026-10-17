@@ -76,7 +76,7 @@ class OfficerRequestController extends Controller
             // verdict, which is `remarks` and is written by close().
             'additional_remarks' => ['nullable', 'string', 'max:2000'],
             // A blank form, a template, a sample of a valid certificate.
-            'reference' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'reference' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
             // Meeting fields (officer-provided; no live calendar call — future work).
             'meeting_scheduled_at' => ['nullable', 'date', 'required_if:request_type,meeting'],
             'meeting_duration_minutes' => ['nullable', 'integer', 'min:5', 'max:480'],
@@ -391,7 +391,7 @@ class OfficerRequestController extends Controller
         $data = $request->validate([
             // A file-only reply is valid, which is what the Respond form already allows.
             'body' => ['required_without:document', 'nullable', 'string', 'max:5000'],
-            'document' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'document' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
             // Optional: the Respond form has no type picker, so an unlabelled
             // upload files itself under the "Other Requirements" type.
             'document_type_id' => ['nullable', 'exists:document_types,id'],
@@ -540,10 +540,10 @@ class OfficerRequestController extends Controller
             });
         } else {
             $request->validate([
-                'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+                'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png,webp', 'max:10240'],
             ], [
                 'document.required' => 'Choose a file to upload.',
-                'document.mimes' => 'Upload a PDF, JPG or PNG.',
+                'document.mimes' => 'Upload a PDF, JPG, PNG, WEBP, HEIC or TIFF.',
                 'document.max' => 'The file must be 10 MB or smaller.',
             ]);
             $file = $request->file('document');
