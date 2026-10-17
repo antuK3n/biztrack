@@ -28,6 +28,11 @@ use Carbon\CarbonImmutable;
  * engine before and after the status change, so what is pinned is the movement
  * the change causes.
  *
+ * Since 18 October 2026 the soft deletes are gone from that line too — removing
+ * a record is not a business closing, and test records made and removed in a
+ * month read as dozens of closures — and a retired Mayor's Permit joined the
+ * blacklisting (AnalyticsFeesSuspendedMovementTest pins both).
+ *
  * SUSPENSION IS DELIBERATELY EXCLUDED and has a test of its own. A suspension
  * is temporary; counting it as a closure would turn this chart into a chart of
  * sanctions.
@@ -142,7 +147,7 @@ it('leaves an undated blacklisting off the monthly closures', function () {
     expect(movement()['closed'])->toBe($before['closed']);
 });
 
-it('counts a business removed from the register once, not also as blacklisted', function () {
+it('takes a business removed from the register off the closures, even one blacklisted first', function () {
     $business = aTradingBusiness();
     $business->update([
         'status' => Business::STATUS_BLACKLISTED,
@@ -153,8 +158,13 @@ it('counts a business removed from the register once, not also as blacklisted', 
 
     $business->delete();
 
-    // Removed after being struck off: it closed once, on the day it was removed.
-    expect(movement()['closed'])->toBe($before['closed']);
+    /*
+     * It counted once, on the day it was removed. Since 18 October 2026 a
+     * removed business is in neither column: removal is housekeeping, and
+     * the test records removed the same month made October read 22 closures
+     * on a register of 24. Its blacklisting goes with it.
+     */
+    expect(movement()['closed'])->toBe($before['closed'] - 1);
 });
 
 it('does not re-date a closure when an admin re-saves the same status', function () {

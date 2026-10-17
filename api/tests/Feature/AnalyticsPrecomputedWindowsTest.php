@@ -202,3 +202,29 @@ it('keeps the provenance fields on every response, notice included', function ()
         ->and($resolved['meta']['fallback_reason'])->toBe('not_yet_refreshed')
         ->and($resolved['meta']['notice'])->not->toBeNull();
 });
+
+it('does not serve a dashboard snapshot stored in an older shape', function () {
+    /*
+     * 18 October 2026 removed the tier panel, the renewal forecast and two
+     * officer figures and added Fees Collected and Suspended Permits. A
+     * snapshot from the night before would have gone on serving the removed
+     * keys and lacked the new ones until 03:00, so a payload whose
+     * `schema_version` is not the current one is treated as no snapshot.
+     */
+    $key = AnalyticsSnapshot::keyFor('dashboard', ['months' => 12]);
+    $stored = AnalyticsSnapshot::create([
+        'key' => $key, 'dataset' => 'dashboard', 'source' => 'local',
+        'payload' => ['processing_tiers' => []], 'computed_at' => now(),
+    ]);
+
+    $old = AnalyticsResolver::resolve('dashboard', ['months' => 12], fn () => ['fresh' => true]);
+
+    expect($old['meta']['source'])->toBe('local')
+        ->and($old['meta']['fallback_reason'])->toBe('not_yet_refreshed')
+        ->and($old['data'])->toBe(['fresh' => true]);
+
+    $stored->update(['payload' => ['schema_version' => AnalyticsDatasets::get('dashboard')['schema']]]);
+    $current = AnalyticsResolver::resolve('dashboard', ['months' => 12], fn () => ['fresh' => true]);
+
+    expect($current['meta']['source'])->toBe('snapshot');
+});

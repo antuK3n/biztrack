@@ -32,15 +32,15 @@ function dashboardPdfText(string $email, string $query = ''): string
 function dashboardPdfHtml(?string $office): string
 {
     $report = DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS, $office);
-    $report['stages']['rows'] = [['code' => 'BFP', 'name' => 'Bureau of Fire Protection', 'reviews' => 12, 'mean_days' => 3.1]];
+    $report['stages']['rows'] = [['code' => 'BFP', 'name' => 'Bureau of Fire Protection', 'reviews' => 12, 'mean_days' => 4.1, 'drawn' => true]];
     $report['stages']['reviews'] = 60;
     $report['stages']['mean_days'] = 2.7;
     $report['stages']['bottleneck'] = [
         'code' => 'BFP',
         'name' => 'Bureau of Fire Protection',
-        'mean_days' => 3.1,
+        'mean_days' => 4.1,
         'reviews' => 12,
-        'above_average_days' => 0.4,
+        'above_average_days' => 1.4,
         'share_of_reviews' => 20.0,
     ];
 
@@ -59,7 +59,41 @@ it('prints the bottleneck sentence, not the Blade that builds it', function () {
 
     expect($html)->not->toContain('@if')
         ->and($html)->not->toContain('@endif')
-        ->and($html)->toContain('0.4 office days above the 2.7-office-day all-office average');
+        ->and($html)->toContain('Bureau of Fire Protection is the slowest at')
+        ->and($html)->toContain('1.4 above the')
+        ->and($html)->toContain('2.7-day average');
+});
+
+it('mirrors the dashboard: the new panels in, the removed ones out, the all-time count under its label', function () {
+    /*
+     * 18 October 2026 (client's picker): the printed copy follows the screen.
+     * Fees Collected and Suspended Permits are new; the RA 11032 tier table,
+     * the department table timed from assignments, response time and the
+     * Cancelled row are gone; "Applications (all time)" prints the all-time
+     * count rather than `applications_ytd`.
+     */
+    $report = DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+    $report['kpis']['applications_all_time'] = 4321;
+    $report['kpis']['applications_ytd'] = 1234;
+
+    $admin = User::where('email', 'admin@biztrack.local')->firstOrFail();
+    $html = view('pdf.analytics-dashboard-report', [
+        'report' => $report,
+        'meta' => ['engine' => 'BizTrack', 'source' => 'snapshot'],
+        'scope' => AnalyticsOffice::describe($admin, null),
+        'generated_at' => 'October 18, 2026 9:00 AM Manila time',
+    ])->render();
+
+    expect($html)->toContain('Fees collected')
+        ->and($html)->toContain('Suspended permits')
+        ->and($html)->toContain('Time in office')
+        ->and($html)->toContain('Messages &amp; requests')
+        ->and($html)->toContain('4,321')
+        ->and($html)->not->toContain('1,234')
+        ->and($html)->not->toContain('RA 11032 tier')
+        ->and($html)->not->toContain('by department')
+        ->and($html)->not->toContain('response time')
+        ->and($html)->not->toContain('Cancelled');
 });
 
 it('heads each office’s copy with that office, not BPLO', function () {

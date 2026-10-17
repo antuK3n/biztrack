@@ -607,8 +607,8 @@ final class LguReports
     {
         /*
          * Decided in the period, against the filing's own RA 11032 tier, timed
-         * the way the dashboard's tier panel times it — FilingClock, one
-         * implementation for both. All offices: submission to decision, less
+         * by FilingClock (the dashboard's tier panel read it too, until that
+         * panel was removed on 18 October 2026). All offices: submission to decision, less
          * the stretches the filing sat with its applicant. One office: that
          * office's own review (BPLO: the time at its desk). This used to time
          * every routed filing's whole lifetime even on an office's report.

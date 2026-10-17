@@ -167,33 +167,31 @@ it('covers charted, thin, unchartable and flagged departments', function () {
 it('covers the dashboard branches where a null and a zero are different things', function () {
     $report = goldenComputed('dashboard');
 
-    $tiers = array_column($report['processing_tiers'], null, 'tier');
+    /*
+     * The RA 11032 tier assertions that stood here went with the tier panel
+     * on 18 October 2026 (it rested on a complexity tier BPLO no longer
+     * sets). Time in Office took its place below.
+     */
+    expect($report)->not->toHaveKeys(['processing_tiers', 'renewal_forecast']);
 
-    expect($tiers['simple']['breaching'])->toBeTrue();
-    expect($tiers['complex']['breaching'])->toBeFalse();
-
-    // A tier with no decided filing has no mean. Reporting 0 working days would
-    // read as instant service rather than as no evidence, and it must not count
-    // as breaching a limit it has no measurement against.
-    expect($tiers['highly_technical']['observations'])->toBe(0);
-    expect($tiers['highly_technical']['mean_working_days'])->toBeNull();
-    expect($tiers['highly_technical']['breaching'])->toBeFalse();
-
-    expect($tiers['simple']['mean_working_days'])->toEqual(4.2);
-    expect($tiers['complex']['mean_working_days'])->toEqual(6.5);
-
-    // A filing is judged against two deadlines — RA 11032's statutory limit and
-    // the longer one actually recorded — so the two rates cannot be equal here.
-    expect($tiers['simple']['within_statutory'])->toBeLessThan($tiers['simple']['within_recorded_deadline']);
-    expect($tiers['simple']['recorded_deadline_working_days'])
-        ->toBeGreaterThan($tiers['simple']['statutory_working_days']);
+    // Time in Office: CHO at 5.0 working days over three permits against a
+    // 2.3-day average is named; the head of the table and the bottleneck agree.
+    expect($report['stages']['unit'])->toBe('working_days');
+    expect($report['stages']['mean_days'])->toEqual(2.3);
+    expect($report['stages']['rows'][0]['code'])->toBe('CHO');
+    expect($report['stages']['bottleneck']['code'])->toBe('CHO');
+    expect($report['stages']['bottleneck']['above_average_days'])->toEqual(2.7);
+    // The three offices tied at 0 days and one permit, in code order.
+    expect(array_slice(array_column($report['stages']['rows'], 'code'), 2))->toBe(['BFP', 'CENRO', 'OBO']);
 
     // 8/12 = 66.666… → 66.7. Pins the rounding, which is the single most likely
-    // thing to move silently under a refactor.
+    // thing to move silently under a refactor. No Cancelled row.
     expect($report['decisions']['decisioned'])->toBe(12);
     expect($report['decisions']['approval_rate'])->toEqual(66.7);
+    expect(array_column($report['decisions']['rows'], 'outcome'))->toBe(['approved', 'returned', 'rejected', 'pending']);
 
     $compliance = array_column($report['compliance'], null, 'indicator');
+    expect(array_keys($compliance))->toBe(['permit_validity', 'renewal']);
 
     // Two different reasons for a null rate: nothing to measure yet (no reason
     // given, because none is needed) versus a denominator the register cannot
@@ -204,6 +202,19 @@ it('covers the dashboard branches where a null and a zero are different things',
     expect($compliance['renewal']['rate'])->toBeNull();
     expect($compliance['renewal']['unavailable_reason'])->toContain('gap in the register');
     expect($compliance['renewal']['denominator'])->toBeGreaterThan(0);
+
+    // Fees: totals rounded to the centavo, a zero row kept, Other last.
+    expect($report['fees_collected']['month_total'])->toEqual(1300.25);
+    expect($report['fees_collected']['year_total'])->toEqual(5200.25);
+    expect(array_column($report['fees_collected']['rows'], 'code'))
+        ->toBe(['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'OTHER']);
+
+    // Suspended: all seven counted, four long, the oldest five listed oldest
+    // first, the undated one last and therefore cut.
+    expect($report['suspended_permits']['total'])->toBe(7);
+    expect($report['suspended_permits']['long'])->toBe(4);
+    expect($report['suspended_permits']['undated'])->toBe(1);
+    expect(array_column($report['suspended_permits']['oldest'], 'permit_id'))->toBe([27, 22, 24, 25, 26]);
 
     // Expiry windows nest, so their totals must be non-decreasing.
     $windows = array_column($report['expiry']['rows'], null, 'window');
@@ -228,7 +239,11 @@ it('covers the dashboard branches where a null and a zero are different things',
     expect($inspections['CPDO']['pass_rate'])->toBeNull();
     expect($inspections['CHO']['pass_rate'])->toEqual(87.5);
 
-    expect($report['officer_activity']['median_response_hours'])->toEqual(2.8);
+    // Messages & Requests: 5 of 8 is an exact 62.5, and nothing else is left
+    // of the officer panel.
+    expect($report['officer_activity']['requests_fulfilled_rate'])->toEqual(62.5);
+    expect(array_keys($report['officer_activity']))
+        ->toBe(['threads_awaiting_reply', 'requests_total', 'requests_fulfilled', 'requests_fulfilled_rate']);
 
     // Six decimal places of latitude, not four. Truncating to four moves a pin
     // about 11 metres, which is the width of the street it is meant to be on.

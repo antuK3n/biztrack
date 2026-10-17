@@ -86,6 +86,20 @@ final class AnalyticsResolver
          */
         $definitions = AnalyticsDefinitions::for($dataset);
 
+        /*
+         * A snapshot of an older SHAPE is no snapshot. A dataset that declares
+         * a `schema` stamps it on its payload (`schema_version`); one stored
+         * before the shape last changed would serve keys that no longer exist
+         * and lack the new ones until the next refresh — on 18 October 2026
+         * that was the removed tier panel still showing and the new Fees
+         * Collected panel blank. It is computed now instead, and reported as
+         * `not_yet_refreshed`, which is exactly what it is.
+         */
+        $schema = AnalyticsDatasets::get($dataset)['schema'] ?? null;
+        if ($snapshot !== null && $schema !== null && ($snapshot->payload['schema_version'] ?? null) !== $schema) {
+            $snapshot = null;
+        }
+
         if ($snapshot !== null) {
             return [
                 'data' => $snapshot->payload,

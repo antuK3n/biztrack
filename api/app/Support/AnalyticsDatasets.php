@@ -50,11 +50,15 @@ final class AnalyticsDatasets
      */
 
     /**
+     * `schema`, where an entry has one, is the `schema_version` its computed
+     * payload carries; a stored snapshot of any other version is not served.
+     *
      * @return array<string, array{
      *     label: string,
      *     dataset: callable(array<string, int>): array<string, mixed>,
      *     build: callable(array<string, int>): array<string, mixed>,
-     *     defaults: array<string, int>
+     *     defaults: array<string, int>,
+     *     schema?: int
      * }>
      */
     public static function all(): array
@@ -71,6 +75,9 @@ final class AnalyticsDatasets
                     $p['office'] ?? null,
                 ),
                 'defaults' => ['months' => DashboardAnalytics::DEFAULT_WINDOW_MONTHS],
+                // The payload shape a stored snapshot must carry to be served
+                // (AnalyticsResolver). See DashboardAnalytics::SCHEMA_VERSION.
+                'schema' => DashboardAnalytics::SCHEMA_VERSION,
             ],
 
             self::PROCESSING_TIME => [

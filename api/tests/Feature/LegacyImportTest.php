@@ -182,7 +182,7 @@ it('imports businesses unclaimed, with paper permits that have no filing, and au
     expect(LegacyImport::find($preview['id'])->stored_path)->toBeNull();
 });
 
-it('dates an imported business by its earliest permit on the old register, not by the day of the import', function () {
+it('dates an imported business by its earliest permit on the old register, and counts an import as no new business this month', function () {
     $monthBefore = collect(DashboardAnalytics::build()['business_movement']['rows'])->last()['registered'];
 
     runImport(previewAsAdmin(legacyCsv([
@@ -199,8 +199,16 @@ it('dates an imported business by its earliest permit on the old register, not b
     runImport(previewAsAdmin(legacyCsv([legacyRow(['legacy_permit_id' => 'P-3', 'permit_number' => 'OLD-MP-2026-0001', 'valid_from' => '2026-01-10'])]))['id']);
     expect(Business::where('legacy_id', 'B-1')->firstOrFail()->created_at->toDateString())->toBe('2020-01-02');
 
-    // So the import is one new business this month (B-2), not a spike of three.
-    expect(collect(DashboardAnalytics::build()['business_movement']['rows'])->last()['registered'] - $monthBefore)->toBe(1);
+    /*
+     * So the import is no new business this month, not a spike of three. B-1
+     * opened in 2020, on its oldest permit. B-2 carries no permit and no
+     * filing, so it has applied for nothing on either register and has not
+     * opened at all: since 18 October 2026 New and Closed Businesses counts a
+     * business by its first submitted filing or first permit, never by when
+     * its record was written (DashboardAnalytics::movementFacts). Under the
+     * old rule B-2 counted as one new business, dated the day of the import.
+     */
+    expect(collect(DashboardAnalytics::build()['business_movement']['rows'])->last()['registered'] - $monthBefore)->toBe(0);
 });
 
 it('updates on re-import instead of adding a second copy', function () {

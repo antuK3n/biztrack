@@ -149,14 +149,19 @@ function anaCarries(int $applicationId, string $typeCode, array $attrs = []): in
 /**
  * A filing's status history, one [to_status, at] pair per move, in order.
  *
+ * With a permit type code, the history of that one permit on the filing
+ * instead (rows carrying `permit_type_id`, as WorkflowService writes them
+ * since 26 September 2026).
+ *
  * @param  list<array{0: string, 1: string}>  $moves
  */
-function anaHistory(int $applicationId, array $moves): void
+function anaHistory(int $applicationId, array $moves, ?string $permitTypeCode = null): void
 {
     $from = null;
     foreach ($moves as [$to, $at]) {
         DB::table('application_status_history')->insert([
             'application_id' => $applicationId,
+            'permit_type_id' => $permitTypeCode === null ? null : anaPermitTypeId($permitTypeCode),
             'from_status' => $from,
             'to_status' => $to,
             'created_at' => $at,

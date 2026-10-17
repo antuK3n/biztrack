@@ -9,7 +9,8 @@ import { sessionFor, waitForAnalytics } from './helpers'
  * wrong: City Health's dashboard said "permit" and "Business permit compliance"
  * about sanitary permits; BPLO, which books no visits, got an empty Inspections
  * chart; working days and office days both printed as "d"; a 20-minute wait
- * printed "0.0h"; the first of the month showed three zero bars; a renewal rate
+ * printed "0.0h" (that card is gone since 18 October 2026, with the panels the
+ * client took off that day); the first of the month showed three zero bars; a renewal rate
  * that could not be computed claimed there were no permits due; and the Office
  * menu was cut short at 1440px. Each test below pins one of those as a reader
  * meets it.
@@ -68,20 +69,26 @@ test.describe('as City Health', () => {
     await expect(page.getByText('No valid sanitary permit today (lapsed, or not issued yet)')).toBeVisible()
   })
 
-  test('RA 11032 is in working days and time at an office in office days, on every figure', async ({ page }) => {
+  /*
+   * The RA 11032 tier chart and the office-days department chart this test
+   * read were replaced on 18 October 2026 by Time in Office, in working days
+   * (client's picker). The unit is still written on every figure.
+   */
+  test('time in office is in working days, on every figure', async ({ page }) => {
     await page.goto(DASHBOARD)
     await waitForAnalytics(page, TITLE)
 
-    const tiers = page.getByRole('table', { name: /Average processing time per RA 11032 tier/ })
-    for (const cell of await tiers.locator('tbody td:first-of-type').allTextContents()) {
+    await expect(page.getByRole('heading', { name: 'Time in Office', level: 2 })).toBeVisible()
+    await expect(
+      page.getByText('From the day an office receives a permit to the day it issues or refuses it.'),
+    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Average Processing Time/ })).toHaveCount(0)
+
+    const offices = page.getByRole('table', { name: /Average working days a permit spends with each office/ })
+    for (const cell of await offices.locator('tbody td:first-of-type').allTextContents()) {
       expect(cell).toMatch(/^\d+\.\d working days$/)
     }
-
-    const offices = page.getByRole('table', { name: /Average office days a review spends with each department/ })
-    for (const cell of await offices.locator('tbody td:first-of-type').allTextContents()) {
-      expect(cell).toMatch(/^\d+\.\d office days$/)
-    }
-    await expect(page.getByText(/An office day is 9 office hours/)).toBeVisible()
+    await expect(page.getByText(/office days/)).toHaveCount(0)
   })
 
   test('each compliance card states its own window; the heading claims none', async ({ page }) => {
@@ -95,22 +102,70 @@ test.describe('as City Health', () => {
 
     const validity = page.locator('div').filter({ hasText: /^Sanitary permit compliance/i }).last()
     await expect(validity).toContainText(/As of /)
-    const processing = page.locator('div').filter({ hasText: /^RA 11032 processing/i }).last()
-    await expect(processing).toContainText(/Last 12 months to /)
+    const renewal = page.locator('div').filter({ hasText: /^Renewal compliance/i }).last()
+    await expect(renewal).toContainText(/Last 12 months to /)
+    // Removed with the tier panel (18 October 2026).
+    await expect(page.getByText(/^RA 11032 processing/i)).toHaveCount(0)
   })
 
-  test('a wait under an hour is given in minutes, not as 0.0h', async ({ page }) => {
+  /*
+   * "A wait under an hour is given in minutes" stood here. The response-time
+   * card it read went on 18 October 2026: nothing records replies. What is
+   * left is Messages & Requests.
+   */
+  test('messages and requests carry no response time and no meetings', async ({ page }) => {
+    await page.goto(DASHBOARD)
+    await waitForAnalytics(page, TITLE)
+
+    await expect(page.getByRole('heading', { name: 'Messages & Requests', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Officer Activity' })).toHaveCount(0)
+    await expect(page.getByText(/Response time/i)).toHaveCount(0)
+    await expect(page.getByText(/meeting/i)).toHaveCount(0)
+    await expect(page.getByText('Awaiting reply', { exact: false }).first()).toBeVisible()
+  })
+
+  test('suspended permits name the oldest and the long ones, with no link to a register that cannot show them', async ({ page }) => {
     await editPayload(page, (data) => {
-      data.officer_activity.mean_response_hours = 0.35
-      data.officer_activity.median_response_hours = 0.2
-      data.officer_activity.responses = 4
+      data.suspended_permits = {
+        total: 2,
+        long: 1,
+        long_after_days: 30,
+        undated: 0,
+        oldest: [
+          {
+            permit_id: 1, permit_number: 'MP-2026-000101', business_id: 1, business: 'Oldest Sari-sari',
+            permit_code: 'BUSINESS', permit: "Mayor's / Business Permit", suspended_on: '2026-08-01', days: 78,
+            long: true, waits_on: { permit: 'Sanitary Permit', office_code: 'CHO', office: 'City Health Office' },
+          },
+          {
+            permit_id: 2, permit_number: 'MP-2026-000102', business_id: 2, business: 'Newer Bakery',
+            permit_code: 'BUSINESS', permit: "Mayor's / Business Permit", suspended_on: '2026-10-10', days: 8,
+            long: false, waits_on: { permit: 'Sanitary Permit', office_code: 'CHO', office: 'City Health Office' },
+          },
+        ],
+      }
     })
     await page.goto(DASHBOARD)
     await waitForAnalytics(page, TITLE)
 
-    await expect(page.getByText('0.0h')).toHaveCount(0)
-    await expect(page.getByText(/^21\s*min$/)).toBeVisible()
-    await expect(page.getByText(/middle wait 12 min/)).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Suspended Permits', level: 2 })).toBeVisible()
+    await expect(page.getByText('BPLO may revoke')).toBeVisible()
+    await expect(page.getByText('Oldest Sari-sari')).toBeVisible()
+    await expect(page.getByText('78 days')).toBeVisible()
+    // City Health's permits register holds sanitary permits, where these do not appear.
+    await expect(page.getByRole('link', { name: 'All suspended' })).toHaveCount(0)
+  })
+
+  test('fees collected show only City Health’s permit, in pesos', async ({ page }) => {
+    await page.goto(DASHBOARD)
+    await waitForAnalytics(page, TITLE)
+
+    await expect(page.getByRole('heading', { name: 'Fees Collected', level: 2 })).toBeVisible()
+    const fees = page.getByRole('table', { name: /Fees collected by permit/ })
+    await expect(fees.locator('tbody th')).toHaveText(['Sanitary'])
+    for (const cell of await fees.locator('tbody td').allTextContents()) {
+      expect(cell).toMatch(/^₱[\d,]+\.\d{2}$/)
+    }
   })
 
   test('a renewal rate that cannot be computed does not claim there was nothing due', async ({ page }) => {
@@ -170,6 +225,35 @@ test.describe('as BPLO', () => {
     await page.goto(`${DASHBOARD}?office=CHO`)
     await waitForAnalytics(page, TITLE)
     await expect(page.getByRole('heading', { name: 'Inspections', level: 2 })).toBeVisible()
+  })
+
+  test('suspended permits link BPLO to the permits register, filtered the same way', async ({ page }) => {
+    await editPayload(page, (data) => {
+      data.suspended_permits = {
+        total: 1,
+        long: 1,
+        long_after_days: 30,
+        undated: 0,
+        oldest: [
+          {
+            permit_id: 1, permit_number: 'MP-2026-000101', business_id: 1, business: 'Oldest Sari-sari',
+            permit_code: 'BUSINESS', permit: "Mayor's / Business Permit", suspended_on: '2026-08-01', days: 78,
+            long: true, waits_on: { permit: 'Sanitary Permit', office_code: 'CHO', office: 'City Health Office' },
+          },
+        ],
+      }
+    })
+    await page.goto(`${DASHBOARD}?office=BPLO`)
+    await waitForAnalytics(page, TITLE)
+
+    await expect(page.getByRole('link', { name: 'All suspended' })).toHaveAttribute(
+      'href',
+      '/staff/admin/permits?status=suspended',
+    )
+    await expect(page.getByRole('link', { name: 'Over 30 days' })).toHaveAttribute(
+      'href',
+      '/staff/admin/permits?status=suspended_30',
+    )
   })
 
   test('BPLO’s own figures name the business permit', async ({ page }) => {

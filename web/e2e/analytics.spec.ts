@@ -169,6 +169,42 @@ test.describe('the dashboard, as BPLO', () => {
     await expect(page.locator('button[aria-label="How New and Closed Businesses is measured"]')).toHaveCount(1)
   })
 
+  /*
+   * The client's picker, 18 October 2026: panels resting on data nobody
+   * records came off, two came on, and the department panel became Time in
+   * Office. Asserted by heading, as a reader meets them.
+   */
+  test('carries the panels the client asked for, and none of the removed ones', async ({ page }) => {
+    await page.goto(DASHBOARD.path)
+    await waitForAnalytics(page, DASHBOARD.title)
+    await chooseOffice(page, 'all')
+
+    for (const name of ['Time in Office', 'Fees Collected', 'Suspended Permits', 'Messages & Requests']) {
+      await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible()
+    }
+    for (const gone of [
+      /Average Processing Time/,
+      /Renewal Estimate/,
+      /Officer Activity/,
+    ]) {
+      await expect(page.getByRole('heading', { name: gone })).toHaveCount(0)
+    }
+    await expect(page.getByText(/^RA 11032 processing/i)).toHaveCount(0)
+    await expect(page.getByText('Cancelled', { exact: true })).toHaveCount(0)
+
+    // Every office's fees, Other included, in pesos.
+    const fees = page.getByRole('table', { name: /Fees collected by permit/ })
+    await expect(fees.locator('tbody th')).toHaveText([
+      'Business Permit',
+      'Sanitary',
+      'FSIC',
+      'Zoning',
+      'Occupancy',
+      'CEC',
+      'Other',
+    ])
+  })
+
   test('the tabs reach the dashboard and Reports, and nothing BPLO may not open', async ({ page }) => {
     await page.goto(DASHBOARD.path)
     await waitForAnalytics(page, DASHBOARD.title)

@@ -1,4 +1,5 @@
 {
+  "schema_version": 2,
   "generated_at": "2026-07-30T00:00:00.000000Z",
   "window_months": 12,
   "window_start": "2025-07-30",
@@ -7,6 +8,7 @@
   "today": "2026-07-30",
   "kpis": {
     "active_businesses": 20,
+    "applications_all_time": 131,
     "applications_ytd": 120,
     "applications_this_month": 16,
     "compliance_rate": null
@@ -43,12 +45,12 @@
         "outcome": "returned",
         "label": "Returned for revision",
         "count": 2,
-        "decisioned": true
+        "decisioned": false
       },
       {
         "outcome": "rejected",
         "label": "Rejected",
-        "count": 2,
+        "count": 4,
         "decisioned": true
       },
       {
@@ -56,125 +58,65 @@
         "label": "Pending",
         "count": 4,
         "decisioned": false
-      },
-      {
-        "outcome": "cancelled",
-        "label": "Cancelled",
-        "count": 0,
-        "decisioned": false
       }
     ],
-    "total": 16,
+    "total": 18,
     "decisioned": 12,
     "approved": 8,
     "approval_rate": 66.7
   },
-  "processing_tiers": [
-    {
-      "tier": "simple",
-      "label": "Simple",
-      "statutory_working_days": 3,
-      "observations": 4,
-      "mean_working_days": 4.2,
-      "mean_calendar_days": 5.8,
-      "within_statutory": 1,
-      "within_statutory_rate": 25,
-      "within_recorded_deadline": 4,
-      "recorded_deadline_working_days": 10,
-      "overage_days": 1.2,
-      "breaching": true
-    },
-    {
-      "tier": "complex",
-      "label": "Complex",
-      "statutory_working_days": 7,
-      "observations": 4,
-      "mean_working_days": 6.5,
-      "mean_calendar_days": 8.5,
-      "within_statutory": 4,
-      "within_statutory_rate": 100,
-      "within_recorded_deadline": 4,
-      "recorded_deadline_working_days": 10,
-      "overage_days": -0.5,
-      "breaching": false
-    },
-    {
-      "tier": "highly_technical",
-      "label": "Highly technical",
-      "statutory_working_days": 20,
-      "observations": 0,
-      "mean_working_days": null,
-      "mean_calendar_days": null,
-      "within_statutory": 0,
-      "within_statutory_rate": null,
-      "within_recorded_deadline": 0,
-      "recorded_deadline_working_days": null,
-      "overage_days": null,
-      "breaching": false
-    }
-  ],
   "stages": {
+    "unit": "working_days",
     "rows": [
       {
         "code": "CHO",
         "name": "City Health Office",
-        "reviews": 2,
-        "mean_days": 4.5,
-        "drawn": false
+        "reviews": 3,
+        "mean_days": 5.0,
+        "drawn": true
       },
       {
         "code": "BPLO",
         "name": "Business Permits and Licensing Office",
         "reviews": 3,
-        "mean_days": 2,
+        "mean_days": 2.0,
         "drawn": true
       },
       {
         "code": "BFP",
         "name": "Bureau of Fire Protection",
         "reviews": 1,
-        "mean_days": 0,
+        "mean_days": 0.0,
         "drawn": false
       },
       {
         "code": "CENRO",
         "name": "City Environment Office",
         "reviews": 1,
-        "mean_days": 0,
+        "mean_days": 0.0,
         "drawn": false
       },
       {
         "code": "OBO",
         "name": "Office of the Local Building Official",
         "reviews": 1,
-        "mean_days": 0,
+        "mean_days": 0.0,
         "drawn": false
       }
     ],
-    "reviews": 8,
-    "mean_days": 1.9,
+    "reviews": 9,
+    "mean_days": 2.3,
     "bottleneck": {
-      "code": "BPLO",
-      "name": "Business Permits and Licensing Office",
-      "mean_days": 2,
+      "code": "CHO",
+      "name": "City Health Office",
+      "mean_days": 5.0,
       "reviews": 3,
-      "above_average_days": 0.1,
-      "share_of_reviews": 37.5
+      "above_average_days": 2.7,
+      "share_of_reviews": 33.3
     },
-    "min_reviews": 3,
-    "excluded": []
+    "min_reviews": 3
   },
   "compliance": [
-    {
-      "indicator": "ra11032_processing",
-      "label": "RA 11032 processing",
-      "numerator": 71,
-      "denominator": 100,
-      "numerator_label": "decided within the legal deadline",
-      "denominator_label": "decided filings",
-      "rate": 71,
-      "unavailable_reason": null
-    },
     {
       "indicator": "permit_validity",
       "label": "Business permit compliance",
@@ -196,6 +138,142 @@
       "unavailable_reason": "No renewal filing in this window records which permit it replaces, so on-time renewals cannot be counted. This is a gap in the register, not a compliance finding."
     }
   ],
+  "fees_collected": {
+    "month_start": "2026-07-01",
+    "year_start": "2026-01-01",
+    "month_total": 1300.25,
+    "year_total": 5200.25,
+    "payments_month": 3,
+    "payments_year": 9,
+    "rows": [
+      {
+        "code": "BUSINESS",
+        "label": "Mayor's / Business Permit",
+        "month": 1000.1,
+        "year": 4000.1
+      },
+      {
+        "code": "SANITARY",
+        "label": "Sanitary Permit",
+        "month": 0.2,
+        "year": 300.2
+      },
+      {
+        "code": "FSIC",
+        "label": "Fire Safety Inspection Certificate",
+        "month": 0.0,
+        "year": 500.0
+      },
+      {
+        "code": "ZONING",
+        "label": "Zoning Clearance",
+        "month": 250.0,
+        "year": 250.0
+      },
+      {
+        "code": "OCCUPANCY",
+        "label": "Occupancy Permit",
+        "month": 0.0,
+        "year": 0.0
+      },
+      {
+        "code": "CEC",
+        "label": "City Environmental Certificate",
+        "month": 0.0,
+        "year": 0.0
+      },
+      {
+        "code": "OTHER",
+        "label": "Other",
+        "month": 49.95,
+        "year": 149.95
+      }
+    ]
+  },
+  "suspended_permits": {
+    "total": 7,
+    "long": 4,
+    "long_after_days": 30,
+    "undated": 1,
+    "oldest": [
+      {
+        "permit_id": 27,
+        "permit_number": "MP-2026-000027",
+        "business_id": 127,
+        "business": "Fixture Business 27",
+        "permit_code": "BUSINESS",
+        "permit": "Mayor's / Business Permit",
+        "suspended_on": "2026-03-15",
+        "days": 137,
+        "long": true,
+        "waits_on": {
+          "permit": "Sanitary Permit",
+          "office_code": "CHO",
+          "office": "City Health Office"
+        }
+      },
+      {
+        "permit_id": 22,
+        "permit_number": "MP-2026-000022",
+        "business_id": 122,
+        "business": "Fixture Business 22",
+        "permit_code": "BUSINESS",
+        "permit": "Mayor's / Business Permit",
+        "suspended_on": "2026-05-01",
+        "days": 90,
+        "long": true,
+        "waits_on": {
+          "permit": "Sanitary Permit",
+          "office_code": "CHO",
+          "office": "City Health Office"
+        }
+      },
+      {
+        "permit_id": 24,
+        "permit_number": "MP-2026-000024",
+        "business_id": 124,
+        "business": "Fixture Business 24",
+        "permit_code": "BUSINESS",
+        "permit": "Mayor's / Business Permit",
+        "suspended_on": "2026-06-01",
+        "days": 59,
+        "long": true,
+        "waits_on": {
+          "permit": "Fire Safety Inspection Certificate",
+          "office_code": "BFP",
+          "office": "Bureau of Fire Protection"
+        }
+      },
+      {
+        "permit_id": 25,
+        "permit_number": "MP-2026-000025",
+        "business_id": 125,
+        "business": "Fixture Business 25",
+        "permit_code": "BUSINESS",
+        "permit": "Mayor's / Business Permit",
+        "suspended_on": "2026-06-01",
+        "days": 59,
+        "long": true,
+        "waits_on": {
+          "permit": "Zoning Clearance",
+          "office_code": "CPDO",
+          "office": "Planning/Zoning Office"
+        }
+      },
+      {
+        "permit_id": 26,
+        "permit_number": "MP-2026-000026",
+        "business_id": 126,
+        "business": "Fixture Business 26",
+        "permit_code": "BUSINESS",
+        "permit": "Mayor's / Business Permit",
+        "suspended_on": "2026-07-01",
+        "days": 29,
+        "long": false,
+        "waits_on": null
+      }
+    ]
+  },
   "expiry": {
     "columns": [
       {
@@ -278,27 +356,27 @@
     "rows": [
       {
         "rank": 1,
+        "barangay": "Longos",
         "count": 7,
-        "share": 43.8,
-        "barangay": "Longos"
+        "share": 43.8
       },
       {
         "rank": 2,
+        "barangay": "Acacia",
         "count": 4,
-        "share": 25,
-        "barangay": "Acacia"
+        "share": 25.0
       },
       {
         "rank": 3,
+        "barangay": "Bulacan",
         "count": 4,
-        "share": 25,
-        "barangay": "Bulacan"
+        "share": 25.0
       },
       {
         "rank": 4,
+        "barangay": "Tinajeros",
         "count": 1,
-        "share": 6.2,
-        "barangay": "Tinajeros"
+        "share": 6.2
       }
     ],
     "total": 16,
@@ -308,24 +386,24 @@
     "rows": [
       {
         "rank": 1,
-        "count": 5,
-        "share": 45.5,
         "industry": "Retail sale of hardware",
-        "psic_code": "47521"
+        "psic_code": "47521",
+        "count": 5,
+        "share": 45.5
       },
       {
         "rank": 2,
-        "count": 3,
-        "share": 27.3,
         "industry": "Bakery products",
-        "psic_code": "10711"
+        "psic_code": "10711",
+        "count": 3,
+        "share": 27.3
       },
       {
         "rank": 3,
-        "count": 3,
-        "share": 27.3,
         "industry": "Laundry services",
-        "psic_code": "96200"
+        "psic_code": "96200",
+        "count": 3,
+        "share": 27.3
       }
     ],
     "total": 11,
@@ -337,25 +415,25 @@
         "form": "sole_proprietorship",
         "label": "Sole Proprietorship",
         "count": 12,
-        "share": 60
+        "share": 60.0
       },
       {
         "form": "corporation",
         "label": "Corporation",
         "count": 5,
-        "share": 25
+        "share": 25.0
       },
       {
         "form": "partnership",
         "label": "Partnership",
         "count": 2,
-        "share": 10
+        "share": 10.0
       },
       {
         "form": "cooperative",
         "label": "Cooperative",
         "count": 1,
-        "share": 5
+        "share": 5.0
       }
     ],
     "recorded": 20,
@@ -403,20 +481,14 @@
       "passed": 12,
       "failed": 2,
       "conditional": 2,
-      "pass_rate": 75
+      "pass_rate": 75.0
     }
   },
   "officer_activity": {
-    "responses": 4,
-    "mean_response_hours": 12.1,
-    "median_response_hours": 2.8,
     "threads_awaiting_reply": 2,
     "requests_total": 8,
     "requests_fulfilled": 5,
-    "requests_fulfilled_rate": 62.5,
-    "meetings_scheduled": 4,
-    "meetings_attended": 3,
-    "meetings_attended_rate": 75
+    "requests_fulfilled_rate": 62.5
   },
   "map": {
     "mapped": 4,
@@ -461,13 +533,13 @@
         "barangay": "Longos",
         "businesses": 2,
         "active": 1,
-        "share": 50
+        "share": 50.0
       },
       {
         "barangay": "Tinajeros",
         "businesses": 1,
         "active": 1,
-        "share": 25
+        "share": 25.0
       }
     ]
   },
@@ -478,25 +550,24 @@
         "registered": 7,
         "closed": 2,
         "net": 5,
-          "partial": false
+        "partial": false
       },
       {
         "month": "2026-06",
         "registered": 1,
         "closed": 3,
         "net": -2,
-          "partial": false
+        "partial": false
       },
       {
         "month": "2026-07",
         "registered": 0,
         "closed": 0,
         "net": 0,
-          "partial": false
+        "partial": false
       }
     ],
     "registered": 8,
     "closed": 5
-  },
-  "renewal_forecast": null
+  }
 }
