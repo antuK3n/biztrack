@@ -43,6 +43,10 @@
  * `schema_version` joined it. The old baseline also named BPLO the slowest
  * office at 0.1 days above the average — the callout the client asked to
  * drop. Every other figure in dashboard.expected.json is unchanged.
+ *
+ * RE-BASELINED 19 October 2026, deliberately (the client's picker again):
+ * Messages & Requests (`officer_activity`) left the payload and
+ * `schema_version` went to 3. Every other figure is unchanged.
  * Written with two-space indents, as the R-era file was.
  */
 
@@ -139,16 +143,6 @@ $inspections = [
     ['type' => 'CHO', 'label' => 'Sanitary', 'scheduled' => 10, 'completed' => 8, 'passed' => 7, 'failed' => 0, 'conditional' => 1],
     ['type' => 'BFP', 'label' => 'Fire Safety', 'scheduled' => 9, 'completed' => 8, 'passed' => 5, 'failed' => 2, 'conditional' => 1],
     ['type' => 'CPDO', 'label' => 'Zoning', 'scheduled' => 4, 'completed' => 0, 'passed' => 0, 'failed' => 0, 'conditional' => 0],
-];
-
-/*
- * Messages & Requests (`officer_activity`). 5 of 8 fulfilled is 62.5% — an
- * exact half at one place that must not round. Response latencies and
- * meetings went on 18 October 2026: nothing in the product records them.
- */
-$officerActivity = [
-    'threads_awaiting_reply' => 2,
-    'requests' => ['total' => 8, 'fulfilled' => 5],
 ];
 
 /*
@@ -308,7 +302,6 @@ $dashboard = [
     'lines_of_business' => $linesOfBusiness,
     'organization_forms' => $organizationForms,
     'inspections' => $inspections,
-    'officer_activity' => $officerActivity,
     'fees' => $fees,
     'suspended_permits' => $suspendedPermits,
     'map' => [

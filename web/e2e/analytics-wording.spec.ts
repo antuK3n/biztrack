@@ -110,18 +110,19 @@ test.describe('as City Health', () => {
 
   /*
    * "A wait under an hour is given in minutes" stood here. The response-time
-   * card it read went on 18 October 2026: nothing records replies. What is
-   * left is Messages & Requests.
+   * card it read went on 18 October 2026: nothing records replies. What was
+   * left, Messages & Requests, went too on 19 October 2026 (client's picker).
    */
-  test('messages and requests carry no response time and no meetings', async ({ page }) => {
+  test('the officer panel is gone: no messages, requests, response time or meetings', async ({ page }) => {
     await page.goto(DASHBOARD)
     await waitForAnalytics(page, TITLE)
 
-    await expect(page.getByRole('heading', { name: 'Messages & Requests', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Messages & Requests' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Officer Activity' })).toHaveCount(0)
     await expect(page.getByText(/Response time/i)).toHaveCount(0)
     await expect(page.getByText(/meeting/i)).toHaveCount(0)
-    await expect(page.getByText('Awaiting reply', { exact: false }).first()).toBeVisible()
+    await expect(page.getByText('Awaiting reply', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Requests fulfilled', { exact: true })).toHaveCount(0)
   })
 
   test('suspended permits name the oldest and the long ones, with no link to a register that cannot show them', async ({ page }) => {

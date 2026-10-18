@@ -840,6 +840,23 @@ named (`PermitFace::ownerName`). Permits already issued keep the name they were
 signed with. If BPLO wants the filer instead, that one method changes, and an
 approved change of ownership would then have to move the account before the
 reissued permit is printed.
+
+## A34. On the Custom Report, should a business that was later removed still count in permit and collection figures?
+
+The Custom Report tab (client, 19 October 2026) lets an office count businesses, applications,
+permits or payments with its own filters. Businesses and applications leave out records removed
+from the register, as the dashboard does. Permits and payments do not: they follow the fixed
+Reports, which count every permit issued and every peso collected.
+
+**Why it matters.** A test business that was issued a permit and then removed still shows in
+"Permits issued per type" and "Collections per month". Leaving it out would make the custom
+figures disagree with the fixed Permits Issued and Collections reports for the same period.
+
+**What we assumed meanwhile.** Permits and payments count whatever became of the business, so the
+custom and fixed reports reconcile (CustomReportTest pins it). If BPLO wants removed businesses
+left out, the change belongs in `App\Support\LguReports` and `App\Support\CustomReports` together.
+Saved custom reports are private to the person who saved them; if an office wants shared ones,
+that is an added column, not a redesign.
 ---
 
 # B. For MISD — systems, data, hosting, accounts

@@ -172,20 +172,22 @@ test.describe('the dashboard, as BPLO', () => {
   /*
    * The client's picker, 18 October 2026: panels resting on data nobody
    * records came off, two came on, and the department panel became Time in
-   * Office. Asserted by heading, as a reader meets them.
+   * Office. Asserted by heading, as a reader meets them. Messages & Requests
+   * came off on 19 October 2026 (the picker again).
    */
   test('carries the panels the client asked for, and none of the removed ones', async ({ page }) => {
     await page.goto(DASHBOARD.path)
     await waitForAnalytics(page, DASHBOARD.title)
     await chooseOffice(page, 'all')
 
-    for (const name of ['Time in Office', 'Fees Collected', 'Suspended Permits', 'Messages & Requests']) {
+    for (const name of ['Time in Office', 'Fees Collected', 'Suspended Permits']) {
       await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible()
     }
     for (const gone of [
       /Average Processing Time/,
       /Renewal Estimate/,
       /Officer Activity/,
+      /Messages & Requests/,
     ]) {
       await expect(page.getByRole('heading', { name: gone })).toHaveCount(0)
     }

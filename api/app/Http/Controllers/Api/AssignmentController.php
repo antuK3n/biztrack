@@ -126,20 +126,6 @@ class AssignmentController extends Controller
              * officer reads somebody else's caseload as free to take.
              */
             'oic' => ['sometimes', 'in:unassigned,mine,others'],
-            /*
-             * ?overdue=1 — only filings whose RA 11032 deadline has passed.
-             *
-             * Added 18 October 2026 for the office admin's home page, whose
-             * "Overdue" tile opens the queue narrowed to exactly these rows.
-             * `deadline_at` is the filing's statutory deadline, set at
-             * submission from its tier (Ra11032::deadlineFor). The statute
-             * gives the whole transaction one allowance and apportions none to
-             * an office (see OfficePerformanceAnalytics::turnaround), so this
-             * says "the filing is past its deadline while it waits here", not
-             * "this office took too long". A filing with no deadline is never
-             * overdue. `=0` and absent both mean no narrowing.
-             */
-            'overdue' => ['sometimes', 'boolean'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -279,13 +265,6 @@ class AssignmentController extends Controller
                 $a->whereLike('tracking_id', "%{$q}%")
                     ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$q}%"));
             });
-        }
-
-        // See `overdue` in the validation above.
-        if ($request->boolean('overdue')) {
-            $query->whereHas('application', fn ($a) => $a
-                ->whereNotNull('deadline_at')
-                ->where('deadline_at', '<', now()));
         }
 
         /*

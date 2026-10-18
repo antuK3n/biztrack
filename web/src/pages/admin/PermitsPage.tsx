@@ -9,7 +9,7 @@ import { ChangeStatusDialog, StatusHistoryDialog } from './PermitStatusDialogs'
 import { STATUS_TONES } from './permitStatusTones'
 import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
+import { PageTitle, ProtoCard, SectionTitle, SortFilter, StatusChip } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
 import { DocumentActions } from '../../components/DocumentActions'
 import { useAuth } from '../../stores/auth'
@@ -428,9 +428,10 @@ export function PermitsPage({
   embedded = false,
 }: {
   /**
-   * Drawn inside the office home page's Permits tab (18 October 2026): the
-   * whole register and every control, without the page heading the tab
-   * already stands for. The /admin/permits route renders it without.
+   * Drawn as the "Permits" section of the office Home, under its analytics
+   * (19 October 2026): the whole register and every control, under a section
+   * heading (anchor `#permits`) instead of the page's. The /admin/permits
+   * route renders it without.
    */
   embedded?: boolean
 } = {}) {
@@ -863,16 +864,21 @@ export function PermitsPage({
           </span>
           )
 
+  /*
+   * A region named by its heading, on its own page and on the Home alike: the
+   * Home stacks the analytics dashboard above, with tables of its own, and
+   * this is how a reader (or a test) finds the register among them.
+   */
   return (
-    <div>
+    <section aria-labelledby="permits-title">
       {embedded ? (
-        // The tab above is named "Permits"; a screen reader still gets a heading.
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-          <h2 className="sr-only">Permits</h2>
-          {controls}
-        </div>
+        <SectionTitle id="permits" right={controls} quiet>
+          Permits
+        </SectionTitle>
       ) : (
-        <PageTitle right={controls}>Permits</PageTitle>
+        <PageTitle id="permits-title" right={controls}>
+          Permits
+        </PageTitle>
       )}
 
       {/*
@@ -1252,6 +1258,6 @@ export function PermitsPage({
       )}
       </>
       )}
-    </div>
+    </section>
   )
 }

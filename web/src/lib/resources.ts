@@ -8,7 +8,6 @@ import type {
   ReportKey,
   ReportListItem,
   AnalyticsScope,
-  FeesMonth,
   ScopedComputed,
   AdminBusiness,
   AdminCaseload,
@@ -1117,11 +1116,6 @@ export interface AssignmentFilters extends PageParams {
    * which is right there because there is only one noun in play.
    */
   application_type?: string
-  /**
-   * 1 = only filings past their RA 11032 deadline (`deadline_at`). The office
-   * home page's Overdue tile, and the queue it opens (QueueFocus).
-   */
-  overdue?: 0 | 1
 }
 
 export const assignments = {
@@ -1638,15 +1632,6 @@ export const analytics = {
       { params: { months, office } },
     )
     return { data: res.data.data, meta: res.data.meta, scope: res.data.scope }
-  },
-  /**
-   * Fees Collected this month, alone — the office home page's tile. The
-   * dashboard's own figure under the same office rule, without the rest of
-   * the dashboard's payload.
-   */
-  feesMonth: async (): Promise<{ data: FeesMonth; scope: AnalyticsScope }> => {
-    const res = await api.get<{ data: FeesMonth; scope: AnalyticsScope }>('/analytics/fees-month')
-    return res.data
   },
   dashboardReport: (months: number, office?: string) =>
     downloadBlob(

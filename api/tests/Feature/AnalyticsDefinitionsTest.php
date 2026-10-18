@@ -57,13 +57,15 @@ function analyticsDefinitionSubjects(): array
          *
          * 18 October 2026: `processing_tiers` went (it rested on a tier BPLO
          * no longer sets); `fees_collected` and `suspended_permits` came.
+         *
+         * 19 October 2026: `officer_activity` (Messages & Requests) went.
          */
         AnalyticsDatasets::DASHBOARD => [
             'payload' => DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS),
             'panels' => [
                 'kpis', 'volume', 'decisions', 'stages', 'compliance', 'fees_collected', 'suspended_permits',
                 'top_barangays', 'top_lines_of_business', 'organization_forms',
-                'inspections', 'officer_activity', 'map', 'expiry', 'business_movement',
+                'inspections', 'map', 'expiry', 'business_movement',
             ],
         ],
 

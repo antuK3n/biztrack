@@ -23,6 +23,15 @@ async function shot(page: Page, name: string) {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: false })
 }
 
+/*
+ * The register, as a region named by its heading. BPLO's and the fire
+ * office's /staff/admin/permits opens their Home since 19 October 2026, under
+ * an analytics dashboard with a map, tables and a Filter button of its own;
+ * scoped so these steps act on the register. On the super admin's own page the
+ * region is the whole page.
+ */
+const register = (page: Page) => page.getByRole('region', { name: 'Permits', exact: true })
+
 /** Tiles are stubbed so the test never waits on OpenStreetMap. */
 async function quietTiles(page: Page) {
   const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
@@ -36,15 +45,15 @@ test.describe('BPLO revokes a permit', () => {
 
   test('the permit comes back Revoked, and its QR page says so', async ({ page }) => {
     await page.goto('/staff/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
 
     // Active Mayor's Permits only, so the row picked is one Revoke is offered on.
-    await page.getByRole('button', { name: /^Filter/ }).click()
+    await register(page).getByRole('button', { name: /^Filter/ }).click()
     await page.getByRole('option', { name: 'Active', exact: true }).click()
     await page.keyboard.press('Escape')
 
     // Revoked from Change status in the Actions column [client, 5 October 2026].
-    const revoke = page.getByRole('button', { name: /^Change status of / }).first()
+    const revoke = register(page).getByRole('button', { name: /^Change status of / }).first()
     await expect(revoke).toBeVisible({ timeout: 30_000 })
     const permitNumber = ((await revoke.getAttribute('aria-label')) ?? '').replace(/^Change status of /, '')
     expect(permitNumber).toMatch(/\S+-\d{4}-\d+/)
@@ -66,12 +75,12 @@ test.describe('BPLO revokes a permit', () => {
     await expect(dialog).toHaveCount(0)
 
     // The server's answer, not the page's: search it back out under Revoked.
-    await page.getByRole('button', { name: /^Filter/ }).click()
+    await register(page).getByRole('button', { name: /^Filter/ }).click()
     await page.getByRole('option', { name: 'Revoked', exact: true }).click()
     await page.keyboard.press('Escape')
-    await page.getByRole('searchbox', { name: /Search permits/ }).fill(permitNumber)
+    await register(page).getByRole('searchbox', { name: /Search permits/ }).fill(permitNumber)
 
-    const row = page.locator('tbody tr').filter({ hasText: permitNumber })
+    const row = register(page).locator('tbody tr').filter({ hasText: permitNumber })
     await expect(row).toHaveCount(1, { timeout: 20_000 })
     await expect(row).toContainText('Revoked')
     await expect(row).toContainText('Closure order from the Mayor, e2e check.')
@@ -99,16 +108,16 @@ test.describe('an office changes its own certificates, and maps them', () => {
    */
   test('the fire office is offered Change status on FSICs only, and a Map of its own certificate', async ({ page }) => {
     await page.goto('/staff/admin/permits')
-    await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
+    await expect(register(page).locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
 
     // Every Change status on its table is on one of its own certificates.
-    for (const label of await page.getByRole('button', { name: /^Change status of / }).evaluateAll((els) =>
+    for (const label of await register(page).getByRole('button', { name: /^Change status of / }).evaluateAll((els) =>
       els.map((e) => e.getAttribute('aria-label') ?? ''),
     )) {
       expect(label).toMatch(/^Change status of FSIC-/)
     }
 
-    await page.getByRole('group', { name: 'Permits view' }).getByRole('button', { name: 'Map' }).click()
+    await register(page).getByRole('group', { name: 'Permits view' }).getByRole('button', { name: 'Map' }).click()
     await expect(page.getByText(/businesses holding a Fire Safety Inspection Certificate carry a/)).toBeVisible({ timeout: 30_000 })
   })
 })
@@ -122,20 +131,20 @@ test.describe('the Map view on the Permits page', () => {
     await quietTiles(page)
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.goto('/staff/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
 
     const payload = page.waitForResponse(
       (r) => r.url().includes('/api/v1/admin/business-map') && r.status() === 200,
     )
-    await page.getByRole('button', { name: 'Map', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Map', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await register(page).getByRole('button', { name: 'Map', exact: true }).click()
+    await expect(register(page).getByRole('button', { name: 'Map', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
     const body = (await (await payload).json()) as {
       data: { state: string; barangay: string | null; permit_number: string | null }[]
       meta: { plotted: number; counts: Record<string, number> }
     }
     expect(body.meta.plotted).toBeGreaterThan(0)
-    await expect(page.locator('.biztrack-map-pin')).toHaveCount(body.meta.plotted)
+    await expect(register(page).locator('.biztrack-map-pin')).toHaveCount(body.meta.plotted)
 
     // The legend is five rows, in words, with the server's counts.
     for (const [state, label] of [
@@ -145,7 +154,7 @@ test.describe('the Map view on the Permits page', () => {
       ['revoked', 'Permit revoked'],
       ['none', 'No permit on file'],
     ] as const) {
-      await expect(page.getByRole('row').filter({ hasText: label })).toContainText(
+      await expect(register(page).getByRole('row').filter({ hasText: label })).toContainText(
         String(body.meta.counts[state]),
       )
     }
@@ -154,21 +163,21 @@ test.describe('the Map view on the Permits page', () => {
     // The barangay filter narrows to what that barangay declared.
     const barangay = body.data.find((r) => r.barangay !== null)?.barangay as string
     const inIt = body.data.filter((r) => r.barangay === barangay).length
-    await page.getByRole('combobox', { name: 'Barangay', exact: true }).selectOption(barangay)
-    await expect(page.locator('.biztrack-map-pin')).toHaveCount(inIt)
+    await register(page).getByRole('combobox', { name: 'Barangay', exact: true }).selectOption(barangay)
+    await expect(register(page).locator('.biztrack-map-pin')).toHaveCount(inIt)
     await expect(
       page.getByText(`Showing ${inIt} of the ${body.meta.plotted} businesses on the map in ${barangay}.`),
     ).toBeVisible()
 
     // A marker with a permit leads back into the register, searched for it.
-    await page.getByRole('combobox', { name: 'Barangay', exact: true }).selectOption('')
-    await page.getByRole('button', { name: /^Permit active/ }).click()
+    await register(page).getByRole('combobox', { name: 'Barangay', exact: true }).selectOption('')
+    await register(page).getByRole('button', { name: /^Permit active/ }).click()
     const target = body.data.find((r) => r.state === 'active' && r.permit_number !== null)
     expect(target, 'no active business on the map').toBeTruthy()
     // Dispatched rather than clicked: 700 markers on one city overlap, and a
     // real pointer lands on whichever neighbour is drawn on top.
-    await page.locator('.biztrack-map-pin--active').first().dispatchEvent('click')
-    const popup = page.locator('.leaflet-popup')
+    await register(page).locator('.biztrack-map-pin--active').first().dispatchEvent('click')
+    const popup = register(page).locator('.leaflet-popup')
     await expect(popup).toContainText('Permit active')
     await shot(page, 'map-popup')
 
@@ -176,9 +185,9 @@ test.describe('the Map view on the Permits page', () => {
     const number = ((await find.getAttribute('aria-label')) ?? '').replace(/^Find | in the register$/g, '')
     await find.click()
 
-    await expect(page.getByRole('button', { name: 'Table', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.getByRole('searchbox', { name: /Search permits/ })).toHaveValue(number)
-    await expect(page.locator('tbody tr').filter({ hasText: number })).toHaveCount(1, { timeout: 20_000 })
+    await expect(register(page).getByRole('button', { name: 'Table', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(register(page).getByRole('searchbox', { name: /Search permits/ })).toHaveValue(number)
+    await expect(register(page).locator('tbody tr').filter({ hasText: number })).toHaveCount(1, { timeout: 20_000 })
   })
 })
 
@@ -188,8 +197,8 @@ test.describe('the super admin', () => {
   test('gets the Map view on Permits', async ({ page }) => {
     await quietTiles(page)
     await page.goto('/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Map', exact: true }).click()
-    await expect(page.locator('.biztrack-map-pin').first()).toBeVisible({ timeout: 30_000 })
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
+    await register(page).getByRole('button', { name: 'Map', exact: true }).click()
+    await expect(register(page).locator('.biztrack-map-pin').first()).toBeVisible({ timeout: 30_000 })
   })
 })

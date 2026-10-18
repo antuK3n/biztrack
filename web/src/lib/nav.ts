@@ -18,6 +18,7 @@ import { portalPath } from './api'
 import type { Portal } from './api'
 import type { AccountRestriction, User } from './types'
 import { canUseDebug } from '../pages/admin/debug/access'
+import { landsOnOfficeHome } from './officeHome'
 
 export interface NavItem {
   label: string
@@ -258,7 +259,18 @@ const NAV_ITEMS: NavItem[] = [
    * from a filing. If the client says the table is the super admin's alone,
    * narrow it to `user.manage` HERE and in App.tsx together.
    */
-  { label: 'Permits', icon: FileTextIcon, to: '/admin/permits', permission: 'permit.view_all' },
+  /*
+   * Hidden from an office admin since 19 October 2026 (client: "Remove the
+   * button"): their Home draws this table under the office's analytics, and
+   * App.tsx sends this address there. The super admin keeps the entry — they
+   * have no such Home.
+   */
+  {
+    label: 'Permits',
+    icon: FileTextIcon,
+    to: '/admin/permits',
+    visibleWhen: (user) => user.permissions.includes('permit.view_all') && !landsOnOfficeHome(user),
+  },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
    * only way to it was to type the address. Transparency is the thing this
