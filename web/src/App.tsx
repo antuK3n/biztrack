@@ -33,6 +33,7 @@ import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ReportsPage } from './pages/admin/ReportsPage'
+import { CustomReportPage } from './pages/admin/CustomReportPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { UsersPage } from './pages/admin/UsersPage'
@@ -48,6 +49,7 @@ import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { activePortal, homePathFor, loginPathFor, portalPath } from './lib/api'
+import { landsOnOfficeHome } from './lib/officeHome'
 import { assignments, inspections } from './lib/resources'
 import { useAuth } from './stores/auth'
 
@@ -108,6 +110,30 @@ function NotFoundRedirect() {
 function MovedToStaff({ path }: { path: string }) {
   const { id } = useParams()
   return <Navigate to={portalPath('staff', id ? `${path}/${id}` : path)} replace />
+}
+
+/**
+ * /staff/admin/permits for an office admin: their Home, which draws this
+ * table on its Permits tab, the tab it opens on (client, 19 October 2026 — the Permits
+ * menu button removed, the old links redirected).
+ *
+ * The query is carried across — the dashboard's Suspended links say
+ * `?status=suspended`, the Business Map's "Find in register" says `?q=` —
+ * because the Home's table reads it exactly as this page did, and with no
+ * `tab` the Home opens on Permits. Everyone else (the super admin, on the
+ * staff site) gets the page as before.
+ */
+function OfficePermitsOrHome() {
+  const user = useAuth((s) => s.user)
+  const { search } = useLocation()
+  if (user && landsOnOfficeHome(user)) {
+    return <Navigate to={`${portalPath('staff', '/dashboard')}${search}`} replace />
+  }
+  return (
+    <RequirePermission permission="permit.view_all">
+      <AdminPermitsPage />
+    </RequirePermission>
+  )
 }
 
 /**
@@ -499,6 +525,18 @@ export default function App() {
             }
           />
           {/*
+            Custom Report (client, 19 October 2026). Same permission as
+            Reports; the server applies the same office boundary.
+          */}
+          <Route
+            path="/staff/analytics/custom-report"
+            element={
+              <RequirePermission permission="analytics.view">
+                <CustomReportPage />
+              </RequirePermission>
+            }
+          />
+          {/*
             /staff/analytics/business-growth and /staff/analytics/renewal-risk
             were here. Both screens were removed (checklist 2026-09-27, item 6);
             their useful panels moved onto the dashboard above. An old link to
@@ -611,14 +649,8 @@ export default function App() {
             registers an office has no business browsing, whereas this one
             cannot show a reader a permit they could not already open.
           */}
-          <Route
-            path="/staff/admin/permits"
-            element={
-              <RequirePermission permission="permit.view_all">
-                <AdminPermitsPage />
-              </RequirePermission>
-            }
-          />
+          {/* An office admin is sent to their Home, which holds this table — see OfficePermitsOrHome. */}
+          <Route path="/staff/admin/permits" element={<OfficePermitsOrHome />} />
           {/*
             The register on a map, coloured by permit state (issue #104).
 
@@ -738,6 +770,14 @@ export default function App() {
             element={
               <RequirePermission permission="analytics.view">
                 <ReportsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/analytics/custom-report"
+            element={
+              <RequirePermission permission="analytics.view">
+                <CustomReportPage />
               </RequirePermission>
             }
           />

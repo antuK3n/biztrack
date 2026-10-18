@@ -239,11 +239,9 @@ it('covers the dashboard branches where a null and a zero are different things',
     expect($inspections['CPDO']['pass_rate'])->toBeNull();
     expect($inspections['CHO']['pass_rate'])->toEqual(87.5);
 
-    // Messages & Requests: 5 of 8 is an exact 62.5, and nothing else is left
-    // of the officer panel.
-    expect($report['officer_activity']['requests_fulfilled_rate'])->toEqual(62.5);
-    expect(array_keys($report['officer_activity']))
-        ->toBe(['threads_awaiting_reply', 'requests_total', 'requests_fulfilled', 'requests_fulfilled_rate']);
+    // Messages & Requests (`officer_activity`) was removed on 19 October 2026
+    // (the client's picker). It must not come back in the payload.
+    expect($report)->not->toHaveKey('officer_activity');
 
     // Six decimal places of latitude, not four. Truncating to four moves a pin
     // about 11 metres, which is the width of the street it is meant to be on.

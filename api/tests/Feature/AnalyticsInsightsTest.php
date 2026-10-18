@@ -237,12 +237,15 @@ it('returns every panel the dashboard spec asks for', function () {
     expect($body['data'])->toHaveKeys([
         'kpis', 'volume', 'decisions', 'stages', 'compliance', 'fees_collected', 'suspended_permits',
         'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
-        'inspections', 'officer_activity', 'map',
+        'inspections', 'map',
     ]);
 
     // Removed on 18 October 2026 (client's picker), and not left behind on
     // the payload for a screen to pick back up.
     expect($body['data'])->not->toHaveKeys(['processing_tiers', 'renewal_forecast']);
+
+    // Messages & Requests, removed on 19 October 2026 (client's picker).
+    expect($body['data'])->not->toHaveKey('officer_activity');
 
     // Provenance is mandatory on every analytics response: these are batch figures
     // and the screen has to be able to say when and by what they were computed.

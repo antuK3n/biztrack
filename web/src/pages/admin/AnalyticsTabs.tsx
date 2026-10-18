@@ -53,6 +53,13 @@ const TABS = [
    */
   { to: '/analytics/reports', label: 'Reports', end: false, permission: 'analytics.view' },
   /*
+   * Custom Report (client, 19 October 2026): the reader picks what to count,
+   * the numbers, filters and breakdown. Beside Reports and under the same
+   * permission, because it is the same kind of document with the choices
+   * left open.
+   */
+  { to: '/analytics/custom-report', label: 'Custom Report', end: false, permission: 'analytics.view' },
+  /*
    * The super admin's two screens, in the order the question is asked.
    *
    * Office Performance comes first because it answers "which office" and

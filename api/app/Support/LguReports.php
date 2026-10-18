@@ -791,10 +791,13 @@ final class LguReports
      * one naming several offices' permits stays unassigned rather than being
      * guessed.
      *
+     * Public for CustomReports, which credits an office's payments
+     * by the same rule so its totals and this report's agree.
+     *
      * @param  array<string, mixed>  $line
      * @param  array<string, string>  $officeOfPermit
      */
-    private static function lineOffice(array $line, array $officeOfPermit): string
+    public static function lineOffice(array $line, array $officeOfPermit): string
     {
         $office = (string) ($line['office'] ?? '');
         if ($office !== '') {
@@ -810,7 +813,7 @@ final class LguReports
     }
 
     /** @return array<string, string> permit type code => issuing office code */
-    private static function issuingOfficeByPermitCode(): array
+    public static function issuingOfficeByPermitCode(): array
     {
         return DB::table('permit_types')
             ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')

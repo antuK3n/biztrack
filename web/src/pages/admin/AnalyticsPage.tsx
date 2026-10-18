@@ -1,11 +1,11 @@
-import { useEffect } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
-import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
+import { FilterMenu, PageTitle, ProtoCard, SectionTitle } from '../../components/ui/Proto'
 import { HorizontalBars, VerticalBars } from '../../components/charts/Bars'
 import type { BarDatum } from '../../components/charts/Bars'
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
@@ -69,7 +69,9 @@ import type { OfficePermit } from './officePermit'
  *    (too little history), response time and meetings (nothing records them),
  *    and the Cancelled outcome (applicants can no longer cancel). Fees Collected
  *    and Suspended Permits came on, and the department panel became Time in
- *    Office. Do not put a panel back without the data under it.
+ *    Office. On 19 October 2026 the client's picker also took off what was left
+ *    of the officer panel, Messages & Requests. Do not put a panel back without
+ *    the data under it.
  *
  * THE CHART TYPES ARE NOT A STYLE CHOICE. The client's "R INTEGRATION DRAFTS"
  * names a required visualisation per report, and it was written down because
@@ -85,7 +87,6 @@ import type { OfficePermit } from './officePermit'
  *   Top Five Barangays / Business Categories  vertical bar charts
  *   Form of Organization                      pie chart
  *   Inspections                               horizontal STACKED bar chart
- *   Messages & Requests                       two KPI cards
  *
  * Every one of them goes through components/charts, which is what supplies the
  * accessible name and the sr-only table of the underlying numbers. A chart
@@ -245,8 +246,14 @@ function WarningGlyph() {
  * under every heading. Multiplied by twelve sections that was most of the dead
  * vertical space the client complained about, and it is a caption, not a
  * statement — so it now sits beside the title and only wraps when it has to.
+ *
+ * An h3 when the dashboard is a section of the office Home (embedded), where
+ * the section's own "Analytics" heading is the h2; an h2 on its own page.
  */
+const PanelHeadingLevel = createContext<'h2' | 'h3'>('h2')
+
 function SectionHeading({ children, note, metric }: { children: ReactNode; note?: string; metric?: string }) {
+  const Heading = useContext(PanelHeadingLevel)
   return (
     <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
       {/*
@@ -255,7 +262,7 @@ function SectionHeading({ children, note, metric }: { children: ReactNode; note?
        * anyone navigating by heading hears the button on every section.
        */}
       <div className="flex items-center">
-        <h2 className="text-[17px] font-semibold text-ink">{children}</h2>
+        <Heading className="text-[17px] font-semibold text-ink">{children}</Heading>
         {metric && <Info metric={metric} />}
       </div>
       {note && <p className="text-[11px] text-ink-muted">{note}</p>}
@@ -878,8 +885,17 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
  * Permits: BPLO and the two who read every office. A clearance office's
  * register is its own permits, where these do not appear, so it gets the list
  * here and no link to an empty table.
+ *
+ * `registerLink` builds the address for a `?status=` value: the register's own
+ * page, or — on the office Home — the Home's Permits section below.
  */
-function SuspendedPanel({ suspended, registerLink }: { suspended: SuspendedPermits; registerLink: string | null }) {
+function SuspendedPanel({
+  suspended,
+  registerLink,
+}: {
+  suspended: SuspendedPermits
+  registerLink: ((status: string) => string) | null
+}) {
   if (suspended.total === 0) {
     return (
       <ProtoCard className="px-4 py-4 text-[13px] text-ink-muted">No permit is suspended.</ProtoCard>
@@ -961,12 +977,12 @@ function SuspendedPanel({ suspended, registerLink }: { suspended: SuspendedPermi
         </table>
         {registerLink && (
           <p className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-[12px]">
-            <Link to={`${registerLink}?status=suspended`} className="font-semibold text-royal hover:underline">
+            <Link to={registerLink('suspended')} className="font-semibold text-royal hover:underline">
               All suspended
             </Link>
             {suspended.long > 0 && (
               <Link
-                to={`${registerLink}?status=suspended_30`}
+                to={registerLink('suspended_30')}
                 className="font-semibold text-royal hover:underline"
               >
                 Over {suspended.long_after_days} days
@@ -1308,52 +1324,6 @@ function InspectionsPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Messages & Requests ───────────────────────────────────────────────── */
-
-function MessagesPanel({ report }: { report: DashboardReport }) {
-  const a = report.officer_activity
-
-  return (
-    /*
-     * "Officer Activity" until 18 October 2026, with a response-time card and,
-     * before that, meeting participation. Both went because nothing in the
-     * product records them: there is no meetings feature, and the live register
-     * had no answered thread to time. The client asked for the metrics nothing
-     * records to come off (picker, item 6).
-     *
-     * What is left earns a slim panel of its own: officer requests are used,
-     * and a conversation where the applicant wrote last is a question someone
-     * at the office owns. Two separate cards, because neither is a breakdown of
-     * the other — the split the adviser asked for (docs/r-integration-
-     * revisions.md §1.11) still holds.
-     */
-    <div className="grid gap-4 sm:grid-cols-2">
-      <StatCard
-        label="Awaiting reply"
-        metric="officer_activity.threads_awaiting_reply"
-        value={num(a.threads_awaiting_reply)}
-        detail={
-          a.threads_awaiting_reply === 1
-            ? 'conversation where the applicant wrote last'
-            : 'conversations where the applicant wrote last'
-        }
-      />
-
-      <StatCard
-        label="Requests fulfilled"
-        metric="officer_activity.requests_fulfilled_rate"
-        unavailable={a.requests_total === 0}
-        value={a.requests_total === 0 ? 'None raised' : num(a.requests_fulfilled)}
-        detail={
-          a.requests_total === 0
-            ? 'No request was raised in this window.'
-            : `${num(a.requests_fulfilled)} of ${num(a.requests_total)} raised (${pct(a.requests_fulfilled_rate)}).`
-        }
-      />
-    </div>
-  )
-}
-
 /* ── GIS Mapping ───────────────────────────────────────────────────────── */
 
 const MALABON: [number, number] = [14.669, 120.957]
@@ -1588,7 +1558,24 @@ function LoadingState() {
   )
 }
 
-export function AnalyticsPage() {
+export function AnalyticsPage({
+  embedded = false,
+  permitsLink,
+}: {
+  /**
+   * Drawn as the "Analytics" section of the office Home (19 October 2026,
+   * client: Home is "Analytics, then Permits"). The same dashboard, under a
+   * section heading instead of the page's: no tab strip and no Generate
+   * Report — both live on the full page, which a "View full analytics" link
+   * opens. The /analytics route renders it without, unchanged.
+   */
+  embedded?: boolean
+  /**
+   * Embedded only: where the Suspended Permits links go — the Home's own
+   * Permits section, when the Home has one. Without it they are not drawn.
+   */
+  permitsLink?: (status: string) => string
+} = {}) {
   /*
    * Undefined until the reader picks one: the first request asks for "my
    * default" and the server answers with the reader's own office (or every
@@ -1605,10 +1592,22 @@ export function AnalyticsPage() {
    * kept two different ways. `months` is left out of the URL at its default,
    * so the plain address stays the plain address.
    */
+  /*
+   * Embedded, both are component state instead: the Home's URL belongs to the
+   * Permits table under it, which reads `?office=all` and `?status=` on
+   * arrival, and an `office` written here would be read there as a different
+   * question. The full page keeps them in its own URL.
+   */
   const [params, setParams] = useSearchParams()
-  const office = params.get('office') ?? undefined
-  const months = windowFrom(params.get('months'))
+  const [local, setLocal] = useState<Record<string, string | undefined>>({})
+  const read = (name: string) => (embedded ? local[name] : (params.get(name) ?? undefined))
+  const office = read('office')
+  const months = windowFrom(read('months') ?? null)
   const setParam = (name: string, value: string | undefined) => {
+    if (embedded) {
+      setLocal((prev) => ({ ...prev, [name]: value }))
+      return
+    }
     const next = new URLSearchParams(params)
     if (value === undefined) next.delete(name)
     else next.set(name, value)
@@ -1641,23 +1640,49 @@ export function AnalyticsPage() {
   const scoped = Boolean(scope?.office)
   const permit = officePermit(scope?.office)
 
-  return (
-    <div>
+  const windowFilter = (
+    <FilterMenu
+      label="Filter the dashboard"
+      fields={[
+        {
+          label: 'Trailing window',
+          value: months,
+          options: PERIOD_OPTIONS,
+          onChange: setMonths,
+        },
+      ]}
+    />
+  )
+
+  /*
+   * Embedded, the "Showing CHO figures" line is left out for a reader who
+   * cannot switch: the Home's own heading is already the office's name.
+   */
+  const heading = embedded ? (
+    <SectionTitle
+      id="analytics"
+      quiet
+      right={
+        <span className="flex flex-wrap items-center gap-3 pb-0.5">
+          {scope?.can_switch && <OfficeScope scope={scope} onChange={setOffice} />}
+          {windowFilter}
+          <Link
+            to={portalPath(activePortal(), '/analytics')}
+            className="text-sm font-semibold text-royal hover:underline"
+          >
+            View full analytics
+          </Link>
+        </span>
+      }
+    >
+      Analytics
+    </SectionTitle>
+  ) : (
       <PageTitle
         right={
           <span className="flex flex-wrap items-center gap-3 pb-1">
             {scope && <OfficeScope scope={scope} onChange={setOffice} />}
-            <FilterMenu
-              label="Filter the dashboard"
-              fields={[
-                {
-                  label: 'Trailing window',
-                  value: months,
-                  options: PERIOD_OPTIONS,
-                  onChange: setMonths,
-                },
-              ]}
-            />
+            {windowFilter}
             {/*
               "Generate Report" opens Report Generation (checklist 2026-09-27,
               item 7) for the office on screen, rather than downloading this
@@ -1677,8 +1702,14 @@ export function AnalyticsPage() {
       >
         Analytics Dashboard
       </PageTitle>
+  )
 
-      <AnalyticsTabs />
+  return (
+    <PanelHeadingLevel.Provider value={embedded ? 'h3' : 'h2'}>
+    <section aria-labelledby={embedded ? 'analytics-title' : undefined}>
+      {heading}
+
+      {!embedded && <AnalyticsTabs />}
 
       {/*
         Refresh only for the two readers who see every office: one press
@@ -1822,9 +1853,11 @@ export function AnalyticsPage() {
               <SuspendedPanel
                 suspended={data.suspended_permits}
                 registerLink={
-                  scope?.can_switch || scope?.office === 'BPLO'
-                    ? portalPath(activePortal(), '/admin/permits')
-                    : null
+                  !(scope?.can_switch || scope?.office === 'BPLO')
+                    ? null
+                    : embedded
+                      ? (permitsLink ?? null)
+                      : (status) => `${portalPath(activePortal(), '/admin/permits')}?status=${status}`
                 }
               />
             </section>
@@ -1838,20 +1871,23 @@ export function AnalyticsPage() {
           </div>
 
           {/*
-            Five sections in a two-column grid: a plain grid, so the last one
-            runs to the full width rather than leaving a hole. "Permits
-            Approaching Expiry" used to lead this block; it came back from
-            Renewal Risk Prediction (checklist 2026-09-27, item 6) and sits in its
-            own row above.
+            Four sections in a two-column grid, two rows of two. Messages &
+            Requests was the fifth until the client's picker took it off
+            (19 October 2026). Without Inspections (an office that books no
+            visits) the block is three, and the last one runs to the full width
+            rather than sitting alone in half a row. "Permits Approaching
+            Expiry" used to lead this block; it came back from Renewal Risk
+            Prediction (checklist 2026-09-27, item 6) and sits in its own row
+            above.
           */}
-          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
+          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2 lg:[&>:last-child:nth-child(odd)]:col-span-2">
             {/*
               Only for an office that inspects. The payload has a row for every
               inspecting office in scope, even at zero visits, so no rows means
               the office on screen books no visits at all — BPLO, which issues
               the Mayor's Permit on the strength of the clearances. It used to
               get an empty chart over "No pass rate overall — 0 passed of 0".
-              Without it the block is four sections, two rows of two.
+              Without it the block is three sections; see above.
             */}
             {data.inspections.rows.length > 0 && (
               <section>
@@ -1907,18 +1943,6 @@ export function AnalyticsPage() {
               <OrganizationPanel report={data} />
             </section>
 
-            <section>
-              {/*
-                "Officer Activity" was the paper's name, kept over the
-                adviser's objection (docs/r-integration-revisions.md §1.11).
-                With response time and meetings gone the panel is about
-                messages and requests, and the client named it that
-                (18 October 2026) — which also answers her question of who
-                "officer" was.
-              */}
-              <SectionHeading note={trailing}>Messages &amp; Requests</SectionHeading>
-              <MessagesPanel report={data} />
-            </section>
           </div>
 
           <section className="mt-5">
@@ -1927,6 +1951,7 @@ export function AnalyticsPage() {
           </section>
         </MetricDefinitions>
       ) : null}
-    </div>
+    </section>
+    </PanelHeadingLevel.Provider>
   )
 }

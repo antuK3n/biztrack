@@ -284,13 +284,6 @@
             "conditional": 0
         }
     ],
-    "officer_activity": {
-        "threads_awaiting_reply": 2,
-        "requests": {
-            "total": 8,
-            "fulfilled": 5
-        }
-    },
     "fees": {
         "month_start": "2026-07-01",
         "year_start": "2026-01-01",

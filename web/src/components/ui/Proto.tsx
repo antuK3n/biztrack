@@ -412,7 +412,7 @@ export function StatusChip({
 }
 
 /** Page heading with the thin underline rule (p11/p19/p21). */
-export function PageTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+export function PageTitle({ children, right, id }: { children: ReactNode; right?: ReactNode; id?: string }) {
   return (
     <div className="mb-6 border-b-2 border-ink/50 pb-2">
       {/*
@@ -429,7 +429,44 @@ export function PageTitle({ children, right }: { children: ReactNode; right?: Re
        * The rule itself stays full width — only its contents inset.
        */}
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pr-12 lg:pr-0">
-        <h1 className="text-2xl font-bold text-ink">{children}</h1>
+        <h1 id={id} className="text-2xl font-bold text-ink">{children}</h1>
+        {right}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A section of a page that stacks whole screens — the office Home's
+ * "Analytics" over its "Permits" (19 October 2026). PageTitle one step down:
+ * an h2, a lighter rule, the same wrapping `right` slot for the section's
+ * controls, so a phone gets them on their own line rather than a sideways
+ * scroll. `id` is the anchor a link can jump to; the heading is `${id}-title`,
+ * for the region it names to point at.
+ */
+export function SectionTitle({
+  children,
+  right,
+  id,
+  quiet = false,
+}: {
+  children: ReactNode
+  right?: ReactNode
+  id?: string
+  /**
+   * The heading is for screen readers only and the controls stand alone,
+   * right-aligned. For a section under a tab already showing its name, where a
+   * visible heading would say the word twice.
+   */
+  quiet?: boolean
+}) {
+  return (
+    <div id={id} className={`mb-5 scroll-mt-4 ${quiet ? '' : 'border-b border-line pb-2'}`}>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <h2 id={id ? `${id}-title` : undefined} className={quiet ? 'sr-only' : 'text-xl font-bold text-ink'}>
+          {children}
+        </h2>
+        {quiet && <span aria-hidden className="flex-1" />}
         {right}
       </div>
     </div>

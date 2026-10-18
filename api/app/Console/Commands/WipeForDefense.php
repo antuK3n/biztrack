@@ -77,6 +77,13 @@ class WipeForDefense extends Command
         'barangay_zoning_classification', 'barangay_zoning_overlay', 'barangays', 'departments', 'document_types',
         'fee_rules', 'migrations', 'office_signatories', 'permissions', 'permit_type_requirements', 'permit_types',
         'psic_codes', 'role_permissions', 'roles', 'settings', 'zoning_classifications', 'zoning_overlays',
+        /*
+         * Custom Report set-ups (19 October 2026). Staff-only: saving one needs
+         * `analytics.view`, which no owner holds, and a row goes with its user
+         * (`cascadeOnDelete`). They hold definitions, never figures, so a wiped
+         * register leaves nothing stale in them.
+         */
+        'saved_reports',
     ];
 
     /** Kept for staff, emptied of owners. */

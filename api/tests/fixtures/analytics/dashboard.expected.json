@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "generated_at": "2026-07-30T00:00:00.000000Z",
   "window_months": 12,
   "window_start": "2025-07-30",
@@ -483,12 +483,6 @@
       "conditional": 2,
       "pass_rate": 75.0
     }
-  },
-  "officer_activity": {
-    "threads_awaiting_reply": 2,
-    "requests_total": 8,
-    "requests_fulfilled": 5,
-    "requests_fulfilled_rate": 62.5
   },
   "map": {
     "mapped": 4,

@@ -207,6 +207,16 @@ const RETIRED = {
 }
 
 /*
+ * The register, as a region named by its heading. An office admin's
+ * /staff/admin/permits opens their Home since 19 October 2026 (client: the
+ * Permits menu button removed, old links redirected), and the Home stacks the
+ * analytics dashboard above the table, with tables and a Filter button of its
+ * own. Scoped here so a test reads the register and nothing above it; on the
+ * super admin's own page the region is the whole page, so the same locators hold.
+ */
+const register = (page: Page) => page.getByRole('region', { name: 'Permits', exact: true })
+
+/*
  * The Sort and Filter menus.
  *
  * The header carried five controls laid out in a row — status pills, an office
@@ -216,12 +226,12 @@ const RETIRED = {
  * open it.
  */
 const openSort = async (page: Page) => {
-  await page.getByRole('button', { name: /^Sort/ }).click()
+  await register(page).getByRole('button', { name: /^Sort/ }).click()
   await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
 }
 
 const openFilter = async (page: Page) => {
-  await page.getByRole('button', { name: /^Filter/ }).click()
+  await register(page).getByRole('button', { name: /^Filter/ }).click()
   await expect(page.getByRole('option', { name: 'All', exact: true })).toBeVisible()
 }
 
@@ -324,7 +334,7 @@ test.describe('the permit register table', () => {
     })
 
     await page.goto('/staff/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
 
     /*
      * The super admin belongs to no office and opens on ALL. Pressed again
@@ -333,7 +343,7 @@ test.describe('the permit register table', () => {
      */
     if ((await officeTab(page, '').count()) > 0) {
       await chooseOffice(page, '')
-      await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+      await expect(register(page).locator('tbody tr')).toHaveCount(PERMITS.length)
     }
   })
 
@@ -354,7 +364,7 @@ test.describe('the permit register table', () => {
      * `toBeVisible` and misses the instruction entirely — which is how the
      * first cut shipped with the BAN in front for a day.
      */
-    const headers = page.locator('thead th')
+    const headers = register(page).locator('thead th')
     // The super admin's order [client, 5 October 2026]: Tracking ID, Business
     // Account No., Permit No.
     await expect(headers.nth(0)).toContainText('Tracking ID')
@@ -390,7 +400,7 @@ test.describe('the permit register table', () => {
       await expect(headers.nth(i)).toContainText(label)
     }
 
-    const rows = page.locator('tbody tr')
+    const rows = register(page).locator('tbody tr')
     await expect(rows).toHaveCount(PERMITS.length)
 
     const first = rows.first()
@@ -420,7 +430,7 @@ test.describe('the permit register table', () => {
      * third row makes the point the hard way: its business is gone from the
      * register entirely and the face still carries what was signed.
      */
-    const orphan = page.locator('tbody tr').filter({ hasText: 'MCZ-2026-000014' })
+    const orphan = register(page).locator('tbody tr').filter({ hasText: 'MCZ-2026-000014' })
     await expect(orphan).toContainText('Malabon')
   })
 
@@ -443,17 +453,17 @@ test.describe('the permit register table', () => {
       'Building Permit No.',
       'Owner’s Address',
     ]) {
-      await expect(page.getByRole('columnheader', { name: new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })).toBeVisible()
     }
 
     // Each column says whose form it is, so forty-five headings do not read as
     // one undifferentiated row.
-    await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toContainText(
+    await expect(register(page).getByRole('columnheader', { name: /Sanitary Classification/i })).toContainText(
       'CHO form',
     )
 
     // And the answers are actually in the row.
-    const sanitary = page.locator('tbody tr').filter({ hasText: 'MCS-2025-000770' })
+    const sanitary = register(page).locator('tbody tr').filter({ hasText: 'MCS-2025-000770' })
     await expect(sanitary).toContainText('Food Establishment')
     await expect(sanitary).toContainText('Level III (Waterworks)')
   })
@@ -466,8 +476,8 @@ test.describe('the permit register table', () => {
      * CENRO headings, which is not a blank cell but a false one: it would say
      * the health office asked a question on a filing it had no sheet for.
      */
-    const zoning = page.locator('tbody tr').filter({ hasText: 'MCZ-2026-000014' })
-    const headers = page.locator('thead th')
+    const zoning = register(page).locator('tbody tr').filter({ hasText: 'MCZ-2026-000014' })
+    const headers = register(page).locator('thead th')
 
     const indexOf = async (label: string, office: string) => {
       const n = await headers.count()
@@ -496,24 +506,24 @@ test.describe('the permit register table', () => {
      * hand would find nothing past the first page of a register that holds
      * thousands.
      */
-    const wide = await page.locator('thead th').count()
+    const wide = await register(page).locator('thead th').count()
 
     await chooseOffice(page, 'SANITARY')
 
     await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
-    await expect(page.locator('tbody tr')).toHaveCount(1)
-    await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
+    await expect(register(page).locator('tbody tr')).toHaveCount(1)
+    await expect(register(page).getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
     // The other four sheets are gone.
-    await expect(page.getByRole('columnheader', { name: /Floor Area/i })).toHaveCount(0)
-    await expect(page.getByRole('columnheader', { name: /Certificate Applied For/i })).toHaveCount(0)
-    expect(await page.locator('thead th').count()).toBeLessThan(wide)
+    await expect(register(page).getByRole('columnheader', { name: /Floor Area/i })).toHaveCount(0)
+    await expect(register(page).getByRole('columnheader', { name: /Certificate Applied For/i })).toHaveCount(0)
+    expect(await register(page).locator('thead th').count()).toBeLessThan(wide)
 
     // The count line names the office it narrowed to.
     await expect(page.getByText(/issued by CHO/)).toBeVisible()
   })
 
   test('searching narrows on the server, by every identifier the label names', async ({ page }) => {
-    const rows = page.locator('tbody tr')
+    const rows = register(page).locator('tbody tr')
     const search = page.getByRole('searchbox', { name: 'Search permits by permit number, BAN, business name, owner, tracking ID or permit type' })
 
     await search.fill('rxcare')
@@ -551,7 +561,7 @@ test.describe('the permit register table', () => {
     await openFilter(page)
     await page.getByRole('option', { name: 'Active', exact: true }).click()
 
-    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(register(page).locator('tbody tr')).toHaveCount(1)
     await expect.poll(() => asked.at(-1)).toContain('status=active')
     /*
      * The count line reads from meta.total, so it is the count of what was
@@ -572,7 +582,7 @@ test.describe('the permit register table', () => {
     )
 
     await page.getByRole('option', { name: 'All', exact: true }).click()
-    await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+    await expect(register(page).locator('tbody tr')).toHaveCount(PERMITS.length)
   })
 
   test('the issue-date range is not offered as a filter', async ({ page }) => {
@@ -646,9 +656,9 @@ test.describe('the permit register table', () => {
      * header moves the menu's tick and picking from the menu moves the
      * header's arrow.
      */
-    await page.getByRole('button', { name: /^Business/ }).click()
+    await register(page).getByRole('button', { name: /^Business/ }).click()
     await expect(
-      page.locator('th', { has: page.getByRole('button', { name: /^Business/ }) }),
+      register(page).locator('th', { has: register(page).getByRole('button', { name: /^Business/ }) }),
     ).toHaveAttribute('aria-sort', 'ascending')
 
     await openSort(page)
@@ -666,15 +676,15 @@ test.describe('the permit register table', () => {
      * assertion is that the page ASKS — a sort the browser performed would
      * order these three rows identically and prove nothing.
      */
-    const heading = page.getByRole('button', { name: /^Business/ })
+    const heading = register(page).getByRole('button', { name: /^Business/ })
 
     await heading.click()
-    await expect(page.locator('th', { has: heading })).toHaveAttribute('aria-sort', 'ascending')
+    await expect(register(page).locator('th', { has: heading })).toHaveAttribute('aria-sort', 'ascending')
     await expect.poll(() => asked.at(-1)).toContain('sort=business')
     await expect.poll(() => asked.at(-1)).toContain('dir=asc')
 
     await heading.click()
-    await expect(page.locator('th', { has: heading })).toHaveAttribute('aria-sort', 'descending')
+    await expect(register(page).locator('th', { has: heading })).toHaveAttribute('aria-sort', 'descending')
     await expect.poll(() => asked.at(-1)).toContain('dir=desc')
 
     // The footer names the sort's reach, and the reach is now the register.
@@ -684,7 +694,7 @@ test.describe('the permit register table', () => {
 
     // A third press puts the register back in the order its totals are counted in.
     await heading.click()
-    await expect(page.locator('th', { has: heading })).toHaveAttribute('aria-sort', 'none')
+    await expect(register(page).locator('th', { has: heading })).toHaveAttribute('aria-sort', 'none')
     await expect(page.getByText('Ordered by issue date, newest first.')).toBeVisible()
   })
 
@@ -697,7 +707,7 @@ test.describe('the permit register table', () => {
      * DIFFERENT column would be worse.
      */
     for (const label of ['Sanitary Classification', 'Days to expiry', 'Office', 'Owner']) {
-      const header = page.getByRole('columnheader', { name: new RegExp(label, 'i') }).first()
+      const header = register(page).getByRole('columnheader', { name: new RegExp(label, 'i') }).first()
       await expect(header.getByRole('button')).toHaveCount(0)
       // And it does not claim to be sortable to a screen reader either.
       await expect(header).not.toHaveAttribute('aria-sort', /.*/)
@@ -722,11 +732,11 @@ test.describe('the permit register table', () => {
     await expect.poll(() => asked.at(-1)).toContain('permit_type=BUSINESS')
 
     for (const gone of [/^Valid until/i, /^Days to expiry/i, /^Permit \/ Certificate/i, /^Office$/i]) {
-      await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+      await expect(register(page).getByRole('columnheader', { name: gone })).toHaveCount(0)
     }
     // What BPLO does read is still there.
     for (const kept of [/^Tracking ID/i, /^Permit No/i, /^Business/i, /^Status/i, /^Issued on/i]) {
-      await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: kept })).toBeVisible()
     }
 
     /*
@@ -741,7 +751,7 @@ test.describe('the permit register table', () => {
 
     // Another office keeps its expiry — a clearance lapses in any month.
     await chooseOffice(page, 'SANITARY')
-    await expect(page.getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
+    await expect(register(page).getByRole('columnheader', { name: /^Valid until/i })).toBeVisible()
   })
 
   test('there is no "Other offices" tab, and ALL is the first', async ({ page }) => {
@@ -760,7 +770,7 @@ test.describe('the permit register table', () => {
      * default is the server's narrowing, not rows fetched and then dropped.
      */
     expect(asked[0]).toContain('retired=hide')
-    await expect(page.locator('tbody')).not.toContainText('MCB-2025-000099')
+    await expect(register(page).locator('tbody')).not.toContainText('MCB-2025-000099')
     await expect(page.getByText(/Retired businesses are hidden\./)).toBeVisible()
 
     await openFilter(page)
@@ -770,7 +780,7 @@ test.describe('the permit register table', () => {
     await page.keyboard.press('Escape')
 
     await expect.poll(() => asked.at(-1)).toContain('retired=only')
-    const rows = page.locator('tbody tr')
+    const rows = register(page).locator('tbody tr')
     await expect(rows).toHaveCount(1)
     // Named, and said to be retired in words — not a tint, not "removed".
     await expect(rows.first()).toContainText('Lumang Panaderia (retired)')
@@ -797,7 +807,7 @@ test.describe('the permit register table', () => {
     // with the issuing office’s choices — Revoked included on a Mayor’s Permit.
     await expect(page.getByRole('button', { name: 'Change status of MCB-2026-000001' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Status history of MCB-2026-000001' })).toBeVisible()
-    await expect(page.getByRole('columnheader', { name: 'Actions' })).toBeVisible()
+    await expect(register(page).getByRole('columnheader', { name: 'Actions' })).toBeVisible()
   })
 
   test('every View button names the permit it opens', async ({ page }) => {
@@ -833,21 +843,21 @@ test.describe('the permit register table', () => {
     test('another office’s tab is the permit, not the office’s sheet or uploads', async ({ page }) => {
       await chooseOffice(page, 'SANITARY')
       await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
-      await expect(page.locator('tbody tr')).toHaveCount(1)
+      await expect(register(page).locator('tbody tr')).toHaveCount(1)
 
       // The permit: who holds it, its number, whether it is in force, and the certificate.
       for (const kept of [/^Business Account No/i, /^Permit No/i, /^Business$/i, /^Owner/i, /^Status/i, /^Valid until/i]) {
-        await expect(page.getByRole('columnheader', { name: kept })).toBeVisible()
+        await expect(register(page).getByRole('columnheader', { name: kept })).toBeVisible()
       }
       // An office leads with the Business Account No.; the tracking ID is the
       // super admin's column [client, 5 October 2026].
-      await expect(page.getByRole('columnheader', { name: /^Tracking ID/i })).toHaveCount(0)
-      await expect(page.locator('thead th').first()).toContainText('Business Account No.')
+      await expect(register(page).getByRole('columnheader', { name: /^Tracking ID/i })).toHaveCount(0)
+      await expect(register(page).locator('thead th').first()).toContainText('Business Account No.')
       await expect(page.getByRole('button', { name: 'View certificate MCS-2025-000770' })).toBeVisible()
 
       // Not the health office's sheet, its uploads, or the rest of the record.
       for (const gone of [/Sanitary Classification/i, /Water Source/i, /^Requirements Submitted/i, /^Address/i, /^Issued by/i]) {
-        await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+        await expect(register(page).getByRole('columnheader', { name: gone })).toHaveCount(0)
       }
     })
 
@@ -908,8 +918,8 @@ test.describe('the permit register table', () => {
     })
 
     test('its own tab keeps every field and the uploads', async ({ page }) => {
-      await expect(page.getByRole('columnheader', { name: /^Requirements Submitted/i })).toBeVisible()
-      await expect(page.getByRole('columnheader', { name: /^Line of Business/i })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /^Requirements Submitted/i })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /^Line of Business/i })).toBeVisible()
     })
   })
 })
@@ -924,7 +934,7 @@ test.describe('viewing a certificate', () => {
      * behaviour, not something this screen introduces.)
      */
     await page.goto('/staff/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
 
     /*
      * A row has to exist before anything here means something. Asserted rather
@@ -1011,8 +1021,8 @@ test.describe('the office picker, and whose columns each reader gets', () => {
 
       test(`${office} is offered no office picker, and sees only its own sheet`, async ({ page }) => {
         await page.goto('/staff/admin/permits')
-        await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
-        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
+        await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
+        await expect(register(page).locator('thead th').first()).toBeVisible({ timeout: 20_000 })
 
         /*
          * No office control at all — asserted with the Filter panel OPEN,
@@ -1036,9 +1046,9 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         await page.keyboard.press('Escape')
 
         // Its own sheet is there…
-        await expect(page.getByRole('columnheader', { name: own })).toBeVisible()
+        await expect(register(page).getByRole('columnheader', { name: own })).toBeVisible()
         // …and no other office's is.
-        await expect(page.getByRole('columnheader', { name: foreign })).toHaveCount(0)
+        await expect(register(page).getByRole('columnheader', { name: foreign })).toHaveCount(0)
 
         // And the screen says whose certificates these are, rather than
         // leaving a reader to work out why the table is short.
@@ -1060,12 +1070,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
          * which reads as the sort having done nothing.
          */
         await page.goto('/staff/admin/permits')
-        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+        await expect(register(page).locator('thead th').first()).toBeVisible({ timeout: 30_000 })
 
         // Back on every office's table [client, 5 October 2026].
-        await expect(page.getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
+        await expect(register(page).getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
 
-        await page.getByRole('button', { name: /^Sort/ }).click()
+        await register(page).getByRole('button', { name: /^Sort/ }).click()
         await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
         await expect(page.getByRole('option', { name: 'Business Account No. (A–Z)' })).toBeVisible()
         // The orderings that DO name a visible column are still there.
@@ -1092,11 +1102,11 @@ test.describe('the office picker, and whose columns each reader gets', () => {
          * ever" look identical to a bare visibility wait. Each step here is a
          * different stage of the same load, so a failure says which one.
          */
-        await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
-        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
-        await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
+        await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
+        await expect(register(page).locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+        await expect(register(page).locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
 
-        const headers = page.locator('thead th')
+        const headers = register(page).locator('thead th')
         const count = await headers.count()
         let at = -1
         for (let i = 0; i < count; i++) {
@@ -1105,7 +1115,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         expect(at, 'no Permit / Certificate column').toBeGreaterThanOrEqual(0)
 
         const types = new Set(
-          await page.locator('tbody tr').locator(`td:nth-child(${at + 1})`).allTextContents(),
+          await register(page).locator('tbody tr').locator(`td:nth-child(${at + 1})`).allTextContents(),
         )
         expect(types.size, `${office} was handed ${[...types].join(', ')}`).toBe(1)
       })
@@ -1122,7 +1132,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
        * whole register and the picker is the only way to narrow it.
        */
       await page.goto('/staff/admin/permits')
-      await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
+      await expect(register(page).locator('thead th').first()).toBeVisible({ timeout: 20_000 })
 
       await expect(officeGroup(page)).toBeVisible()
       await expect(officeGroup(page).getByRole('button')).toHaveCount(OFFICE_COUNT + 1) // six offices and ALL
@@ -1132,12 +1142,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       await chooseOffice(page, '')
 
       // The Business Account No. is a column again [client, 5 October 2026].
-      await expect(page.getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /^Business Account No/ })).toBeVisible()
 
       // With nothing picked it carries every office's sheet.
-      await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
-      await expect(page.getByRole('columnheader', { name: /DENR Basis/i })).toBeVisible()
-      await expect(page.getByRole('columnheader', { name: /Floor Area/i })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /DENR Basis/i })).toBeVisible()
+      await expect(register(page).getByRole('columnheader', { name: /Floor Area/i })).toBeVisible()
     })
   })
 })
@@ -1166,12 +1176,12 @@ test.describe('the office picker, and whose columns each reader gets', () => {
  * A position is not a column. This looks the heading up.
  */
 async function columnValues(page: import('@playwright/test').Page, heading: RegExp) {
-  const headers = page.locator('thead th')
+  const headers = register(page).locator('thead th')
   const n = await headers.count()
 
   for (let i = 0; i < n; i++) {
     if (heading.test((await headers.nth(i).innerText()).replace(/\s+/g, ' '))) {
-      return page.locator('tbody tr').locator(`td:nth-child(${i + 1})`).allTextContents()
+      return register(page).locator('tbody tr').locator(`td:nth-child(${i + 1})`).allTextContents()
     }
   }
 
@@ -1190,9 +1200,9 @@ test.describe('an office reads its own certificates only', () => {
     })
 
     await page.goto('/staff/admin/permits')
-    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+    await expect(register(page).getByRole('heading', { name: 'Permits', exact: true })).toBeVisible()
 
-    const rows = page.locator('tbody tr')
+    const rows = register(page).locator('tbody tr')
     await expect(rows.first()).toBeVisible({ timeout: 15_000 })
 
     // Every type cell, on the page the office actually got, says FSIC.
@@ -1211,14 +1221,14 @@ test.describe('BPLO reads the whole register', () => {
 
   test('BPLO sees more than one certificate type', async ({ page }) => {
     await page.goto('/staff/admin/permits')
-    await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+    await expect(register(page).locator('thead th').first()).toBeVisible({ timeout: 30_000 })
 
     /*
      * Widen first. BPLO opens on its own office — one certificate type by
      * construction — and the claim being tested is that the office boundary
      * does not narrow it further than it chooses to be narrowed.
      */
-    await page.getByRole('button', { name: /^Filter/ }).click()
+    await register(page).getByRole('button', { name: /^Filter/ }).click()
     await page
       .locator('.shadow-overlay label')
       .filter({ hasText: 'Office' })
@@ -1226,7 +1236,7 @@ test.describe('BPLO reads the whole register', () => {
       .selectOption('')
     await page.keyboard.press('Escape')
 
-    const rows = page.locator('tbody tr')
+    const rows = register(page).locator('tbody tr')
     await expect(rows.first()).toBeVisible({ timeout: 30_000 })
     const types = new Set(await columnValues(page, /PERMIT \/ CERTIFICATE/))
     expect(types.size, `BPLO's first page held one type only: ${[...types].join(', ')}`).toBeGreaterThan(1)

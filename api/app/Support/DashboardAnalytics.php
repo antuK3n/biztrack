@@ -7,7 +7,6 @@ use App\Enums\ApplicationType;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
-use App\Enums\OfficerRequestStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Models\Business;
@@ -40,7 +39,7 @@ use Illuminate\Support\Facades\DB;
  *   calendar       Fees Collected: this month and this year, Manila calendar
  *   full term      the "Applications (all time)" KPI — every filing on record
  *   trailing N mo  time in office, compliance indicators, inspections,
- *                  messages and requests, new and closed businesses
+ *                  new and closed businesses
  *   as of today    Active Businesses, Suspended Permits, expiry windows,
  *                  barangays, lines of business, form of organization, the map
  *
@@ -56,6 +55,12 @@ use Illuminate\Support\Facades\DB;
  * tab's processing-time report. RenewalForecast was deleted with its panel —
  * nothing else read it; it is in git history (5 October 2026) if a renewal
  * estimate is wanted again once the register holds a few renewal seasons.
+ *
+ * On 19 October 2026 the client's picker also removed what was left of that
+ * officer panel, "Messages & Requests" (wire name `officer_activity`:
+ * conversations awaiting a reply and officer requests fulfilled), from the
+ * payload, the screen and the PDF. SCHEMA_VERSION 3 retires snapshots that
+ * still carry it.
  *
  * DEFINITIONS THAT ARE CHOICES, stated because they are arguable
  *
@@ -119,8 +124,9 @@ final class DashboardAnalytics
      *   2  tier panel, RA 11032 row, renewal forecast, response time and
      *      meetings removed; time in office, fees collected, suspended
      *      permits and the all-time filing count added
+     *   3  Messages & Requests (`officer_activity`) removed, 19 October 2026
      */
-    public const SCHEMA_VERSION = 2;
+    public const SCHEMA_VERSION = 3;
 
     /** Cumulative expiry horizons, in days. */
     private const EXPIRY_WINDOWS = [30, 60, 90];
@@ -289,7 +295,6 @@ final class DashboardAnalytics
             'lines_of_business' => self::lineOfBusinessFacts($today, $scope),
             'organization_forms' => self::organizationFormFacts($scope),
             'inspections' => self::inspectionFacts($windowStart, $now, $scope),
-            'officer_activity' => self::officerActivityFacts($windowStart, $now, $scope),
             'map' => self::mapFacts($today, $scope),
             'business_movement' => self::movementFacts($windowStart, $now, $scope),
         ];
@@ -299,34 +304,6 @@ final class DashboardAnalytics
     public static function build(int $windowMonths = self::DEFAULT_WINDOW_MONTHS, ?string $office = null): array
     {
         return self::compute(self::dataset($windowMonths, $office));
-    }
-
-    /**
-     * Fees Collected this month, and nothing else — the office admin's home
-     * tile (18 October 2026).
-     *
-     * The same feeFacts() and computeFees() the dashboard's panel runs, under
-     * the same office scope, so the tile and the panel are one figure. Only
-     * the frame is rebuilt here, exactly as dataset() builds it: Manila's
-     * today and the start of its month.
-     *
-     * @return array{month_start: string, today: string, month_total: float, payments_month: int}
-     */
-    public static function feesThisMonth(?string $office = null): array
-    {
-        $scope = AnalyticsOffice::scope($office);
-        $now = CarbonImmutable::now();
-        $today = ManilaCalendar::today($now);
-        $monthStart = ManilaCalendar::startOfDay($today->startOfMonth());
-
-        $fees = self::computeFees(self::feeFacts($today, $monthStart, $now, $scope));
-
-        return [
-            'month_start' => $fees['month_start'],
-            'today' => $today->toDateString(),
-            'month_total' => $fees['month_total'],
-            'payments_month' => $fees['payments_month'],
-        ];
     }
 
     /* ── office scope ──────────────────────────────────────────────────── */
@@ -444,7 +421,6 @@ final class DashboardAnalytics
             'top_lines_of_business' => self::computeShares($dataset['lines_of_business'], 'industry', $topN),
             'organization_forms' => self::computeOrganizationForms($dataset['organization_forms']),
             'inspections' => self::computeInspections($dataset['inspections']),
-            'officer_activity' => self::computeOfficerActivity($dataset['officer_activity']),
             'map' => self::computeMap($dataset['map']),
             'business_movement' => self::computeMovement($dataset['business_movement']),
         ];
@@ -1443,77 +1419,6 @@ final class DashboardAnalytics
         return array_values($buckets);
     }
 
-    /* ── facts: messages and requests ──────────────────────────────────── */
-
-    /**
-     * Conversations waiting on an office, and requests raised and fulfilled.
-     *
-     * ── WHAT WENT, AND WHY THE PANEL STAYED ─────────────────────────────────
-     *
-     * This was "Officer Activity" and also timed officer replies and counted
-     * meetings. On the live register on 18 October 2026 it read 0 replies, no
-     * response time and 0 meetings: there is no meetings feature at all (the
-     * figure was AnalyticsHistorySeeder's rows read back as attendance), and
-     * applicants and offices barely use the message threads for replies. The
-     * client asked for the metrics nothing records to go. Both went, from the
-     * facts as well as the screen — the `meetings_*` keys this payload carried
-     * "only to hold the published shape" went with them, since the schema
-     * version (SCHEMA_VERSION) now retires old snapshots.
-     *
-     * What is left is worth a slim panel, "Messages & Requests": officer
-     * requests ARE used (seven raised, one fulfilled, on the live register),
-     * and a thread whose last word is the applicant's is an unanswered
-     * question someone at the office owns.
-     *
-     * A thread is awaiting a reply when an applicant's message in the window
-     * has had no message from anyone else after it.
-     *
-     * @return array{threads_awaiting_reply: int, requests: array{total: int, fulfilled: int}}
-     */
-    private static function officerActivityFacts(CarbonImmutable $windowStart, CarbonImmutable $now, ?array $scope = null): array
-    {
-        // Scoped, the office's own threads and its own requests.
-        $messages = DB::table('messages')
-            ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
-            ->when($scope !== null, static fn ($q) => $q->where('message_threads.department_id', $scope['department_id']))
-            ->where('messages.created_at', '>=', $windowStart)
-            ->where('messages.created_at', '<=', $now)
-            ->orderBy('messages.thread_id')
-            ->orderBy('messages.created_at')
-            ->orderBy('messages.id')
-            ->get(['messages.thread_id', 'messages.sender_user_id']);
-
-        $applicants = DB::table('applications')
-            ->whereNull('applications.deleted_at')
-            ->join('message_threads', 'message_threads.application_id', '=', 'applications.id')
-            ->pluck('applications.applicant_user_id', 'message_threads.id');
-
-        $awaiting = [];
-        foreach ($messages as $message) {
-            $threadId = (int) $message->thread_id;
-            $applicantId = isset($applicants[$threadId]) ? (int) $applicants[$threadId] : null;
-
-            if ($applicantId !== null && (int) $message->sender_user_id === $applicantId) {
-                $awaiting[$threadId] = true;
-            } else {
-                unset($awaiting[$threadId]);
-            }
-        }
-
-        $requests = DB::table('officer_requests')
-            ->when($scope !== null, static fn ($q) => $q->where('department_id', $scope['department_id']))
-            ->where('created_at', '>=', $windowStart)
-            ->where('created_at', '<=', $now);
-
-        return [
-            'threads_awaiting_reply' => count($awaiting),
-            'requests' => [
-                'total' => (clone $requests)->count(),
-                'fulfilled' => (clone $requests)->where('status', OfficerRequestStatus::Fulfilled->value)->count(),
-            ],
-        ];
-    }
-
     /* ── facts: new and closed businesses ──────────────────────────────── */
 
     /**
@@ -2402,27 +2307,6 @@ final class DashboardAnalytics
             ...$row,
             'pass_rate' => $completed > 0
                 ? Rounding::statistic(((int) $row['passed'] / $completed) * 100, 1)
-                : null,
-        ];
-    }
-
-    /**
-     * Messages & Requests. `officer_activity` is the old panel's wire name.
-     *
-     * @param  array{threads_awaiting_reply: int, requests: array{total: int, fulfilled: int}}  $facts
-     * @return array<string, mixed>
-     */
-    private static function computeOfficerActivity(array $facts): array
-    {
-        $requestTotal = (int) $facts['requests']['total'];
-        $fulfilled = (int) $facts['requests']['fulfilled'];
-
-        return [
-            'threads_awaiting_reply' => (int) $facts['threads_awaiting_reply'],
-            'requests_total' => $requestTotal,
-            'requests_fulfilled' => $fulfilled,
-            'requests_fulfilled_rate' => $requestTotal > 0
-                ? Rounding::statistic(($fulfilled / $requestTotal) * 100, 1)
                 : null,
         ];
     }

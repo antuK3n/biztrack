@@ -15,6 +15,7 @@ import { OfficeHome } from './OfficeHome'
 import { permits, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { activePortal, portalPath } from '../lib/api'
+import { landsOnOfficeHome } from '../lib/officeHome'
 import { useAuth } from '../stores/auth'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
@@ -233,8 +234,8 @@ function OwnerHome() {
 /* ── Staff / admin landing ────────────────────────────────────────────── */
 /*
  * The super admin's home, and the fallback for a staff account that holds
- * neither the queue nor the permits register. BPLO and the clearance offices
- * land on OfficeHome instead since 18 October 2026 — see DashboardPage.
+ * neither the analytics dashboard nor the permits register. BPLO and the
+ * clearance offices land on OfficeHome instead — see DashboardPage.
  */
 function StaffHome({ permissions }: { permissions: string[] }) {
   // Absolute /staff paths: this landing only ever renders on the LGU site, and
@@ -352,23 +353,17 @@ export function DashboardPage() {
   if (user.permissions.includes('application.view_own')) return <OwnerHome />
 
   /*
-   * ── Office admins get figures and their tables; the super admin does not ──
+   * ── Office admins get their analytics and permits; the super admin does not ──
    *
-   * Client suggestion, approved 18 October 2026: an office admin's home is a
-   * dashboard over the queue and the permits register (OfficeHome), not a
-   * launcher. The super admin keeps the launcher: their home is a set of
-   * consoles — Officer Assignment, Records — and neither table is theirs
-   * (`application.review` was taken off the role). Told apart by the portal
-   * they stand on and by `user.manage`, which only the super admin holds;
-   * either alone is enough to keep the launcher.
+   * Client, 19 October 2026: an office admin's home is "Analytics, then
+   * Permits" (OfficeHome), not a launcher. The super admin keeps the launcher:
+   * their home is a set of consoles — Officer Assignment, Records. Who lands
+   * where is one rule shared with the rail and the router: landsOnOfficeHome.
    *
-   * A staff account holding neither table's permission keeps the launcher
-   * too, rather than landing on a page with nothing it can open.
+   * A staff account holding neither half keeps the launcher too, rather than
+   * landing on a page with nothing on it.
    */
-  const superAdmin = activePortal() === 'admin' || user.permissions.includes('user.manage')
-  const hasTable =
-    user.permissions.includes('application.review') || user.permissions.includes('permit.view_all')
-  if (!superAdmin && hasTable) return <OfficeHome />
+  if (landsOnOfficeHome(user)) return <OfficeHome />
 
   return <StaffHome permissions={user.permissions} />
 }

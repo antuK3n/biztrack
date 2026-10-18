@@ -87,13 +87,14 @@ it('mirrors the dashboard: the new panels in, the removed ones out, the all-time
     expect($html)->toContain('Fees collected')
         ->and($html)->toContain('Suspended permits')
         ->and($html)->toContain('Time in office')
-        ->and($html)->toContain('Messages &amp; requests')
         ->and($html)->toContain('4,321')
         ->and($html)->not->toContain('1,234')
         ->and($html)->not->toContain('RA 11032 tier')
         ->and($html)->not->toContain('by department')
         ->and($html)->not->toContain('response time')
-        ->and($html)->not->toContain('Cancelled');
+        ->and($html)->not->toContain('Cancelled')
+        ->and($html)->not->toContain('Messages &amp; requests')
+        ->and($html)->not->toContain('awaiting a reply');
 });
 
 it('heads each office’s copy with that office, not BPLO', function () {

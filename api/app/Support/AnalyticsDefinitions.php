@@ -264,28 +264,6 @@ final class AnalyticsDefinitions
                 'why' => 'Passed, failed and conditional will not add up to the scheduled count, and this is why. The gap between scheduled and completed is the backlog. A cancelled visit is not counted as scheduled; a rescheduled one is, because it is still owed.',
             ],
 
-            /*
-             * "Officer Activity" became "Messages & Requests" on 18 October
-             * 2026. Its response-time card ('officer_activity.mean_response_hours')
-             * and, earlier, meeting participation were removed because nothing
-             * in the product records them: the live register had no answered
-             * thread and no meetings feature exists. Restore an entry only
-             * with a card for it.
-             */
-            'officer_activity.threads_awaiting_reply' => [
-                'label' => 'Awaiting reply',
-                'formula' => 'Conversations where the applicant wrote last and no one at the office has answered.',
-                'covers' => 'Messages sent in the months set by the filter. For one office, only its own conversations.',
-                'why' => 'Each one is a question an applicant is still waiting on.',
-            ],
-
-            'officer_activity.requests_fulfilled_rate' => [
-                'label' => 'Requests fulfilled',
-                'formula' => 'Requests marked fulfilled ÷ requests raised × 100.',
-                'covers' => 'Requests raised in the months set by the filter. One still open counts against the rate, because it is what is holding the filing.',
-                'why' => 'Whether asking an applicant for something actually closes. Many raised and few fulfilled means filings are stalling on paperwork rather than on review.',
-            ],
-
             'fees_collected' => [
                 'label' => 'Fees Collected',
                 'formula' => 'Payments received this month and this year, split by the permit each fee line was for. Business tax and other charges billed on the Mayor\'s Permit count under the Business Permit. A permit fee carried over onto a later bill counts under its own permit.',

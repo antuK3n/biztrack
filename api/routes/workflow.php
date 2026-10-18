@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\ClearanceController;
+use App\Http\Controllers\Api\CustomReportController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\InspectionController;
@@ -540,15 +541,6 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
         /*
-         * Fees collected this month, alone — the "Fees this month" tile on an
-         * office admin's home page (18 October 2026). The dashboard's own
-         * figure, computed by the same code under the same office boundary,
-         * but without the other twenty panels: the home page asks on every
-         * sign-in, and the full dashboard payload (map points included) is
-         * far more than one number is worth.
-         */
-        Route::get('analytics/fees-month', [AnalyticsController::class, 'feesMonth']);
-        /*
          * Report Generation (checklist 2026-09-27, item 7): five LGU-format
          * reports over a chosen period, as JSON for the printable screen and as
          * CSV. Same permission and the same office boundary as the dashboard —
@@ -559,6 +551,24 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             ->where('report', '[a-z-]+');
         Route::get('analytics/reports/{report}/csv', [ReportController::class, 'csv'])
             ->where('report', '[a-z-]+');
+        /*
+         * Custom Report (client, 19 October 2026): the reader picks what to
+         * count, which numbers, filters and breakdown. Same permission and the
+         * same office boundary as Reports above — CustomReportController asks
+         * AnalyticsOffice on every call. POST because a definition is a JSON
+         * object, not a query string; none of the POSTs but `saved` writes.
+         * Saved set-ups are the caller's own (404 for anyone else's).
+         */
+        Route::get('analytics/custom-reports/catalogue', [CustomReportController::class, 'catalogue']);
+        Route::post('analytics/custom-reports/run', [CustomReportController::class, 'run']);
+        Route::post('analytics/custom-reports/export/{format}', [CustomReportController::class, 'export'])
+            ->where('format', 'csv|xlsx|pdf');
+        Route::get('analytics/custom-reports/saved', [CustomReportController::class, 'savedIndex']);
+        Route::post('analytics/custom-reports/saved', [CustomReportController::class, 'savedStore']);
+        Route::patch('analytics/custom-reports/saved/{savedReport}', [CustomReportController::class, 'savedUpdate'])
+            ->whereNumber('savedReport');
+        Route::delete('analytics/custom-reports/saved/{savedReport}', [CustomReportController::class, 'savedDestroy'])
+            ->whereNumber('savedReport');
         /*
          * Business Growth Analysis and Renewal Risk Prediction lived here, with
          * their PDF reports, the fitted renewal model and the per-permit

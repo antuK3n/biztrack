@@ -365,33 +365,6 @@
     </div>
     @endif
 
-    {{--
-        "Officer activity" until 18 October 2026. Its response-time row went,
-        as meeting participation had before it: nothing in BizTrack records
-        either, and a printed report is the worst place to leave a figure about
-        nothing — it is filed and quoted by a reader who cannot ask what it
-        counted. See DashboardAnalytics::officerActivityFacts().
-    --}}
-    <h2>Messages &amp; requests <span class="window">(trailing window)</span></h2>
-    <table>
-        <tr>
-            <td>Conversations awaiting a reply</td>
-            <td>{{ number_format($report['officer_activity']['threads_awaiting_reply']) }}</td>
-        </tr>
-        <tr>
-            <td>Requests fulfilled</td>
-            <td>
-                @if ($report['officer_activity']['requests_total'] === 0)
-                    <span class="unavailable">No request was raised in this window</span>
-                @else
-                    {{ number_format($report['officer_activity']['requests_fulfilled']) }} of
-                    {{ number_format($report['officer_activity']['requests_total']) }}
-                    ({{ number_format($report['officer_activity']['requests_fulfilled_rate'], 1) }}%)
-                @endif
-            </td>
-        </tr>
-    </table>
-
     <h2>GIS mapping</h2>
     <div class="empty">
         @if ($report['map']['plotted'] === 0)

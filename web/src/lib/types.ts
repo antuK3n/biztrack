@@ -1965,16 +1965,6 @@ export interface AnalyticsScope {
   offices: { code: string; name: string }[]
 }
 
-/** `analytics/fees-month`: Fees Collected this month, for the office home tile. */
-export interface FeesMonth {
-  /** Manila dates: the 1st of this month, and today. */
-  month_start: string
-  today: string
-  /** Pesos received this month for the permits this office issues. */
-  month_total: number
-  payments_month: number
-}
-
 export interface ScopedComputed<T> extends Computed<T> {
   scope: AnalyticsScope
 }
@@ -2285,19 +2275,6 @@ export interface InspectionRow {
   pass_rate: number | null
 }
 
-/**
- * Messages & Requests (the payload still calls it `officer_activity`).
- *
- * Response time and meeting participation are gone from the payload as well as
- * the screen since 18 October 2026: nothing in BizTrack records either.
- */
-export interface OfficerActivity {
-  threads_awaiting_reply: number
-  requests_total: number
-  requests_fulfilled: number
-  requests_fulfilled_rate: number | null
-}
-
 /** Fees Collected: completed payments by the permit each fee line was for. */
 export interface FeesCollected {
   /** Manila dates the two windows start on. */
@@ -2420,7 +2397,6 @@ export interface DashboardReport {
     total: number
   }
   inspections: { rows: InspectionRow[]; combined: InspectionRow }
-  officer_activity: OfficerActivity
   map: {
     mapped: number
     plotted: number
