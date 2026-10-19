@@ -347,6 +347,12 @@ interface MapPickerProps {
    * Ignored while a real pin exists.
    */
   startAt?: { latitude: number; longitude: number } | null
+  /**
+   * The map's height in pixels. 320 everywhere it always was; the officer's
+   * compact filing view (19 October 2026) draws a smaller one beside the
+   * address instead of a full-width block under it.
+   */
+  height?: number
 }
 
 export function MapPicker({
@@ -358,6 +364,7 @@ export function MapPicker({
   readOnly = false,
   onPick,
   startAt = null,
+  height = 320,
 }: MapPickerProps) {
   const hasPin = latitude !== null && longitude !== null
   const locked = lockedReason !== null
@@ -430,7 +437,7 @@ export function MapPicker({
           center={center}
           zoom={hasPin ? 15 : 13}
           scrollWheelZoom={false}
-          style={{ height: 320, width: '100%' }}
+          style={{ height, width: '100%' }}
         >
           <ContainerName
             label={

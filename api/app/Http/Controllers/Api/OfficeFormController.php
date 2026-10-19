@@ -9,11 +9,13 @@ use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
+use App\Services\NotificationService;
 use App\Services\WorkflowService;
 use App\Support\AccountPrefill;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
+use App\Support\OfficerEditRules;
 use App\Support\PdfFile;
 use App\Support\RenewalPrefill;
 use App\Support\SanitaryPrefill;
@@ -48,7 +50,7 @@ class OfficeFormController extends Controller
     private const FORM_PERMIT_CODES = PermitType::OFFICE_FORM_CODES;
 
     /** Issuance dates: recorded by the reviewing office, never by the applicant. */
-    private const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued'];
+    private const OFFICER_KEYS = OfficerEditRules::SHEET_OFFICE_USE;
 
     /** GET — owner-of or application.view_all. Derived answers are merged in. */
     /**
@@ -550,6 +552,10 @@ class OfficeFormController extends Controller
          *
          * Every corrected answer is written to the audit log by key, before and
          * after, so a sheet an office changed reads as one an office changed.
+         *
+         * Narrowed on 19 October 2026 to the three groups in OfficerEditRules:
+         * which of the sheet's answers the issuing office may touch at all is
+         * decided below, after `$corrected` is known.
          */
         $ownsSheet = $user->department_id !== null
             && $user->department_id === $this->issuingDepartmentId($permitTypeCode);
@@ -564,12 +570,53 @@ class OfficeFormController extends Controller
         }
 
         $corrected = [];
+        $reason = trim((string) $request->input('reason', ''));
         if (! $isOwner && $ownsSheet) {
+            /*
+             * Compared against the sheet AS READ — derived answers included —
+             * because that is what the review page sends back: the whole
+             * sheet it was shown, with the officer's edits laid over it. A
+             * derived answer the page restates is not a correction, and
+             * comparing to the bare stored row would call it one on every
+             * sheet the applicant has not saved since a derivation changed.
+             */
+            $shown = OfficeFormAnswers::derive($application, $permitType->code, $current);
+            $same = fn ($a, $b) => json_encode($a ?? '') === json_encode($b ?? '')
+                || (is_scalar($a ?? '') && is_scalar($b ?? '') && (string) ($a ?? '') === (string) ($b ?? ''));
             foreach ($formData as $key => $value) {
-                if (($current[$key] ?? null) !== $value) {
+                if (! $same($shown[$key] ?? null, $value)) {
                     $corrected[$key] = ['from' => $current[$key] ?? null, 'to' => $value];
                 }
             }
+
+            /*
+             * ── The three groups (OfficerEditRules) ───────────────────────
+             *
+             * Client, 19 October 2026: *"have restrictions on what certain
+             * fields are allowed to be edited only by the admin."* The office
+             * fills its own dates freely; it fixes a clerical slip on its own
+             * sheet with a reason; and it never rewrites what the applicant
+             * declared — that goes back through Return. This replaces the
+             * 4 October rule that let the issuing office correct any answer.
+             */
+            $locked = array_values(array_filter(
+                array_keys($corrected),
+                fn ($key) => OfficerEditRules::sheetGroup($permitType->code, $key) === 'locked',
+            ));
+            if ($locked !== []) {
+                throw OfficerEditRules::refusal(
+                    OfficerEditRules::LOCKED_MESSAGE,
+                    array_map(fn ($k) => "form_data.$k", $locked),
+                );
+            }
+            $clerical = array_values(array_filter(
+                array_keys($corrected),
+                fn ($key) => OfficerEditRules::sheetGroup($permitType->code, $key) === 'clerical',
+            ));
+            if ($clerical !== [] && $reason === '') {
+                throw OfficerEditRules::refusal(OfficerEditRules::REASON_MESSAGE, ['reason']);
+            }
+            abort_if(mb_strlen($reason) > 500, 422, 'Keep the reason under 500 characters.');
         }
 
         /*
@@ -614,7 +661,23 @@ class OfficeFormController extends Controller
             Audit::log('office_form.corrected_by_office', $form, [
                 'department_id' => $user->department_id,
                 'fields' => $corrected,
+                ...($reason !== '' ? ['reason' => $reason] : []),
             ]);
+            // The owner hears of a clerical fix to their answers; the
+            // office's own dates are not their answers and say nothing.
+            $clericalLabels = collect(array_keys($corrected))
+                ->filter(fn ($key) => OfficerEditRules::sheetGroup($permitType->code, $key) === 'clerical')
+                ->map(fn ($key) => OfficerEditRules::label($key))
+                ->values()
+                ->all();
+            if ($clericalLabels !== []) {
+                app(NotificationService::class)->correctedByOffice(
+                    $application,
+                    (string) $user->department?->code,
+                    $clericalLabels,
+                    $reason,
+                );
+            }
         }
 
         /*

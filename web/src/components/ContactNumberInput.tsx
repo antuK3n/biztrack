@@ -478,7 +478,7 @@ export function LandlineInput({
  * labelled input sitting side by side in the same grid read as one row of
  * questions rather than two kinds of thing.
  */
-const legendCls = 'mb-1.5 block text-[13px] font-semibold leading-snug text-ink'
+const legendCls = 'field-label mb-1.5 block text-[13px] font-semibold leading-snug text-ink'
 
 /*
  * The prototype's filled input. `tnum` because a phone number is read digit by

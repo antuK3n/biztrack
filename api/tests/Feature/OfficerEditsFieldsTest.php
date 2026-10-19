@@ -2,35 +2,34 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\AppNotification;
+use App\Models\AuditLog;
 use App\Models\Barangay;
-use App\Models\PsicCode;
+use App\Models\Department;
 use App\Models\User;
-use App\Support\MalabonGeo;
+use App\Support\OfficerEditRules;
 
 /*
- * An officer corrects the filing's own answers, under the applicant's rules.
+ * An office corrects the business permit form, under three groups.
  *
  * ── What this guards ────────────────────────────────────────────────────────
  *
- * The client instructed on 30 September 2026 that Edit mode let every admin
- * change any field. Edit mode had always locked the applicant's answers, and
- * for a reason: a citizen's declaration is corrected by RETURNING the filing,
- * which records the change against the person who declared it.
+ * Client, 19 October 2026: *"it is told to us to have restrictions on what
+ * certain fields are allowed to be edited only by the admin."* The groups are
+ * in App\Support\OfficerEditRules, and this file pins the server half of them
+ * for the business permit form (PUT /applications/{id}/fields):
  *
- * Writing them directly loses that for free, so it is bought back — and these
- * cases pin the two halves of the purchase:
+ *  - CLERICAL fixes (business / trade name, house no. and street, contact
+ *    numbers, e-mail, website) are BPLO's to make, with a reason that is
+ *    audited beside the old and new value and the officer, and the owner is
+ *    told.
+ *  - LOCKED declarations (TIN, registration number, the owner's name, form
+ *    of organization, line of business, capital, rent …) are refused to every
+ *    office, reason or not. The remedy is Return.
+ *  - The form is BPLO's: a clearance office reading it may not correct it.
  *
- *  1. THE SAME RULES. The endpoint calls the applicant's own
- *     `validateBusiness()` rather than carrying a copy, which is the only
- *     reading of "same validation as their original counterparts" that stays
- *     true after the next paper change. A rubbish TIN is refused here exactly
- *     as it is refused on the form.
- *
- *  2. THE TRAIL. Every changed field is audited with the officer named. If
- *     that ever stops happening, a declared answer can be altered by somebody
- *     other than the declarant with nothing on the record saying so.
- *
- * And the boundary: an office may only correct a filing it can already read.
+ * The applicant's own validator still runs first — a correction that the form
+ * itself would refuse is refused here too.
  */
 
 /** The filing scopedAssignmentFiling builds, as an Application. */
@@ -39,285 +38,289 @@ function filingForOfficerEdit(string $name): Application
     return Application::findOrFail(scopedAssignmentFiling($name));
 }
 
-/** Everything `validateBusiness` requires, so a case can vary one field. */
+/**
+ * The business exactly as it stands, restated — what the review page sends —
+ * with `$overrides` laid over it. Restating matters now: an answer the payload
+ * left out would read as a change to a locked field.
+ */
 function officerFieldsPayload(Application $app, array $overrides = []): array
 {
-    $business = $app->business;
+    $business = $app->fresh()->business;
+    $address = $business->address;
+    $owner = $business->owners()->where('is_primary', true)->first();
 
-    return array_merge([
+    $payload = [
         'name' => $business->name,
-        'registration_type' => 'sole_proprietorship',
-        'registration_number' => 'DTI-99887',
-        'tin' => '123-456-789-000',
+        'trade_name' => $business->trade_name,
+        'registration_type' => $business->registration_type,
+        'registration_number' => $business->registration_number,
+        'tin' => $business->tin,
+        'is_rented' => (bool) $business->is_rented,
+        'has_tax_incentives' => (bool) $business->has_tax_incentives,
+        'capital_investment' => $business->capital_investment,
+        'economic_organization' => $business->economic_organization,
+        'president_officer_name' => $business->president_officer_name,
+        'citizenship' => $business->citizenship,
+        'capital_participation_filipino' => $business->capital_participation_filipino,
+        'emergency_contact_name' => $business->emergency_contact_name,
+        'emergency_contact_number' => $business->emergency_contact_number,
+        'lessor_name' => $business->lessor_name,
+        'lessor_address' => $business->lessor_address,
+        'lessor_contact' => $business->lessor_contact,
+        'monthly_rental' => $business->monthly_rental,
         'address' => [
-            'line1' => '3 Scoped Street',
-            'barangay_id' => Barangay::first()->id,
+            'line1' => $address->line1,
+            'line2' => $address->line2,
+            'barangay_id' => $address->barangay_id,
+            'latitude' => $address->latitude,
+            'longitude' => $address->longitude,
+            'postal_code' => $address->postal_code,
+            'telephone' => $address->telephone,
+            'mobile_number' => $address->mobile_number,
+            'email' => $address->email,
+            'website' => $address->website,
         ],
-        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 150000]],
-    ], $overrides);
+        'lines' => $business->lines->map(fn ($l) => [
+            'psic_code_id' => $l->psic_code_id,
+            'capitalization' => $l->capitalization,
+            'line_of_business' => $l->line_of_business,
+            'products_services' => $l->products_services,
+        ])->all(),
+    ];
+    if ($owner !== null) {
+        $payload['owner'] = $owner->only(['surname', 'given_name', 'middle_name', 'suffix', 'gender']);
+    }
+
+    return array_replace_recursive($payload, $overrides);
 }
 
-it('lets a reviewing officer correct a field on a filing they hold', function () {
+it('serves the three groups from the one class the API enforces', function () {
+    authAs('sanitary@biztrack.local');
+
+    test()->getJson('/api/v1/reference/officer-edit-rules')
+        ->assertOk()
+        ->assertJsonPath('data.business.office', 'BPLO')
+        ->assertJsonPath('data.business.clerical', OfficerEditRules::BUSINESS_CLERICAL)
+        ->assertJsonPath('data.sheets.OCCUPANCY.clerical', OfficerEditRules::SHEET_CLERICAL['OCCUPANCY'])
+        ->assertJsonPath('data.sheets.ZONING.office_use', OfficerEditRules::SHEET_OFFICE_USE);
+
+    // Every 422 the groups produce is one short line (client: under ~50 characters).
+    foreach ([OfficerEditRules::LOCKED_MESSAGE, OfficerEditRules::REASON_MESSAGE, OfficerEditRules::NOT_YOUR_FORM_MESSAGE] as $message) {
+        expect(mb_strlen($message))->toBeLessThan(50);
+    }
+});
+
+it('lets BPLO fix a clerical slip with a reason, audits it and tells the owner', function () {
     $app = filingForOfficerEdit('Officer Edit Co');
+    $before = $app->business->name;
 
-    $sanitary = authAs('sanitary@biztrack.local');
-    test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'name' => 'Corrected Trading Name',
-        ]))
-        ->assertOk();
+    authAs('bplo@biztrack.local');
+    $changed = test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'name' => 'Corrected Trading Name',
+        'address' => ['email' => 'shop@example.com'],
+        'reason' => 'Misspelt on the form.',
+    ]))
+        ->assertOk()
+        ->json('meta.changed');
 
-    expect($app->fresh()->business->name)->toBe('Corrected Trading Name');
+    expect($changed)->toEqualCanonicalizing(['name', 'address.email'])
+        ->and($app->fresh()->business->name)->toBe('Corrected Trading Name');
+
+    $entry = AuditLog::where('action', 'application.fields_corrected_by_officer')->latest('id')->first();
+    expect($entry->changes['reason'])->toBe('Misspelt on the form.')
+        ->and($entry->changes['department'])->toBe('BPLO')
+        ->and($entry->changes['officer_id'])->toBe(User::where('email', 'bplo@biztrack.local')->value('id'))
+        ->and($entry->changes['changed']['name'])->toBe(['from' => $before, 'to' => 'Corrected Trading Name']);
+
+    $notice = AppNotification::where('user_id', $app->applicant_user_id)->latest('id')->first();
+    expect($notice->title)->toBe('BPLO corrected your filing')
+        ->and($notice->body)->toContain('business name and e-mail address')
+        ->and($notice->body)->toContain('Misspelt on the form.');
+});
+
+it('refuses a clerical fix that gives no reason, and keeps the old value', function () {
+    $app = filingForOfficerEdit('Officer Edit Reason Co');
+
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'trade_name' => 'Fixed Trade Name',
+        'reason' => '   ',
+    ]))
+        ->assertStatus(422)
+        ->assertJsonPath('message', OfficerEditRules::REASON_MESSAGE);
+
+    expect($app->fresh()->business->trade_name)->not->toBe('Fixed Trade Name')
+        ->and(AuditLog::where('action', 'application.fields_corrected_by_officer')->count())->toBe(0);
+});
+
+it('refuses a locked declaration even with a reason, and rolls the whole save back', function () {
+    $app = filingForOfficerEdit('Officer Edit Locked Co');
+    $tin = $app->business->tin;
+    $name = $app->business->name;
+
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'tin' => '987-654-321-000',
+        // A clerical change in the same request must not land on its own.
+        'name' => 'Should Not Land',
+        'reason' => 'Applicant asked.',
+    ]))
+        ->assertStatus(422)
+        ->assertJsonPath('message', OfficerEditRules::LOCKED_MESSAGE)
+        ->assertJsonValidationErrors(['fields.tin']);
+
+    $business = $app->fresh()->business;
+    expect($business->tin)->toBe($tin)
+        ->and($business->name)->toBe($name)
+        ->and(AppNotification::where('title', 'BPLO corrected your filing')->count())->toBe(0);
+});
+
+it('locks the owner’s name, the form of organization and the line of business', function () {
+    $app = filingForOfficerEdit('Officer Edit Owner Row Co');
+    authAs('bplo@biztrack.local');
+
+    foreach ([
+        ['owner' => ['surname' => 'Reyes', 'given_name' => 'Corazon']],
+        ['registration_type' => 'corporation'],
+        ['lines' => [['products_services' => 'Something else entirely']]],
+        ['is_rented' => true],
+        ['capital_investment' => 999999],
+    ] as $change) {
+        test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, $change + ['reason' => 'Trying.']))
+            ->assertStatus(422)
+            ->assertJsonPath('message', OfficerEditRules::LOCKED_MESSAGE);
+    }
+});
+
+it('refuses a clearance office, whose sheet only carries BPLO’s form', function () {
+    $app = filingForOfficerEdit('Officer Edit Clearance Co');
+
+    authAs('sanitary@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'name' => 'Not Theirs',
+        'reason' => 'Typo.',
+    ]))
+        ->assertForbidden()
+        ->assertJsonPath('message', OfficerEditRules::NOT_YOUR_FORM_MESSAGE);
+
+    expect($app->fresh()->business->name)->not->toBe('Not Theirs');
 });
 
 it('applies the applicant’s own validation, not a second copy of it', function () {
-    /*
-     * The client's instruction was that these fields carry the rules of their
-     * counterparts on the form. The endpoint calls `validateBusiness()` to
-     * mean it — so a TIN the form would refuse is refused here, and will stay
-     * refused when that rule next changes.
-     */
     $app = filingForOfficerEdit('Officer Edit Rules Co');
 
-    $sanitary = authAs('sanitary@biztrack.local');
-    test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'tin' => 'not-a-tin',
-        ]))
-        ->assertStatus(422);
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'address' => ['email' => 'not-an-email'],
+        'reason' => 'Typo.',
+    ]))->assertStatus(422);
 
-    /* And a required field cannot be emptied. */
-    test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'name' => '',
-        ]))
-        ->assertStatus(422);
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'name' => '',
+        'reason' => 'Typo.',
+    ]))->assertStatus(422);
 });
 
-it('records every changed field against the officer who changed it', function () {
-    $app = filingForOfficerEdit('Officer Edit Audit Co');
-    $before = $app->business->name;
-
-    $sanitary = authAs('sanitary@biztrack.local');
-    $changed = test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'name' => 'Audited Name',
-        ]))
-        ->assertOk()
-        ->json('meta.changed');
-
-    /*
-     * The response says what moved. A change nobody can trace to a person is
-     * what makes this endpoint dangerous, and naming them is the answer.
-     */
-    expect($changed)->toContain('name')
-        ->and($before)->not->toBe('Audited Name');
-});
-
-it('reports nothing changed when nothing did', function () {
-    /*
-     * Saving an untouched form is an ordinary press — the officer opened Edit,
-     * looked, and saved. It must not read as a correction on the record.
-     */
+it('reports nothing changed when nothing did, and asks no reason for it', function () {
     $app = filingForOfficerEdit('Officer Edit Noop Co');
 
-    $sanitary = authAs('sanitary@biztrack.local');
-    /* Seed the watched columns first, so the second call changes nothing. */
-    test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app))
-        ->assertOk();
-
-    $again = test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app))
+    authAs('bplo@biztrack.local');
+    $changed = test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app))
         ->assertOk()
         ->json('meta.changed');
 
-    expect($again)->toBe([]);
+    expect($changed)->toBe([]);
 });
 
-it('records a change to the named owner, who lives on another table', function () {
+it('keeps the map pin when the street is corrected', function () {
     /*
-     * The audit watched the twelve columns on `businesses` and nothing else,
-     * which was true to the screen when it was written — the sheet offered no
-     * control for anything else. It offers one for all five of the owner's
-     * name fields now, and an officer who can change WHO OWNS a business with
-     * nothing on the record is the exact failure the entry exists to prevent.
+     * `syncAddressAndLines` defaults latitude and longitude to null when the
+     * payload omits them; the page restates them, and the lock would now
+     * refuse a request that moved the pin rather than let it be erased.
      */
-    $app = filingForOfficerEdit('Officer Edit Owner Row Co');
+    $app = filingForOfficerEdit('Officer Edit Street Co');
+    $app->business->address->update(['latitude' => 14.6600, 'longitude' => 120.9600]);
 
-    $sanitary = authAs('sanitary@biztrack.local');
-    $changed = test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'owner' => [
-                'surname' => 'Reyes',
-                'given_name' => 'Corazon',
-                'middle_name' => null,
-                'suffix' => null,
-                'gender' => 'F',
-            ],
-        ]))
-        ->assertOk()
-        ->json('meta.changed');
-
-    expect($changed)->toContain('owner.surname')
-        ->and($app->fresh()->business->owners()->where('is_primary', true)->first()->surname)
-        ->toBe('Reyes');
-});
-
-it('records a change of barangay, and keeps the map pin', function () {
-    /*
-     * Two things at once, because they fail together.
-     *
-     * The barangay is the one answer on the sheet that is a choice from the
-     * city's own table, and it decides which zoning rules the filing is read
-     * against — so a change to it is the last one that should go unrecorded.
-     *
-     * And `syncAddressAndLines` defaults latitude and longitude to null when
-     * the payload omits them, which is right for the wizard (it sends the pin
-     * on every save) and lethal here: an officer fixing a typo in the street
-     * would silently erase the pin CPDD rules the locational clearance from.
-     * The client restates it; this case is what notices if that ever stops.
-     */
-    $app = filingForOfficerEdit('Officer Edit Barangay Co');
-    $address = $app->business->address;
-    $address->update(['latitude' => 14.6600, 'longitude' => 120.9600]);
-
-    /*
-     * The barangay the pin actually sits in, not just any other one. Since
-     * 1 October 2026 the API refuses a pin outside the barangay the business
-     * names (MalabonGeo::pinProblem), so moving the business to an arbitrary
-     * barangay with the pin left in Tonsuya is refused before anything is
-     * recorded. Moving it to the pin's own barangay is the correction an
-     * officer would actually make, and it still changes the barangay.
-     */
-    $pinBarangay = MalabonGeo::barangayContaining(14.6600, 120.9600);
-    $elsewhere = Barangay::where('name', $pinBarangay)->firstOrFail();
-    if ($elsewhere->id === $address->barangay_id) {
-        $address->update(['barangay_id' => Barangay::where('id', '!=', $elsewhere->id)->value('id')]);
-    }
-
-    $sanitary = authAs('sanitary@biztrack.local');
-    $changed = test()->withHeaders($sanitary)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'address' => [
-                'line1' => '3 Scoped Street',
-                'barangay_id' => $elsewhere->id,
-                'latitude' => 14.6600,
-                'longitude' => 120.9600,
-            ],
-        ]))
-        ->assertOk()
-        ->json('meta.changed');
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'address' => ['street' => 'Rizal Avenue', 'house_bldg_no' => '12'],
+        'reason' => 'Street misspelt.',
+    ]))->assertOk();
 
     $fresh = $app->fresh()->business->address;
-
-    expect($changed)->toContain('address.barangay_id')
-        ->and($fresh->barangay_id)->toBe($elsewhere->id)
+    expect($fresh->street)->toBe('Rizal Avenue')
         ->and((float) $fresh->latitude)->toBe(14.66);
+
+    // And moving the pin is a locked change, not a silent one.
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'address' => ['latitude' => 14.67],
+        'reason' => 'Moving it.',
+    ]))->assertStatus(422);
 });
-it('refuses an office the filing was never routed to', function () {
-    /*
-     * The boundary `ApplicationVisibility` exists to hold. A filing carrying
-     * BUSINESS and SANITARY is CHO's and BPLO's; the fire officer can neither
-     * read it nor, now, write it.
-     */
-    $app = filingForOfficerEdit('Officer Edit Boundary Co');
 
-    $fire = authAs('fire@biztrack.local');
-    test()->withHeaders($fire)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'name' => 'Not Theirs To Change',
-        ]))
-        ->assertForbidden();
+it('locks the barangay, which the zoning decision turns on', function () {
+    $app = filingForOfficerEdit('Officer Edit Barangay Co');
+    $other = Barangay::where('id', '!=', $app->business->address->barangay_id)->firstOrFail();
 
-    expect($app->fresh()->business->name)->not->toBe('Not Theirs To Change');
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'address' => ['barangay_id' => $other->id],
+        'reason' => 'Wrong barangay.',
+    ]))->assertStatus(422);
+
+    expect($app->fresh()->business->address->barangay_id)->not->toBe($other->id);
 });
 
 it('refuses the applicant, who has their own door', function () {
-    /*
-     * An owner edits through the wizard, which is Draft-or-Returned only. This
-     * endpoint is the OFFICE's, and letting the owner through it would be a
-     * way round that guard rather than a convenience.
-     */
     $app = filingForOfficerEdit('Officer Edit Owner Co');
 
-    $owner = authAs('owner@biztrack.local');
-    test()->withHeaders($owner)
-        ->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
-            'name' => 'Owner Route',
-        ]))
-        ->assertForbidden();
+    authAs('owner@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'name' => 'Owner Route',
+        'reason' => 'Mine.',
+    ]))->assertForbidden();
 });
 
-/*
- * ── Not after a decision, and only by the officer holding the case ────────
- *
- * Ken, 5 October 2026. A decided filing is a record: rewriting the business
- * behind a Rejected or Completed filing changed the register without an
- * amendment filing (or its fee). And every other act on a review — approve,
- * return, checks, the category — is the holder's, so an officer the case is
- * not with could change the applicant's answers while being refused Approve.
- */
-it('refuses an edit once the filing is rejected or completed', function () {
+it('refuses an edit once the filing is rejected or cancelled', function () {
     $app = filingForOfficerEdit('Officer Edit Decided Co');
 
     authAs('bplo@biztrack.local');
     test()->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Fake registration.'])->assertOk();
-
-    authAs('sanitary@biztrack.local');
-    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'After Rejection']))
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'After Rejection', 'reason' => 'Typo.']))
         ->assertStatus(422)
         ->assertJsonPath('message', "This filing has been decided and can't be edited.");
 
-    $completed = filingForOfficerEdit('Officer Edit Completed Co');
-    Application::whereKey($completed->id)->update(['status' => 'approved', 'decided_at' => now()]);
-
+    $cancelled = filingForOfficerEdit('Officer Edit Cancelled Co');
+    Application::whereKey($cancelled->id)->update(['status' => 'cancelled']);
     authAs('bplo@biztrack.local');
-    test()->putJson("/api/v1/applications/{$completed->id}/fields", officerFieldsPayload($completed, ['name' => 'After Completion']))
-        ->assertStatus(422)
-        ->assertJsonPath('message', "This filing has been decided and can't be edited.");
+    test()->putJson("/api/v1/applications/{$cancelled->id}/fields", officerFieldsPayload($cancelled, ['name' => 'After Cancelling', 'reason' => 'Typo.']))
+        ->assertStatus(422);
 
     expect($app->fresh()->business->name)->not->toBe('After Rejection')
-        ->and($completed->fresh()->business->name)->not->toBe('After Completion');
+        ->and($cancelled->fresh()->business->name)->not->toBe('After Cancelling');
 });
 
-it('refuses an officer of the office who does not hold the case', function () {
+it('refuses a BPLO officer who does not hold the case', function () {
     $app = filingForOfficerEdit('Officer Edit Holder Co');
-    $sanitary = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
-    $cho = ApplicationAssignment::where('application_id', $app->id)
-        ->where('department_id', $sanitary->department_id)->firstOrFail();
-
-    authAs('sanitary@biztrack.local');
-    test()->postJson("/api/v1/assignments/{$cho->id}/claim")->assertOk();
+    $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    ApplicationAssignment::where('application_id', $app->id)
+        ->where('department_id', Department::where('code', 'BPLO')->value('id'))
+        ->update(['officer_user_id' => $bplo->id]);
 
     $colleague = User::create([
-        'name' => 'Other Health Officer', 'first_name' => 'Other', 'last_name' => 'Officer', 'gender' => 'F',
-        'email' => 'other.health@biztrack.local', 'password' => 'biztrack1', 'mobile_number' => '09170000088',
-        'department_id' => $sanitary->department_id, 'is_active' => true, 'email_verified_at' => now(),
+        'name' => 'Other Bplo', 'first_name' => 'Other', 'last_name' => 'Bplo', 'gender' => 'F',
+        'email' => 'other.bplo@biztrack.local', 'password' => 'biztrack1', 'mobile_number' => '09170000089',
+        'department_id' => $bplo->department_id, 'is_active' => true, 'email_verified_at' => now(),
     ]);
-    $colleague->roles()->sync($sanitary->roles()->pluck('roles.id'));
+    $colleague->roles()->sync($bplo->roles()->pluck('roles.id'));
 
-    authAs('other.health@biztrack.local');
-    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'Not The Holder']))
+    authAs('other.bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'Not The Holder', 'reason' => 'Typo.']))
         ->assertForbidden()
         ->assertJsonPath('message', 'Only the officer handling this filing can edit it.');
 
-    // The holder still can.
-    authAs('sanitary@biztrack.local');
-    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'By The Holder']))
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'By The Holder', 'reason' => 'Typo.']))
         ->assertOk();
     expect($app->fresh()->business->name)->toBe('By The Holder');
-});
-
-it('refuses an edit once the owner has cancelled the filing', function () {
-    // Read-only like a decided filing [Ken, 5 October 2026].
-    $app = Application::findOrFail(scopedAssignmentFiling('Officer Edit Cancelled Co'));
-    Application::whereKey($app->id)->update(['status' => 'cancelled']);
-
-    authAs('sanitary@biztrack.local');
-    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'After Cancelling']))
-        ->assertStatus(422)
-        ->assertJsonPath('message', "This filing has been decided and can't be edited.");
-
-    expect($app->fresh()->business->name)->not->toBe('After Cancelling');
 });

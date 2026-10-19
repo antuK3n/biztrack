@@ -9,7 +9,6 @@ import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { formatDate } from '../../lib/format'
 import { BARANGAY_POLYGONS, MALABON_OUTLINE } from '../../lib/malabonGeo.data'
-import { BARANGAY_TOLERANCE_M, metresFromBarangay, withinMalabon } from '../../lib/malabonGeo'
 import { ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard } from '../../components/ui/Proto'
 
@@ -74,37 +73,13 @@ import { FilterPills, PageTitle, ProtoCard } from '../../components/ui/Proto'
  * lapsed if the block is one circle reading "148") but a bounding-box parameter
  * on the endpoint, so the browser only ever holds what the viewport covers.
  *
- * ── The pins do not agree with the barangays, and that is the data ───────────
+ * ── No pin check ─────────────────────────────────────────────────────────────
  *
- * Running the shipped polygon set over all 742 pins:
- *
- *    70  sit inside their own declared barangay, or within the 150 m tolerance
- *   672  do not
- *   171  fall outside the city border altogether
- *
- * So roughly nine pins in ten disagree with the barangay their owner picked
- * from the dropdown. This predates the pin/barangay check in the wizard, which
- * now refuses a mismatch at entry — these rows were written before it existed.
- *
- * Three things could be done with that and only one of them is useful:
- *
- *   FILTER them out — no. It would hide 90% of the register behind a
- *   correctness rule the register never had to meet, and a map that silently
- *   omits most of the city is worse than a table.
- *
- *   FLAG each one — no, and this is the interesting one. A flag is only
- *   information when it marks a minority. Painting 672 of 742 markers as
- *   suspect makes "suspect" the default state of the map, which tells a reader
- *   nothing and buries the permit state the screen exists to show underneath a
- *   second warning colour.
- *
- *   SHOW them, state the number once, and let someone ASK for the subset — yes.
- *   That is what the Pin check control does. The default view is every pin,
- *   undecorated; the note under the map states how many agree; and a clerk
- *   working the backlog can narrow to the pins outside the city in one click.
- *
- * Which means some markers on this map are visibly in the wrong barangay, and
- * 171 are not in Malabon at all. That is a true picture of what is on file.
+ * A "Pin check" filter (pin in its barangay / a different one / outside
+ * Malabon) and a note under the map counting the mismatches were removed on
+ * 19 October 2026. The apply wizard refuses a pin outside its barangay, so a
+ * mismatch only exists on records that skipped that rule; client: *"I don't
+ * think this is necessary if all data were correct in the first place."*
  */
 
 /** One business, as the map endpoint returns it. */
@@ -352,39 +327,6 @@ function ContainerName({ label }: { label: string }) {
   return null
 }
 
-/** Whether a pin agrees with the barangay its owner declared. */
-type PinCheck = 'all' | 'agrees' | 'disagrees' | 'off-city'
-
-const PIN_CHECKS: { value: PinCheck; label: string }[] = [
-  { value: 'all', label: 'All pins' },
-  { value: 'agrees', label: 'Pin matches its barangay' },
-  { value: 'disagrees', label: 'Pin in a different barangay' },
-  { value: 'off-city', label: 'Pin outside Malabon' },
-]
-
-/*
- * The verdict for one pin, using the same polygons and the same 150 m tolerance
- * the apply wizard refuses a new pin against.
- *
- * `checkPin` in malabonGeo.ts returns exactly this judgement but collapses
- * "outside the city" and "wrong barangay" into one verdict union; here they are
- * separate filters, because they are separate problems. A pin in the wrong
- * barangay is a data-entry slip worth correcting at leisure; a pin in Caloocan
- * is a business whose location this system does not actually know.
- *
- * `metresFromBarangay` returns null when the declared barangay is not in the
- * polygon set. That counts as agreeing, for the reason checkPin gives: a
- * bookkeeping gap between a seeded table and a shipped asset is OURS, and
- * reporting it as the business's problem would be the wrong failure.
- */
-function pinVerdict(row: MapBusiness): Exclude<PinCheck, 'all'> {
-  if (!withinMalabon(row.latitude, row.longitude)) return 'off-city'
-  if (row.barangay === null) return 'agrees'
-  const metres = metresFromBarangay(row.latitude, row.longitude, row.barangay)
-  if (metres === null || metres <= BARANGAY_TOLERANCE_M) return 'agrees'
-  return 'disagrees'
-}
-
 /** The value of the barangay select that means "every barangay". */
 const ALL_BARANGAYS = ''
 
@@ -406,7 +348,6 @@ export function BusinessMapPage({
   )
 
   const [state, setState] = useState<PermitState | 'all'>('all')
-  const [pinCheck, setPinCheck] = useState<PinCheck>('all')
   const [barangay, setBarangay] = useState(ALL_BARANGAYS)
   const [viewError, setViewError] = useState<string | null>(null)
 
@@ -434,27 +375,6 @@ export function BusinessMapPage({
   const meta = data?.meta ?? null
 
   /*
-   * The pin verdict for all 742 rows, computed once and reused by both the
-   * filter and its counts.
-   *
-   * It is 742 point-in-polygon tests against 21 barangays plus a
-   * distance-to-ring pass for the ones that miss — about 15 ms in the browser,
-   * and it must not run on every keystroke of the filter pills. Keyed on `rows`
-   * so it recomputes only when the fetch returns.
-   */
-  const verdicts = useMemo(() => {
-    const map = new Map<number, Exclude<PinCheck, 'all'>>()
-    for (const row of rows) map.set(row.id, pinVerdict(row))
-    return map
-  }, [rows])
-
-  const pinCounts = useMemo(() => {
-    const counts = { agrees: 0, disagrees: 0, 'off-city': 0 }
-    for (const verdict of verdicts.values()) counts[verdict] += 1
-    return counts
-  }, [verdicts])
-
-  /*
    * The barangays to offer, from the rows themselves — the barangay each owner
    * DECLARED. Read off the data rather than the polygon set, so a barangay the
    * register names and the shipped asset spells differently still appears, and
@@ -473,10 +393,9 @@ export function BusinessMapPage({
       rows.filter(
         (row) =>
           (state === 'all' || row.state === state) &&
-          (barangay === ALL_BARANGAYS || row.barangay === barangay) &&
-          (pinCheck === 'all' || verdicts.get(row.id) === pinCheck),
+          (barangay === ALL_BARANGAYS || row.barangay === barangay),
       ),
-    [rows, state, barangay, pinCheck, verdicts],
+    [rows, state, barangay],
   )
 
   if (loading) return <SkeletonList rows={6} />
@@ -537,8 +456,7 @@ export function BusinessMapPage({
           * are 21 of them and pills would wrap into a wall.
           *
           * It filters on the barangay the owner DECLARED, the one the popup
-          * names. The Pin check beside it is what finds the pins that sit
-          * somewhere else.
+          * names.
           */}
         <label className="flex items-center gap-2 text-sm text-ink-secondary">
           <span>Barangay</span>
@@ -556,28 +474,6 @@ export function BusinessMapPage({
           </select>
         </label>
 
-        {/*
-          * A select rather than a second row of pills. The permit state is the
-          * question this screen answers and owns the pills; the pin check is a
-          * data-quality lens over it, and giving them the same control would
-          * say they matter equally.
-          */}
-        <label className="flex items-center gap-2 text-sm text-ink-secondary">
-          <span>Pin check</span>
-          <select
-            value={pinCheck}
-            onChange={(e) => setPinCheck(e.target.value as PinCheck)}
-            className="rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-sm text-ink"
-          >
-            {PIN_CHECKS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.value === 'all'
-                  ? `${option.label} ${meta.plotted}`
-                  : `${option.label} ${pinCounts[option.value]}`}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       {viewError && (
@@ -591,7 +487,7 @@ export function BusinessMapPage({
         * §6.4) — with three filters set, "12 markers" says nothing about how
         * many were narrowed away.
         */}
-      {(state !== 'all' || barangay !== ALL_BARANGAYS || pinCheck !== 'all') && (
+      {(state !== 'all' || barangay !== ALL_BARANGAYS) && (
         <p role="status" className="mt-3 text-sm text-ink-secondary">
           Showing {visible.length} of the {meta.plotted} businesses on the map
           {barangay !== ALL_BARANGAYS && ` in ${barangay}`}.
@@ -719,8 +615,6 @@ export function BusinessMapPage({
                   </span>
                   <span className="mt-1 block text-sm text-ink-muted">
                     Barangay {row.barangay ?? '—'}
-                    {verdicts.get(row.id) === 'off-city' && ' · pin is outside Malabon'}
-                    {verdicts.get(row.id) === 'disagrees' && ' · pin is in a different barangay'}
                   </span>
                   {/*
                     * The way to the details. Two, because they answer two
@@ -817,22 +711,6 @@ export function BusinessMapPage({
         </table>
       </ProtoCard>
 
-      {/*
-        * The pin/barangay shortfall, stated once, in plain words, with both
-        * numbers. See the long note at the top of this file for why it is a
-        * sentence here rather than a warning painted on 672 markers.
-        *
-        * Deliberately not styled as an alert: no red, no icon, no tinted panel.
-        * It is a fact about historical data, not something that just went
-        * wrong, and dressing it as an error would put a permanent alarm on a
-        * screen somebody has to look at every day.
-        */}
-      <p className="mt-4 max-w-3xl text-sm text-ink-secondary">
-        {pinCounts.agrees} of the {meta.plotted} pins sit in the barangay their owner declared, and{' '}
-        {pinCounts['off-city']} fall outside Malabon altogether. Filings made before the apply
-        wizard began checking the pin against the barangay were never held to it, so those markers
-        are drawn where the register says they are. Use Pin check above to work through them.
-      </p>
     </div>
   )
 }

@@ -9,6 +9,7 @@ use App\Models\DocumentType;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Support\AmendableFields;
+use App\Support\OfficerEditRules;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -192,5 +193,16 @@ class ReferenceController extends Controller
         ]);
 
         return response()->json(['data' => $data]);
+    }
+
+    /**
+     * Which answers an office may correct in Edit mode, and how (OfficerEditRules).
+     *
+     * Served rather than copied into the browser, so the review page locks
+     * exactly what the officer endpoints refuse. Same for every reader.
+     */
+    public function officerEditRules(): JsonResponse
+    {
+        return response()->json(['data' => OfficerEditRules::toArray()]);
     }
 }

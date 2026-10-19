@@ -6,12 +6,14 @@ use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
+use App\Models\AppNotification;
 use App\Models\AuditLog;
 use App\Models\Business;
 use App\Models\Department;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\OfficerEditRules;
 use App\Support\SanitaryPrefill;
 use App\Support\SheetRequirements;
 
@@ -274,17 +276,66 @@ it('does not let ANOTHER office overwrite the applicant answers', function () {
     expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001');
 });
 
-it('lets the office that issues the permit correct the applicant’s answers, and records each change', function () {
+it('lets the issuing office fix a clerical answer on its own sheet, with a reason, audited and told to the owner', function () {
     /*
-     * Client, 4 October 2026: *"edit mode for the admin side still does not
-     * work. I can't edit fields. PLEASE FIX FOR ALL ADMINS/OFFICES."* Edit
-     * mode had only ever opened the For Office Use fields; the decision taken
-     * was that an office may correct the one sheet it issues the permit for.
-     *
-     * Two things are pinned. The write lands — and the audit row names the
-     * key, what it said and what it says now, so a sheet an office changed
-     * reads as one an office changed. `department_id` is on the row because
-     * the reader of an audit log asks "which office", not "which user id".
+     * Client, 4 October 2026: *"I can't edit fields."* — so the office that
+     * issues a permit was let correct its own sheet. Client, 19 October 2026:
+     * *"have restrictions on what certain fields are allowed to be edited only
+     * by the admin"* — so that correction is now group 2 of
+     * App\Support\OfficerEditRules: a clerical line the sheet asks (OBO's Tel.
+     * No. here), a reason, the reason in the audit row beside the before and
+     * after, and the owner told. `department_id` is on the row because the
+     * reader of an audit log asks "which office", not "which user id".
+     */
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-456'],
+    ]);
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'OBO')->value('id'),
+        'status' => 'pending',
+        'assigned_at' => now(),
+    ]);
+    $obo = authAs('obo@biztrack.local');
+
+    // No reason: refused, nothing written.
+    $this->withHeaders($obo)
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-457'],
+        ])
+        ->assertStatus(422)
+        ->assertJsonPath('message', OfficerEditRules::REASON_MESSAGE);
+    expect(savedForm($app, 'OCCUPANCY')['owner_tel'])->toBe('8123-456');
+
+    $this->withHeaders($obo)
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-457'],
+            'reason' => 'Last digit mistyped.',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.owner_tel', '8123-457');
+
+    $entry = AuditLog::where('action', 'office_form.corrected_by_office')->latest('id')->first();
+    expect($entry)->not->toBeNull()
+        ->and($entry->changes['department_id'])->toBe(User::where('email', 'obo@biztrack.local')->value('department_id'))
+        ->and($entry->changes['reason'])->toBe('Last digit mistyped.')
+        ->and($entry->changes['fields'])->toBe([
+            'owner_tel' => ['from' => '8123-456', 'to' => '8123-457'],
+        ]);
+
+    $notice = AppNotification::where('user_id', $app->applicant_user_id)->latest('id')->first();
+    expect($notice->title)->toBe('OBO corrected your filing')
+        ->and($notice->body)->toContain('telephone');
+});
+
+it('refuses the issuing office a declared answer on its own sheet, and leaves its dates free', function () {
+    /*
+     * Group 3: the building permit number is the applicant's declaration. The
+     * office returns the filing to have it changed; a reason does not unlock
+     * it. Group 1, the issuance dates, stays the office's to fill, no reason.
      */
     $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
     ApplicationOfficeForm::create([
@@ -292,33 +343,57 @@ it('lets the office that issues the permit correct the applicant’s answers, an
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
         'form_data' => ['building_permit_no' => 'BP-001', 'building_units' => '3'],
     ]);
-    /*
-     * Routed, as `startClearance` routes it: visibility asks whether the
-     * office holds a review on the filing before the write rule is ever
-     * reached, and an office with no assignment is a stranger to it.
-     */
     ApplicationAssignment::create([
         'application_id' => $app->id,
         'department_id' => Department::where('code', 'OBO')->value('id'),
         'status' => 'pending',
         'assigned_at' => now(),
     ]);
+    $obo = authAs('obo@biztrack.local');
 
-    $this->withHeaders(authAs('obo@biztrack.local'))
+    $this->withHeaders($obo)
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
             'form_data' => ['building_permit_no' => 'BP-001-A', 'building_units' => '3'],
+            'reason' => 'Applicant phoned.',
         ])
-        ->assertOk()
-        ->assertJsonPath('data.form_data.building_permit_no', 'BP-001-A');
+        ->assertStatus(422)
+        ->assertJsonPath('message', OfficerEditRules::LOCKED_MESSAGE)
+        ->assertJsonValidationErrors(['form_data.building_permit_no']);
 
-    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001-A');
+    $this->withHeaders($obo)
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001', 'building_units' => '3', 'fsec_date' => '2026-01-06'],
+        ])
+        ->assertOk();
 
-    $entry = AuditLog::where('action', 'office_form.corrected_by_office')->latest('id')->first();
-    expect($entry)->not->toBeNull()
-        ->and($entry->changes['department_id'])->toBe(User::where('email', 'obo@biztrack.local')->value('department_id'))
-        ->and($entry->changes['fields'])->toBe([
-            'building_permit_no' => ['from' => 'BP-001', 'to' => 'BP-001-A'],
+    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+        ->and(savedForm($app, 'OCCUPANCY')['fsec_date'])->toBe('2026-01-06');
+});
+
+it('refuses one clearance office another office’s sheet', function () {
+    $app = officeFormApp(['OCCUPANCY', 'SANITARY'], ApplicationType::New, ApplicationStatus::Approved, now()->subDay());
+    ApplicationOfficeForm::create([
+        'application_id' => $app->id,
+        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
+        'form_data' => ['owner_tel' => '8123-456'],
+    ]);
+    foreach (['OBO', 'CHO'] as $office) {
+        ApplicationAssignment::create([
+            'application_id' => $app->id,
+            'department_id' => Department::where('code', $office)->value('id'),
+            'status' => 'pending',
+            'assigned_at' => now(),
         ]);
+    }
+
+    $this->withHeaders(authAs('sanitary@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['owner_tel' => '0000-000'],
+            'reason' => 'Typo.',
+        ])
+        ->assertForbidden();
+
+    expect(savedForm($app, 'OCCUPANCY')['owner_tel'])->toBe('8123-456');
 });
 
 /** An OBO filing with a sheet on it and OBO's review routed, held by `$holder`. */
@@ -328,7 +403,7 @@ function oboSheetHeldBy(?User $holder): Application
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
-        'form_data' => ['building_permit_no' => 'BP-001'],
+        'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-456'],
     ]);
     ApplicationAssignment::create([
         'application_id' => $app->id,
@@ -363,7 +438,8 @@ it('refuses the correction to an officer of the office who does not hold the cas
 
     $this->withHeaders($obo)
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
-            'form_data' => ['building_permit_no' => 'BP-001-A'],
+            'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-457'],
+            'reason' => 'Typo.',
         ])
         ->assertForbidden()
         ->assertJsonPath('message', 'This filing is with another officer. Only the Super Administrator can move it.');
@@ -374,7 +450,7 @@ it('refuses the correction to an officer of the office who does not hold the cas
         ])
         ->assertOk();
 
-    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+    expect(savedForm($app, 'OCCUPANCY')['owner_tel'])->toBe('8123-456')
         ->and(savedForm($app, 'OCCUPANCY')['fsec_date'])->toBe('2026-01-06');
 });
 
@@ -388,12 +464,13 @@ it('refuses the correction once the office has issued the permit', function () {
 
     $this->withHeaders(authAs('obo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
-            'form_data' => ['building_permit_no' => 'BP-001-A'],
+            'form_data' => ['building_permit_no' => 'BP-001', 'owner_tel' => '8123-457'],
+            'reason' => 'Typo.',
         ])
         ->assertStatus(422)
         ->assertJsonPath('message', 'This permit has been issued, so the answers on its sheet can no longer be changed.');
 
-    expect(savedForm($app, 'OCCUPANCY')['building_permit_no'])->toBe('BP-001')
+    expect(savedForm($app, 'OCCUPANCY')['owner_tel'])->toBe('8123-456')
         ->and(AuditLog::where('action', 'office_form.corrected_by_office')->count())->toBe(0);
 });
 

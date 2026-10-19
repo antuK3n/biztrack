@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/ui/Proto'
+import { OPERATION_LABELS } from './formLabels'
 import type { ApplicationType, FeeProfile, FeeProfileLine } from '../../lib/types'
 
 /*
@@ -541,7 +542,7 @@ export function feeProfileIssues(
          * heading the step does not have. The occupancy branch below keeps
          * "Floor Area" — that is what the OBO sheet calls it.
          */
-        label: '1. Business Area (sq. m.)',
+        label: OPERATION_LABELS.floor_area_sqm,
         value: draft.floor_area_sqm,
         required: true,
         blankMessage: 'Enter the floor area of your premises in square metres.',
@@ -573,7 +574,7 @@ export function feeProfileIssues(
     if (derivedTotal !== undefined && derivedTotal > MAX_COUNT) {
       issues.push({
         key: 'male_employees',
-        label: '2. Total Number of Employees',
+        label: OPERATION_LABELS.employees,
         message: 'Enter a headcount below 100,000.',
       })
     }
@@ -595,11 +596,12 @@ export function feeProfileIssues(
      * The labels match the field labels word for word, and have to: this is
      * what Review prints under "still missing", so a summary naming "Female
      * Employees" beside a box headed "Number of Female Employees" sends the
-     * applicant looking for a field that is not there.
+     * applicant looking for a field that is not there. Both now read the one
+     * OPERATION_LABELS entry, so they cannot drift apart again.
      */
     for (const [key, label] of [
-      ['male_employees', '2. Number of Male Employees'],
-      ['female_employees', '2. Number of Female Employees'],
+      ['male_employees', OPERATION_LABELS.male_employees],
+      ['female_employees', OPERATION_LABELS.female_employees],
     ] as const) {
       push(
         numericIssue({
@@ -619,7 +621,7 @@ export function feeProfileIssues(
     push(
       numericIssue({
         key: 'employees_in_lgu',
-        label: '3. Number of Employees Residing in Malabon',
+        label: OPERATION_LABELS.employees_in_lgu,
         value: draft.employees_in_lgu,
         required: true,
         blankMessage: 'Enter how many of your employees live in Malabon. Enter 0 if none.',
@@ -640,7 +642,7 @@ export function feeProfileIssues(
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
-        label: '3. Number of Employees Residing in Malabon',
+        label: OPERATION_LABELS.employees_in_lgu,
         message: 'This can’t be more than your total number of employees.',
       })
     }
@@ -665,8 +667,8 @@ export function feeProfileIssues(
      * still fails — so nothing it caught is now let through.
      */
     for (const [key, label] of [
-      ['delivery_vehicles_motorized', 'Motorized Delivery Vehicles'],
-      ['delivery_vehicles_other', 'Other Delivery Vehicles'],
+      ['delivery_vehicles_motorized', OPERATION_LABELS.delivery_vehicles_motorized],
+      ['delivery_vehicles_other', OPERATION_LABELS.delivery_vehicles_other],
     ] as const) {
       push(
         numericIssue({
@@ -957,7 +959,7 @@ export function capitalInvestmentMissing(
     key: 'capital_investment',
     // Numbered to match the field, so the 'Still needed on this part'
     // summary names what the applicant can actually find on screen.
-    label: '6. Capital Investment',
+    label: OPERATION_LABELS.capital_investment,
     /*
      * Coerced, and not defensively — this took the whole wizard down.
      *
@@ -1802,18 +1804,19 @@ export function FeeProfileStep({
             at 48rem. In quarters item 2's three counts sit on the same column
             lines as item 4's two below them; every box fills its column.
 
-            `items-end` keeps a row's boxes level whatever its labels wrap to,
-            as in section A. The groups are framed the way section A frames
+            `field-grid` keeps a row level whatever its labels wrap to, as in
+            section A: labels start on one line, boxes sit on another (it was
+            `items-end`, which levelled only the boxes — 19 October 2026). The groups are framed the way section A frames
             items 15-17 — a border drawn out in the gutters, no fill — so the
             boxes inside stay on the section's column lines. `gap-y-7` rather
             than A's `gap-y-4` because the two frames sit one above the other
             here: each reaches 8px into the gap, so at 16px their borders met.
           */}
-          <div className="@container grid grid-cols-12 items-end gap-x-5 gap-y-7">
+          <div className="@container field-grid grid grid-cols-12 gap-x-5 gap-y-7">
             <NumberField
               className="col-span-12 @xl:col-span-6 @3xl:col-span-3"
               box="w-full"
-              label="1. Business Area (sq. m.)"
+              label={OPERATION_LABELS.floor_area_sqm}
               required
               kind="area"
               value={value.floor_area_sqm}
@@ -1835,8 +1838,16 @@ export function FeeProfileStep({
               carries the number. Inside it each box still says in full what it
               counts — "No. of Male Employees", not "Male" — because the client
               asked for "number of" before every kind of employee (checklist,
-              Apply for Permit 5); only the item number is not repeated.
-              Item 3 is its own box on the paper and stays its own field here.
+              Apply for Permit 5). Item 3 is its own box on the paper and stays
+              its own field here.
+
+              The boxes are lettered under the group's number — 2a and 2b, 4a
+              and 4b — since 19 October 2026: the still-needed line and Review
+              name boxes, not groups, and printed "2." twice. Client: "to avoid
+              repetition of numbers, you may put 2a, 2b, etc. instead. APPLY
+              that number scheming to the application form itself too." The
+              derived total stays unlettered; it is not asked. The words come
+              from OPERATION_LABELS (formLabels.ts), shared with those lists.
 
               A visible heading plus an sr-only <legend>, rather than a visible
               legend: a legend is laid out inside the fieldset's top border and
@@ -1851,7 +1862,7 @@ export function FeeProfileStep({
                 className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
               />
               <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
-                2. Total No. of Employees
+                {OPERATION_LABELS.employees}
               </p>
 
             {/*
@@ -1892,7 +1903,7 @@ export function FeeProfileStep({
                 />
                 <NumberField
                   box="w-full"
-                  label="No. of Male Employees"
+                  label={OPERATION_LABELS.male_employees}
                   required
                   kind="count"
                   value={value.male_employees}
@@ -1902,7 +1913,7 @@ export function FeeProfileStep({
                 />
                 <NumberField
                   box="w-full"
-                  label="No. of Female Employees"
+                  label={OPERATION_LABELS.female_employees}
                   required
                   kind="count"
                   value={value.female_employees}
@@ -1926,7 +1937,7 @@ export function FeeProfileStep({
             <NumberField
               className="col-span-12 @xl:col-span-6"
               box="w-full"
-              label="3. No. of Employees Residing within Malabon"
+              label={OPERATION_LABELS.employees_in_lgu}
               required
               kind="count"
               value={value.employees_in_lgu}
@@ -1967,14 +1978,14 @@ export function FeeProfileStep({
                 className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
               />
               <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
-                4. No. of Delivery Units
+                {OPERATION_LABELS.delivery_units}
                 <OptionalTag />
               </p>
               {/* Halves of six columns: in quarters, under item 2's male and female counts. */}
               <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-2">
                 <NumberField
                   box="w-full"
-                  label="No. of Motorized Delivery Units"
+                  label={OPERATION_LABELS.delivery_vehicles_motorized}
                   hint="truck, van, motor vehicle"
                   kind="count"
                   value={value.delivery_vehicles_motorized}
@@ -1985,7 +1996,7 @@ export function FeeProfileStep({
                 />
                 <NumberField
                   box="w-full"
-                  label="No. of Other Delivery Units"
+                  label={OPERATION_LABELS.delivery_vehicles_other}
                   hint="pedicab, cart"
                   kind="count"
                   value={value.delivery_vehicles_other}

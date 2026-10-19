@@ -143,6 +143,16 @@ class AssignmentResource extends JsonResource
                 // See the note on ApplicationResource's own `decided`.
                 'status_label' => $this->application->statusLabel(),
                 'decided' => $this->application->isDecided(),
+                /*
+                 * For the queue table's Due and Business columns. The applicant
+                 * is guarded like `business`: the claim/release responses
+                 * reload without it, and an unloaded relation means "not
+                 * sent", never a lazy query per row.
+                 */
+                'deadline_at' => optional($this->application->deadline_at)->toISOString(),
+                'applicant' => $this->application->relationLoaded('applicant') && $this->application->applicant ? [
+                    'name' => $this->application->applicant->name,
+                ] : null,
             ]),
         ];
     }

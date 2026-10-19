@@ -10,6 +10,7 @@ import {
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { RequestedChanges } from '../../components/RequestedChanges'
+import { ReturnHistory } from '../../components/ReturnHistory'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
@@ -1234,6 +1235,21 @@ export function ApplicationDetailPage() {
             onDone={reload}
           />
         )}
+        {/*
+          ── Every return, kept after it is complied (client, 19 October 2026) ──
+
+          The box above and the Remarks below are the CURRENT round and go
+          when it is answered. This keeps each round — what was asked, by
+          which office, and what changed — so a complied return still reads
+          as asked and answered rather than vanishing. Renders nothing on a
+          filing that was never returned.
+        */}
+        <ReturnHistory
+          applicationId={app.id}
+          audience="owner"
+          refreshKey={`${app.status}|${app.permit_types.map((p) => p.status).join(',')}`}
+          className="mt-8"
+        />
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (
           <section className="mt-8">

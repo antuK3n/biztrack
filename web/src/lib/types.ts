@@ -989,6 +989,13 @@ export interface Assignment {
     decided?: boolean
     status_label?: string
     status: ApplicationStatus
+    /**
+     * The RA 11032 deadline, for the queue table's Due column. Optional: a
+     * payload from before 19 October 2026 does not carry it.
+     */
+    deadline_at?: string | null
+    /** Who filed it; null when not loaded or the account is gone. */
+    applicant?: { name: string } | null
   }
   /**
    * This office's own permit on the filing — the second state machine, as seen

@@ -13,10 +13,12 @@ use App\Models\Business;
 use App\Models\BusinessOwner;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Services\NotificationService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\MalabonGeo;
 use App\Support\Numbering;
+use App\Support\OfficerEditRules;
 use App\Support\RenewablePermit;
 use App\Support\Tin;
 use Closure;
@@ -234,6 +236,10 @@ class BusinessController extends Controller
      * officer the case is not with, who was refused Approve on the same
      * filing while being let rewrite its answers [Ken, 5 October 2026].
      *
+     * Since 19 October 2026 only BPLO may use it, and only for the clerical
+     * group of `OfficerEditRules`, with a reason; a declared answer is
+     * refused outright and the owner is told of every correction.
+     *
      * Every changed field is written to `application_corrections` with the
      * officer named. A citizen's declared answer changed by somebody else
      * has to say so on the record, or the declaration they signed stops
@@ -278,16 +284,35 @@ class BusinessController extends Controller
             'Only the officer handling this filing can edit it.'
         );
 
+        /*
+         * ── The business permit form is BPLO's (OfficerEditRules) ───────────
+         *
+         * Client, 19 October 2026: some fields may be "edited only by the
+         * admin". This endpoint writes the business permit form, which BPLO
+         * owns, so a clearance office reading it — whose own sheet carries
+         * these answers over — may not correct it here. It corrects its own
+         * sheet through OfficeFormController instead.
+         */
+        abort_unless(
+            $user->department?->code === OfficerEditRules::BUSINESS_FORM_OFFICE,
+            403,
+            OfficerEditRules::NOT_YOUR_FORM_MESSAGE
+        );
+
         $business = $application->business;
         abort_unless($business !== null, 422, 'This filing has no business on the register.');
 
         $data = $this->validateBusiness($request, $business);
+        $reason = trim((string) ($request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ])['reason'] ?? ''));
 
         /*
-         * Read BEFORE the write, so the audit can say what each field was.
-         * Only the columns this endpoint sets; the address and the lines are
-         * recorded as a fact of change rather than value-by-value, because a
-         * line table diffed into an audit line is unreadable.
+         * Read BEFORE the write, so the audit can say what each field was —
+         * and so the lock below can see every answer this request moved.
+         * The lines, the pin and the postal code are in the snapshot for the
+         * second reason only: the page restates them untouched, and a request
+         * that changed them would otherwise pass unseen.
          */
         $watched = [
             'name', 'trade_name', 'registration_type', 'registration_number',
@@ -299,21 +324,19 @@ class BusinessController extends Controller
             'capital_participation_filipino', 'capital_investment',
             'has_tax_incentives',
         ];
-        $before = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all();
+        $snapshot = fn () => collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all()
+            + self::relatedSnapshot($business)
+            + self::lockedSnapshot($business);
+        $before = $snapshot();
 
         /*
-         * The address and the named owner live on their own tables, and
-         * the sheet now edits both — the barangay, the street, the block
-         * and lot, the business's own telephone, mobile and e-mail, and
-         * all five of the owner's name fields.
-         *
-         * Read the same way and for the same reason as the columns above:
-         * an officer who can change WHO OWNS a business and leave nothing
-         * on the record is the failure this entry exists to prevent.
+         * Written, then compared, then kept or rolled back. Comparing the
+         * stored result rather than the request is what makes the lock
+         * exact: the writer normalises (trims, composes `line1`, keeps a
+         * capital it was not sent), and only the stored value says whether
+         * an answer actually moved.
          */
-        $before += self::relatedSnapshot($business);
-
-        DB::transaction(function () use ($business, $data) {
+        $changed = DB::transaction(function () use ($business, $data, $snapshot, $before, $reason) {
             $business->update([
                 'name' => $data['name'],
                 'trade_name' => $data['trade_name'] ?? null,
@@ -332,38 +355,65 @@ class BusinessController extends Controller
                 ...self::paperFormFields($data),
             ]);
             $this->syncAddressAndLines($business, $data);
+            $business->refresh();
+
+            $after = $snapshot();
+            $changed = [];
+            foreach ($after as $field => $value) {
+                /*
+                 * Loose, not strict. A decimal column comes back from the
+                 * database as the string '100.00' where it went in as the
+                 * number 100, and a strict comparison would report a change
+                 * every time an officer saved without touching the field.
+                 */
+                if (($before[$field] ?? null) == $value) {
+                    continue;
+                }
+                $changed[$field] = ['from' => $before[$field] ?? null, 'to' => $value];
+            }
+
+            /*
+             * Group 3 first: a declared answer is refused outright, whatever
+             * reason comes with it. Then group 2 without a reason. Either
+             * throws, and the transaction puts every row back.
+             */
+            $locked = array_values(array_filter(
+                array_keys($changed),
+                fn ($key) => OfficerEditRules::businessGroup($key) === 'locked',
+            ));
+            if ($locked !== []) {
+                throw OfficerEditRules::refusal(
+                    OfficerEditRules::LOCKED_MESSAGE,
+                    array_map(fn ($k) => "fields.$k", $locked),
+                );
+            }
+            if ($changed !== [] && $reason === '') {
+                throw OfficerEditRules::refusal(OfficerEditRules::REASON_MESSAGE, ['reason']);
+            }
+
+            return $changed;
         });
 
-        $business->refresh();
-
         /*
-         * One row per field that actually moved. A change nobody can trace
-         * to a person is the thing that makes this endpoint dangerous, and
-         * this is the whole of the answer to it.
+         * One row per field that actually moved, with the reason and the
+         * officer. A change nobody can trace to a person is the thing that
+         * makes this endpoint dangerous, and this is the whole of the answer
+         * to it. The owner is told as well: a corrected declaration they
+         * learn about at the counter is one they cannot dispute.
          */
-        $after = collect($watched)->mapWithKeys(fn ($c) => [$c => $business->$c])->all()
-            + self::relatedSnapshot($business);
-
-        $changed = [];
-        foreach ($after as $field => $value) {
-            /*
-             * Loose, not strict. A decimal column comes back from the
-             * database as the string '100.00' where it went in as the
-             * number 100, and a strict comparison would report a change
-             * every time an officer saved without touching the field.
-             */
-            if ($before[$field] == $value) {
-                continue;
-            }
-            $changed[$field] = ['from' => $before[$field], 'to' => $value];
-        }
-
         if ($changed !== []) {
             Audit::log('application.fields_corrected_by_officer', $application, [
                 'officer_id' => $user->id,
                 'department' => $user->department?->code,
+                'reason' => $reason,
                 'changed' => $changed,
             ]);
+            app(NotificationService::class)->correctedByOffice(
+                $application,
+                (string) $user->department?->code,
+                array_map(fn ($key) => OfficerEditRules::label($key), array_keys($changed)),
+                $reason,
+            );
         }
 
         return response()->json([
@@ -372,6 +422,32 @@ class BusinessController extends Controller
             ])),
             'meta' => ['changed' => array_keys($changed)],
         ]);
+    }
+
+    /**
+     * What the officer endpoint restates and must never change: the lines,
+     * the map pin and the postal code. Compared, never audited — the lock
+     * refuses any request that moves one, so none reaches the log.
+     *
+     * @return array<string, scalar|null>
+     */
+    private static function lockedSnapshot(Business $business): array
+    {
+        $address = $business->address()->first();
+        $lines = $business->lines()->orderBy('psic_code_id')->get()
+            ->map(fn ($l) => [
+                (int) $l->psic_code_id,
+                (string) $l->line_of_business,
+                (string) $l->products_services,
+                $l->capitalization === null ? null : (float) $l->capitalization,
+            ])->all();
+
+        return [
+            'lines' => json_encode($lines),
+            'address.latitude' => $address?->latitude === null ? null : (float) $address->latitude,
+            'address.longitude' => $address?->longitude === null ? null : (float) $address->longitude,
+            'address.postal_code' => $address?->postal_code,
+        ];
     }
 
     public function update(Request $request, Business $business): JsonResponse

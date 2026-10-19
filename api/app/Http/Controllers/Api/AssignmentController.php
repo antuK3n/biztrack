@@ -141,8 +141,15 @@ class AssignmentController extends Controller
              * the server had just SELECTED as decided reported `decided:
              * false` and wore "Approved" where they had earned "Completed".
              */
-            'application:id,tracking_id,business_id,application_type,status,decided_at',
+            /*
+             * `deadline_at` and `applicant_user_id` are for the queue TABLE
+             * (client, 19 October 2026: Manage Applications as a table, not
+             * cards): its Due column counts down to the RA 11032 deadline,
+             * and its Business column names who filed under the business.
+             */
+            'application:id,tracking_id,business_id,applicant_user_id,application_type,status,decided_at,deadline_at',
             'application.business:id,name',
+            'application.applicant:id,name',
             /*
              * For `AssignmentResource::clearanceRow()`, which reports the state
              * of this office's own permit. It reads the loaded collection and

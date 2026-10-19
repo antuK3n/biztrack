@@ -10,7 +10,7 @@ test.use({ storageState: mergedStorageState(['bplo.json']) })
 
 test('the review sheet has no Messages section, and the rail still has Messages', async ({ page }) => {
   await page.goto('/staff/queue')
-  const first = page.locator('ul li a[href^="/staff/queue/"]').first()
+  const first = page.locator('table a[href^="/staff/queue/"]').first()
   const any = await first.waitFor({ timeout: 30_000 }).then(() => true, () => false)
   test.skip(!any, 'nothing on BPLO’s queue to open on this register')
 

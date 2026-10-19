@@ -28,9 +28,14 @@ import { useAuth } from '../../stores/auth'
  * Each tab carries the permission its route demands (see App.tsx).
  *
  * `analytics.view` is every office admin's, BPLO's and the super admin's;
- * `analytics.processing_time` is the super admin's alone. An office admin
- * therefore has one tab (and sees no strip, see below), and the super admin
- * has all three.
+ * `analytics.processing_time` is the super admin's alone. The super admin
+ * therefore has all four tabs.
+ *
+ * An office admin and BPLO never see this strip at all since 19 October 2026
+ * (client: "To avoid redundancy, we should only have one existing among
+ * them", then "Why not implement the report too on the analytics?"): their
+ * analytics live on Home's Analytics tab, with its own sub-tabs (OfficeHome),
+ * and App.tsx sends every /analytics address of theirs there.
  *
  * The permission is duplicated from App.tsx rather than derived from it. If a
  * route's guard is ever changed without changing the matching line here, the tab
@@ -53,12 +58,12 @@ const TABS = [
    */
   { to: '/analytics/reports', label: 'Reports', end: false, permission: 'analytics.view' },
   /*
-   * Custom Report (client, 19 October 2026): the reader picks what to count,
-   * the numbers, filters and breakdown. Beside Reports and under the same
-   * permission, because it is the same kind of document with the choices
-   * left open.
+   * No Custom Report tab. It sat here from 19 October 2026 until, the same
+   * day, the client asked "what's the difference between Report and Custom
+   * Report. I do think it is best to just merge them." The builder is now the
+   * second part of the Reports screen ("Build your own report", see
+   * ReportsPage), and /analytics/custom-report redirects there (App.tsx).
    */
-  { to: '/analytics/custom-report', label: 'Custom Report', end: false, permission: 'analytics.view' },
   /*
    * The super admin's two screens, in the order the question is asked.
    *
@@ -70,30 +75,16 @@ const TABS = [
    * held exactly one analytics screen, so `tabs.length < 2` below hid the strip
    * from them entirely. It now appears for the first time, which is why the
    * two-tab guard is load-bearing rather than defensive.
+   */
+  /*
+   * There was a second copy of this entry, merged in twice with its comment,
+   * whose path read '/staff/analytics/offices'. `portalPath()` prefixes it
+   * again, so the super admin saw two "Office Performance" tabs and one of
+   * them led to /staff/staff/… or /admin/staff/…, a 404. Removed 19 October
+   * 2026.
    */
   {
     to: '/analytics/offices',
-    // The dataset's own label, and the h1 on the screen it leads to. All three
-    // are asserted equal in e2e/office-performance.spec.ts, because a
-    // half-applied rename is how a screen and its payload drift apart.
-    label: 'Office Performance',
-    end: false,
-    permission: 'analytics.processing_time',
-  },
-  /*
-   * The super admin's two screens, in the order the question is asked.
-   *
-   * Office Performance comes first because it answers "which office" and
-   * Processing Time answers "what has that office been doing" — a reader who
-   * has not yet picked an office has nothing to do on a control chart.
-   *
-   * Note what this pair does to the strip: until issue #102 the super admin
-   * held exactly one analytics screen, so `tabs.length < 2` below hid the strip
-   * from them entirely. It now appears for the first time, which is why the
-   * two-tab guard is load-bearing rather than defensive.
-   */
-  {
-    to: '/staff/analytics/offices',
     // The dataset's own label, and the h1 on the screen it leads to. All three
     // are asserted equal in e2e/office-performance.spec.ts, because a
     // half-applied rename is how a screen and its payload drift apart.

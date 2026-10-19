@@ -47,7 +47,7 @@ test('the owner chooses Over the Counter, and BPLO marks the filing paid from th
   await page.goto('/staff/queue')
   await page.getByRole('radio', { name: 'Pending Payment', exact: true }).check()
 
-  const row = page.getByRole('listitem').filter({ hasText: filing.tracking })
+  const row = page.getByRole('row').filter({ hasText: filing.tracking })
   await expect(row).toBeVisible({ timeout: 30_000 })
   await row.getByRole('button', { name: 'Mark as paid' }).click()
 
@@ -57,7 +57,7 @@ test('the owner chooses Over the Counter, and BPLO marks the filing paid from th
   await dialog.getByRole('button', { name: 'Mark as paid' }).click()
 
   await expect(page.getByRole('status').filter({ hasText: 'marked paid at the counter' })).toBeVisible()
-  await expect(page.getByRole('listitem').filter({ hasText: filing.tracking })).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: filing.tracking })).toHaveCount(0)
 
   const after = await page.evaluate(async (id) => {
     const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.public')}` }

@@ -14,6 +14,12 @@ import type { User } from './types'
  * rail (lib/nav.ts) hides "Permits" from anyone whose home already holds the
  * register, and App.tsx sends /staff/admin/permits to that Home.
  *
+ * The same three since later on 19 October 2026 for analytics (client: "To
+ * avoid redundancy, we should only have one existing among them", then "Why
+ * not implement the report too on the analytics?"): the rail hides
+ * "Analytics" from this reader, and App.tsx sends every /staff/analytics
+ * address of theirs to the matching sub-tab of Home's Analytics tab.
+ *
  * An account lands here holding either half — `analytics.view` or
  * `permit.view_all` — and OfficeHome draws only the halves it holds. Business
  * owners never; the super admin never (their portal, or `user.manage`, which

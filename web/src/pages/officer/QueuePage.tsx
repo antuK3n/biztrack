@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { InboxIcon } from '../../components/icons'
 import { InspectorNameField } from '../../components/InspectorNameField'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoModal, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { applications, assignments, payments } from '../../lib/resources'
-import { formatDateTime } from '../../lib/format'
+import { formatDate, formatDateTime } from '../../lib/format'
 import {
   TONE_CLASSES,
   applicationStatusMeta,
@@ -24,8 +24,9 @@ import type {
 } from '../../lib/types'
 
 /*
- * Manage Applications (PDF p61/p80) — the officer queue restyled to the
- * prototype: pill filters, white shadow rows with the solid payment chip block.
+ * Manage Applications (PDF p61/p80) — the officer queue. A table with pinned
+ * Business and Actions columns from 640px up (client, 19 October 2026), and
+ * stacked cards on a phone; see `QueueTable`.
  */
 
 type Tab = 'all' | 'approval' | 'payment' | 'inspection' | 'final'
@@ -726,6 +727,13 @@ interface QueueItem {
   canAct: boolean
   /** Does this reader hold it? What "My assigned" means, on one row. */
   mine: boolean
+  /**
+   * The filing's RA 11032 deadline, for the Due column. Null when the filing
+   * has none yet or the payload predates the field.
+   */
+  deadline: string | null
+  /** Who filed it, printed small under the business name. */
+  owner: string | null
 }
 
 /**
@@ -789,6 +797,8 @@ function fromAssignment(item: Assignment): QueueItem {
      * control must not appear on a case nobody holds.
      */
     mine: item.officer !== null && item.can_act === true,
+    deadline: app.deadline_at ?? null,
+    owner: app.applicant?.name ?? null,
   }
 }
 
@@ -828,6 +838,8 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     type: app.application_type,
     // No office holds this filing yet, so there is no "your permit" to report.
     clearance: null,
+    deadline: app.deadline_at,
+    owner: app.applicant?.name ?? null,
   }
 }
 
@@ -1061,6 +1073,10 @@ const TYPE_LABEL: Record<string, string> = {
 /*
  * The card, as a COLUMN rather than a horizontal band.
  *
+ * PHONE WIDTH ONLY since 19 October 2026, when the client asked for a table
+ * (see `QueueTable`); below 640px the cards stack one to a row. The note
+ * below is the history of how the card got its shape.
+ *
  * It was one full-width rectangle per row: the details on the left and a 9rem
  * status stripe down the right. The client asked for three to a row [24
  * September 2026: "make it 3 boxes kada row not 1 long rectangle"], and at a
@@ -1092,6 +1108,117 @@ const CARD = 'flex flex-1 flex-col bg-white'
  */
 function visitOf(item: QueueItem): QueueItem['inspection'] {
   return item.clearance?.status === 'for_inspection' ? item.inspection : null
+}
+
+/**
+ * The status a row wears, which depends on the seat — see the long note in
+ * `QueueRow`. Shared by the phone card and the table so the two can never
+ * disagree about a row.
+ */
+function badgeOf(item: QueueItem, ownPermit: boolean) {
+  const own = ownPermit ? item.clearance : null
+  const ownPermitBadge = own !== null && own.status !== null
+  const badge = ownPermitBadge
+    ? {
+        tone: clearanceStatusMeta(own.status!).tone,
+        label: own.status_label ?? clearanceStatusMeta(own.status!).label,
+      }
+    : {
+        /*
+         * The FILING's badge, so it has to know whether the filing is
+         * finished: `approved` is "Completed" as a status and "Approved" on
+         * one still gathering, and an officer told a live filing was
+         * Completed would stop looking at it.
+         */
+        tone: filingStatusMeta(item).tone,
+        label: filingStatusMeta(item).label,
+      }
+
+  return { badge, ownPermitBadge }
+}
+
+/**
+ * How far the filing is from its RA 11032 deadline, in calendar days.
+ *
+ * Calendar days, not working days, and the column says a date beside the
+ * count: the deadline itself is already counted in working days by
+ * `App\Support\Ra11032` on the server, so all this does is say how far away
+ * that date is from today. Re-counting working days here would be a second
+ * copy of the statute's arithmetic, without the holiday calendar.
+ *
+ * `tone` is `null` when there is nothing to flag. Overdue is the one red on
+ * the row — a breached statutory clock is a failure, which is what red is
+ * kept for (DESIGN.md) — and it is always worded too, never colour alone.
+ */
+function dueOf(iso: string | null): { date: string; text: string; tone: 'overdue' | 'near' | null } | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const now = new Date()
+  const days = Math.round(
+    (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+      - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+      / 86_400_000,
+  )
+  const plural = (n: number) => `${n} day${n === 1 ? '' : 's'}`
+  const text = days < 0 ? `${plural(-days)} overdue` : days === 0 ? 'Due today' : `${plural(days)} left`
+
+  return { date: formatDate(iso), text, tone: days < 0 ? 'overdue' : days <= 2 ? 'near' : null }
+}
+
+/** The Received column's second line. */
+const TIME_FMT = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit' })
+
+const DUE_TONE: Record<'overdue' | 'near', string> = {
+  overdue: 'bg-s-red-tint text-s-red-deep',
+  near: 'bg-s-orange-tint text-s-orange-ink',
+}
+
+/** The countdown, as a chip when it needs attention and plain text when not. */
+function DueText({ due }: { due: ReturnType<typeof dueOf> }) {
+  if (!due) return <span className="text-ink-muted">—</span>
+
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      <span
+        className={
+          due.tone
+            ? `rounded-md px-2 py-0.5 text-xs font-bold ${DUE_TONE[due.tone]}`
+            : 'text-sm font-semibold text-ink-secondary'
+        }
+      >
+        {due.text}
+      </span>
+      <span className="text-xs text-ink-muted">{due.date}</span>
+    </span>
+  )
+}
+
+/*
+ * ── Phone width or not, answered once ─────────────────────────────────────
+ *
+ * The table and the phone cards are two renderings of one list, and only ONE
+ * is mounted. Hiding the other with CSS would keep both in the DOM: every row's
+ * link twice, every button twice, and a screen reader — or a test counting
+ * rows — meeting the list twice over.
+ *
+ * 640px is Tailwind's `sm`, the same edge the rest of the app folds at.
+ */
+const WIDE_QUERY = '(min-width: 640px)'
+
+function subscribeWide(onChange: () => void) {
+  const media = window.matchMedia(WIDE_QUERY)
+  media.addEventListener('change', onChange)
+
+  return () => media.removeEventListener('change', onChange)
+}
+
+function useWideScreen(): boolean {
+  return useSyncExternalStore(
+    subscribeWide,
+    () => window.matchMedia(WIDE_QUERY).matches,
+    () => true,
+  )
 }
 
 function QueueRow({
@@ -1170,23 +1297,8 @@ function QueueRow({
    * is an application and belongs to no office yet, and showing the filing's
    * status there is better than showing none.
    */
-  const own = ownPermit ? item.clearance : null
-  const ownPermitBadge = own !== null && own.status !== null
-  const badge = ownPermitBadge
-    ? {
-        tone: clearanceStatusMeta(own.status!).tone,
-        label: own.status_label ?? clearanceStatusMeta(own.status!).label,
-      }
-    : {
-        /*
-         * The FILING's badge, so it has to know whether the filing is
-         * finished: `approved` is "Completed" as a status and "Approved" on
-         * one still gathering, and an officer told a live filing was
-         * Completed would stop looking at it.
-         */
-        tone: filingStatusMeta(item).tone,
-        label: filingStatusMeta(item).label,
-      }
+  const { badge, ownPermitBadge } = badgeOf(item, ownPermit)
+  const due = dueOf(item.deadline)
 
   const body = (
     <>
@@ -1244,9 +1356,23 @@ function QueueRow({
             </span>
           )}
         </p>
+        {item.owner && <p className="mt-0.5 text-sm text-ink-secondary">{item.owner}</p>}
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
         </p>
+        {/* The RA 11032 countdown, as on the table's Due column. */}
+        {due && (
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-ink-muted">
+            <span
+              className={
+                due.tone ? `rounded-md px-2 py-0.5 text-xs font-bold ${DUE_TONE[due.tone]}` : 'font-semibold text-ink-secondary'
+              }
+            >
+              {due.text}
+            </span>
+            <span>Due {due.date}</span>
+          </p>
+        )}
         {/*
           * A Pending Payment row does not open, and used to say why in a
           * sentence here ("Waiting on the applicant's payment. It reaches an
@@ -1435,6 +1561,325 @@ function QueueRow({
   )
 }
 
+/*
+ * ── The table (client, 19 October 2026) ───────────────────────────────────
+ *
+ * *"The manage application part should be in table format, not in card
+ * format."* Asked how to keep it usable with every action in one view, the
+ * client picked a PINNED Actions column over a ⋯ menu: an officer's buttons
+ * stay on screen at the right edge however far the table scrolls sideways,
+ * and nothing is folded away behind a click.
+ *
+ * The cards were three to a row (24 September 2026); a table scans faster
+ * down a column — which filing is overdue, which is unassigned — and that is
+ * the reading a queue is for.
+ *
+ * Sticky on both edges. Business on the left so a reader scrolled sideways
+ * still knows which row they are on; Actions on the right so the buttons
+ * never scroll away. The scroller is also the vertical scroller (`max-h`),
+ * because a sticky header only sticks inside its nearest scrolling ancestor
+ * and `overflow-x: auto` makes the table's box that ancestor whatever else is
+ * set — so the header stays put by giving the box its own height.
+ *
+ * Phone width does not get the table: below 640px it is the stacked cards
+ * (`QueueRow`), one to a row, so there is no sideways page scroll at all.
+ *
+ * No clickable column headers. The order is the Sort menu's, and two of its
+ * three orders are the browser re-sorting rows the API sent in its own fixed
+ * order (see `serverSort`); a header that sorted would be a second control
+ * for the same thing, with no server column ordering behind it.
+ */
+function QueueTable({
+  items,
+  ownPermit,
+  onClaim,
+  onRelease,
+  claimingId,
+  onMarkPaid,
+  markingPaidId,
+}: {
+  items: QueueItem[]
+  ownPermit: boolean
+  onClaim: (item: QueueItem) => void
+  onRelease: (item: QueueItem) => void
+  claimingId: number | null
+  onMarkPaid?: (item: QueueItem) => void
+  markingPaidId: number | null
+}) {
+  const navigate = useNavigate()
+
+  /*
+   * The whole row opens the filing, for a mouse. The keyboard's way in is the
+   * business name, which is a real link — a `<tr>` with a tabindex and a
+   * click handler would be a row a screen reader announces as nothing.
+   *
+   * Clicks that land on a control in the row are that control's, and a drag
+   * that selected text (a tracking ID being copied) is not a click on the row.
+   */
+  function openRow(e: MouseEvent<HTMLTableRowElement>, href: string | null) {
+    if (!href) return
+    const target = e.target as HTMLElement
+    if (target.closest('a, button, input, textarea, select, label, [role="button"]')) return
+    if (window.getSelection()?.toString()) return
+    if (e.ctrlKey || e.metaKey) {
+      window.open(href, '_blank', 'noopener')
+      return
+    }
+    navigate(href)
+  }
+
+  const th =
+    'sticky top-0 z-20 whitespace-nowrap border-b border-line bg-[#f3f6fb] px-3.5 py-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted'
+  /*
+   * Every cell paints its own background, zebra and hover included. A sticky
+   * cell has to be opaque or the columns scrolling under it show through, and
+   * the row's tint has to reach the sticky cells too or a hovered row would
+   * read as three separate pieces.
+   */
+  const td = 'border-b border-line/70 bg-white px-3.5 py-3.5 align-middle group-even:bg-[#f7f9fd] group-hover:bg-royal-tint'
+  const btn =
+    'inline-flex items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60'
+  const primary = `${btn} bg-royal text-white hover:bg-royal-hover`
+  const secondary = `${btn} border border-royal/50 bg-white text-royal hover:bg-royal-tint`
+  const quiet = `${btn} border border-line bg-white text-ink-secondary hover:bg-canvas`
+
+  return (
+    <div className="overflow-hidden rounded-xl bg-white shadow-card">
+      {/*
+        Focusable and labelled because it scrolls: a region that scrolls but
+        cannot be reached by keyboard hides every column past the fold from a
+        reader without a mouse (the same reasoning as the Permits table).
+      */}
+      <div
+        className="max-h-[calc(100dvh-9rem)] overflow-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
+        tabIndex={0}
+        role="region"
+        aria-label="Applications in this queue"
+      >
+        <table className="w-full border-separate border-spacing-0 text-left text-sm">
+          <thead>
+            <tr>
+              <th scope="col" className={`${th} left-0 z-30 border-r`}>
+                Business
+              </th>
+              <th scope="col" className={th}>
+                Status
+              </th>
+              <th scope="col" className={th}>
+                Due (RA 11032)
+              </th>
+              <th scope="col" className={th}>
+                Officer in charge
+              </th>
+              <th scope="col" className={th}>
+                Permit
+              </th>
+              <th scope="col" className={th}>
+                Type
+              </th>
+              <th scope="col" className={th}>
+                Received
+              </th>
+              <th scope="col" className={`${th} right-0 z-30 border-l`}>
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => {
+              const { badge, ownPermitBadge } = badgeOf(item, ownPermit)
+              const due = dueOf(item.deadline)
+              const visit = visitOf(item)
+              const claiming = claimingId !== null && claimingId === item.assignmentId
+              const markingPaid = markingPaidId === item.applicationId
+              const who = `${item.trackingId}, ${item.name}`
+              const canClaim = item.canClaim
+              const canRelease = item.mine
+              const canMarkPaid = item.assignmentId === null && onMarkPaid !== undefined
+
+              return (
+                <tr
+                  key={item.key}
+                  className={`group ${item.href ? 'cursor-pointer' : ''}`}
+                  onClick={(e) => openRow(e, item.href)}
+                >
+                  {/* Business: the row's name, its tracking ID and who filed it. */}
+                  <th
+                    scope="row"
+                    className={`${td} sticky left-0 z-10 min-w-[14rem] max-w-[18rem] border-r border-r-line text-left font-normal`}
+                  >
+                    {item.href ? (
+                      <Link
+                        to={item.href}
+                        className="block rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                      >
+                        <span className="block break-words font-bold leading-snug text-ink group-hover:text-royal">
+                          {item.name}
+                        </span>
+                        <span className="tnum mt-0.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+                        </span>
+                      </Link>
+                    ) : (
+                      <>
+                        <span className="block break-words font-bold leading-snug text-ink">{item.name}</span>
+                        <span className="tnum mt-0.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+                        </span>
+                      </>
+                    )}
+                    {item.owner && (
+                      <span className="mt-0.5 block truncate text-xs text-ink-secondary" title={item.owner}>
+                        {item.owner}
+                      </span>
+                    )}
+                  </th>
+
+                  <td className={`${td} min-w-[9rem]`}>
+                    <span
+                      className={`inline-block rounded-md border px-2.5 py-1 text-xs font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
+                    >
+                      {badge.label}
+                    </span>
+                  </td>
+
+                  <td className={`${td} whitespace-nowrap`}>
+                    <DueText due={due} />
+                  </td>
+
+                  <td className={`${td} min-w-[11rem]`}>
+                    {item.assignmentId === null ? (
+                      // Not routed yet, so nobody can hold it; see QueueRow.
+                      <span className="text-ink-muted">—</span>
+                    ) : (
+                      <>
+                        {item.officer?.name ? (
+                          <span className="block font-semibold text-ink">{item.officer.name}</span>
+                        ) : (
+                          <span className="block text-ink-muted">Unassigned</span>
+                        )}
+                        {item.officer?.name && !item.canAct && (
+                          <span className="block text-xs text-ink-muted">read-only for you</span>
+                        )}
+                        {visit && (
+                          <div className="mt-1">
+                            <InspectorNameField
+                              inspectionId={visit.id}
+                              name={visit.inspector_name}
+                              canEdit={visit.can_name_inspector}
+                              label="Inspector"
+                              context={item.name}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </td>
+
+                  {/* Which permit this row is — the one thing four offices' rows on one filing differ by. */}
+                  <td className={`${td} min-w-[11rem] text-ink-secondary`}>
+                    {item.clearance ? (
+                      <>
+                        <span className="block leading-snug">{item.clearance.name}</span>
+                        {item.clearance.status_label && !ownPermitBadge && (
+                          <span className="block text-xs text-ink-muted">{item.clearance.status_label}</span>
+                        )}
+                        {item.clearance.mode === 'upload' && (
+                          <span className="block text-xs text-ink-muted">Copy on file</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-ink-muted">—</span>
+                    )}
+                  </td>
+
+                  <td className={`${td} whitespace-nowrap`}>
+                    <span className="rounded border border-royal/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
+                      {TYPE_LABEL[item.type] ?? item.type}
+                    </span>
+                  </td>
+
+                  {/* Date over time, so the column is a date's width rather than a sentence's. */}
+                  <td className={`${td} whitespace-nowrap text-ink-secondary`}>
+                    {item.at ? (
+                      <>
+                        <span className="block">
+                          {item.href ? '' : 'Filed '}
+                          {formatDate(item.at)}
+                        </span>
+                        <span className="block text-xs text-ink-muted">{TIME_FMT.format(new Date(item.at))}</span>
+                      </>
+                    ) : (
+                      <span className="text-ink-muted">—</span>
+                    )}
+                  </td>
+
+                  {/*
+                    Pinned. Labelled buttons, never icons alone and never a menu
+                    — the client chose this over a ⋯ menu. Each name carries the
+                    tracking ID, because a column of twenty-five "Open" buttons
+                    is twenty-five identical stops to a screen reader (§6.2).
+                  */}
+                  <td className={`${td} sticky right-0 z-10 w-px whitespace-nowrap border-l border-l-line`}>
+                    <div className="flex items-center gap-1.5">
+                      {item.href && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(item.href!)}
+                          aria-label={`Open ${who}`}
+                          className={primary}
+                        >
+                          Open
+                        </button>
+                      )}
+                      {canClaim && (
+                        <button
+                          type="button"
+                          onClick={() => onClaim(item)}
+                          aria-disabled={claiming || undefined}
+                          aria-label={`Assign to Me: ${who}`}
+                          className={secondary}
+                        >
+                          {claiming ? 'Assigning…' : 'Assign to Me'}
+                        </button>
+                      )}
+                      {canRelease && (
+                        <button
+                          type="button"
+                          onClick={() => onRelease(item)}
+                          aria-disabled={claiming || undefined}
+                          aria-label={`Unassign from me: ${who}`}
+                          className={quiet}
+                        >
+                          {claiming ? 'Releasing…' : 'Unassign from me'}
+                        </button>
+                      )}
+                      {canMarkPaid && (
+                        <button
+                          type="button"
+                          onClick={() => onMarkPaid!(item)}
+                          aria-disabled={markingPaid || undefined}
+                          aria-label={`Mark as paid: ${who}`}
+                          className={primary}
+                        >
+                          {markingPaid ? 'Marking…' : 'Mark as paid'}
+                        </button>
+                      )}
+                      {!item.href && !canClaim && !canRelease && !canMarkPaid && (
+                        <span className="px-2 text-ink-muted">—</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 /**
  * The officer queue.
  *
@@ -1456,6 +1901,8 @@ export function QueuePage() {
    * describe something wider than "is this reader BPLO".
    */
   const isBplo = useAuth((s) => s.user?.department?.code === 'BPLO')
+  /* Table or phone cards; see `useWideScreen`. */
+  const wide = useWideScreen()
   /*
    * Opens on every stage, by the client's instruction of 4 October 2026:
    * *"When I open this page, the filter under STAGE is For Approval by
@@ -2496,30 +2943,39 @@ export function QueuePage() {
       ) : (
         <>
           {/*
-            Three to a row, as the client asked. Two at tablet width and one on
-            a phone: three cards across a 375px screen would be 100px each,
-            which is narrower than the tracking ID they carry.
-
-            `items-stretch` (the grid default, named here because it is
-            load-bearing) is what makes the cards in a row equal height; the
-            card's own `h-full` is the other half of that.
+            A table from 640px up (client, 19 October 2026 — see QueueTable);
+            the stacked cards below that, one to a row, because a table at
+            phone width is either a sideways scroll or columns too narrow to
+            read.
           */}
-          <ul className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {visible.map((item) => (
-              <QueueRow
-                key={item.key}
-                item={item}
-                ownPermit={!canReadEveryOffice}
-                /* Only while the list is mixed — see the prop's own note. */
-                showType={filingType === ''}
-                onClaim={claim}
-                onRelease={release}
-                claiming={claimingId === item.assignmentId}
-                onMarkPaid={isBplo ? setConfirmPayItem : undefined}
-                markingPaid={markingPaidId === item.applicationId}
-              />
-            ))}
-          </ul>
+          {wide ? (
+            <QueueTable
+              items={visible}
+              ownPermit={!canReadEveryOffice}
+              onClaim={claim}
+              onRelease={release}
+              claimingId={claimingId}
+              onMarkPaid={isBplo ? setConfirmPayItem : undefined}
+              markingPaidId={markingPaidId}
+            />
+          ) : (
+            <ul className="grid grid-cols-1 gap-3">
+              {visible.map((item) => (
+                <QueueRow
+                  key={item.key}
+                  item={item}
+                  ownPermit={!canReadEveryOffice}
+                  /* Only while the list is mixed — see the prop's own note. */
+                  showType={filingType === ''}
+                  onClaim={claim}
+                  onRelease={release}
+                  claiming={claimingId === item.assignmentId}
+                  onMarkPaid={isBplo ? setConfirmPayItem : undefined}
+                  markingPaid={markingPaidId === item.applicationId}
+                />
+              ))}
+            </ul>
+          )}
           {hasMore && (
             <button
               type="button"

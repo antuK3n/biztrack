@@ -190,7 +190,7 @@ test.describe('a clearance office', () => {
 
   test('sees only its own share of the Assessed Fee', async ({ page, browser }) => {
     await page.goto('/staff/queue')
-    const first = page.locator('ul li a[href^="/staff/queue/"]').first()
+    const first = page.locator('table a[href^="/staff/queue/"]').first()
     const any = await first.waitFor({ timeout: 30_000 }).then(() => true, () => false)
     test.skip(!any, 'nothing on CHO’s queue to open on this register')
 

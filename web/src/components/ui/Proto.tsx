@@ -919,6 +919,42 @@ export const inputCls =
 export const inputClsShort = `${inputCls} max-w-[10rem]`
 
 /**
+ * The application forms' field grid — Business Information's section A,
+ * shared so every section and every office sheet is laid out the same way.
+ *
+ * Client, 19 October 2026, of section A: *"I also already like the
+ * compactness of this. Can this layout be applied too on the other sections or
+ * EVEN OTHER FORMS?"* This is that layout, lifted out of the wizard so the
+ * other forms reuse it instead of copying its classes.
+ *
+ * Twelve columns, sized by the width of the SHEET, not the window
+ * (`@container`), because the same JSX is drawn narrower on the review step:
+ * quarters from 56rem, halves from 36rem, one column below that. A cell takes
+ * one of the `formCell` spans so it starts and ends on a column line.
+ *
+ * `field-grid` is what lines a row up — labels from one top edge, boxes on
+ * one line, however many lines a label wraps to. See the rule in index.css.
+ */
+export const formGridCls = '@container field-grid grid grid-cols-12 gap-x-5 gap-y-4'
+
+/**
+ * How much of a `formGridCls` row a field takes.
+ *
+ *   quarter — a short answer: a count, a date, a number, a name part
+ *   half    — a medium one: a name, an e-mail, a short select
+ *   wide    — three quarters: a long name or a group of pills
+ *   full    — an address, a description, a checklist, a map
+ *
+ * Each is one column on a phone and half the sheet from 36rem.
+ */
+export const formCell = {
+  quarter: 'col-span-12 @xl:col-span-6 @4xl:col-span-3',
+  half: 'col-span-12 @xl:col-span-6',
+  wide: 'col-span-12 @4xl:col-span-9',
+  full: 'col-span-12',
+} as const
+
+/**
  * The message a field makes about itself, floated over its label.
  *
  * Client, 24 September 2026: *"Can you make the warning messages like pop-ups
@@ -1100,7 +1136,7 @@ export function FieldLabel({
    * question beside a labelled box still starts on the same line.
    */
   return (
-    <span className="mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
+    <span className="field-label mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
       {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
       {children}
       {/*

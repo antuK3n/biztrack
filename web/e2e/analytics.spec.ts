@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { infoButtonNames, sessionFor, waitForAnalytics } from './helpers'
+import {
+  HOME_ANALYTICS,
+  HOME_DASHBOARD_HEADING,
+  HOME_REPORTS_HEADING,
+  infoButtonNames,
+  sessionFor,
+  waitForAnalytics,
+} from './helpers'
 
 /*
  * The analytics screens, and who may open them.
@@ -23,6 +30,15 @@ import { infoButtonNames, sessionFor, waitForAnalytics } from './helpers'
  *   analytics.view            → every office admin, BPLO, super admin
  *   analytics.processing_time → super admin only (Office Performance, Processing Time)
  *
+ * ── Where it lives, since 19 October 2026 ───────────────────────────────────
+ *
+ * For an office admin and BPLO the dashboard is the Dashboard sub-tab of
+ * Home's Analytics tab, beside Reports, and nowhere else (client: "To avoid
+ * redundancy, we should only have one existing among them", then "Why not
+ * implement the report too on the analytics?"). Their rail has no Analytics
+ * entry, and /staff/analytics redirects to the sub-tab with its query. The
+ * super admin keeps the full page, its tab strip and its rail entry.
+ *
  * Sessions come from auth.setup.ts via storageState (one sign-in per account
  * per run), so each block declares whose session it runs under.
  */
@@ -30,7 +46,10 @@ const BPLO_SESSION = sessionFor('bplo')
 const SANITARY_SESSION = sessionFor('sanitary')
 const SUPER_ADMIN_SESSION = sessionFor('admin')
 
-const DASHBOARD = { path: '/staff/analytics', title: 'Analytics Dashboard' } as const
+/** The dashboard as an office admin or BPLO opens it: a sub-tab of Home. */
+const DASHBOARD = { path: HOME_ANALYTICS, title: HOME_DASHBOARD_HEADING.name, level: 2 } as const
+/** The full page, which only the super admin still has. */
+const FULL_DASHBOARD = { path: '/admin/analytics', title: 'Analytics Dashboard', level: 1 } as const
 
 /** The rail entry, scoped to the <aside>: the mobile tab bar repeats the label. */
 function railLink(page: Page, label: string) {
@@ -38,9 +57,9 @@ function railLink(page: Page, label: string) {
 }
 
 /** Every info button names a figure, reads "How … is measured", and none stutters. */
-async function assertExplainsItsFigures(page: Page, screen: { path: string; title: string }) {
+async function assertExplainsItsFigures(page: Page, screen: { path: string; title: string; level: 1 | 2 }) {
   await page.goto(screen.path)
-  await waitForAnalytics(page, screen.title)
+  await waitForAnalytics(page, screen.title, screen.level)
 
   const names = await infoButtonNames(page)
   expect(names.length, `${screen.path} shows no info affordance at all`).toBeGreaterThan(0)
@@ -61,7 +80,7 @@ async function chooseOffice(page: Page, value: string) {
   await page.getByLabel('Office', { exact: true }).selectOption(value)
   const res = await answered
   expect(res.status()).toBe(200)
-  await waitForAnalytics(page, DASHBOARD.title)
+  await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 }
 
 test.describe('the dashboard, as BPLO', () => {
@@ -74,7 +93,7 @@ test.describe('the dashboard, as BPLO', () => {
 
   test('opens on BPLO and offers every office, and all of them', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     const menu = page.getByLabel('Office', { exact: true })
     await expect(menu).toHaveValue('BPLO')
@@ -89,7 +108,7 @@ test.describe('the dashboard, as BPLO', () => {
 
   test('an info panel opens on click, on keyboard focus, and closes on Escape', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     const button = page.locator('button[aria-label^="How "]').first()
     await expect(button).toHaveAttribute('aria-expanded', 'false')
@@ -122,7 +141,7 @@ test.describe('the dashboard, as BPLO', () => {
    */
   test('the inspections panel names every inspecting office, and no BPLO', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
     await chooseOffice(page, 'all')
 
     const inspections = page.getByRole('table', { name: /Inspection outcomes by inspecting office/ })
@@ -134,7 +153,7 @@ test.describe('the dashboard, as BPLO', () => {
 
   test('the workload KPI is stated over the full term, not the year to date', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     await expect(page.getByText('Applications (all time)').first()).toBeVisible()
     await expect(page.getByText('every filing on record').first()).toBeVisible()
@@ -153,7 +172,7 @@ test.describe('the dashboard, as BPLO', () => {
    */
   test('carries the two panels that came from the retired screens', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
     await chooseOffice(page, 'all')
 
     await expect(page.getByRole('heading', { name: 'Permits Approaching Expiry' })).toBeVisible()
@@ -177,11 +196,12 @@ test.describe('the dashboard, as BPLO', () => {
    */
   test('carries the panels the client asked for, and none of the removed ones', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
     await chooseOffice(page, 'all')
 
+    // h3: on Home the panels sit under the office's h1 and the dashboard's h2.
     for (const name of ['Time in Office', 'Fees Collected', 'Suspended Permits']) {
-      await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible()
+      await expect(page.getByRole('heading', { name, level: 3 })).toBeVisible()
     }
     for (const gone of [
       /Average Processing Time/,
@@ -207,17 +227,44 @@ test.describe('the dashboard, as BPLO', () => {
     ])
   })
 
-  test('the tabs reach the dashboard and Reports, and nothing BPLO may not open', async ({ page }) => {
+  test('Home’s Analytics sub-tabs reach the dashboard and Reports, and nothing BPLO may not open', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     const strip = page.getByRole('navigation', { name: 'Analytics sections' })
     const labels = await strip.getByRole('link').allInnerTexts()
-    expect(labels).toEqual(['Analytics Dashboard', 'Reports'])
+    expect(labels).toEqual(['Dashboard', 'Reports'])
+    await expect(strip.getByRole('link', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page')
 
     await strip.getByRole('link', { name: 'Reports', exact: true }).click()
-    await expect(page).toHaveURL(/\/staff\/analytics\/reports/)
-    await waitForAnalytics(page, 'Reports')
+    await expect(page).toHaveURL(/\/staff\/dashboard\?tab=analytics&view=reports$/)
+    await waitForAnalytics(page, HOME_REPORTS_HEADING.name, HOME_REPORTS_HEADING.level)
+  })
+
+  test('the dashboard is on Home only: no View full analytics, and Generate Report opens Home’s Reports', async ({ page }) => {
+    await page.goto(DASHBOARD.path)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
+    await expect(page.getByRole('link', { name: 'View full analytics' })).toHaveCount(0)
+
+    // BPLO can switch, so the office on screen goes with it.
+    const generate = page.getByRole('link', { name: 'Generate Report', exact: true })
+    await expect(generate).toHaveAttribute('href', '/staff/dashboard?tab=analytics&view=reports&office=BPLO')
+    await generate.click()
+    await waitForAnalytics(page, HOME_REPORTS_HEADING.name, HOME_REPORTS_HEADING.level)
+  })
+
+  test('the old dashboard address opens Home’s Analytics tab, keeping its office and window', async ({ page }) => {
+    await page.goto('/staff/analytics?office=CHO&months=6')
+    await expect(page).toHaveURL(/\/staff\/dashboard\?tab=analytics&office=CHO&months=6$/, { timeout: 30_000 })
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
+    await expect(page.getByLabel('Office', { exact: true })).toHaveValue('CHO')
+  })
+
+  test('the old Office Performance address opens Home’s dashboard, which BPLO may read', async ({ page }) => {
+    await page.goto('/staff/analytics/offices')
+    await expect(page).toHaveURL(/\/staff\/dashboard\?tab=analytics&view=offices$/, { timeout: 30_000 })
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
+    await expect(page.getByRole('heading', { name: 'Office Performance' })).toHaveCount(0)
   })
 
   test('the retired screens are gone, not redirected to something else', async ({ page }) => {
@@ -232,15 +279,16 @@ test.describe('the dashboard, as BPLO', () => {
     await expect(page).toHaveURL(/\/staff\/dashboard$/, { timeout: 30_000 })
   })
 
-  test('the rail sends BPLO to the dashboard on the staff site', async ({ page }) => {
+  test('the rail has no Analytics entry for BPLO: Home holds it', async ({ page }) => {
     await page.goto('/staff/dashboard')
-    await expect(railLink(page, 'Analytics')).toHaveAttribute('href', '/staff/analytics')
+    await expect(page.getByRole('navigation', { name: 'Home sections' })).toBeVisible({ timeout: 30_000 })
+    await expect(railLink(page, 'Analytics')).toHaveCount(0)
   })
 
   test('the dashboard does not scroll sideways on a 390px phone', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -252,19 +300,29 @@ test.describe('the dashboard, as BPLO', () => {
 test.describe('the dashboard, as an office admin (City Health)', () => {
   test.use({ storageState: SANITARY_SESSION })
 
-  test('the rail offers Analytics, and the screen says whose figures these are', async ({ page }) => {
+  test('Home’s Analytics tab holds the dashboard, under the office’s own name, and the rail has no Analytics', async ({ page }) => {
     await page.goto('/staff/dashboard')
-    await railLink(page, 'Analytics').click()
-    await waitForAnalytics(page, DASHBOARD.title)
+    await expect(railLink(page, 'Analytics')).toHaveCount(0)
+    await page
+      .getByRole('navigation', { name: 'Home sections' })
+      .getByRole('link', { name: 'Analytics', exact: true })
+      .click()
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
-    await expect(page.getByText('Showing', { exact: false }).filter({ hasText: 'City Health Office' })).toBeVisible()
+    // Home's h1 is the office: the "Showing … figures" line is left out here.
+    await expect(page.getByRole('heading', { name: 'City Health Office', level: 1 })).toBeVisible()
     // No menu: an office admin has nothing to choose.
     await expect(page.getByLabel('Office', { exact: true })).toHaveCount(0)
+    // Nor anything to carry into Reports but their own office.
+    await expect(page.getByRole('link', { name: 'Generate Report', exact: true })).toHaveAttribute(
+      'href',
+      '/staff/dashboard?tab=analytics&view=reports',
+    )
   })
 
   test('another office’s figures are refused even when asked for directly', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
 
     const statuses = await page.evaluate(async () => {
       const token = localStorage.getItem('biztrack.token.staff')
@@ -278,11 +336,17 @@ test.describe('the dashboard, as an office admin (City Health)', () => {
     expect(statuses).toEqual([200, 403, 403])
   })
 
-  test('the tabs offer the dashboard and Reports', async ({ page }) => {
+  test('Home’s Analytics sub-tabs offer the dashboard and Reports', async ({ page }) => {
     await page.goto(DASHBOARD.path)
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
     const strip = page.getByRole('navigation', { name: 'Analytics sections' })
-    expect(await strip.getByRole('link').allInnerTexts()).toEqual(['Analytics Dashboard', 'Reports'])
+    expect(await strip.getByRole('link').allInnerTexts()).toEqual(['Dashboard', 'Reports'])
+  })
+
+  test('the old dashboard address opens Home’s Analytics tab', async ({ page }) => {
+    await page.goto('/staff/analytics')
+    await expect(page).toHaveURL(/\/staff\/dashboard\?tab=analytics$/, { timeout: 30_000 })
+    await waitForAnalytics(page, DASHBOARD.title, DASHBOARD.level)
   })
 })
 
@@ -290,14 +354,14 @@ test.describe('the dashboard, as the super admin', () => {
   test.use({ storageState: SUPER_ADMIN_SESSION })
 
   test('opens on every office, with the Office menu', async ({ page }) => {
-    await page.goto('/admin/analytics')
-    await waitForAnalytics(page, DASHBOARD.title)
+    await page.goto(FULL_DASHBOARD.path)
+    await waitForAnalytics(page, FULL_DASHBOARD.title)
     await expect(page.getByLabel('Office', { exact: true })).toHaveValue('all')
   })
 
   test('the tab strip reaches all four screens, on the admin site', async ({ page }) => {
-    await page.goto('/admin/analytics')
-    await waitForAnalytics(page, DASHBOARD.title)
+    await page.goto(FULL_DASHBOARD.path)
+    await waitForAnalytics(page, FULL_DASHBOARD.title)
 
     const strip = page.getByRole('navigation', { name: 'Analytics sections' })
     const hrefs = await strip.getByRole('link').evaluateAll((links) =>
@@ -319,6 +383,6 @@ test.describe('the dashboard, as the super admin', () => {
     const analytics = railLink(page, 'Analytics')
     await expect(analytics).toHaveAttribute('href', '/admin/analytics')
     await analytics.click()
-    await waitForAnalytics(page, DASHBOARD.title)
+    await waitForAnalytics(page, FULL_DASHBOARD.title)
   })
 })

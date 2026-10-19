@@ -41,6 +41,7 @@ import {
 import { Alert } from '../../components/ui/Alert'
 import { DocumentActions } from '../../components/DocumentActions'
 import { TinInput } from '../../components/TinInput'
+import { OPERATION_LABELS, inItemOrder } from './formLabels'
 import { LandlineInput, MobileNumberInput } from '../../components/ContactNumberInput'
 import { MOBILE_ERROR, canonicalMobile, mobileValid } from '../../lib/phone'
 import { Skeleton } from '../../components/ui/primitives'
@@ -50,6 +51,8 @@ import {
   OptionalTag,
   PillButton,
   ProtoModal,
+  formCell,
+  formGridCls,
   inputCls,
 } from '../../components/ui/Proto'
 import { formatBytes, formatDate, formatMoney, tradeName } from '../../lib/format'
@@ -5332,6 +5335,8 @@ export function ApplyWizard() {
         },
       ],
       business: [
+        // Item 1 first, as the page asks it; it was read back after item 9.
+        { label: '1. Form of Organization', value: structure?.label ?? '' },
         {
           label: `2. ${structure ? `${structure.agency} Registration Number` : 'Registration Number'}`,
           value: form.registration_number,
@@ -5368,7 +5373,6 @@ export function ApplyWizard() {
         { label: '7. Mobile Number', value: form.mobile_number },
         { label: '8. E-mail Address', value: form.email },
         { label: '9. Website Address', value: form.website },
-        { label: '1. Form of Organization', value: structure?.label ?? '' },
         /*
          * ── 10 to 13, one range for four boxes ───────────────────────────
          *
@@ -5424,33 +5428,37 @@ export function ApplyWizard() {
         },
       ],
       operation: [
+        /*
+         * The step's own labels (OPERATION_LABELS), so 2a/2b and 4a/4b read
+         * the same here as over the boxes and in the still-needed line.
+         */
         {
-          label: '1. Business Area (sq. m.)',
+          label: OPERATION_LABELS.floor_area_sqm,
           value: feeDraft.floor_area_sqm,
         },
-        { label: '2. Total Number of Employees', value: feeDraft.employees },
+        { label: OPERATION_LABELS.employees, value: feeDraft.employees },
         {
-          label: '2. Number of Male Employees',
+          label: OPERATION_LABELS.male_employees,
           value: feeDraft.male_employees,
         },
         {
-          label: '2. Number of Female Employees',
+          label: OPERATION_LABELS.female_employees,
           value: feeDraft.female_employees,
         },
         {
-          label: '3. Number of Employees Residing in Malabon',
+          label: OPERATION_LABELS.employees_in_lgu,
           value: feeDraft.employees_in_lgu,
         },
         {
-          label: '4. Motorized Delivery Units',
+          label: OPERATION_LABELS.delivery_vehicles_motorized,
           value: feeDraft.delivery_vehicles_motorized,
         },
         {
-          label: '4. Other Delivery Units',
+          label: OPERATION_LABELS.delivery_vehicles_other,
           value: feeDraft.delivery_vehicles_other,
         },
         {
-          label: '5. Economic Organization',
+          label: OPERATION_LABELS.economic_organization,
           value: organization?.label ?? '',
         },
         ...(form.economic_organization === 'others'
@@ -5464,7 +5472,7 @@ export function ApplyWizard() {
         ...(applicationType === 'new'
           ? [
               {
-                label: '6. Capital Investment',
+                label: OPERATION_LABELS.capital_investment,
                 value: form.capital_investment,
               },
             ]
@@ -6084,7 +6092,20 @@ export function ApplyWizard() {
          * on the form going in.
          */
         case 'business': {
-          const missing: string[] = []
+          /*
+           * Collected with the item number each entry is about, and sorted on
+           * it before returning. Client, 19 October 2026: the still-needed
+           * line has to follow the page, and it followed the order these
+           * checks happen to run in — Business Name first, Form of
+           * Organization fifth. Rank 0 is the entry dialog's questions, which
+           * the Change button at the top of the step answers.
+           *
+           * A blank question is named by its label on the page, number and
+           * all, so the applicant can find it; a wrong answer keeps its
+           * "A valid …" sentence, which says what is wrong with it.
+           */
+          const ranked: [number, string][] = []
+          const add = (item: number, entry: string) => ranked.push([item, entry])
           /*
            * Item 110 — these three are the entry dialog's questions, and the
            * dialog will not close until they are answered, so reaching this
@@ -6095,7 +6116,8 @@ export function ApplyWizard() {
            * to answer them are no longer on it.
            */
           if (isReuse && prefillBusinessId === null) {
-            missing.push(
+            add(
+              0,
               `The business you are ${applicationType === 'renewal' ? 'renewing' : 'amending'} — press Change above`,
             )
           }
@@ -6111,7 +6133,8 @@ export function ApplyWizard() {
            * businesses holding no permit at all.
            */
           if (isReuse && !priorPermitAnswered) {
-            missing.push(
+            add(
+              0,
               `Which permit you are ${applicationType === 'renewal' ? 'renewing' : 'amending'} — press Change above`,
             )
           }
@@ -6122,7 +6145,7 @@ export function ApplyWizard() {
            * too, in the language of the removed category ticks, it sent the
            * applicant to press a Change button for a control that had gone.
            */
-          if (!form.name.trim()) missing.push('Business Name')
+          if (!form.name.trim()) add(4, '4. Business Name')
           /*
            * Items 11/12 — the named person the filing is in.
            *
@@ -6137,9 +6160,9 @@ export function ApplyWizard() {
            * one. Gender is required because CENRO's paper prints a SEX box and
            * nothing else on the filing answers it.
            */
-          if (!form.owner_surname.trim()) missing.push('Owner’s Family Name')
-          if (!form.owner_given_name.trim()) missing.push('Owner’s First Name')
-          if (!form.owner_gender.trim()) missing.push('Owner’s Sex')
+          if (!form.owner_surname.trim()) add(10, '10. Surname')
+          if (!form.owner_given_name.trim()) add(11, '11. Given Name')
+          if (!form.owner_gender.trim()) add(14, '14. Gender')
           /*
            * Item 94 — the structure is listed FIRST, and the number is named
            * after the agency that structure implies.
@@ -6155,13 +6178,13 @@ export function ApplyWizard() {
            * Asking the mapping instead means only a real structure counts.
            */
           const agency = agencyFor(form.registration_type)
-          if (agency === null) missing.push('1. Form of Organization')
+          if (agency === null) add(1, '1. Form of Organization')
           const numberLabel = agency
             ? REGISTRATION_AGENCIES[agency].label
             : 'Your registration number'
-          if (!form.registration_number.trim()) missing.push(numberLabel)
+          if (!form.registration_number.trim()) add(2, `2. ${numberLabel}`)
           else if (!registrationNumberValid(form.registration_number)) {
-            missing.push(`A valid ${numberLabel}`)
+            add(2, `A valid ${numberLabel}`)
           }
           /*
            * Optional since 24 September 2026, so a blank one does not hold
@@ -6170,7 +6193,7 @@ export function ApplyWizard() {
            * server rejects the same value either way.
            */
           if (form.tin.trim() && !tinValid(form.tin)) {
-            missing.push('A valid TIN (9 digits, plus branch code)')
+            add(3, 'A valid TIN (9 digits, plus branch code)')
           }
           /*
            * ── The blanket "paper fields are optional" rule ended here ────────
@@ -6207,10 +6230,10 @@ export function ApplyWizard() {
            * when blank, which is what these three checks were doing for
            * everything.
            */
-          if (!form.mobile_number.trim()) missing.push('Mobile Number')
-          else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
-          if (!form.email.trim()) missing.push('E-mail Address')
-          else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
+          if (!form.mobile_number.trim()) add(7, '7. Mobile Number')
+          else if (!phoneValid(form.mobile_number)) add(7, 'A valid Mobile Number')
+          if (!form.email.trim()) add(8, '8. E-mail Address')
+          else if (!emailValid(form.email)) add(8, 'A valid E-mail Address')
           /*
            * Item 5 is OPTIONAL as of 30 September 2026, on the client's
            * decision. The server always accepted a blank one and the permit
@@ -6220,7 +6243,7 @@ export function ApplyWizard() {
            * has no second name to give.
            */
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
-            missing.push('A valid Telephone (Landline)')
+            add(6, 'A valid Telephone (Landline)')
           }
           /*
            * Item 10 — the mobile is checked on the same terms as the landline
@@ -6231,10 +6254,10 @@ export function ApplyWizard() {
            * "mobile or landline" rule the other four contact fields share.
            */
           if (form.mobile_number.trim() && !mobileValid(form.mobile_number)) {
-            missing.push('A valid Mobile Number')
+            add(7, 'A valid Mobile Number')
           }
           if (form.website.trim() && !websiteValid(form.website)) {
-            missing.push('A valid Website Address')
+            add(9, 'A valid Website Address')
           }
           /*
            * Items 13-15, now asked of every structure — the paper routes both
@@ -6244,9 +6267,9 @@ export function ApplyWizard() {
            */
           if (hasPresidentOrOfficer(form.registration_type)) {
             if (!form.president_officer_name.trim()) {
-              missing.push('Name of President / OIC')
+              add(15, '15. Name of President / Officer in Charge')
             }
-            if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
+            if (!form.citizenship.trim()) add(16, '16. Citizenship (of President/OIC)')
             /*
              * Not for a sole proprietor: item 17 is derived from item 16 and
              * read-only, so a blank here means item 16 is blank — already
@@ -6258,13 +6281,22 @@ export function ApplyWizard() {
               form.registration_type !== 'sole_proprietorship'
               && !form.capital_participation_filipino.trim()
             ) {
-              missing.push('Capital Participation (Filipino)')
+              add(17, '17. Capital Participation (% Filipino)')
             }
           }
           if (!percentValid(form.capital_participation_filipino)) {
-            missing.push('A Capital Participation between 0 and 100 percent')
+            add(17, 'A Capital Participation between 0 and 100 percent')
           }
-          return missing
+          // Stable, so two entries about one item keep their order; the Set
+          // drops the mobile number's second "A valid", which two checks raise.
+          return [
+            ...new Set(
+              ranked
+                .map((entry, index) => ({ entry, index }))
+                .sort((a, b) => a.entry[0] - b.entry[0] || a.index - b.index)
+                .map(({ entry }) => entry[1]),
+            ),
+          ]
         }
         /*
          * Section B. One check, and it is conditional rather than new: on the
@@ -6289,7 +6321,7 @@ export function ApplyWizard() {
            * than an inapplicable one, which is the test the whole reversal turns
            * on.
            */
-          if (!form.economic_organization) missing.push('5. Economic Organization')
+          if (!form.economic_organization) missing.push(OPERATION_LABELS.economic_organization)
           if (
             form.economic_organization === 'others' &&
             !form.economic_organization_others.trim()
@@ -6339,7 +6371,9 @@ export function ApplyWizard() {
            * from a business record nothing fills.
            */
 
-          return missing
+          // In the page's order — item 5 is checked first above, but asked
+          // fifth. See inItemOrder.
+          return inItemOrder(missing)
         }
         case 'address': {
           const missing: string[] = []
@@ -6392,17 +6426,11 @@ export function ApplyWizard() {
            * duplicate wearing a different hat.
            */
           /*
-           * The STREET is required; the house or building number is not.
-           * Premises exist with no number of their own — a stall inside a
-           * public market, a unit known only by its building's name — and the
-           * paper prints a line for it without marking it required. Demanding
-           * one would be our rule, not the city's.
+           * The street and lot area are checked further down, after the pin:
+           * the still-needed line follows the page, and the page asks Line of
+           * Business, Barangay, the pin, then the Address card (client,
+           * 19 October 2026 — the list's order has to be the screen's).
            */
-          if (!form.street.trim()) missing.push('Street')
-          // Optional, so listed only when what is in it is not an area.
-          if (form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)) {
-            missing.push('A valid Lot Area')
-          }
           // The field's own label, so the list names something on the screen.
           if (!form.barangay_id) missing.push('Barangay Name')
           // CPDO rules on the zoning clearance from where the business actually
@@ -6474,6 +6502,18 @@ export function ApplyWizard() {
            * would have blocked Location & Zoning on four fields that are no
            * longer on it, with nothing on screen to fix.
            */
+          /*
+           * The STREET is required; the house or building number is not.
+           * Premises exist with no number of their own — a stall inside a
+           * public market, a unit known only by its building's name — and the
+           * paper prints a line for it without marking it required. Demanding
+           * one would be our rule, not the city's.
+           */
+          if (!form.street.trim()) missing.push('Street')
+          // Optional, so listed only when what is in it is not an area.
+          if (form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)) {
+            missing.push('A valid Lot Area')
+          }
           // Inspectors turn up unannounced; somebody has to be reachable.
           if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
           if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
@@ -10684,8 +10724,15 @@ export function ApplyWizard() {
             </LocationStep>
 
             <LocationStep n={4} title="Address" done={form.street.trim() !== ''}>
-              <div className="space-y-3">
-              <div>
+              {/*
+                Section A's grid (Proto's `formGridCls`) since 19 October 2026,
+                on the client's ask to use that layout on the other sections.
+                Three rows of a box each became two: the number, the street
+                and the block on one; the lot, its area and the landmark on
+                the next — the paper's order, with every box on a column line.
+              */}
+              <div className={formGridCls}>
+              <div className="contents">
                 {/*
                   ── Item 5's two boxes, as the paper prints them ─────────────
 
@@ -10704,8 +10751,8 @@ export function ApplyWizard() {
                   known only by its building's name — and the paper prints a
                   line for it without marking it required.
                 */}
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
+                <div className="contents">
+                  <div className={formCell.quarter}>
                     <label className="block">
                       <FieldLabel optional>House / Bldg. No.</FieldLabel>
                       <input
@@ -10725,7 +10772,7 @@ export function ApplyWizard() {
                       />
                     </label>
                   </div>
-                  <div className="relative sm:col-span-2">
+                  <div className={`relative ${formCell.half}`}>
                     <label className="block">
                       <FieldLabel required>Street</FieldLabel>
                       <input
@@ -10747,21 +10794,6 @@ export function ApplyWizard() {
                     )}
                   </div>
                 </div>
-                {/*
-                 * Says the boxes were written by us, from the pin, and are
-                 * theirs to correct. Only while every filled box still holds
-                 * what we put there (`autoFillNoteShown`): once the applicant
-                 * edits, the text is theirs and the note would be describing
-                 * the wrong thing. The live region is always mounted so the
-                 * sentence is announced when it appears.
-                 */}
-                <div role="status" aria-live="polite">
-                  {autoFillNoteShown && (
-                    <p className="mt-2 text-sm text-ink-secondary" data-testid="address-autofill-note">
-                      Filled in from your pin. Check it and fix anything that’s wrong.
-                    </p>
-                  )}
-                </div>
               </div>
               {/*
                * Block, Lot and the lot's area (client, 23 September 2026).
@@ -10771,8 +10803,8 @@ export function ApplyWizard() {
                * word for two quantities is how the same question gets asked
                * twice by mistake.
                */}
-              <div className="grid gap-4 sm:grid-cols-3">
-                <label className="block">
+              <div className="contents">
+                <label className={formCell.quarter}>
                   <FieldLabel optional>Block</FieldLabel>
                   <input
                     value={form.block}
@@ -10781,7 +10813,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <label className="block">
+                <label className={formCell.quarter}>
                   <FieldLabel optional>Lot</FieldLabel>
                   <input
                     value={form.lot}
@@ -10790,7 +10822,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <div className="relative">
+                <div className={`relative ${formCell.quarter}`}>
                   <label className="block">
                     <FieldLabel optional>Lot Area (sq. m.)</FieldLabel>
                     <input
@@ -10809,7 +10841,7 @@ export function ApplyWizard() {
                   )}
                 </div>
               </div>
-              <div>
+              <div className={formCell.half}>
                 <label className="block">
                   <FieldLabel optional>Locational Group/Landmark</FieldLabel>
                   <input
@@ -10823,6 +10855,24 @@ export function ApplyWizard() {
               </div>
 
               </div>
+              {/*
+               * Says the boxes were written by us, from the pin, and are
+               * theirs to correct. Only while every filled box still holds
+               * what we put there (`autoFillNoteShown`): once the applicant
+               * edits, the text is theirs and the note would be describing
+               * the wrong thing. The live region is always mounted so the
+               * sentence is announced when it appears.
+               *
+               * Under the grid rather than between its rows: a grid cell that
+               * is empty most of the time would still cost a row gap.
+               */}
+              <div role="status" aria-live="polite">
+                {autoFillNoteShown && (
+                  <p className="mt-2 text-sm text-ink-secondary" data-testid="address-autofill-note">
+                    Filled in from your pin. Check it and fix anything that’s wrong.
+                  </p>
+                )}
+              </div>
             </LocationStep>
 
             <LocationStep
@@ -10833,8 +10883,9 @@ export function ApplyWizard() {
                 phoneValid(form.emergency_contact_number)
               }
             >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="relative">
+              {/* Section A's grid: a name takes half the row, a phone number a quarter. */}
+              <div className={formGridCls}>
+                <div className={`relative ${formCell.half}`}>
                   <label className="block">
                     <FieldLabel required>Contact Person</FieldLabel>
                     <input
@@ -10853,7 +10904,7 @@ export function ApplyWizard() {
                     </FieldError>
                   )}
                 </div>
-                <div className="relative">
+                <div className={`relative ${formCell.quarter}`}>
                   <label className="block">
                     <FieldLabel required>Contact Number</FieldLabel>
                     <input
@@ -11057,16 +11108,21 @@ export function ApplyWizard() {
             Below 56rem the quarters are too narrow for the mobile number's
             three boxes after +63, which is what sets that line.
 
-            `items-end` is what keeps a row's boxes level. Where a label is
-            too long for its column it wraps, the cells are aligned by their
-            bottom edge, and since every box in the section is the same
-            height the boxes still sit on one line however many lines the
-            labels above them take. Errors float (FieldError) and hints are
-            `sr-only`, so nothing else ever sits under a box to throw that
-            off — item 16's free-text box is the one exception, and it is
-            given a row of its own below.
+            `field-grid` (in `formGridCls`) is what keeps a row level. It was
+            `items-end`, which put the boxes on one line but left the label
+            tops ragged — client, 19 October 2026, once "(optional)" made
+            items 3, 5 and 6 wrap: the row looked uneven. Now each field's
+            label takes the row's spare height, so the labels start on one
+            line and the boxes sit on another. Errors float (FieldError) and
+            hints are `sr-only`, so nothing else ever sits under a box to
+            throw that off — item 16's free-text box is the one exception,
+            and it is given a row of its own below.
+
+            The grid itself is Proto's `formGridCls`, shared since the client
+            asked the same day for this layout on the other sections and
+            forms too.
           */}
-          <div className="@container mt-3 grid grid-cols-12 items-end gap-x-5 gap-y-4">
+          <div className={`${formGridCls} mt-3`}>
             {/* `contents`: these children join the wrap rather than form a row. */}
             <div className="contents">
             {/*
@@ -11673,8 +11729,8 @@ export function ApplyWizard() {
               When item 16's free-text box opens, it takes a second row of the
               box, and in quarters the box then spans two rows of the SECTION
               (`row-span-2`, rows subgridded too). Otherwise the box would be
-              one tall cell, and `items-end` would level item 14's pills with
-              that free-text box instead of with the select above it.
+              one tall cell, and the grid's row levelling would put item 14's
+              pills on the free-text box's line instead of the select's.
 
               The live region stays on the element: `presidentAsked` is true
               for every structure since 16 September, so nothing toggles here
@@ -11682,7 +11738,7 @@ export function ApplyWizard() {
             */}
             <div
               aria-live="polite"
-              className={`relative col-span-12 grid grid-cols-subgrid items-end gap-x-5 gap-y-4 @4xl:col-span-9 ${
+              className={`relative col-span-12 grid grid-cols-subgrid gap-x-5 gap-y-4 @4xl:col-span-9 ${
                 citizenshipMode === 'other' ? '@4xl:row-span-2 @4xl:grid-rows-subgrid' : ''
               }`}
             >
@@ -12102,16 +12158,17 @@ export function ApplyWizard() {
               taken as a SUBGRID (`row-span-3 grid-rows-subgrid`). In a quarter
               items 7 and 8's labels wrap to two lines and item 6's does not,
               and a Yes answer puts a note under one control and not the
-              others; with the rows shared, labels sit on the control's edge,
-              the controls share a line, and a note only lengthens the row
-              below them. `gap-y-0` because those rows are a label and its own
+              others; with the rows shared, labels start on one line (top, as
+              on every form grid since 19 October 2026 — they used to sit on
+              the control's edge, `self-end`), the controls share a line, and a
+              note only lengthens the row below them. `gap-y-0` because those rows are a label and its own
               box — FieldLabel's margin is the space between them — and `pb-4`
               on each item is the gap to the next row of items.
             */}
             <div className="grid grid-cols-12 gap-x-5">
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @3xl:col-span-6">
                 <label className="row-span-2 grid grid-rows-subgrid">
-                  <span className="self-end">
+                  <span>
                     <FieldLabel
                       required={applicationType === 'new'}
                       optional={applicationType !== 'new'}
@@ -12176,7 +12233,7 @@ export function ApplyWizard() {
                * could equally mean the applicant skipped the question.
                */}
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
-                <span className="self-end">
+                <span>
                   <FieldLabel optional>7. Tax incentives from a Government Entity?</FieldLabel>
                 </span>
                 <div
@@ -12259,7 +12316,7 @@ export function ApplyWizard() {
                * than showing four fields most applicants must leave blank.
                */}
               <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
-                <span className="self-end">
+                <span>
                   <FieldLabel optional>8. Do you pay rent for the premises?</FieldLabel>
                 </span>
                 {/*
@@ -13940,6 +13997,22 @@ export function ApplyWizard() {
           {isLast && !consent && (
             <p className="max-w-md text-xs text-ink-muted">
               Tick the Data Privacy Consent on the first part before submitting.
+            </p>
+          )}
+          {/*
+            Why Next is held when nothing is missing: the pin's zone refuses
+            the business (`zoneHolds`). The button greyed out with no reason
+            beside it; client, 19 October 2026: "Can you at least put a message
+            here telling me to fix my zoning, just like how you provide a
+            message when there are missing fields."
+          */}
+          {zoneHolds && stepMissing.length === 0 && (
+            <p className="max-w-md text-xs text-ink-muted">
+              {zoneRefusal === null
+                ? 'Checking the zoning at your pin…'
+                : stepIndex === zoneStepIndex
+                  ? 'Your pin’s zone doesn’t allow this business.'
+                  : 'Your pin’s zone doesn’t allow this business. Go back to fix it.'}
             </p>
           )}
         </div>

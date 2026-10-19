@@ -1,9 +1,16 @@
-import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
 import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
-import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/ui/Proto'
+import {
+  FieldError,
+  FieldLabel,
+  OptionalTag,
+  formCell,
+  formGridCls,
+  inputCls,
+} from '../../components/ui/Proto'
 import { genderLabel } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
@@ -1084,14 +1091,17 @@ function ChipRow({
 function ControlNoField({
   label,
   placeholder,
+  className = 'block',
 }: {
   label: ReactNode
   placeholder: string
+  /** The cell's span on the sheet's form grid. */
+  className?: string
 }) {
   // Wrapped in a real <label>: FieldLabel is a styled <span>, so on its own it
   // names nothing and a screen reader reaches the box with no idea what it is.
   return (
-    <label className="block">
+    <label className={className}>
       <FieldLabel>{label}</FieldLabel>
       <input
         value=""
@@ -1180,12 +1190,35 @@ function DerivedField({
   /** Sizes the cell inside its section's wrap — see the note on the grids. */
   className?: string
 }) {
-  // The <label> stops at the input: the hint sits outside it so that a long
-  // explanatory sentence is not read out as part of the field's name.
+  const id = useId()
+  const hintId = `${id}-hint`
+  /*
+   * The hint sits between the label and the box, and the <label> names the
+   * box by `htmlFor` rather than by wrapping it.
+   *
+   * It was under the box, inside a wrapping label's parent. On the shared
+   * form grid (Proto's `formGridCls`, 19 October 2026) a note under a box
+   * pushes THAT box up by the note's height, so a row holding "Date of
+   * Application — Recorded by the system when you submit." had one box
+   * sitting higher than its neighbours. Above the box, the note is part of
+   * the label area that grows to the row's height, and the box stays on the
+   * row's line. It is also where the form-control vocabulary in fields.tsx
+   * has always put hints.
+   *
+   * Still outside the <label>, so a long sentence is not read out as part of
+   * the field's name; `aria-describedby` reads it as the description instead.
+   */
   return (
     <div className={className}>
-      <label className="block">
+      <label htmlFor={id}>
         <FieldLabel>{label}</FieldLabel>
+      </label>
+      {hint && (
+        <p id={hintId} className="-mt-0.5 mb-1.5 text-xs text-ink-muted">
+          {hint}
+        </p>
+      )}
+      <div>
         {/*
          * No placeholder. It read "Filled in from your application", which is
          * what `<FromApplicationTag />` in the label beside it already says —
@@ -1199,13 +1232,14 @@ function DerivedField({
          * reassuring sentence where the answer should be.
          */}
         <input
+          id={id}
           value={value}
           readOnly
           aria-readonly="true"
+          aria-describedby={hint ? hintId : undefined}
           className={`${inputCls} cursor-not-allowed bg-line/60 text-ink-secondary`}
         />
-      </label>
-      {hint && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
+      </div>
     </div>
   )
 }
@@ -1245,22 +1279,33 @@ function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
         carried field sits AMONG asked ones and the reader cannot tell which is
         which; here they are all carried and the heading says so.
       */}
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-        <DerivedField className="grow basis-[15rem]" label="Business Name" value={business.name} />
+      {/*
+        The sheets' shared form grid (Proto's `formGridCls`) since 19 October
+        2026, so this block sits on the same column lines as the sections
+        below it. The name shares its row with the trade name when there is
+        one, the address takes a half, and the line of business — a PSIC title
+        and its products, often long — a row of its own.
+      */}
+      <div className={formGridCls}>
+        <DerivedField
+          className={business.tradeName !== '' ? formCell.quarter : formCell.half}
+          label="Business Name"
+          value={business.name}
+        />
         {business.tradeName !== '' && (
           <DerivedField
-            className="grow basis-[13rem]"
+            className={formCell.quarter}
             label="Trade Name / Franchise"
             value={business.tradeName}
           />
         )}
         <DerivedField
-          className="grow basis-[18rem]"
+          className={formCell.half}
           label="Business Address"
           value={business.address}
         />
         <DerivedField
-          className="grow basis-[18rem]"
+          className={formCell.full}
           label="Line of Business"
           value={business.lineOfBusiness}
         />
@@ -1283,9 +1328,10 @@ function applicationDate(data: OfficeFormData): string {
 }
 
 /** "Date of Application" reads from submitted_at and is never typed (item 11). */
-function ApplicationDateField({ data }: { data: OfficeFormData }) {
+function ApplicationDateField({ data, className }: { data: OfficeFormData; className?: string }) {
   return (
     <DerivedField
+      className={className}
       label={
         <>
           Date of Application
@@ -1420,8 +1466,21 @@ function ZoningFields({
           the placeholder shows the shape of the number the applicant will
           eventually be given rather than a shape we made up for the box.
         */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/*
+          ── One grid for the whole sheet, 19 October 2026 ──────────────────
+
+          The wizard's section A layout (Proto's `formGridCls`), on the
+          client's ask that it be used on the other forms too. It was five
+          separate three-column grids with a full-width field between each,
+          so a one-word answer like "Activity" took a third of the page and
+          the address of the firm a third as well. Now a short answer is a
+          quarter, a name or an address a half or more, and the boxes of a
+          row share one line. The paper's order is kept: the fields still run
+          from the masthead through I to IX.
+        */}
+        <div className={formGridCls}>
           <ControlNoField
+            className={formCell.quarter}
             label={
               <>
                 Locational Clearance No.
@@ -1430,12 +1489,11 @@ function ZoningFields({
             }
             placeholder="MCZ-2026-________"
           />
-          <ApplicationDateField data={data} />
-        </div>
+          <ApplicationDateField data={data} className={formCell.quarter} />
 
-        {/* I. NAME OF PROPRIETOR/PRESIDENT/GENERAL MANAGER · CONTACT NO. · EMAIL ADD. */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* I. NAME OF PROPRIETOR/PRESIDENT/GENERAL MANAGER · CONTACT NO. · EMAIL ADD. */}
           <DerivedField
+            className={formCell.half}
             label={
               <>
                 Name of Proprietor / President / General Manager
@@ -1445,14 +1503,15 @@ function ZoningFields({
             value={business.proprietorName}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Contact No.<FromApplicationTag /></>}
             value={business.proprietorContact}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Email Address<FromApplicationTag /></>}
             value={business.proprietorEmail}
           />
-        </div>
 
         {/*
           II. HOME ADDRESS — an input, because nothing on the filing answers it.
@@ -1466,7 +1525,7 @@ function ZoningFields({
           does not mark it mandatory, so the gate was right and the mark was
           the lie (tester).
         */}
-        <label className="block">
+        <label className={formCell.half}>
           <FieldLabel optional>Home Address</FieldLabel>
           <input
             value={get(data, 'zoning_home_address')}
@@ -1479,24 +1538,26 @@ function ZoningFields({
         </label>
 
         {/* III. NAME OF FIRM · CONTACT NO.  |  IV. ADDRESS OF FIRM */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
+            className={formCell.quarter}
             label={<>Name of Firm<FromApplicationTag /></>}
             value={business.name}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Contact No.<FromApplicationTag /></>}
             value={business.proprietorContact}
           />
           <DerivedField
+            className={formCell.half}
             label={<>Address of Firm<FromApplicationTag /></>}
             value={business.address}
           />
           <DerivedField
+            className={formCell.half}
             label={<>Activity<FromApplicationTag /></>}
             value={business.activity}
           />
-        </div>
 
         {/*
           VI. LOCATION/ADDRESS OF PROJECT/ACTIVITY.
@@ -1508,19 +1569,28 @@ function ZoningFields({
           find both boxes answered.
         */}
         <DerivedField
+          className={formCell.half}
           label={<>Location / Address of Project or Activity<FromApplicationTag /></>}
           value={business.address}
         />
 
         {/* VII. NATURE OF APPLICATION — New Business or Renewal, from the filing. */}
         <DerivedField
+          className={formCell.quarter}
           label={<>Nature of Application<FromApplicationTag /></>}
           value={get(data, 'application_type')}
         />
 
-        {/* VIII. PROJECT DESCRIPTION */}
-        <label className="block">
+        {/*
+          VIII. PROJECT DESCRIPTION. Its note is between the label and the
+          box, not under it, so the box's bottom edge stays on item VII's line
+          beside it (see DerivedField). Inside the <label>, as it always was.
+        */}
+        <label className={formCell.wide}>
           <FieldLabel optional>Project Description</FieldLabel>
+          <span className="-mt-0.5 mb-1.5 block text-xs text-ink-muted">
+            In your own words, what will be built or operated at this address.
+          </span>
           <textarea
             rows={3}
             value={get(data, 'zoning_project_description')}
@@ -1530,13 +1600,10 @@ function ZoningFields({
             className={inputCls}
           />
           <CarriedTag field="zoning_project_description" />
-          <p className="mt-1 text-xs text-ink-muted">
-            In your own words, what will be built or operated at this address.
-          </p>
         </label>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
+            className={formCell.quarter}
             label={<>Floor Area to be / being Utilized<FromApplicationTag /></>}
             value={get(data, 'total_floor_area_sqm')}
             hint="Square metres, from your Business Operation answers."
@@ -1556,7 +1623,7 @@ function ZoningFields({
             actually asks for it. Left derived, it would print empty forever —
             exactly what happened to the lessor boxes below.
           */}
-          <label className="block">
+          <label className={formCell.quarter}>
             <FieldLabel optional>No. of Storey of Building</FieldLabel>
             <input
               value={get(data, 'building_storeys')}
@@ -1589,7 +1656,7 @@ function ZoningFields({
             takes the answer. Left derived, both boxes would print empty
             forever.
           */}
-          <label className="block">
+          <label className={formCell.half}>
             <FieldLabel optional>Name of Lessor (if lessee)</FieldLabel>
             <input
               value={get(data, 'lessor_name')}
@@ -1600,7 +1667,8 @@ function ZoningFields({
             />
             <CarriedTag field="lessor_name" />
           </label>
-          <label className="block">
+          {/* An address, so three quarters of the row, under its lessor's name. */}
+          <label className={formCell.wide}>
             <FieldLabel optional>Address of Lessor (if lessee)</FieldLabel>
             <input
               value={get(data, 'lessor_address')}
@@ -1611,9 +1679,9 @@ function ZoningFields({
             />
             <CarriedTag field="lessor_address" />
           </label>
-        </div>
 
-        <div>
+        {/* A row of its own: five pills, and a note under them that no box beside it could share. */}
+        <div className={formCell.full}>
           <FieldLabel optional>Type of Industrial Project</FieldLabel>
           <ChipRow
             label="Type of industrial project"
@@ -1636,6 +1704,7 @@ function ZoningFields({
         */}
         {get(data, 'authorized_representative_source') === 'FSIC' ? (
           <DerivedField
+            className={formCell.half}
             label={
               <>
                 Authorized Representative
@@ -1646,7 +1715,7 @@ function ZoningFields({
             hint="Change it on the Fire Safety Inspection Certificate form and it follows here."
           />
         ) : (
-          <label className="block">
+          <label className={formCell.half}>
             <FieldLabel optional>Authorized Representative</FieldLabel>
             <input
               value={get(data, 'authorized_representative')}
@@ -1656,12 +1725,14 @@ function ZoningFields({
               className={inputCls}
             />
             <CarriedTag field="authorized_representative" />
+            {/* Under the box: it is the last field, alone on its row, so nothing beside it to line up with. */}
             <p className="mt-1 text-xs text-ink-muted">
               Leave blank if you are filing this yourself. If you name someone, CPDD asks for an
               authorization letter with your documents.
             </p>
           </label>
         )}
+        </div>
       </section>
     </div>
   )
@@ -1699,8 +1770,14 @@ function SanitaryFields({
 }) {
   const ro = useReadOnly()
   const isFood = get(data, 'sanitary_classification') === 'Food Establishment'
-  const select = (key: string, options: readonly string[], required = false) => (
-    <label className="block">
+  // Both helpers take the cell's span on the sheet's form grid.
+  const select = (
+    key: string,
+    options: readonly string[],
+    required = false,
+    className: string = formCell.quarter,
+  ) => (
+    <label className={className}>
       <FieldLabel required={required} optional={!required}>
         {officeFormFieldLabel('SANITARY', key)}
       </FieldLabel>
@@ -1721,8 +1798,8 @@ function SanitaryFields({
       <CarriedTag field={key} />
     </label>
   )
-  const yesNo = (key: string) => (
-    <div>
+  const yesNo = (key: string, className: string = formCell.quarter) => (
+    <div className={className}>
       <FieldLabel optional>{officeFormFieldLabel('SANITARY', key)}</FieldLabel>
       <ChipRow options={YES_NO} value={get(data, key)} onChange={(v) => set(key, v)} />
       <CarriedTag field={key} />
@@ -1733,9 +1810,16 @@ function SanitaryFields({
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/*
+          Each section is one of the wizard's form grids (Proto's
+          `formGridCls`) since 19 October 2026 — the client asked for section
+          A's layout on the office forms too. Counts and dates take a quarter,
+          choices sized to their pills; the boxes of a row share one line.
+        */}
+        <div className={formGridCls}>
           {/* New vs Renewal is the application's own type — never re-asked. */}
           <DerivedField
+            className={formCell.quarter}
             label={
               <>
                 Type of Application
@@ -1745,6 +1829,7 @@ function SanitaryFields({
             value={get(data, 'application_type')}
           />
           <ControlNoField
+            className={formCell.quarter}
             label={
               <>
                 Sanitary Permit No.
@@ -1753,13 +1838,14 @@ function SanitaryFields({
             }
             placeholder="SP-2026-________"
           />
-          <ApplicationDateField data={data} />
+          <ApplicationDateField data={data} className={formCell.quarter} />
         </div>
       </section>
 
       <section className="space-y-3">
         <SectionMarker letter="B" label="Establishment Profile" />
-        <div>
+        <div className={formGridCls}>
+        <div className={formCell.full}>
           <FieldLabel required>Sanitary Classification</FieldLabel>
           <ChipRow
             options={SANITARY_CLASSIFICATIONS}
@@ -1768,30 +1854,31 @@ function SanitaryFields({
           />
           <CarriedTag field="sanitary_classification" />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/*
             The headcount and the floor area are the Business & Tax Profile's —
             the figures the sanitary inspection fee is bracketed on — so they
             are carried, not asked again. See `OfficeFormAnswers`.
           */}
           <DerivedField
+            className={formCell.quarter}
             label={<>Employees — Male<FromApplicationTag /></>}
             value={get(data, 'employees_male')}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Employees — Female<FromApplicationTag /></>}
             value={get(data, 'employees_female')}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Employees — Total<FromApplicationTag /></>}
             value={get(data, 'employees_total')}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Floor Area (sq. m.)<FromApplicationTag /></>}
             value={get(data, 'total_floor_area_sqm')}
           />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
            * Asked once, on the Business & Tax Profile, and asked there because
            * that is where it is PRICED: the health certificate fee (Sec.
@@ -1807,6 +1894,7 @@ function SanitaryFields({
            * same filing.
            */}
           <DerivedField
+            className={formCell.half}
             label={
               <>
                 No. of Workers Requiring Health Certificates
@@ -1816,7 +1904,7 @@ function SanitaryFields({
             value={get(data, 'workers_requiring_health_certs')}
             hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
           />
-          <label className="block">
+          <label className={formCell.half}>
             <FieldLabel optional>Operating Hours</FieldLabel>
             <input
               value={get(data, 'operating_hours')}
@@ -1832,9 +1920,9 @@ function SanitaryFields({
 
       <section className="space-y-3">
         <SectionMarker letter="C" label="Water and Sanitation Facilities" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className={formGridCls}>
           {select('water_source', WATER_SOURCES, true)}
-          <label className="block">
+          <label className={formCell.quarter}>
             <FieldLabel required>No. of Toilets</FieldLabel>
             <input
               inputMode="numeric"
@@ -1847,16 +1935,12 @@ function SanitaryFields({
             <CarriedTag field="toilets_count" />
           </label>
           {select('toilet_type', TOILET_TYPES)}
-        </div>
-        {yesNo('toilets_separate_sexes')}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {yesNo('toilets_separate_sexes')}
           {select('sewage_disposal', SEWAGE_DISPOSALS, true)}
           {select('solid_waste_disposal', SOLID_WASTE_DISPOSALS, true)}
-        </div>
-        {yesNo('waste_segregation')}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {yesNo('waste_segregation')}
           {select('pest_control', PEST_CONTROL_MEASURES)}
-          <label className="block">
+          <label className={formCell.quarter}>
             <FieldLabel optional>Last Pest Control Treatment</FieldLabel>
             <input
               type="date"
@@ -1879,8 +1963,8 @@ function SanitaryFields({
       {isFood && (
         <section className="space-y-3">
           <SectionMarker letter="D" label="Food Establishment" />
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="block">
+          <div className={formGridCls}>
+            <label className={formCell.quarter}>
               <FieldLabel optional>Seating Capacity</FieldLabel>
               <input
                 inputMode="numeric"
@@ -2730,9 +2814,17 @@ function CecFields({
         </h2>
 
         {/* TYPE OF APPLICATION | TYPE OF BUSINESS */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <ApplicationDateField data={data} />
+        {/*
+          One form grid for the sheet (Proto's `formGridCls`), 19 October
+          2026 — the wizard's section A layout, on the client's ask. The
+          paper's pairs ran three to a row with a third of the row empty; now
+          counts take a quarter, names and addresses a half, and a row's
+          boxes share one line. The paper's order is unchanged.
+        */}
+        <div className={formGridCls}>
+          <ApplicationDateField data={data} className={formCell.quarter} />
           <ControlNoField
+            className={formCell.quarter}
             label={
               <>
                 Control No.
@@ -2742,6 +2834,7 @@ function CecFields({
             placeholder="CEC-2026-________"
           />
           <DerivedField
+            className={formCell.quarter}
             label={
               <>
                 Type of Application
@@ -2751,6 +2844,7 @@ function CecFields({
             value={get(data, 'application_type')}
           />
           <DerivedField
+            className={formCell.quarter}
             label={
               <>
                 Type of Business
@@ -2759,27 +2853,27 @@ function CecFields({
             }
             value={business.registrationType}
           />
-        </div>
 
         {/* BUSINESS AREA | TOTAL NO. OF EMPLOYEES (MALE / FEMALE) */}
-        <div className="grid gap-3 sm:grid-cols-3">
           <DerivedField
+            className={formCell.quarter}
             label={<>Business Area (in sq. m.)<FromApplicationTag /></>}
             value={business.businessAreaSqm}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Total No. of Employees — Male<FromApplicationTag /></>}
             value={business.maleEmployees}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Total No. of Employees — Female<FromApplicationTag /></>}
             value={business.femaleEmployees}
           />
-        </div>
 
         {/* OWNER | BUSINESS NAME */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
+            className={formCell.quarter}
             label={
               <>
                 Owner (Family Name, First Name, Middle Name)
@@ -2788,11 +2882,9 @@ function CecFields({
             }
             value={business.ownerName}
           />
-          <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />
-        </div>
+          <DerivedField className={formCell.half} label={<>Business Name<FromApplicationTag /></>} value={business.name} />
 
         {/* OWNER&rsquo;S ADDRESS | BUSINESS ADDRESS */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
             The one address the register does not hold. `business_addresses` has
             an `address_type` column and nothing has ever written a residential
@@ -2801,7 +2893,7 @@ function CecFields({
             its own prompt. If BPLO ever grows item A16 this becomes a carried
             field like the rest and the question comes off.
           */}
-          <label className="block">
+          <label className={formCell.half}>
             <FieldLabel required>Owner&rsquo;s Address</FieldLabel>
             <input
               value={get(data, 'owner_address')}
@@ -2813,14 +2905,13 @@ function CecFields({
             <CarriedTag field="owner_address" />
           </label>
           <DerivedField
+            className={formCell.half}
             label={<>Business Address<FromApplicationTag /></>}
             value={business.address}
           />
-        </div>
 
         {/* BIRTHDAY | SEX */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="relative">
+          <div className={`relative ${formCell.quarter}`}>
             <FieldLabel optional>Birthday</FieldLabel>
             {/* Birthdays can never be in the future: capped here, re-checked by the API. */}
             <input
@@ -2841,26 +2932,29 @@ function CecFields({
           </div>
           {/* The word. `ownerSex` carries the stored 'M' or 'F'. */}
           <DerivedField
+            className={formCell.quarter}
             label={<>Sex<FromApplicationTag /></>}
             value={genderLabel(business.ownerSex)}
           />
-        </div>
 
         {/* LINE OF BUSINESS | PRODUCTS/SERVICES | CONTACT NUMBERS */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
+            className={formCell.half}
             label={<>Line of Business<FromApplicationTag /></>}
             value={business.lineOfBusiness}
           />
           <DerivedField
+            className={formCell.half}
             label={<>Products / Services<FromApplicationTag /></>}
             value={business.productsServices}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Contact Numbers — Landline<FromApplicationTag /></>}
             value={business.landline}
           />
           <DerivedField
+            className={formCell.quarter}
             label={<>Contact Numbers — Mobile No.<FromApplicationTag /></>}
             value={business.mobile}
           />
@@ -2910,8 +3004,10 @@ function FsicFields({
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        {/* The sheets' form grid (Proto's `formGridCls`) — see the Zoning sheet. */}
+        <div className={formGridCls}>
           <ControlNoField
+            className={formCell.quarter}
             label={
               <>
                 FSIC Application Number
@@ -2927,7 +3023,7 @@ function FsicFields({
             place through CarriedOverSection above.
           */}
           <DerivedField
-            className="grow basis-[14rem]"
+            className={formCell.quarter}
             label={
               <>
                 Name of Owner
@@ -2936,20 +3032,25 @@ function FsicFields({
             }
             value={business.ownerName}
           />
-          <label className="block grow basis-[14rem]">
+          <label className={formCell.quarter}>
             <FieldLabel optional>Authorized Representative</FieldLabel>
             {/*
              * Item 70 — the placeholder used to carry the rule ("Auto-filled
              * from Business Permit if blank"), which is the one thing about this
              * field that must survive the first keystroke and is exactly what a
-             * placeholder does not. It is a hint below the box now, and the
-             * placeholder is an example, as every other one on these sheets is.
+             * placeholder does not. It is a hint beside the label now — above
+             * the box, so the box stays on its row's line (19 October 2026) —
+             * and the placeholder is an example, as every other one on these
+             * sheets is.
              *
              * This is also where the CPDD locational clearance's IX. Authorized
              * Representative is answered whenever both sheets are on the filing:
              * one question, asked on the form that asked it first, carried onto
              * the zoning sheet read-only.
              */}
+            <span className="-mt-0.5 mb-1.5 block text-xs text-ink-muted">
+              Leave blank to use the name on the Business Permit application.
+            </span>
             <input
               value={get(data, 'authorized_representative')}
               onChange={(e) => set('authorized_representative', e.target.value)}
@@ -2957,17 +3058,14 @@ function FsicFields({
               placeholder="Full name"
               className={inputCls}
             />
-            <p className="mt-1 text-xs text-ink-muted">
-              Leave blank to use the name on the Business Permit application.
-            </p>
           </label>
-          <ApplicationDateField data={data} />
+          <ApplicationDateField data={data} className={formCell.quarter} />
         </div>
       </section>
 
       <section className="space-y-3">
         <SectionMarker letter="B" label="The Premises" />
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <div className={formGridCls}>
           {/*
             "TYPE OF OCCUPANCY / BUSINESS NATURE". Seeded from the line of
             business and editable, because BFP's vocabulary is not PSIC's — a
@@ -2981,7 +3079,7 @@ function FsicFields({
             separate now — client: "Make them separate" — and each paper asks
             its own boxes.
           */}
-          <label className="block grow basis-[16rem]">
+          <label className={formCell.half}>
             <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
             <input
               value={get(data, 'occupancy_type')}
@@ -2992,7 +3090,7 @@ function FsicFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3000,7 +3098,7 @@ function FsicFields({
               onChange={(e) => set('building_storeys', e.target.value)}
               readOnly={ro}
               placeholder="e.g. 2"
-              className={`${inputCls} tnum w-[7rem]`}
+              className={`${inputCls} tnum`}
             />
             <CarriedTag field="building_storeys" />
           </label>
@@ -3010,17 +3108,17 @@ function FsicFields({
             Operation — so it is carried rather than asked a third time.
           */}
           <DerivedField
-            className="shrink-0"
+            className={formCell.quarter}
             label="Total Floor Area (sq. m.)"
             value={business.businessAreaSqm}
           />
           <DerivedField
-            className="grow basis-[12rem]"
+            className={formCell.quarter}
             label="Contact Number"
             value={business.mobile || business.landline}
           />
           <DerivedField
-            className="grow basis-[14rem]"
+            className={formCell.half}
             label="E-mail Address"
             value={business.proprietorEmail}
           />
@@ -3035,7 +3133,9 @@ function FsicFields({
          * applicant to repeat it. Never the Occupancy kind on a business filing;
          * see `OfficeFormAnswers`.
          */}
+        <div className={formGridCls}>
         <DerivedField
+          className={formCell.half}
           label={
             <>
               Certificate Applied For
@@ -3045,6 +3145,7 @@ function FsicFields({
           value={get(data, 'certificate_applied_for')}
           hint="Set from the application type you chose in step 1: a new business or a renewal."
         />
+        </div>
       </section>
 
     </div>
@@ -3065,12 +3166,13 @@ function OccupancyFields({
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application & Permit Details" />
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        {/* The sheets' form grid (Proto's `formGridCls`) — see the Zoning sheet. */}
+        <div className={formGridCls}>
           {/*
            * Full vs Partial is how much of the building will be occupied — a
            * real applicant decision, not the new/renewal the system knows.
            */}
-          <div className="shrink-0">
+          <div className={formCell.quarter}>
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
               options={OCCUPANCY_SCOPES}
@@ -3079,8 +3181,8 @@ function OccupancyFields({
             />
             <CarriedTag field="application_type" />
           </div>
-          <ApplicationDateField data={data} />
-          <div>
+          <ApplicationDateField data={data} className={formCell.quarter} />
+          <div className={formCell.quarter}>
             <FieldLabel optional>Building Permit No.</FieldLabel>
             <input
               value={get(data, 'building_permit_no')}
@@ -3090,7 +3192,7 @@ function OccupancyFields({
             />
             <CarriedTag field="building_permit_no" />
           </div>
-          <div>
+          <div className={formCell.quarter}>
             <FieldLabel optional>FSEC No.</FieldLabel>
             <input
               value={get(data, 'fsec_no')}
@@ -3105,25 +3207,25 @@ function OccupancyFields({
             each sits beside the number it belongs to — see the note on this
             change for why they are asked here and not on the officer's sheet.
           */}
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>Building Permit — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'building_permit_date')}
               onChange={(e) => set('building_permit_date', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} w-[11rem]`}
+              className={inputCls}
             />
             <CarriedTag field="building_permit_date" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>FSEC — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'fsec_date')}
               onChange={(e) => set('fsec_date', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} w-[11rem]`}
+              className={inputCls}
             />
             <CarriedTag field="fsec_date" />
           </label>
@@ -3132,9 +3234,9 @@ function OccupancyFields({
 
       <section className="space-y-3">
         <SectionMarker letter="B" label="Owner / Permittee" />
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <div className={formGridCls}>
           <DerivedField
-            className="grow basis-[14rem]"
+            className={formCell.quarter}
             label={
               <>
                 Name of Owner / Permittee
@@ -3150,7 +3252,7 @@ function OccupancyFields({
             different places. Prefilling the business address here would put a
             wrong answer on a form the Building Official posts to.
           */}
-          <label className="block grow basis-[18rem]">
+          <label className={formCell.half}>
             <FieldLabel optional>Address of Owner / Permittee</FieldLabel>
             <input
               value={get(data, 'owner_address')}
@@ -3162,7 +3264,7 @@ function OccupancyFields({
             <CarriedTag field="owner_address" />
           </label>
           {/* Printed beside the address on the paper; the OBO posts to it. */}
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>ZIP Code</FieldLabel>
             <input
               inputMode="numeric"
@@ -3170,7 +3272,7 @@ function OccupancyFields({
               onChange={(e) => set('owner_zip', e.target.value)}
               readOnly={ro}
               placeholder="1470"
-              className={`${inputCls} tnum w-[7rem]`}
+              className={`${inputCls} tnum`}
             />
             <CarriedTag field="owner_zip" />
           </label>
@@ -3184,51 +3286,51 @@ function OccupancyFields({
             every owner holds one today, and a blank the office can ask for is
             better than a gate that stops the sheet.
           */}
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>Tel. No.</FieldLabel>
             <input
               inputMode="tel"
               value={get(data, 'owner_tel')}
               onChange={(e) => set('owner_tel', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} w-[11rem]`}
+              className={inputCls}
             />
             <CarriedTag field="owner_tel" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>Community Tax Certificate No.</FieldLabel>
             <input
               value={get(data, 'owner_ctc_no')}
               onChange={(e) => set('owner_ctc_no', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} w-[12rem]`}
+              className={inputCls}
             />
             <CarriedTag field="owner_ctc_no" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>CTC — Date Issued</FieldLabel>
             <input
               type="date"
               value={get(data, 'owner_ctc_date')}
               onChange={(e) => set('owner_ctc_date', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} w-[11rem]`}
+              className={inputCls}
             />
             <CarriedTag field="owner_ctc_date" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel optional>CTC — Place Issued</FieldLabel>
             <input
               value={get(data, 'owner_ctc_place')}
               onChange={(e) => set('owner_ctc_place', e.target.value)}
               readOnly={ro}
               placeholder="Malabon City"
-              className={`${inputCls} w-[12rem]`}
+              className={inputCls}
             />
             <CarriedTag field="owner_ctc_place" />
           </label>
           <DerivedField
-            className="grow basis-[12rem]"
+            className={formCell.quarter}
             label={
               <>
                 Tel. No.
@@ -3242,13 +3344,13 @@ function OccupancyFields({
 
       <section className="space-y-3">
         <SectionMarker letter="C" label="The Project" />
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <div className={formGridCls}>
           {/*
             Seeded from the business name and editable: a project on the
             Building Official's books is often named for the structure rather
             than the trade in it, and only the applicant knows which it is.
           */}
-          <label className="block grow basis-[14rem]">
+          <label className={formCell.quarter}>
             <FieldLabel required>Name of Project</FieldLabel>
             <input
               value={get(data, 'project_name')}
@@ -3258,7 +3360,7 @@ function OccupancyFields({
             />
             <CarriedTag field="project_name" />
           </label>
-          <label className="block grow basis-[18rem]">
+          <label className={formCell.half}>
             <FieldLabel required>Location of Project</FieldLabel>
             <input
               value={get(data, 'project_location')}
@@ -3274,7 +3376,7 @@ function OccupancyFields({
             paper prints them too and carries these answers read-only. See the
             note above the component.
           */}
-          <label className="block grow basis-[16rem]">
+          <label className={formCell.quarter}>
             <FieldLabel required>Use / Character of Occupancy</FieldLabel>
             <input
               value={get(data, 'occupancy_type')}
@@ -3285,7 +3387,7 @@ function OccupancyFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3293,11 +3395,11 @@ function OccupancyFields({
               onChange={(e) => set('building_storeys', e.target.value)}
               readOnly={ro}
               placeholder="e.g. 2"
-              className={`${inputCls} tnum w-[7rem]`}
+              className={`${inputCls} tnum`}
             />
             <CarriedTag field="building_storeys" />
           </label>
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel required>No. of Units</FieldLabel>
             <input
               inputMode="numeric"
@@ -3305,28 +3407,27 @@ function OccupancyFields({
               onChange={(e) => set('building_units', e.target.value)}
               readOnly={ro}
               placeholder="e.g. 1"
-              className={`${inputCls} tnum w-[7rem]`}
+              className={`${inputCls} tnum`}
             />
             <CarriedTag field="building_units" />
           </label>
           {/* On both the unified form and the Certificate of Completion; it was asked on neither sheet here. */}
           {/*
-            `max-w-full` on every `shrink-0` cell of these rows (17 October
-            2026). A cell that may not shrink is as wide as its longest line,
-            and on a phone this one's carried-answer note ("From your Business
-            Permit application — change it if it is wrong") was wider than the
-            screen, so the whole sheet scrolled sideways by 27px. Found while
-            checking that the new "(optional)" labels did not break the rows;
-            capping the cell lets the note and the label wrap instead.
+            These rows were a flex wrap of fixed-width cells until 19 October
+            2026, and on 17 October a `shrink-0` cell here — as wide as its
+            carried-answer note — scrolled the sheet sideways by 27px on a
+            phone. Grid cells (`formCell`) cannot be wider than their column,
+            so a long note wraps; keep that in mind before giving a cell a
+            fixed width again.
           */}
-          <label className="block max-w-full shrink-0">
+          <label className={formCell.quarter}>
             <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
             <input
               inputMode="decimal"
               value={get(data, 'total_floor_area_sqm')}
               onChange={(e) => set('total_floor_area_sqm', e.target.value)}
               readOnly={ro}
-              className={`${inputCls} tnum w-[10rem]`}
+              className={`${inputCls} tnum`}
             />
             <CarriedTag field="total_floor_area_sqm" />
           </label>
@@ -3337,7 +3438,7 @@ function OccupancyFields({
             all — request of 6 October 2026.
           */}
           <DerivedField
-            className="shrink-0"
+            className={formCell.quarter}
             label={
               <>
                 Date of Completion

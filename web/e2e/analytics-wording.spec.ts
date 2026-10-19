@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { sessionFor, waitForAnalytics } from './helpers'
+import { HOME_ANALYTICS, HOME_DASHBOARD_HEADING, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * What the dashboard SAYS about its figures, office by office.
@@ -22,8 +22,16 @@ import { sessionFor, waitForAnalytics } from './helpers'
 const BPLO_SESSION = sessionFor('bplo')
 const SANITARY_SESSION = sessionFor('sanitary')
 
-const DASHBOARD = '/staff/analytics'
-const TITLE = 'Analytics Dashboard'
+/*
+ * Both accounts read the dashboard as the Dashboard sub-tab of Home's
+ * Analytics tab since 19 October 2026 (client: "To avoid redundancy, we should
+ * only have one existing among them"). Under Home's h1 (the office's name) the
+ * dashboard is an h2 and its panels h3, which is why the panel headings below
+ * are asked for at level 3. `office` and `months` ride in Home's URL.
+ */
+const DASHBOARD = HOME_ANALYTICS
+const TITLE = HOME_DASHBOARD_HEADING.name
+const LEVEL = HOME_DASHBOARD_HEADING.level
 
 type Payload = { data: Record<string, unknown> & Record<string, Record<string, unknown>> }
 
@@ -56,7 +64,7 @@ test.describe('as City Health', () => {
 
   test('the permit figures name the sanitary permit, not "permit" or the business permit', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     await expect(page.getByText('holding a sanitary permit valid today')).toBeVisible()
     await expect(page.getByText('sanitary permit validity, today')).toBeVisible()
@@ -76,9 +84,9 @@ test.describe('as City Health', () => {
    */
   test('time in office is in working days, on every figure', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
-    await expect(page.getByRole('heading', { name: 'Time in Office', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Time in Office', level: 3 })).toBeVisible()
     await expect(
       page.getByText('From the day an office receives a permit to the day it issues or refuses it.'),
     ).toBeVisible()
@@ -93,9 +101,9 @@ test.describe('as City Health', () => {
 
   test('each compliance card states its own window; the heading claims none', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
-    const heading = page.getByRole('heading', { name: 'Compliance Rate', level: 2 })
+    const heading = page.getByRole('heading', { name: 'Compliance Rate', level: 3 })
     await expect(heading).toBeVisible()
     // The note beside a heading is its sibling in the heading row.
     await expect(heading.locator('xpath=../..')).not.toContainText('Last 12 months')
@@ -115,7 +123,7 @@ test.describe('as City Health', () => {
    */
   test('the officer panel is gone: no messages, requests, response time or meetings', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     await expect(page.getByRole('heading', { name: 'Messages & Requests' })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: 'Officer Activity' })).toHaveCount(0)
@@ -147,9 +155,9 @@ test.describe('as City Health', () => {
       }
     })
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
-    await expect(page.getByRole('heading', { name: 'Suspended Permits', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Suspended Permits', level: 3 })).toBeVisible()
     await expect(page.getByText('BPLO may revoke')).toBeVisible()
     await expect(page.getByText('Oldest Sari-sari')).toBeVisible()
     await expect(page.getByText('78 days')).toBeVisible()
@@ -159,9 +167,9 @@ test.describe('as City Health', () => {
 
   test('fees collected show only City Health’s permit, in pesos', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
-    await expect(page.getByRole('heading', { name: 'Fees Collected', level: 2 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Fees Collected', level: 3 })).toBeVisible()
     const fees = page.getByRole('table', { name: /Fees collected by permit/ })
     await expect(fees.locator('tbody th')).toHaveText(['Sanitary'])
     for (const cell of await fees.locator('tbody td').allTextContents()) {
@@ -176,7 +184,7 @@ test.describe('as City Health', () => {
       Object.assign(renewal, { numerator: 0, denominator: 0, rate: null, unavailable_reason: null })
     })
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     const card = page.locator('div').filter({ hasText: /^Renewal compliance/i }).last()
     await expect(card).toContainText('Cannot be computed')
@@ -194,7 +202,7 @@ test.describe('as City Health', () => {
       Object.assign(decisions, { total: 0, decisioned: 0, approved: 0, approval_rate: null })
     })
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     await expect(page.getByText('Nothing filed yet this month.')).toHaveCount(2)
     await expect(page.getByText(/has been decided yet/)).toHaveCount(0)
@@ -202,15 +210,17 @@ test.describe('as City Health', () => {
   })
 
   test('a link to another office is refused plainly, with the way back and no "Try again"', async ({ page }) => {
-    await page.goto(`${DASHBOARD}?office=BFP`)
-    await expect(page.getByRole('heading', { name: TITLE, level: 1 })).toBeVisible()
+    await page.goto(`${DASHBOARD}&office=BFP`)
+    await expect(page.getByRole('heading', { name: TITLE, level: LEVEL })).toBeVisible()
     await expect(page.getByText(/only see your own office/i)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Show my office instead' }).click()
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
     await expect(page).not.toHaveURL(/office=/)
-    await expect(page.getByText('Showing', { exact: false }).filter({ hasText: 'City Health Office' })).toBeVisible()
+    // On Home the office is the page's h1; the "Showing … figures" line is
+    // drawn only for a reader who can switch.
+    await expect(page.getByRole('heading', { name: 'City Health Office', level: 1 })).toBeVisible()
   })
 })
 
@@ -218,17 +228,17 @@ test.describe('as BPLO', () => {
   test.use({ storageState: BPLO_SESSION })
 
   test('an office that books no visits gets no Inspections panel', async ({ page }) => {
-    await page.goto(`${DASHBOARD}?office=BPLO`)
-    await waitForAnalytics(page, TITLE)
-    await expect(page.getByRole('heading', { name: 'Inspections', level: 2 })).toHaveCount(0)
+    await page.goto(`${DASHBOARD}&office=BPLO`)
+    await waitForAnalytics(page, TITLE, LEVEL)
+    await expect(page.getByRole('heading', { name: 'Inspections', level: 3 })).toHaveCount(0)
 
     // An office that does inspect keeps it.
-    await page.goto(`${DASHBOARD}?office=CHO`)
-    await waitForAnalytics(page, TITLE)
-    await expect(page.getByRole('heading', { name: 'Inspections', level: 2 })).toBeVisible()
+    await page.goto(`${DASHBOARD}&office=CHO`)
+    await waitForAnalytics(page, TITLE, LEVEL)
+    await expect(page.getByRole('heading', { name: 'Inspections', level: 3 })).toBeVisible()
   })
 
-  test('suspended permits link BPLO to the permits register, filtered the same way', async ({ page }) => {
+  test('suspended permits link BPLO to Home’s Permits tab, filtered the same way', async ({ page }) => {
     await editPayload(page, (data) => {
       data.suspended_permits = {
         total: 1,
@@ -244,22 +254,24 @@ test.describe('as BPLO', () => {
         ],
       }
     })
-    await page.goto(`${DASHBOARD}?office=BPLO`)
-    await waitForAnalytics(page, TITLE)
+    await page.goto(`${DASHBOARD}&office=BPLO`)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
+    // The register is Home's Permits tab: a link with no `tab` opens on it,
+    // and the table reads `status` on arrival (OfficeHome).
     await expect(page.getByRole('link', { name: 'All suspended' })).toHaveAttribute(
       'href',
-      '/staff/admin/permits?status=suspended',
+      '/staff/dashboard?status=suspended',
     )
     await expect(page.getByRole('link', { name: 'Over 30 days' })).toHaveAttribute(
       'href',
-      '/staff/admin/permits?status=suspended_30',
+      '/staff/dashboard?status=suspended_30',
     )
   })
 
   test('BPLO’s own figures name the business permit', async ({ page }) => {
-    await page.goto(`${DASHBOARD}?office=BPLO`)
-    await waitForAnalytics(page, TITLE)
+    await page.goto(`${DASHBOARD}&office=BPLO`)
+    await waitForAnalytics(page, TITLE, LEVEL)
     await expect(page.getByText('holding a business permit valid today')).toBeVisible()
     await expect(page.getByText('No valid business permit today (lapsed, or not issued yet)')).toBeVisible()
   })
@@ -267,12 +279,12 @@ test.describe('as BPLO', () => {
   test('the Office menu shows the whole office name at 1440px', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     const menu = page.getByLabel('Office', { exact: true })
     for (const office of ['BPLO', 'CPDO']) {
       await menu.selectOption(office)
-      await waitForAnalytics(page, TITLE)
+      await waitForAnalytics(page, TITLE, LEVEL)
       // The chosen option's text, measured in the select's own font, against
       // the room the select gives it (less padding and the arrow).
       const fits = await menu.evaluate((el) => {
@@ -290,7 +302,7 @@ test.describe('as BPLO', () => {
 
   test('the trailing window stays in the URL, like the office', async ({ page }) => {
     await page.goto(DASHBOARD)
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
 
     await page.getByRole('button', { name: 'Filter the dashboard' }).click()
     const asked = page.waitForRequest((req) => req.url().includes('/api/v1/analytics/dashboard') && req.url().includes('months=24'))
@@ -301,7 +313,7 @@ test.describe('as BPLO', () => {
     const again = page.waitForRequest((req) => req.url().includes('/api/v1/analytics/dashboard') && req.url().includes('months=24'))
     await page.reload()
     await again
-    await waitForAnalytics(page, TITLE)
+    await waitForAnalytics(page, TITLE, LEVEL)
     await expect(page.getByText(/Last 24 months to /).first()).toBeVisible()
   })
 
@@ -309,8 +321,8 @@ test.describe('as BPLO', () => {
     test.use({ viewport: { width: 390, height: 844 } })
 
     test('the expiry table keeps its Total column on screen', async ({ page }) => {
-      await page.goto(`${DASHBOARD}?office=all`)
-      await waitForAnalytics(page, TITLE)
+      await page.goto(`${DASHBOARD}&office=all`)
+      await waitForAnalytics(page, TITLE, LEVEL)
 
       const table = page.getByRole('table', { name: /Permits approaching expiry by window/ })
       const total = table.getByRole('columnheader', { name: 'Total' })
@@ -322,8 +334,8 @@ test.describe('as BPLO', () => {
     })
 
     test('business category names are written in full, not cut off', async ({ page }) => {
-      await page.goto(`${DASHBOARD}?office=all`)
-      await waitForAnalytics(page, TITLE)
+      await page.goto(`${DASHBOARD}&office=all`)
+      await waitForAnalytics(page, TITLE, LEVEL)
 
       const heading = page.getByRole('heading', { name: 'Top Five Business Categories' })
       await heading.scrollIntoViewIfNeeded()

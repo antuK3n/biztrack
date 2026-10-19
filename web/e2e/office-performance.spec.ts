@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { sessionFor, waitForAnalytics } from './helpers'
+import { HOME_DASHBOARD_HEADING, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * Office Performance — all six offices on one screen (issue #102).
@@ -228,21 +228,27 @@ test.describe('who may open Office Performance', () => {
    * The permission is written out in three places that nothing derives from one
    * another — the route in App.tsx, the rail entry in lib/nav.ts and the tab in
    * AnalyticsTabs — so a route regated without the rail fails nowhere except
-   * here.
+   * here. Since 19 October 2026 there is a fourth: the sub-tab on an office's
+   * Home (OfficeHome), where BPLO's analytics now live and where the old
+   * address sends it.
    */
   test.describe('as BPLO', () => {
     test.use({ storageState: BPLO_SESSION })
 
-    test('the screen is out of reach and the rail does not offer it', async ({ page }) => {
+    test('the screen is out of reach, and neither the rail nor Home’s sub-tabs offer it', async ({ page }) => {
+      // The old address lands on Home's Analytics tab, which falls back to the
+      // dashboard: Office Performance is not a sub-tab BPLO is given.
       await page.goto(SCREEN.path)
-      await expect(page, 'BPLO was let into the screen that ranks BPLO').toHaveURL(
-        /\/staff\/dashboard$/,
-        { timeout: 30_000 },
-      )
-      await expect(page.getByRole('heading', { name: SCREEN.title, level: 1 })).toHaveCount(0)
+      await expect(page).toHaveURL(/\/staff\/dashboard\?tab=analytics&view=offices$/, { timeout: 30_000 })
+      await waitForAnalytics(page, HOME_DASHBOARD_HEADING.name, HOME_DASHBOARD_HEADING.level)
+      await expect(
+        page.getByRole('heading', { name: SCREEN.title }),
+        'BPLO was let into the screen that ranks BPLO',
+      ).toHaveCount(0)
 
-      const analytics = page.locator('aside').getByRole('link', { name: 'Analytics', exact: true })
-      await expect(analytics).toHaveAttribute('href', '/staff/analytics')
+      const strip = page.getByRole('navigation', { name: 'Analytics sections' })
+      expect(await strip.getByRole('link').allInnerTexts()).toEqual(['Dashboard', 'Reports'])
+      await expect(page.locator('aside').getByRole('link', { name: 'Analytics', exact: true })).toHaveCount(0)
     })
   })
 
