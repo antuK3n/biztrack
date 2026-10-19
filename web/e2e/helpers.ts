@@ -183,9 +183,33 @@ export async function infoButtonNames(page: Page): Promise<string[]> {
   )
 }
 
-/** Wait for an analytics screen to have finished loading its payload. */
-export async function waitForAnalytics(page: Page, heading: string | RegExp) {
-  await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible({
+/*
+ * Where an office admin's and BPLO's analytics live since 19 October 2026:
+ * sub-tabs of Home's Analytics tab (OfficeHome; client: "To avoid redundancy,
+ * we should only have one existing among them", then "Why not implement the
+ * report too on the analytics?"). Their /staff/analytics addresses redirect
+ * here. The super admin keeps /admin/analytics and /staff/analytics.
+ */
+export const HOME_ANALYTICS = '/staff/dashboard?tab=analytics'
+export const HOME_REPORTS = `${HOME_ANALYTICS}&view=reports`
+
+/*
+ * The heading each Home sub-tab can be waited on by. Home's h1 is the office's
+ * name, so the screens under it name themselves one level down: the dashboard
+ * with a screen-reader h2, Reports with the h2 of its open part.
+ */
+export const HOME_DASHBOARD_HEADING = { name: 'Analytics Dashboard', level: 2 } as const
+export const HOME_REPORTS_HEADING = { name: 'Standard reports', level: 2 } as const
+export const HOME_BUILDER_HEADING = { name: /^Build your own report/, level: 2 } as const
+
+/**
+ * Wait for an analytics screen to have finished loading its payload.
+ *
+ * `level` is 1 for a full analytics page (the super admin's) and 2 for a
+ * screen drawn as a sub-tab of an office's Home, under the office's h1.
+ */
+export async function waitForAnalytics(page: Page, heading: string | RegExp, level: 1 | 2 = 1) {
+  await expect(page.getByRole('heading', { name: heading, level })).toBeVisible({
     timeout: 30_000,
   })
   // The skeletons go when the fetch resolves; the info buttons only exist

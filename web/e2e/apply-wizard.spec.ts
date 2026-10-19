@@ -676,7 +676,8 @@ test('a peso amount gains its centavos when committed, and still posts as a numb
   // 5. And the validator reads the padded string as an amount, while a blank
   // one is still reported missing rather than passing as zero.
   expect(found.acceptedPadded).toEqual([])
-  expect(found.blankStillMissing).toEqual(['Capital Investment'])
+  // Named as the box is labelled, number and all (OPERATION_LABELS).
+  expect(found.blankStillMissing).toEqual(['6. Capital Investment (₱)'])
 })
 
 test('every line of business is reachable, and the count is stated', async ({ page }) => {

@@ -373,8 +373,14 @@ test('an office that has FINISHED its review opens on the decision box, not the 
   await expect(page.getByRole('button', { name: SHOW_SHEET })).toHaveCount(0)
   await expect(page.locator('details')).toHaveCount(0)
 
-  // "but the progress thingy is cool, keep that".
-  await expect(page.getByText('Application progress')).toBeVisible()
+  /*
+   * The progress rail was kept here ("but the progress thingy is cool") until
+   * the client asked for it to go on 19 October 2026 — "remove … the Status
+   * -> Status -> Status thingy … just the status itself". The status is a
+   * chip under the business name now.
+   */
+  await expect(page.getByText('Application progress')).toHaveCount(0)
+  await expect(page.getByTestId('review-status')).toBeVisible()
 })
 
 test('an office that still OWES a review reaches its decision while the other permits are worked', async ({

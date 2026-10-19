@@ -143,17 +143,17 @@ test.describe('the office Track page', () => {
   })
 
   test('says who holds each filing, and offers Claim only on the free one', async ({ page }) => {
-    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
-    const mine = page.getByRole('listitem').filter({ hasText: 'Malabon Hardware' })
-    const theirs = page.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
+    const free = page.getByRole('row').filter({ hasText: 'Aling Nena Bakery' })
+    const mine = page.getByRole('row').filter({ hasText: 'Malabon Hardware' })
+    const theirs = page.getByRole('row').filter({ hasText: 'Riverside Carinderia' })
 
-    await expect(free).toContainText('Not yet taken by anyone')
+    await expect(free).toContainText('Unassigned')
     // "Assign to Me" is the client's wording for this control; the test tracks
     // the label a reader actually sees rather than an internal name.
     await expect(free.getByRole('button', { name: /assign to me/i })).toBeVisible()
 
     // Held by the reader: named, and no Claim — you cannot take what is yours.
-    await expect(mine).toContainText(`Officer in charge: ${ME.name}`)
+    await expect(mine).toContainText(ME.name)
     await expect(mine.getByRole('button', { name: /assign to me/i })).toHaveCount(0)
 
     /*
@@ -162,13 +162,13 @@ test.describe('the office Track page', () => {
      * difference between "not mine" and "broken" will ask why the button is
      * missing, and the answer has to be on the row.
      */
-    await expect(theirs).toContainText(`Officer in charge: ${COLLEAGUE.name}`)
+    await expect(theirs).toContainText(COLLEAGUE.name)
     await expect(theirs).toContainText('read-only for you')
     await expect(theirs.getByRole('button', { name: /assign to me/i })).toHaveCount(0)
   })
 
   test('claiming asks the server, and re-reads the list rather than editing it', async ({ page }) => {
-    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
+    const free = page.getByRole('row').filter({ hasText: 'Aling Nena Bakery' })
     await free.getByRole('button', { name: /assign to me/i }).click()
 
     await expect.poll(() => claimed).toContain(FREE.id)
@@ -188,15 +188,15 @@ test.describe('the office Track page', () => {
      * office whose officers will not claim is an office where every case
      * belongs to nobody.
      */
-    const mine = page.getByRole('listitem').filter({ hasText: 'Malabon Hardware' })
+    const mine = page.getByRole('row').filter({ hasText: 'Malabon Hardware' })
     const give = mine.getByRole('button', { name: /unassign from me/i })
     await expect(give).toBeVisible()
 
     // Never on a colleague's case, and never on one nobody holds: releasing
     // either would be deciding somebody else's workload, or undoing nothing.
-    const theirs = page.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
+    const theirs = page.getByRole('row').filter({ hasText: 'Riverside Carinderia' })
     await expect(theirs.getByRole('button', { name: /unassign from me/i })).toHaveCount(0)
-    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
+    const free = page.getByRole('row').filter({ hasText: 'Aling Nena Bakery' })
     await expect(free.getByRole('button', { name: /unassign from me/i })).toHaveCount(0)
 
     await give.click()
@@ -263,7 +263,7 @@ test.describe('the office Track page', () => {
      * case they take. `role="status"` is what makes it reach a reader who
      * cannot see the list reorder itself.
      */
-    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
+    const free = page.getByRole('row').filter({ hasText: 'Aling Nena Bakery' })
     await free.getByRole('button', { name: /assign to me/i }).click()
 
     const said = page.getByRole('status').filter({ hasText: /officer in charge/i })
@@ -274,7 +274,7 @@ test.describe('the office Track page', () => {
   })
 
   test('says so when a filing goes back to the office', async ({ page }) => {
-    const mine = page.getByRole('listitem').filter({ hasText: 'Malabon Hardware' })
+    const mine = page.getByRole('row').filter({ hasText: 'Malabon Hardware' })
     await mine.getByRole('button', { name: /unassign from me/i }).click()
 
     const said = page.getByRole('status').filter({ hasText: /back with the office/i })

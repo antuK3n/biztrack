@@ -1,14 +1,14 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftIcon,
   CheckCircleFilledIcon,
   ChevronDownIcon,
-  ClipboardIcon,
+  DownloadIcon,
   EyeIcon,
+  LockIcon,
 } from '../../components/icons'
-import { ApplicationProgress } from '../../components/ApplicationProgress'
 import { DocumentActions } from '../../components/DocumentActions'
 import { InspectionDecisionPanel } from '../../components/InspectionDecision'
 import { MapPicker } from '../../components/MapPicker'
@@ -45,7 +45,28 @@ import {
   type OfficeFormCode,
 } from '../applicant/OfficeFormStep'
 import { MAIN_FORM_RETURN_TARGETS, mainFormTargetLabel } from '../../lib/returnTargets'
-import { isGatheringOtherPermits, otherPermitProgress } from '../../lib/status'
+import {
+  TONE_CLASSES,
+  TONE_ICONS,
+  clearanceStatusMeta,
+  filingStatusMeta,
+  isGatheringOtherPermits,
+  otherPermitProgress,
+} from '../../lib/status'
+import { ReturnHistory, ReturnedFieldNote } from '../../components/ReturnHistory'
+import { useReturnHistory, type ReturnRound } from '../../lib/returnHistory'
+import {
+  downloadBusinessPermitForm,
+  downloadOfficeSheet,
+  printableOfficeSheets,
+} from '../../lib/applicationForms'
+import { FilingSearch } from './FilingSearch'
+import {
+  LOCKED_TOOLTIP,
+  fetchOfficerEditRules,
+  saveSheetCorrection,
+
+} from './reviewSupport'
 import {
   admin,
   applications,
@@ -74,11 +95,14 @@ import type {
  * box — with remark bubbles floating on the right.
  *
  * The screen has two modes (tester checklist item 54). It opens in View: a
- * record of what the applicant filed, with nothing on it that can be typed
- * into. Edit turns on the handful of fields the office actually owns and the
- * decision buttons. The applicant's own answers are never editable in either
- * mode, which is what the API enforces too: OfficeFormController lets the owner
- * write the answers and the reviewer write only the issuance dates.
+ * record of what the applicant filed, as text in a four-column grid, with
+ * nothing on it that can be typed into (client, 19 October 2026: the whole
+ * form in "2-3 page ups/downs"). Edit turns on the decision buttons and the
+ * answers this seat may correct, in three groups the API defines and enforces
+ * (`App\Support\OfficerEditRules`, served at /reference/officer-edit-rules):
+ * the office's own entries freely, clerical slips on the office's own form
+ * with a reason, and everything the applicant declared locked — shown with a
+ * lock, changed only through Return.
  *
  * The applicant's filed sheet — sections A–E — is behind a disclosure and
  * starts CLOSED. That is the THIRD position this file has held on that sheet;
@@ -229,54 +253,33 @@ const MODE_OPTIONS: { value: ReviewMode; label: string }[] = [
   { value: 'edit', label: 'Edit' },
 ]
 
-/*
- * A submitted answer. It keeps the prototype's filled-blue surface but is no
- * longer an input: read-only inputs looked exactly like the boxes the office
- * fills in, so nothing on the page said which half was a record and which half
- * was work.
- */
 /**
- * A filed answer, as a RECORD rather than as a form control.
+ * A filed answer, as TEXT — the fourth shape this has had, and why.
  *
- * ── Why this is not the applicant's input box ────────────────────────────
+ * It was the applicant’s input box, then a record box that kept the box
+ * (27 September 2026: bare ruled lines were tried and the client called
+ * them *"MUCH WORSE"* — loose text under a heading did not read as a value).
  *
- * It was one: the same rounded border, fill and padding the wizard uses. That
- * is the applicant's styling doing the applicant's job — inviting a value into
- * an empty space — on a sheet where nothing is typed and everything is
- * already answered.
+ * Client, 19 October 2026: *"view the WHOLE FORM in just 2-3 page ups/downs"*
+ * and *"whenever something is in radio box/checkbox or other formats, just
+ * display the answer in text form so that a HUGE space is saved."* So the
+ * box goes, and what made the box necessary is answered another way: a small
+ * muted label over a medium-weight value, four to a row in the same grid the
+ * owner’s section A uses (`SHEET_GRID`: 4 wide, 2 on a tablet, 1 on a phone).
+ * The weight, not a border, is what says "this is the answer". An empty
+ * answer prints "—".
  *
- * Three costs, and the client named the third. A box that looks editable and
- * refuses is the confusion reported on the locked Capital Participation
- * field. It spends about 42 pixels of height on a fact that is often ten
- * characters, and there are thirty of them. And the border and fill are ink
- * around facts, which is what the client meant on 27 September 2026 asking
- * whether the officer's side should be "a more compacted view for easy
- * checking of fields".
- *
- * ── The boxes stay; the GRID was the problem ────────────────────────────
- *
- * Replacing them with bare ruled lines was tried on 27 September 2026 and
- * rejected immediately — *"This looks MUCH WORSE"* — and the client was
- * right: the box is what makes a value read as a value rather than as loose
- * text under a heading. What wasted the space was `lg:grid-cols-3` handing
- * every field an identical third of the row, so a one-letter Gender held as
- * much of the page as an e-mail address. That is fixed on the containers,
- * not here.
- *
- * The padding is `inputCls`'s, not the looser `px-3.5 py-2.5` this carried:
- * the applicant's form was deliberately tightened and this sheet, which
- * holds more fields and exists to be read fast, had missed it.
+ * Rows the paper groups are kept with `sm:col-start-1` on the field that
+ * opens a row, where the old flex layout used a full-width spacer
+ * (`RowBreak`); in a grid an empty row still costs a gap, a column start
+ * costs nothing.
  *
  * What does NOT change is the content or its order: the officer reads this
- * beside MCG-BPLO-FO-001, so the paper's item numbers and sequence are
- * load-bearing and stay exactly as they are.
+ * beside MCG-BPLO-FO-001, so the item numbers and sequence stay as they are.
  */
-const recordValue = 'w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink'
+const SHEET_GRID = 'grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4'
 const officeInput =
-  'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-officeuse-border'
-/** An office value in View mode, or one nobody types here: same footprint, no affordance. */
-const officeValue =
-  'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-2 text-sm text-ink'
+  'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-officeuse-border'
 
 function CloudIcon() {
   return (
@@ -333,11 +336,11 @@ function FileGlyph({ className = 'text-royal' }: { className?: string }) {
 /** Royal square section letter + bold label (p67 "A · Business Information & Registration"). */
 function SectionHeading({ letter, children }: { letter: string; children: ReactNode }) {
   return (
-    <div className="mb-4 flex items-center gap-2.5">
-      <span className="flex h-6 w-6 items-center justify-center rounded bg-royal text-xs font-bold text-white">
+    <div className="mb-2 flex items-center gap-2">
+      <span className="flex h-5 w-5 items-center justify-center rounded bg-royal text-[11px] font-bold text-white">
         {letter}
       </span>
-      <h2 className="text-[15px] font-bold text-ink">{children}</h2>
+      <h2 className="text-sm font-bold text-ink">{children}</h2>
     </div>
   )
 }
@@ -345,9 +348,9 @@ function SectionHeading({ letter, children }: { letter: string; children: ReactN
 /** Royal tick sub-section label (p67 "Main Office Address"). */
 function SubHeading({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-3 mt-6 flex items-center gap-2">
-      <span className="h-4 w-1 rounded-full bg-royal" aria-hidden="true" />
-      <h3 className="text-sm font-bold text-ink">{children}</h3>
+    <div className="mb-1.5 mt-3 flex items-center gap-2">
+      <span className="h-3.5 w-1 rounded-full bg-royal" aria-hidden="true" />
+      <h3 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">{children}</h3>
     </div>
   )
 }
@@ -363,6 +366,15 @@ function SubHeading({ children }: { children: ReactNode }) {
  * never returned) renders exactly as it always has.
  */
 const FieldCorrections = createContext<Map<string, ApplicationCorrection[]>>(new Map())
+
+/**
+ * Every return round on this filing (client, 19 October 2026: *"When a
+ * returned application was complied, the remark should not be removed."*).
+ * A context for the same reason as `FieldCorrections`: each answer and each
+ * document row prints its own one-line `ReturnedFieldNote` under it, and the
+ * rounds are fetched once for the page by `useReturnHistory`.
+ */
+const ReturnRounds = createContext<ReturnRound[]>([])
 
 /**
  * What a field was before the applicant corrected it.
@@ -448,87 +460,40 @@ function FieldHistory({ history, label }: { history: ApplicationCorrection[]; la
 }
 
 /**
- * Ends a row inside a `flex-wrap` group, so the next field starts a new one.
- *
- * ── Why the sheet needs it and the form barely does ─────────────────────────
- *
- * Copied from ApplyWizard, which uses exactly this — `-my-1.5 basis-full` —
- * once, before item 14. The form gets its other row breaks for free, because
- * its controls are naturally the right widths: four radio chips for the form
- * of organization, four small boxes for a TIN, segmented boxes for a phone
- * number.
- *
- * This sheet renders the ANSWERS to those questions in uniform record boxes,
- * so the widths that shaped the form's rows do not exist here. Client,
- * 29 September 2026: *"Compare both layouts. Huge difference, right?"* —
- * the sheet's seventeen boxes wrapped wherever they landed and grouped nothing
- * like the form. Pinning the breaks is what makes the two read the same, and
- * it holds at every window width rather than only at the one I tested.
- *
- * `basis-full` takes a whole line; `-my-1.5` pulls back the row gap either
- * side so the break costs no vertical space. `aria-hidden`, because it is a
- * layout device and a screen reader should hear the fields, not the geometry.
- */
-function RowBreak() {
-  return <div className="-my-1.5 basis-full" aria-hidden="true" />
-}
-/**
- * Section B items 1 to 4, grouped the way the form groups them.
+ * Section B items 1 to 4, one line per paper item.
  *
  * The paper asks four questions and the form draws six boxes: item 2 is
- * Total / Male / Female inside one bordered fieldset, and item 4 is
- * Motorized / Other inside another. One paper item, one border.
+ * Total / Male / Female, item 4 Motorized / Other. They were drawn as boxes
+ * inside a bordered box, the form's own shape; since 19 October 2026 the
+ * client asked for answers as text to save space, so a split item reads as
+ * one line — "12 total · 7 male · 5 female" — under the item's own label.
  *
  * Partitioned on the number the label already carries — the same number
  * `orderedFeeFacts` sorts on — rather than on a list of which items are
- * grouped. An item with one box stays a plain field; if the fee profile
- * ever splits another in two, it boxes itself with no edit here.
+ * grouped. If the fee profile ever splits another item, it joins itself.
  */
-function FeeFactRow({ facts }: { facts: { label: string; value: string }[] }) {
-  const groups: { number: string; facts: { label: string; value: string }[] }[] = []
+function compactFeeFacts(
+  facts: { label: string; value: string }[],
+): { label: string; value: string }[] {
+  const groups: { number: string | null; stem: string; parts: string[]; single: { label: string; value: string } }[] = []
   for (const fact of facts) {
-    const number = /^(\d+)\./.exec(fact.label)?.[1] ?? fact.label
+    const number = /^(\d+)\./.exec(fact.label)?.[1] ?? null
+    const [head, tail] = fact.label.split(' — ')
+    const isTotal = /^\d+\.\s*Total\s/.test(head)
+    const stem = head.replace(/^(\d+\.\s*)Total\s+/, '$1')
+    const part = `${fact.value} ${tail ? tail.toLowerCase() : isTotal ? 'total' : ''}`.trim()
     const last = groups[groups.length - 1]
-    if (last && last.number === number) {
-      last.facts.push(fact)
+    if (number !== null && last && last.number === number) {
+      last.parts.push(part)
     } else {
-      groups.push({ number, facts: [fact] })
+      groups.push({ number, stem, parts: [part], single: fact })
     }
   }
 
-  return (
-    <>
-      {groups.map((group) =>
-        group.facts.length === 1 ? (
-          <Field
-            key={group.number}
-            label={group.facts[0].label}
-            value={group.facts[0].value}
-            className="grow basis-[13rem] max-w-full"
-          />
-        ) : (
-          /* The form's own box for a multi-box item: same radius, same tint. */
-          <div
-            key={group.number}
-            className="grow basis-[21rem] max-w-full rounded-lg border border-line bg-canvas px-3 py-2"
-          >
-            <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-              {group.facts.map((fact) => (
-                <Field
-                  key={fact.label}
-                  label={fact.label}
-                  value={fact.value}
-                  className="grow basis-[8rem] max-w-full"
-                />
-              ))}
-            </div>
-          </div>
-        ),
-      )}
-    </>
+  return groups.map((g) =>
+    g.parts.length === 1 ? g.single : { label: g.stem, value: g.parts.join(' · ') },
   )
 }
-
 /**
  * The answers the API writes over whatever the sheet holds, per sheet.
  *
@@ -604,6 +569,15 @@ const FieldEdits = createContext<{
   values: Record<string, string>
   errors: Record<string, string>
   set: (key: string, value: string) => void
+  /**
+   * May THIS seat change this answer here? The three groups
+   * (`OfficerEditRules` on the API, served at /reference/officer-edit-rules):
+   * on the business permit form only BPLO, and only the clerical paths.
+   * Everything else shows its value with a lock.
+   */
+  mayEdit: (key: string) => boolean
+  /** What a locked answer says when hovered — and to a screen reader. */
+  lockTip: string
 } | null>(null)
 
 /** What a box offers when the sheet is being edited. */
@@ -949,85 +923,91 @@ function Field({
   value,
   /*
    * The return-target code(s) this box shows, for fields an officer can send
-   * back. Several where one box holds several answers — the owner's name is
-   * four targets in one line — so a correction to any of them is reported
-   * against the box the reader is actually looking at.
-   *
-   * Absent on the boxes that are not correctable, which is most of them.
+   * back. Several where one box holds several answers, so a correction to any
+   * of them is reported against the box the reader is looking at.
    */
   targets,
   /*
-   * Defaults to a PACKING rule, not a plain block.
-   *
-   * `grow basis-[15rem]` starts the box at the width a typical answer needs
-   * and lets it expand into whatever the row has left, so three short
-   * answers share a line and a long one takes the space it deserves. The
-   * grid this replaced gave all of them an identical third.
-   *
-   * Overridden per field where the answer has a known shape — a gender or a
-   * postal code should not be invited to grow to a third of the sheet.
+   * Grid placement only — `sm:col-span-2`, `sm:col-start-1` and the like. The
+   * flex `grow basis-[…]` widths this used to take went with the flex rows
+   * (19 October 2026); every answer is one cell of `SHEET_GRID` now.
    */
-  className = 'grow basis-[15rem] max-w-full',
+  className = '',
   /*
-   * What this box becomes in Edit mode, and nothing when it is left out.
-   *
-   * Opt-in rather than derived from `targets`, because six boxes share
-   * `form:address` and several display a formatted answer — see the note
-   * on `FieldEdits`. The boxes that stay records are the ones the API has
-   * no column for: the City, the Province, the Mode of Payment, the
-   * amendment's own reference. Offering to edit those would be a promise
-   * the Save cannot keep.
+   * What this box becomes in Edit mode when the seat may change it — see
+   * `FieldEdits.mayEdit`. Kept on locked answers too: the rules come from the
+   * API, so an answer the server unlocks tomorrow needs no change here.
    */
   edit,
+  /** Overrides the context's lock sentence (a system-derived answer, say). */
+  lockTip,
+  /*
+   * Which return remarks print under this answer. Defaults to its `targets`
+   * on the main form; an office sheet's answer passes its key and permit.
+   * `[]` where several boxes share one target (the address parts), so the
+   * same remark is printed once, under Street, not six times.
+   */
+  notes,
 }: {
   label: string
   value: string
   targets?: string[]
   className?: string
   edit?: FieldEdit
+  lockTip?: string
+  notes?: { code: string; permitTypeCode?: string | null }[]
 }) {
   const corrections = useContext(FieldCorrections)
+  const rounds = useContext(ReturnRounds)
+  const noteList = notes ?? (targets ?? []).map((code) => ({ code, permitTypeCode: null }))
   const edits = useContext(FieldEdits)
-  const editable = edits !== null && edit !== undefined
-
+  const editable = edits !== null && edit !== undefined && edits.mayEdit(edit.key)
   /*
-   * Flattened across the box's targets and re-sorted, so a name box corrected
-   * at the surname and then at the suffix reads in one sequence rather than
-   * in two blocks by target.
+   * In Edit mode every answer this seat may NOT change says so, with the
+   * client's sentence (19 October 2026) on hover and to a screen reader —
+   * a value that silently refuses to become a box reads as a broken page.
    */
+  const locked = edits !== null && !editable
+  const tip = lockTip ?? edits?.lockTip ?? LOCKED_TOOLTIP
+  const control = edit?.control ?? { kind: 'text' as const }
+  /* Chips need the row: four or six of them do not fit in a quarter. */
+  const wide = editable && control.kind === 'radio' && control.options.length > 2
+
   const history = (targets ?? [])
     .flatMap((t) => corrections.get(t) ?? [])
     .sort((a, b) => Date.parse(b.at ?? '') - Date.parse(a.at ?? ''))
 
   return (
-    <dl className={`block ${className}`}>
+    <dl className={`min-w-0 ${wide ? 'sm:col-span-2 lg:col-span-4' : ''} ${className}`}>
       {/*
-        A BLOCK with the badge inline, not a flex row. As a flex sibling the
-        badge could not be flowed around, so "1. DTI / SEC / CDA
-        Registration Number" broke across two lines to make room beside it.
-        Inline, it simply follows the last word and wraps with it.
-
-        Rose, because the palette already spends that hue on Returned —
-        see index.css — and a correction is what answers a return. Royal is
-        this app's ordinary interface blue and would have said nothing.
+        The label small and muted, the value in ink at medium weight: the
+        weight is what makes the answer read as the answer now that the box
+        is gone. The CORRECTED badge stays inline after the label (rose, the
+        palette's Returned hue — a correction is what answers a return).
       */}
-      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">
+      <dt className="text-xs leading-snug text-ink-muted">
         {label}
+        {locked && (
+          <span title={tip} className="ml-1 inline-flex align-[-1px] text-ink-muted">
+            <LockIcon size={11} aria-hidden="true" />
+            <span className="sr-only"> — locked. {tip}</span>
+          </span>
+        )}
         {history.length > 0 && (
           <span
             title="The applicant changed this after your office returned the filing."
-            className="ml-2 inline-block whitespace-nowrap rounded-full bg-s-rose px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white"
+            className="ml-1.5 inline-block whitespace-nowrap rounded-full bg-s-rose px-1.5 py-px align-middle text-[9px] font-bold uppercase tracking-wide text-white"
           >
             Corrected
           </span>
         )}
       </dt>
       {editable && edits !== null && edit !== undefined ? (
-        <dd>
+        <dd className="mt-0.5">
           <FieldEditor
             fieldKey={edit.key}
             label={label}
-            control={edit.control ?? { kind: 'text' }}
+            control={control}
             /*
              * The buffer first, then the RAW answer where the box was
              * given one, and only then the printed value. An input shown
@@ -1039,13 +1019,21 @@ function Field({
           />
         </dd>
       ) : (
-        <dd className={recordValue}>{value || '—'}</dd>
+        <dd className="mt-0.5 break-words text-sm font-medium text-ink">{value || '—'}</dd>
       )}
       {history.length > 0 && <FieldHistory history={history} label={label} />}
+      {noteList.map((n) => (
+        <ReturnedFieldNote
+          key={`${n.permitTypeCode ?? ''}:${n.code}`}
+          rounds={rounds}
+          code={n.code}
+          permitTypeCode={n.permitTypeCode ?? null}
+          className="mt-0.5"
+        />
+      ))}
     </dl>
   )
 }
-
 /**
  * The zoning sheet's CHECKLIST OF REQUIREMENTS, as the deciding office reads it.
  *
@@ -1077,6 +1065,7 @@ function RequirementsRead({
   corrections?: ClearanceCorrection[]
 }) {
   const outstanding = rows.filter((r) => !r.satisfied).length
+  const rounds = useContext(ReturnRounds)
 
   /*
    * The newest change per row. The payload is newest-first, so the first
@@ -1089,7 +1078,7 @@ function RequirementsRead({
   }
 
   return (
-    <div className="mt-4 rounded-lg border border-line bg-white px-4 py-3">
+    <div className="mt-3 rounded-lg border border-line bg-white px-4 py-2.5">
       {/*
         The two papers that ask for documents call the box different things —
         CPDD's "CHECKLIST OF REQUIREMENTS" and CENRO's "REQUIREMENTS FOR
@@ -1113,7 +1102,7 @@ function RequirementsRead({
         first edit. There is one row component now, so there is nothing left
         to drift.
       */}
-      <ul className="mt-3 space-y-2.5">
+      <ul className={`mt-1.5 ${DOCUMENT_LIST}`}>
         {rows.map((row) => {
           /*
             Every file on the row. `documents` is the list the API sends;
@@ -1156,25 +1145,29 @@ function RequirementsRead({
           */
           if (files.length === 0) {
             return (
-              <li key={row.key} className="rounded-lg border border-line bg-white px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
-                    <FileGlyph />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-ink">{row.label}</p>
-                    <p className="truncate text-xs text-ink-muted">
+              <li key={row.key} className="py-1.5">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <FileGlyph className="shrink-0 text-ink-muted" />
+                  <p className="min-w-0 flex-1 truncate text-sm">
+                    <span className="font-semibold text-ink">{row.label}</span>{' '}
+                    <span className="text-xs text-ink-muted">
                       {row.reference
                         ? row.reference
                         : row.source === 'sheet'
-                          ? 'This sheet. It counts as complete once the applicant submits it.'
+                          ? 'This sheet — complete once submitted.'
                           : 'Not on file.'}
-                    </p>
-                  </div>
+                    </span>
+                  </p>
                 </div>
-                {footer !== undefined && (
-                  <div className="mt-2.5 border-t border-line pt-2.5">{footer}</div>
+                {row.code !== null && (
+                  <ReturnedFieldNote
+                    rounds={rounds}
+                    code={row.code}
+                    permitTypeCode={code ?? null}
+                    className="pl-7"
+                  />
                 )}
+                {footer !== undefined && <div className="mt-0.5 pl-7">{footer}</div>}
               </li>
             )
           }
@@ -1216,6 +1209,7 @@ function RequirementsRead({
                 resubmitted: false,
               }}
               footer={footer}
+              notePermitTypeCode={code ?? null}
             />
           )
         })}
@@ -1224,14 +1218,12 @@ function RequirementsRead({
   )
 }
 
-/** A FOR OFFICE USE ONLY value the officer is not filling in right now. */
+/** A FOR OFFICE USE ONLY value the officer is not filling in right now — as text, like the sheet. */
 function OfficeReadout({ label, value }: { label: string; value: string }) {
-  // Column-stretched so a label that wraps to two lines does not push its
-  // value out of line with its neighbours.
   return (
-    <dl className="flex h-full flex-col">
-      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
-      <dd className={`mt-auto ${officeValue}`}>{value || '—'}</dd>
+    <dl className="min-w-0">
+      <dt className="text-xs leading-snug text-ink-muted">{label}</dt>
+      <dd className="mt-0.5 break-words text-sm font-medium text-ink">{value || '—'}</dd>
     </dl>
   )
 }
@@ -1268,74 +1260,72 @@ type RequirementGroup = {
  * refused copy is the evidence of what was refused, and a remark that points
  * at a deleted file cannot be checked by anybody.
  */
+/*
+ * Section C as a compact list (client, 19 October 2026: documents as "a
+ * compact list (name, status, view/download, return action) instead of large
+ * cards"). Two columns on a wide screen, one row per requirement, divided by
+ * hairlines rather than boxed.
+ */
+const DOCUMENT_LIST = 'grid grid-cols-1 divide-y divide-line lg:grid-cols-2 lg:gap-x-8 lg:divide-y-0 [&>li]:border-line lg:[&>li]:border-b'
+
 function DocumentRow({
   group,
   footer,
+  onReturn,
+  notePermitTypeCode = null,
 }: {
   group: RequirementGroup
   /*
    * An extra line under the row. The office sheet puts "Changed — was…"
-   * here on a requirement it asked about; BPLO passes nothing and the row
-   * renders exactly as it did before.
+   * here on a requirement it asked about; BPLO passes nothing.
    */
   footer?: ReactNode
+  /**
+   * Open the Return composer with this requirement already ticked. Passed
+   * only where Return is on offer (Edit mode, a seat that may return it).
+   */
+  onReturn?: () => void
+  /** Whose sheet the return remarks come from: null = the main form. */
+  notePermitTypeCode?: string | null
 }) {
   const { current, earlier, resubmitted } = group
+  const rounds = useContext(ReturnRounds)
   const [showEarlier, setShowEarlier] = useState(false)
 
   /*
-   * A button with aria-expanded/aria-controls, never <details>. Same reason
-   * the "show the application as filed" disclosure gives further down: a
-   * passing test asserts this page has no <details>, and a button is the only
-   * one of the two whose open state React controls.
+   * A button with aria-expanded/aria-controls, never <details>: a passing
+   * test asserts this page has no <details>.
    */
   const earlierId = `requirement-history-${current.id}`
 
   return (
-    <li className="rounded-lg border border-line bg-white px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
-            <FileGlyph />
+    <li className="py-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+        <FileGlyph className="shrink-0 text-royal" />
+        <p className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="min-w-0 shrink truncate text-sm font-semibold text-ink">
+            {current.document_type.name}
           </span>
-          <div className="min-w-0">
-            <p className="flex items-center gap-2">
-              <span className="truncate text-sm font-bold text-ink">
-                {current.document_type.name}
-              </span>
-              {/*
-                The one thing the officer came back to look at, so it is the
-                one thing badged. It is also said on a requirement whose ONLY
-                copy arrived after the return — an applicant can answer a
-                return about something they had never uploaded before.
-              */}
-              {resubmitted && (
-                <span
-                  title="Sent after this filing was returned — this is the copy answering it."
-                  className="shrink-0 rounded-full bg-s-rose px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white"
-                >
-                  Re-uploaded
-                </span>
-              )}
-            </p>
-            <p className="truncate text-xs text-ink-muted">
-              {current.original_filename} · {formatBytes(current.size_bytes)}
-              {/* The date earns its place once there is more than one copy. */}
-              {(earlier.length > 0 || resubmitted) && (
-                <> · {formatVersionDate(current.created_at)}</>
-              )}
-            </p>
-          </div>
-        </div>
-        <DocumentActions
-          id={current.id}
-          filename={current.original_filename}
-          label={current.document_type.name}
-        />
-      </div>
-
-      {earlier.length > 0 && (
-        <div className="mt-2.5 border-t border-line pt-2.5">
+          {/*
+            The status, in words: Re-uploaded when this copy answers a return,
+            otherwise the file itself. The one thing the officer came back to
+            look at is the one thing badged.
+          */}
+          {resubmitted && (
+            <span
+              title="Sent after this filing was returned — this is the copy answering it."
+              className="shrink-0 rounded-full bg-s-rose px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white"
+            >
+              Re-uploaded
+            </span>
+          )}
+          {/* The file shrinks first, so the requirement's name stays readable. */}
+          <span className="hidden min-w-0 shrink-[4] truncate text-xs text-ink-muted sm:inline">
+            {current.original_filename} · {formatBytes(current.size_bytes)}
+            {(earlier.length > 0 || resubmitted) && <> · {formatVersionDate(current.created_at)}</>}
+          </span>
+        </p>
+        {earlier.length > 0 && (
           <button
             type="button"
             onClick={() => setShowEarlier((open) => !open)}
@@ -1344,56 +1334,64 @@ function DocumentRow({
             aria-label={`${showEarlier ? 'Hide' : 'Show'} the ${earlier.length} earlier ${
               earlier.length === 1 ? 'copy' : 'copies'
             } of ${current.document_type.name}`}
-            className="flex items-center gap-1.5 rounded text-xs font-semibold text-royal hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+            className="rounded text-xs font-semibold text-royal hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
           >
-            <span
-              className={`shrink-0 transition-transform ${showEarlier ? 'rotate-180' : ''}`}
-              aria-hidden="true"
-            >
-              <ChevronDownIcon size={14} />
-            </span>
-            {/*
-              The requirement's name is in `aria-label`, not on screen. A
-              screen reader hearing "2 earlier copies" on six rows cannot
-              tell them apart; a sighted reader has the row's own heading
-              directly above and does not need it said twice.
-            */}
-            {earlier.length} earlier {earlier.length === 1 ? 'copy' : 'copies'}
+            {earlier.length} earlier
           </button>
-          {/*
-            `hidden` rather than unmounted: `aria-controls` must point at an
-            element that exists, and `hidden` takes it out of the
-            accessibility tree and out of find-in-page, so a closed fold is
-            genuinely closed and not merely out of sight.
-          */}
-          <ul id={earlierId} hidden={!showEarlier} className="mt-2 space-y-1.5">
-            {earlier.map((doc) => (
-              <li
-                key={doc.id}
-                className="flex items-center justify-between gap-3 rounded-md bg-canvas px-3 py-2"
-              >
-                <p className="min-w-0 truncate text-xs text-ink-secondary">
-                  {doc.original_filename} · {formatBytes(doc.size_bytes)} ·{' '}
-                  {formatVersionDate(doc.created_at)}
-                </p>
-                <DocumentActions
-                  id={doc.id}
-                  filename={doc.original_filename}
-                  label={`${doc.document_type.name} (earlier copy)`}
-                />
-              </li>
-            ))}
-          </ul>
-        </div>
+        )}
+        {onReturn && (
+          <button
+            type="button"
+            onClick={onReturn}
+            aria-label={`Return the filing about ${current.document_type.name}`}
+            className="rounded px-1 text-xs font-semibold text-s-orange-ink underline underline-offset-2 hover:bg-s-orange-tint"
+          >
+            Return
+          </button>
+        )}
+        <DocumentActions
+          id={current.id}
+          filename={current.original_filename}
+          label={current.document_type.name}
+        />
+      </div>
+
+      {earlier.length > 0 && (
+        /*
+          `hidden` rather than unmounted: `aria-controls` must point at an
+          element that exists, and `hidden` keeps a closed fold out of the
+          accessibility tree and out of find-in-page.
+        */
+        <ul id={earlierId} hidden={!showEarlier} className="mt-1.5 space-y-1 pl-7">
+          {earlier.map((doc) => (
+            <li
+              key={doc.id}
+              className="flex items-center justify-between gap-3 rounded-md bg-canvas px-2.5 py-1"
+            >
+              <p className="min-w-0 truncate text-xs text-ink-secondary">
+                {doc.original_filename} · {formatBytes(doc.size_bytes)} ·{' '}
+                {formatVersionDate(doc.created_at)}
+              </p>
+              <DocumentActions
+                id={doc.id}
+                filename={doc.original_filename}
+                label={`${doc.document_type.name} (earlier copy)`}
+              />
+            </li>
+          ))}
+        </ul>
       )}
 
-      {footer !== undefined && (
-        <div className="mt-2.5 border-t border-line pt-2.5">{footer}</div>
-      )}
+      <ReturnedFieldNote
+        rounds={rounds}
+        code={group.code}
+        permitTypeCode={notePermitTypeCode}
+        className="pl-7"
+      />
+      {footer !== undefined && <div className="mt-0.5 pl-7">{footer}</div>}
     </li>
   )
 }
-
 /** Floating white remark bubble (p56/p71). */
 function RemarkBubble({
   author,
@@ -1956,6 +1954,8 @@ function officeFormValueText(key: string, value: unknown): string {
 function formValueText(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  /* A sheet's Yes/No chips store 'yes' / 'no'; print the answer, not the code. */
+  if (value === 'yes' || value === 'no') return value === 'yes' ? 'Yes' : 'No'
   if (Array.isArray(value)) return value.map((v) => formValueText(v)).join(', ')
   if (typeof value === 'object') {
     return Object.entries(value as Record<string, unknown>)
@@ -2241,20 +2241,32 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const [sheetEdits, setSheetEdits] = useState<Record<string, Record<string, string>>>({})
   const [sheetSaving, setSheetSaving] = useState<string | null>(null)
   const [sheetSaveError, setSheetSaveError] = useState<string | null>(null)
+  /*
+   * The reason a clerical correction needs (group 2, OfficerEditRules), per
+   * sheet and for the business form. Required by the server; asked for beside
+   * the Save that sends it, so the officer is not told after the fact.
+   */
+  const [sheetReason, setSheetReason] = useState<Record<string, string>>({})
+  const [fieldReason, setFieldReason] = useState('')
   const editSheet = (code: string, key: string, value: string) =>
     setSheetEdits((prev) => ({ ...prev, [code]: { ...(prev[code] ?? {}), [key]: value } }))
   async function saveSheet(code: string, saved: Record<string, unknown>) {
     const edits = sheetEdits[code]
     if (!edits || sheetSaving !== null) return
+    if ((sheetReason[code] ?? '').trim() === '') {
+      setSheetSaveError(editRules.data?.messages.reason ?? 'Give a short reason for this correction.')
+      return
+    }
     setSheetSaving(code)
     setSheetSaveError(null)
     try {
-      await officeFormsApi.save(app.id, code, { ...saved, ...edits })
+      await saveSheetCorrection(app.id, code, { ...saved, ...edits }, sheetReason[code] ?? '')
       setSheetEdits((prev) => {
         const next = { ...prev }
         delete next[code]
         return next
       })
+      setSheetReason((prev) => ({ ...prev, [code]: '' }))
       reload()
     } catch (err) {
       setSheetSaveError(toApiError(err).message)
@@ -2262,6 +2274,32 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       setSheetSaving(null)
     }
   }
+  /*
+   * The three Edit-mode groups, from the one list the API enforces
+   * (`App\Support\OfficerEditRules`). Until it arrives nothing is editable,
+   * which is the safe direction: a lock that lifts a moment later costs
+   * nothing, a box the server then refuses costs a confused officer.
+   */
+  const editRules = useAsync(() => fetchOfficerEditRules(), [])
+  /*
+   * Every return round on the filing, fetched once for the page and shared
+   * by the Return history panel and each answer's one-line note. Keyed on
+   * the status so a return or a resubmission refetches it. Up here because
+   * it is a hook, and the filing is not known until the loading returns.
+   */
+  const returnHistory = useReturnHistory(
+    data?.application.id ?? null,
+    data?.application.status ?? null,
+  )
+  /* The sheet the search walks, and the PDF buttons' in-flight state. */
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const [formPdfBusy, setFormPdfBusy] = useState<string | null>(null)
+  const [formPdfError, setFormPdfError] = useState<string | null>(null)
+  /*
+   * The requirement a document row's Return link pre-ticks in the composer.
+   * Empty for the header's Return, which opens on nothing ticked as before.
+   */
+  const [returnPreset, setReturnPreset] = useState<string[]>([])
   const [savingFields, setSavingFields] = useState(false)
   const [fieldSaveError, setFieldSaveError] = useState<string | null>(null)
   const [confirmFieldSave, setConfirmFieldSave] = useState(false)
@@ -2435,7 +2473,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const backLink = (
     <Link
       to="/staff/queue"
-      className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline"
+      className="mb-1 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline"
     >
       <ArrowLeftIcon size={16} />
       Back to Manage Applications
@@ -2565,23 +2603,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * not, and showing it invites a decision on answers nobody gave.
    */
 
-  /**
-   * The reader's OWN permit on this filing — the one their office issues.
-   *
-   * Derived from `ownOfficeForms`, which the SERVER filtered to the sheets this
-   * reader may see, so the permit named here is the one the confidentiality
-   * boundary says is theirs. Deriving it from the department instead would be a
-   * second copy of that rule in the browser.
-   *
-   * `undefined` for BPLO and the super admin: they hold
-   * `application.view_any_office`, receive every office's sheet and none of
-   * them is their own (BPLO's BUSINESS permit type carries no office form at
-   * all), so `ownOfficeForms` is empty and the progress rail stays the filing's.
-   * That is the right rail for them — their review IS the filing.
+  /*
+   * `ownPermit` — the reader's own permit, which picked the progress rail's
+   * view — went with the rail on 19 October 2026. The status chip reads the
+   * office's own permit from `data.clearance` instead (see `statusChip`).
    */
-  const ownPermit = (app.permit_types ?? []).find(
-    (pt) => pt.code === ownOfficeForms[0]?.permit_type_code,
-  )
 
   /**
    * What a return on THIS sheet could be about.
@@ -3051,7 +3077,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   const taxOrderBlock =
     (app.fee_assessment?.line_items?.length ?? 0) > 0 ? (
-      <div className="mt-6 rounded-lg border border-line bg-white px-5 py-5">
+      <div className="mt-2 rounded-lg border border-line bg-white px-4 py-3">
         <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
           Tax Order of Payment
         </p>
@@ -3071,10 +3097,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             before approving.
           </p>
         )}
-        <div className="mt-4">
+        <div className="mt-2">
           <TaxOrderBreakdown fee={app.fee_assessment} showCitations />
         </div>
-        <div className="mt-4 flex items-baseline justify-between border-t border-ink/40 pt-3 text-base font-bold text-ink">
+        <div className="mt-2 flex items-baseline justify-between border-t border-ink/40 pt-2 text-base font-bold text-ink">
           <span>Total Amount</span>
           <span className="tnum">{formatMoney(app.fee_assessment?.total_amount)}</span>
         </div>
@@ -3095,7 +3121,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const taxOrderFold = (buttonCls: string) =>
     taxOrderBlock && (
       <>
-        <div className="mt-4">
+        <div id="review-tax" className="mt-3">
           <button
             type="button"
             onClick={() => setTaxOpen((open) => !open)}
@@ -3896,6 +3922,90 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     data.clearance.status !== null &&
     !['approved', 'rejected'].includes(data.clearance.status)
 
+  /*
+   * ── The status, as a chip and one line (client, 19 October 2026) ────────
+   *
+   * *"remove that (the one with the Status -> Status -> Status thingy) and
+   * replace it with something that does not consume too much space, like
+   * just the status itself."* The progress rail (`ApplicationProgress`) is
+   * gone from this page in every seat; what replaces it is the READER's
+   * status — BPLO reads the filing's, a clearance office its own permit's
+   * (the same split the rail made with `ownPermit`), so an office never sees
+   * a filing stage that is not theirs — plus one muted line of context.
+   *
+   * The labels and tones are the shared ones (`filingStatusMeta`,
+   * `clearanceStatusMeta`); nothing here names a status of its own. The line
+   * is read off dates the payload already carries. The RA 11032 clause states
+   * the deadline date and the statutory day count rather than a "day 3 of 7"
+   * count: working days need Malabon's holiday calendar, which is the API's
+   * (`ManilaCalendar`), and a browser guess would be wrong around every
+   * holiday.
+   */
+  const ownClearanceStatus = foldsFiledSheet ? (data.clearance?.status ?? null) : null
+  const statusMeta = ownClearanceStatus
+    ? clearanceStatusMeta(ownClearanceStatus)
+    : filingStatusMeta(app)
+  const StatusIcon = TONE_ICONS[statusMeta.tone]
+  const lastMoveInto = (to: string): string | null =>
+    [...(app.status_history ?? [])].filter((h) => h.to_status === to && h.created_at).pop()
+      ?.created_at ?? null
+  const onDate = (words: string, iso: string | null | undefined) =>
+    iso ? `${words} ${formatDate(iso)}` : words
+  const dueNote = (): string | null => {
+    if (!app.deadline_at) return null
+    const days = app.ra11032?.statutory_working_days
+    return Date.parse(app.deadline_at) < Date.now()
+      ? `Overdue — was due ${formatDate(app.deadline_at)} (RA 11032)`
+      : `Decide by ${formatDate(app.deadline_at)}${days ? ` · RA 11032, ${days} working days` : ''}`
+  }
+  const statusNote: string | null = (() => {
+    if (ownClearanceStatus !== null) {
+      switch (ownClearanceStatus) {
+        case 'returned':
+          return `${onDate('Returned', data.clearance?.returned_at)} — waiting for the owner`
+        case 'rejected':
+          return onDate('Rejected', data.clearance?.rejected_at)
+        case 'for_inspection': {
+          const next = myVisits
+            .filter((v) => v.result === null && v.scheduled_at)
+            .sort((a, b) => Date.parse(a.scheduled_at ?? '') - Date.parse(b.scheduled_at ?? ''))[0]
+          return next ? onDate('Inspection on', next.scheduled_at) : 'Inspection not booked yet'
+        }
+        case 'approved':
+          return onDate(
+            'Approved',
+            app.permit_types.find((p) => p.code === data.clearance?.code)?.decided_at,
+          )
+        case 'for_approval':
+          return dueNote()
+        default:
+          return null
+      }
+    }
+    if (app.status === 'returned') return `${onDate('Returned', lastMoveInto('returned'))} — waiting for the owner`
+    if (app.status === 'rejected') return onDate('Rejected', lastMoveInto('rejected'))
+    if (app.status === 'cancelled') return onDate('Cancelled by the owner', lastMoveInto('cancelled'))
+    if (isGatheringOtherPermits(app)) return onDate('Paid', lastMoveInto('approved'))
+    if (app.status === 'pending_payment') return `${onDate('Approved', lastMoveInto('pending_payment'))} — waiting for payment`
+    if (app.status === 'approved') return onDate('Completed', lastMoveInto('approved'))
+    if (app.status === 'for_approval' || app.status === 'for_final_approval') return dueNote()
+    return null
+  })()
+  const statusChip = (
+    <span
+      data-testid="review-status"
+      className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
+    >
+      <span
+        className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${TONE_CLASSES[statusMeta.tone]}`}
+      >
+        <StatusIcon size={12} aria-hidden="true" />
+        {statusMeta.label}
+      </span>
+      {statusNote && <span className="text-xs text-ink-muted">{statusNote}</span>}
+    </span>
+  )
+
   const nothingLeftForThisOffice =
     (isGatheringOtherPermits(app) || app.status === 'for_final_approval' || myPermitInFlight) &&
     !owesReview &&
@@ -3924,6 +4034,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           <p className="mt-1 text-center text-sm font-semibold uppercase tracking-wide text-ink-muted">
             {app.tracking_id}
           </p>
+          <p className="mt-2 flex justify-center text-center">{statusChip}</p>
 
           <h2 className="display-serif mb-6 mt-4 text-center text-3xl text-ink">
             Application Status
@@ -3998,10 +4109,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             book={bookFirstInspection}
           />
 
-          {/* The rail the client asked to keep: "but the progress thingy is cool". */}
-          <div className="mt-6">
-            <ApplicationProgress app={app} ownPermit={ownPermit} />
-          </div>
+          {/*
+            The rail stood here ("but the progress thingy is cool") until the
+            client asked for it to go on 19 October 2026 — the status chip
+            under the business name above replaces it, in every seat.
+          */}
         </div>
       </div>
     )
@@ -4231,7 +4343,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * the fields nobody edits are restated too, explicitly, below.
    */
   async function saveFields() {
-    if (!fieldEditsValid || !fieldEditsDirty) return
+    if (!fieldEditsValid || !fieldEditsDirty || fieldReason.trim() === '') return
     setSavingFields(true)
     setFieldSaveError(null)
     try {
@@ -4331,9 +4443,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           line_of_business: l.line_of_business ?? null,
           products_services: l.products_services ?? null,
         })),
+        /*
+         * Group 2's reason (OfficerEditRules): audited with the old and new
+         * values and sent to the owner in "BPLO corrected your …".
+         */
+        reason: fieldReason.trim(),
       })
 
       setFieldEdits({})
+      setFieldReason('')
       setConfirmFieldSave(false)
       reload()
     } catch (err) {
@@ -4752,6 +4870,96 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     return byTarget
   }, new Map<string, ApplicationCorrection[]>())
 
+  /*
+   * ── The jump bar (client, 19 October 2026) ──────────────────────────────
+   *
+   * "A slim section jump bar at the top (A, B, C… / office sheets) that
+   * stays visible." One button per part of the sheet that is actually drawn
+   * for this seat, in sheet order. A section inside a folded bar opens its
+   * bar first — jumping to "B" and landing on a closed disclosure would be a
+   * jump to nowhere.
+   */
+  const FILED_SECTIONS = ['review-amendment-from', 'review-location', 'review-a', 'review-b', 'review-c']
+  const jumpItems: { id: string; label: string; title: string }[] = [
+    ...ownOfficeForms.map((form) => ({
+      id: `sheet-${form.permit_type_code}`,
+      label: 'Your form',
+      title: `Your office’s form — ${form.permit_type_name ?? form.permit_type_code}`,
+    })),
+    ...(bploReadsClearances && restsOn.length > 0
+      ? [{ id: 'review-clearances', label: 'Clearances', title: 'The clearances this permit rests on' }]
+      : []),
+    ...(app.requested_changes !== null
+      ? [{ id: 'review-changes', label: 'Changes', title: 'The changes this amendment asks for' }]
+      : []),
+    { id: 'review-location', label: 'Location', title: 'Location & Zoning' },
+    { id: 'review-a', label: 'A · Business', title: 'Section A · Business Information & Registration' },
+    { id: 'review-b', label: 'B · Operation', title: 'Section B · Business Operation' },
+    { id: 'review-c', label: 'C · Documents', title: 'Section C · Documentary Requirements' },
+    { id: 'for-office-use', label: 'Office use', title: 'For Office Use Only' },
+    ...(taxOrderBlock ? [{ id: 'review-tax', label: 'Tax order', title: 'Tax Order of Payment' }] : []),
+  ]
+  const jumpTo = (id: string) => {
+    if (FILED_SECTIONS.includes(id) && foldsApplication && !sheetOpen) setSheetOpen(true)
+    if (id === 'review-tax' && !taxOpen) setTaxOpen(true)
+    // After the fold has rendered open, or the section has no box to land on.
+    window.setTimeout(() => {
+      const target = document.getElementById(id)
+      if (!target) return
+      const bar = document.querySelector('[data-review-sticky]')?.getBoundingClientRect().height ?? 0
+      window.scrollTo({
+        top: window.scrollY + target.getBoundingClientRect().top - bar - 8,
+        behavior: 'smooth',
+      })
+    }, 30)
+  }
+  /*
+   * The search's half of the folds: open a folded bar whose text holds the
+   * query, so a match in the business permit application or the Tax Order
+   * of Payment is found rather than reported missing. `textContent` reads a
+   * `hidden` region perfectly well; only the painting needs it open.
+   */
+  const revealFor = (query: string): boolean => {
+    const needle = query.toLowerCase()
+    const holds = (id: string) =>
+      (document.getElementById(id)?.textContent ?? '').toLowerCase().includes(needle)
+    let opened = false
+    if (foldsApplication && !sheetOpen && holds('application-as-filed')) {
+      setSheetOpen(true)
+      opened = true
+    }
+    if (!taxOpen && holds('tax-order-of-payment')) {
+      setTaxOpen(true)
+      opened = true
+    }
+
+    return opened
+  }
+
+  /*
+   * ── The printable forms (request B, 19 October 2026) ────────────────────
+   *
+   * The business permit application to anyone who can open this filing; an
+   * office's own sheet to the office reading it, and every filled sheet to
+   * BPLO, whose payload carries them all (`app.office_forms` is already
+   * filtered server-side to the sheets this reader may see). A sheet nobody
+   * filled in has nothing to print, so it gets no button — the shared
+   * `printableOfficeSheets` (lib/applicationForms) makes that call, the same
+   * one the applicant's screens make.
+   */
+  const printableSheets = printableOfficeSheets(officeForms)
+  async function downloadFormPdf(key: string, save: () => Promise<void>) {
+    setFormPdfBusy(key)
+    setFormPdfError(null)
+    try {
+      await save()
+    } catch (err) {
+      setFormPdfError(toApiError(err).message)
+    } finally {
+      setFormPdfBusy(null)
+    }
+  }
+
   return (
     <FieldEdits.Provider
       /*
@@ -4765,30 +4973,63 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               values: fieldEdits,
               errors: fieldEditErrors,
               set: (key, value) => setFieldEdits((prev) => ({ ...prev, [key]: value })),
+              mayEdit: (key) =>
+                data.department.code === (editRules.data?.business.office ?? 'BPLO') &&
+                (editRules.data?.business.clerical ?? []).includes(key),
+              /*
+               * A clearance office meets BPLO's form as carried-over context
+               * (client: fields from the BP application are BPLO's), so its
+               * lock says whose they are rather than sending it to Return.
+               */
+              lockTip:
+                data.department.code === (editRules.data?.business.office ?? 'BPLO')
+                  ? LOCKED_TOOLTIP
+                  : 'From the business permit form — only BPLO can correct it.',
             }
           : null
       }
     >
     <FieldCorrections.Provider value={correctionsByTarget}>
+    <ReturnRounds.Provider value={returnHistory.rounds}>
     {/* Not re-indented: see the note in this patch — two spaces across
         2,200 lines would rewrite the sheet's blame to move nothing. */}
     <div>
       {backLink}
 
-      {/* Header zone (p68): clipboard + business · saved cloud · Reject/Approve or decision */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <ClipboardIcon size={30} className="shrink-0 text-royal" />
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-bold text-ink">
+      {/*
+        ── The sticky bar: who, where it stands, the decision, the way round ──
+
+        Client, 19 October 2026: the officer's actions "stay visible while
+        scrolling", with "a slim section jump bar at the top … that stays
+        visible". So the header — business, tracking ID, status, Mode, Save
+        and the decision buttons — and the jump bar under it ride at the top
+        of the window together. Kept to two short rows (about 90px at
+        1366×768) so the sheet keeps the rest of the screen.
+
+        `data-review-sticky` is how the jump bar and the search measure it,
+        so a section scrolled to lands below the bar rather than under it.
+        `pr-14` on the first row keeps it clear of the notification bell,
+        which is fixed to the window's top-right corner.
+      */}
+      <div
+        data-review-sticky
+        className="sticky top-0 z-[15] -mx-4 mb-3 border-b border-line bg-canvas px-4 pb-1.5 pt-2 lg:-mx-10 lg:px-10"
+      >
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 pr-14">
+        <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
+            <h1 className="min-w-0 truncate text-lg font-bold text-ink">
               {business.name ?? app.tracking_id}
             </h1>
+            <span className="tnum text-xs font-semibold text-ink-muted">{app.tracking_id}</span>
             {businessRemoved && (
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
                 Business removed from the register
-              </p>
+              </span>
             )}
           </div>
+          {/* The status, where the progress rail used to be (see `statusChip`). */}
+          <div className="mt-0.5">{statusChip}</div>
         </div>
         {/*
           Says so when it is not true. It read "All Changes Saved" with
@@ -4797,16 +5038,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         */}
         <span
           role="status"
-          className={`hidden items-center gap-2 text-xs italic sm:flex ${
+          className={`hidden items-center gap-1.5 text-xs italic xl:flex ${
             unsavedEdits ? 'font-semibold text-s-orange-ink' : 'text-ink-muted'
           }`}
         >
           <CloudIcon />
           {unsavedEdits ? 'Unsaved changes' : 'All Changes Saved'}
-        </span>
-        {decided ? (
+        </span>        {decided ? (
           <span
-            className={`text-2xl font-bold underline underline-offset-4 ${rejected ? 'text-s-red' : 'text-s-green'}`}
+            className={`text-lg font-bold underline underline-offset-4 ${rejected ? 'text-s-red' : 'text-s-green'}`}
           >
             {rejected ? 'Rejected' : 'Approved'}
           </span>
@@ -4821,7 +5061,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * "Edit" on a sheet that cannot be edited is the same false promise
            * one level up.
            */
-          <p className="rounded-lg bg-s-orange-tint px-4 py-2.5 text-sm font-medium text-s-orange-ink">
+          <p className="rounded-lg bg-s-orange-tint px-3 py-1.5 text-xs font-medium text-s-orange-ink">
             {holderName ? (
               <>
                 Officer in charge: <span className="font-bold">{holderName}</span>. Read-only for
@@ -4836,7 +5076,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             <div className="flex items-center gap-2.5">
               <span
                 id="review-mode-label"
-                className="text-[11px] font-bold uppercase tracking-wide text-ink-muted"
+                className="sr-only text-[11px] sm:not-sr-only font-bold uppercase tracking-wide text-ink-muted"
               >
                 Mode
               </span>
@@ -4870,7 +5110,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   type="button"
                   onClick={() => fieldEditsValid && setConfirmFieldSave(true)}
                   aria-describedby={fieldEditsValid ? undefined : 'field-edit-invalid'}
-                  className={`rounded-md px-7 py-2.5 text-sm font-semibold text-white shadow-card ${
+                  className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white ${
                     fieldEditsValid ? 'bg-s-green hover:brightness-110' : 'bg-ink-muted'
                   }`}
                 >
@@ -4882,7 +5122,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     setFieldEdits({})
                     setFieldSaveError(null)
                   }}
-                  className="rounded-md border border-line px-4 py-2.5 text-sm font-semibold text-ink-secondary hover:bg-input"
+                  className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-ink-secondary hover:bg-input"
                 >
                   Discard
                 </button>
@@ -4916,7 +5156,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     type="button"
                     onClick={() => setPopup('reject')}
                     disabled={busy}
-                    className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                    className="rounded-md bg-s-red px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 hover:brightness-110 disabled:opacity-60"
                   >
                     Reject
                   </button>
@@ -4945,7 +5185,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     type="button"
                     onClick={() => setPopup('reject_permit')}
                     disabled={busy}
-                    className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                    className="rounded-md bg-s-red px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 hover:brightness-110 disabled:opacity-60"
                   >
                     Reject this permit
                   </button>
@@ -4960,7 +5200,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 {mayReturn && (
                 <button
                   type="button"
-                  onClick={() => setPopup('return')}
+                  onClick={() => {
+                    setReturnPreset([])
+                    setPopup('return')
+                  }}
                   disabled={busy}
                   /*
                    * Tinted fill with ink text, not `text-s-orange` on white:
@@ -4968,7 +5211,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                    * this size. The border carries the caution hue; the label
                    * stays readable.
                    */
-                  className="rounded-md border-2 border-s-orange bg-s-orange-tint px-7 py-2.5 text-sm font-semibold text-ink underline underline-offset-2 shadow-card hover:brightness-95 disabled:opacity-60"
+                  className="rounded-md border-2 border-s-orange bg-s-orange-tint px-4 py-1.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95 disabled:opacity-60"
                 >
                   Return with remarks
                 </button>
@@ -5017,7 +5260,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     type="button"
                     onClick={() => setPopup('amend')}
                     disabled={busy}
-                    className="rounded-md border border-royal px-5 py-2.5 text-sm font-semibold text-royal transition-colors hover:bg-royal-tint disabled:opacity-60"
+                    className="rounded-md border border-royal px-3 py-1.5 text-sm font-semibold text-royal transition-colors hover:bg-royal-tint disabled:opacity-60"
                   >
                     Change what you asked for
                   </button>
@@ -5049,7 +5292,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   disabled={busy}
                   aria-disabled={categoryMissing}
                   aria-describedby={categoryMissing ? 'approve-blocked-why' : undefined}
-                  className={`rounded-md px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card disabled:opacity-60 ${
+                  className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 disabled:opacity-60 ${
                     categoryMissing ? 'bg-s-green/50' : 'bg-s-green hover:brightness-110'
                   }`}
                 >
@@ -5060,6 +5303,30 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             )}
           </div>
         )}
+      </div>
+      {/*
+        The jump bar and the search, the bar's second row. See `jumpItems`.
+      */}
+      <div className="mt-1.5 flex items-center gap-2">
+        <nav aria-label="Sections of this filing" className="min-w-0 flex-1 overflow-x-auto">
+          <ul className="flex items-center gap-1 whitespace-nowrap">
+            {jumpItems.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  onClick={() => jumpTo(item.id)}
+                  title={item.title}
+                  aria-label={item.title}
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-ink-secondary hover:bg-royal-tint hover:text-royal focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <FilingSearch containerRef={sheetRef} reveal={revealFor} version={data} />
+      </div>
       </div>
 
       {/*
@@ -5089,12 +5356,31 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         Only on a filing that has been round at least once. See the note at the
         head of this patch for why it sits above everything else.
       */}
-      {(app.corrections ?? []).length > 0 && (
-        <section className="mb-4 rounded-lg bg-white px-5 py-4 shadow-card">
+      {/*
+        ── Return history (client, 19 October 2026) ────────────────────────
+
+        *"When a returned application was complied, the remark should not be
+        removed."* Every round — what was asked, by whom, and what the
+        applicant changed in answer — folded shut by default so it costs one
+        line until opened. A clearance office sees its own sheet's rounds.
+
+        It carries the before-and-after itself, so the older "Corrected after
+        your return" block below is drawn only when there is no history to
+        show (a payload from before the history endpoint existed).
+      */}
+      <ReturnHistory
+        rounds={returnHistory.rounds}
+        audience="staff"
+        permitTypeCode={foldsFiledSheet ? (data.clearance?.code ?? undefined) : undefined}
+        defaultOpen={false}
+        className="mb-3"
+      />
+      {returnHistory.rounds.length === 0 && (app.corrections ?? []).length > 0 && (
+        <section className="mb-3 rounded-lg bg-white px-4 py-2.5 shadow-card">
           <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
             Corrected after your return
           </p>
-          <ul className="mt-3 space-y-2.5">
+          <ul className="mt-1.5 space-y-1">
             {(app.corrections ?? []).map((c, i) => {
               const label = mainFormTargetLabel(c.target)
               /*
@@ -5162,7 +5448,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         className={
           modeNote === ''
             ? 'sr-only'
-            : 'mb-4 flex items-start gap-2.5 rounded-lg bg-white px-4 py-3 text-sm text-ink-secondary shadow-card'
+            : 'mb-3 flex items-start gap-2.5 rounded-lg bg-white px-4 py-2 text-sm text-ink-secondary shadow-card'
         }
       >
         <span className={`mt-0.5 shrink-0 ${editing ? 'text-royal' : 'text-ink-muted'}`}>
@@ -5267,17 +5553,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       )}
 
       {/*
-       * Above the form, not below it. "Where is this in the process" is the
-       * question the sheet is opened with — the form is what you read once you
-       * have decided this is the filing you meant. It also puts the outstanding
-       * offices in front of a reviewer before they approve, so the one holding
-       * it up is visible rather than discovered afterwards.
-       */}
-      <ApplicationProgress app={app} ownPermit={ownPermit} />
-
-      <div className="flex items-start gap-8">
+        The progress rail stood here, above the form, until 19 October 2026;
+        the status chip in the sticky bar replaces it (see `statusChip`).
+      */}      <div className="flex items-start gap-8">
         {/* ── The form sheet ── */}
-        <div className="min-w-0 flex-1 rounded-sm bg-white px-7 py-8 shadow-card sm:px-10">
+        <div
+          ref={sheetRef}
+          className="min-w-0 flex-1 rounded-sm bg-white px-4 py-5 shadow-card sm:px-7"
+        >
           {/*
            * ── Whose review this is, at the top of the sheet (SEP-4) ─────────
            *
@@ -5295,25 +5578,69 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * it belongs, phrased as the source of the record rather than as the
            * owner of the screen.
            */}
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+          {/*
+            The Application No. that sat on the right of this heading is in
+            the sticky bar now, beside the business name — said once.
+          */}
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
                 {data.department.name} · Application Review
               </p>
-              <h2 className="mt-1 text-xl font-bold text-ink">
+              <h2 className="text-base font-bold text-ink">
                 Application for {TYPE_TITLES[app.application_type] ?? app.application_type} Business
                 Permit
               </h2>
-              <p className="mt-1 text-xs text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 Filed on the BPLO business permit form · Form Ref: MCG-BPLO-FO-001 · v2.0
               </p>
             </div>
-            <p className="text-sm text-ink">
-              <span className="font-bold">Application No.</span>{' '}
-              <span className="tnum">{app.tracking_id}</span>
-            </p>
+            {/*
+              The printable forms (request B). Every reader of the filing gets
+              the business permit application; the office sheets follow
+              `printableSheets`. Each button names its form in full for a
+              screen reader — six buttons reading "PDF" are six identical stops.
+            */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  void downloadFormPdf('BUSINESS', () =>
+                    downloadBusinessPermitForm(app.id, app.tracking_id, app.application_type),
+                  )
+                }
+                aria-disabled={formPdfBusy !== null || undefined}
+                aria-label="Download application form (PDF)"
+                className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-royal hover:bg-royal-tint aria-disabled:opacity-60"
+              >
+                <DownloadIcon size={13} />
+                {formPdfBusy === 'BUSINESS' ? 'Preparing…' : 'Application form (PDF)'}
+              </button>
+              {printableSheets.map((sheet) => (
+                <button
+                  key={sheet.code}
+                  type="button"
+                  onClick={() =>
+                    void downloadFormPdf(sheet.code, () =>
+                      downloadOfficeSheet(app.id, sheet.code, app.tracking_id),
+                    )
+                  }
+                  aria-disabled={formPdfBusy !== null || undefined}
+                  aria-label={`Download ${sheet.label} form (PDF)`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-royal hover:bg-royal-tint aria-disabled:opacity-60"
+                >
+                  <DownloadIcon size={13} />
+                  {formPdfBusy === sheet.code ? 'Preparing…' : `${sheet.label} (PDF)`}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="mt-4 border-b-2 border-royal" />
+          {formPdfError && (
+            <p role="alert" className="mt-2 text-xs font-semibold text-s-red">
+              {formPdfError}
+            </p>
+          )}
+          <div className="mt-2 border-b-2 border-royal" />
 
           {/*
            * ── The reader's own clearance, before anyone else's paperwork ────
@@ -5347,7 +5674,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             why it is not hardcoded to five rows.
           */}
           {bploReadsClearances && restsOn.length > 0 && (
-            <section className="mt-7">
+            <section id="review-clearances" className="mt-5">
               <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">
                 The clearances this permit rests on
               </h2>
@@ -5382,18 +5709,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 </p>
               )}
 
-              <ul className="mt-4 space-y-3">
+              <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
                 {restsOn.map(({ permit, certificate, inspection }) => (
                   <li
                     key={permit.code}
-                    className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-line bg-white px-4 py-3"
+                    className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5"
                   >
                     <span className="shrink-0 text-s-green" aria-hidden="true">
                       <CheckCircleFilledIcon size={18} />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold text-ink">{permit.name}</span>
-                      <span className="mt-0.5 block text-xs text-ink-secondary">
+                      <span className="text-sm font-bold text-ink">{permit.name}</span>{' '}
+                      <span className="text-xs text-ink-secondary">
                         {/*
                           The office, the date it decided, and the visit's
                           result — the three facts that make the approval
@@ -5488,7 +5815,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             than rendering as an absent block.
           */}
           {app.requested_changes !== null && (
-            <section className="mt-7">
+            <section id="review-changes" className="mt-5">
               <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">
                 The changes this amendment asks for
               </h2>
@@ -5506,7 +5833,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     </p>
                   )}
 
-                  <ul className="mt-4 space-y-3">
+                  <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
                     {app.requested_changes.map((row) => {
                       /*
                         Before → after, and WHICH before depends on when you are
@@ -5529,25 +5856,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       const after = row.new_label ?? row.new_value
 
                       return (
+                        /*
+                          One line per change as text (client, 19 October
+                          2026): the detail, what it is now, what is asked.
+                        */
                         <li
                           key={row.field}
-                          className="rounded-lg border border-line bg-white px-4 py-3"
+                          className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-1.5"
                         >
-                          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                            <span className="text-sm font-bold text-ink">{row.label}</span>
-                            {applied && (
-                              <span className="text-xs font-semibold text-s-green">
-                                Applied {formatDate(row.applied_at as string)}
-                              </span>
-                            )}
-                          </div>
-                          {/*
-                            The arrow is decoration; the two labelled values
-                            carry the meaning on their own, so a reader who
-                            cannot see it is not guessing at the direction.
-                          */}
-                          <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px]">
-                            <span className="text-ink-secondary">
+                          <span className="min-w-[10rem] text-sm font-semibold text-ink">
+                            {row.label}
+                          </span>
+                            <span className="text-[13px] text-ink-secondary">
                               <span className="text-ink-muted">
                                 {applied ? 'Was: ' : 'Now: '}
                               </span>
@@ -5556,7 +5876,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                             <span aria-hidden="true" className="text-ink-muted">
                               →
                             </span>
-                            <span className="font-semibold text-ink">
+                            <span className="text-[13px] font-semibold text-ink">
                               <span className="font-normal text-ink-muted">
                                 {applied ? 'Now: ' : 'Asked for: '}
                               </span>
@@ -5564,7 +5884,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                                 <span className="italic font-normal text-ink-muted">cleared</span>
                               )}
                             </span>
-                          </div>
+                          {applied && (
+                            <span className="ml-auto text-xs font-semibold text-s-green">
+                              Applied {formatDate(row.applied_at as string)}
+                            </span>
+                          )}
                         </li>
                       )
                     })}
@@ -5600,7 +5924,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             entry as the whole story.
           */}
           {bploReadsClearances && carriedClearances.length > 0 && (
-            <section className="mt-7">
+            <section className="mt-5">
               <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">
                 Clearances already on file
               </h2>
@@ -5617,7 +5941,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 )}
               </p>
 
-              <ul className="mt-4 space-y-3">
+              <ul className="mt-2 space-y-1.5">
                 {carriedClearances.map((row) => {
                   /*
                     Word first, colour second — the same rule the applicant's
@@ -5658,7 +5982,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   return (
                     <li
                       key={row.permit_type_code}
-                      className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border px-4 py-3 ${
+                      className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-3 py-1.5 ${
                         gap ? 'border-s-red bg-s-red-tint' : 'border-line bg-white'
                       }`}
                     >
@@ -5702,7 +6026,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             judge whether it was met.
           */}
           {data.clearance?.rejected_at && (
-            <section className="mt-6 rounded-lg border border-s-red bg-s-red-tint px-5 py-4">
+            <section className="mt-4 rounded-lg border border-s-red bg-s-red-tint px-4 py-3">
               <p className="text-[11px] font-bold uppercase tracking-wide text-s-red">
                 Your office refused this permit on {formatDate(data.clearance.rejected_at)}
               </p>
@@ -5783,13 +6107,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             return (
               <section
                 key={form.permit_type_code}
-                className="mt-6 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4"
+                id={`sheet-${form.permit_type_code}`}
+                className="mt-4 rounded-lg border border-royal/30 bg-royal-tint px-4 py-3"
                 aria-label={`Your office’s form — ${form.permit_type_name ?? form.permit_type_code}`}
               >
                 <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
                   Your office · {data.department.name}
                 </p>
-                <h2 className="mt-1 text-[15px] font-bold text-ink">
+                <h2 className="text-sm font-bold text-ink">
                   {form.permit_type_name ?? form.permit_type_code} — the clearance you are deciding
                 </h2>
                 {/*
@@ -5800,13 +6125,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   in the office.
                 */}
                 {officeFormMeta(form.permit_type_code) !== undefined && (
-                  <p className="mt-0.5 text-xs text-ink-secondary">
+                  <p className="text-xs text-ink-secondary">
                     {officeFormMeta(form.permit_type_code)?.title} ·{' '}
                     <span className="tnum">{officeFormMeta(form.permit_type_code)?.ref}</span>
                   </p>
                 )}
                 {form.form_saved === false && (
-                  <p className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-3 py-2 text-sm leading-relaxed text-ink">
+                  <p className="mt-2 rounded-md border border-s-orange bg-s-orange-tint px-3 py-1.5 text-sm text-ink">
                     <span className="font-semibold">Not filled in yet.</span>
                   </p>
                 )}
@@ -5815,24 +6140,24 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     The applicant recorded no answers on your office’s form.
                   </p>
                 ) : (
-                  <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
+                  <div className={`mt-2 ${SHEET_GRID}`}>
                     {entries.map(([key, value]) =>
                       /*
-                       * Not on a derived answer. The API writes those over
-                       * whatever the sheet holds (`$derived + $formData`), so
-                       * CENRO was offered "Correct Denr Basis" for a value
-                       * that would save and silently come back (tester,
-                       * 5 October 2026). They show as the record they are.
+                       * ── Which answers the office may correct here ──────
+                       *
+                       * Group 2 of OfficerEditRules only — a clerical line the
+                       * sheet itself asks (OBO's Tel. No., an owner address),
+                       * with a reason (19 October 2026). Everything else the
+                       * applicant declared is locked and says so; the
+                       * issuance dates are the office's own and are filled
+                       * under For Office Use Only. A derived answer is never
+                       * offered: the API writes it over whatever is sent
+                       * (`$derived + $formData`, tester 5 October 2026).
                        */
-                      editing && !officeFormKeyIsDerived(form.permit_type_code, key) ? (
-                        /*
-                         * The same control the applicant answers a returned
-                         * field with — chips where the sheet offers chips, a
-                         * date where it asks a date — so a correction cannot
-                         * write a value the sheet itself would never produce.
-                         */
-                        <div key={key} className="min-w-[12rem] grow basis-[14rem]">
-                          <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
+                      editing &&
+                      !officeFormKeyIsDerived(form.permit_type_code, key) &&
+                      (editRules.data?.sheets[form.permit_type_code]?.clerical ?? []).includes(key) ? (                        <div key={key} className="min-w-0">
+                          <p className="text-xs leading-snug text-ink-muted">
                             {officeFormFieldLabel(form.permit_type_code, key)}
                           </p>
                           <CorrectionAnswer
@@ -5851,13 +6176,36 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                           key={key}
                           label={officeFormFieldLabel(form.permit_type_code, key)}
                           value={officeFormValueText(key, value)}
+                          notes={[{ code: key, permitTypeCode: form.permit_type_code }]}
+                          lockTip={
+                            officeFormKeyIsDerived(form.permit_type_code, key)
+                              ? 'Filled in by the system from the filing.'
+                              : (editRules.data?.sheets[form.permit_type_code]?.office_use ?? []).includes(key)
+                                ? 'Your office’s own entry — fill it under For Office Use Only.'
+                                : undefined
+                          }
                         />
                       ),
                     )}
                   </div>
                 )}
                 {editing && sheetEdits[form.permit_type_code] && (
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {/*
+                      The reason a clerical correction carries (group 2). It
+                      goes to the audit log beside the old and new value, and
+                      to the owner in the notice that tells them.
+                    */}
+                    <input
+                      value={sheetReason[form.permit_type_code] ?? ''}
+                      onChange={(e) =>
+                        setSheetReason((prev) => ({ ...prev, [form.permit_type_code]: e.target.value }))
+                      }
+                      maxLength={500}
+                      placeholder="Reason for the correction"
+                      aria-label={`Reason for correcting the ${form.permit_type_name ?? form.permit_type_code} form`}
+                      className="min-w-0 flex-1 rounded-md border border-input-border bg-white px-3 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none sm:max-w-sm"
+                    />
                     <button
                       type="button"
                       onClick={() => void saveSheet(form.permit_type_code, form.form_data ?? {})}
@@ -6008,13 +6356,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             get it.
           */}
           {foldsApplication && (
-            <div className="mt-7 border-t border-line pt-5">
+            <div className="mt-4 border-t border-line pt-3">
               <button
                 type="button"
                 onClick={() => setSheetOpen((open) => !open)}
                 aria-expanded={sheetOpen}
                 aria-controls="application-as-filed"
-                className="flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                className="flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-2 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
               >
                 <span
                   className={`shrink-0 text-royal transition-transform ${sheetOpen ? 'rotate-180' : ''}`}
@@ -6071,10 +6419,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
              * register themselves.
              */}
             {app.application_type === 'amendment' && (
-              <section className="mt-7 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4">
-                <h2 className="text-[15px] font-bold text-ink">Amendment From</h2>
+              <section
+                id="review-amendment-from"
+                className="mt-4 rounded-lg border border-royal/30 bg-royal-tint px-4 py-2.5"
+              >
+                <h2 className="text-sm font-bold text-ink">Amendment From</h2>
                 {app.amendments && app.amendments.summary.length > 0 ? (
-                  <ul className="mt-2 space-y-1">
+                  <ul className="mt-1 flex flex-wrap gap-x-5 gap-y-1">
                     {app.amendments.summary.map((kind) => (
                       <li key={kind} className="flex items-start gap-2 text-sm text-ink">
                         <span className="mt-0.5 font-bold text-royal" aria-hidden="true">
@@ -6116,636 +6467,412 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               No letter. The paper runs A to C and has no zoning section, so a
               D would be a label the paper cannot back.
             */}
-            <section className="mt-7">
-              <h3 className="mb-4 text-lg font-bold text-ink">Location &amp; Zoning</h3>
+            <section id="review-location" className="mt-4">
+              <h3 className="text-sm font-bold text-ink">Location &amp; Zoning</h3>
               {/*
                 ── The trade first, as the form asks it ──────────────────
 
-                ApplyWizard puts this table at the head of Location & Zoning,
-                before the address, and says why: the zoning conformity check
-                on that step "is a judgment about a NAMED TRADE and needs the
-                trade beside it."
+                ApplyWizard puts the line-of-business table at the head of
+                Location & Zoning, before the address: the zoning conformity
+                check "is a judgment about a NAMED TRADE and needs the trade
+                beside it." It was at the foot of Section B until
+                29 September 2026, four headings from the barangay it is
+                judged against.
 
-                It was at the FOOT of Section B until 29 September 2026 —
-                four headings below the barangay and the pin it is judged
-                against, so the officer deciding conformity read the place in
-                one section and the trade in another.
+                The per-line "Capitalization" that stood beside it is gone: it
+                is item B6, Capital Investment, a second time (the wizard
+                stopped asking it per line on 16 September 2026).
               */}
               <SubHeading>Line of Business</SubHeading>
               {business.lines && business.lines.length > 0 ? (
-                <div className="space-y-4">
+                <div className={SHEET_GRID}>
                   {business.lines.map((line, i) => (
-                    <div key={line.id ?? i} className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                      {/*
-                      A per-line "Capitalization" stood beside this and is
-                      gone. It is the same quantity as item 6, Capital
-                      Investment, shown a few rows above — the wizard asked it
-                      per line AND per business until 16 September 2026, when
-                      the per-line question went because the paper has one box
-                      and two boxes for one figure can disagree.
-                      `business_lines.capitalization` is still filled by the
-                      API from that single figure, so this column was the same
-                      number twice on a good filing and a dash on this one.
-                    */}
+                    <div key={line.id ?? i} className="contents">
                       <Field
                         label={`Line of Business ${business.lines!.length > 1 ? i + 1 : ''}`.trim()}
                         // The applicant's own words first, then the class they
-                        // were sorted into: a line under the catch-all 00000 no
-                        // longer reaches the reviewer as "Other (not listed)".
+                        // were sorted into.
                         value={lineOfBusinessText(line)}
+                        className="sm:col-start-1"
                       />
                       {/*
-                       * Products / Services — the paper's own second column of
-                       * this table, on both BPLO forms and on CENRO's CEC
-                       * application. Kept inside the per-line row because that is
-                       * where it belongs: the trade above names what this line
-                       * IS, this names what it handles, and CENRO reviews the
-                       * second. Spans the row so a long list of goods is readable
-                       * rather than crushed into half the width — the row was
-                       * three columns until the duplicate per-line
-                       * capitalization came out of it.
-                       */}
+                        Products / Services — the paper's own second column
+                        of this table, and what CENRO reviews. Given the rest
+                        of the row, because a list of goods is long.
+                      */}
                       <Field
                         label="Products / Services"
                         value={line.products_services ?? ''}
-                        className="grow basis-[32rem] max-w-full"
+                        className="lg:col-span-3"
                       />
                     </div>
                   ))}
                 </div>
               ) : (
-                <Field
-                  label="Line of Business"
-                  value={app.permit_types.map((p) => p.name).join(', ')}
-                />
+                <div className={SHEET_GRID}>
+                  <Field
+                    label="Line of Business"
+                    value={app.permit_types.map((p) => p.name).join(', ')}
+                  />
+                </div>
               )}
 
               <SubHeading>Main Office Address</SubHeading>
               {/*
-                ── The form's own grids ────────────────────────────────────
+                ── The address beside its pin, not above it ──────────────────
 
-                ApplyWizard asks these in three groups: House and Street as
-                `grid sm:grid-cols-3` with Street spanning two, then Block /
-                Lot / Lot Area as another `sm:grid-cols-3`, then the barangay
-                on its own. Copied, because a single wrapping row put Street
-                beside the barangay and scattered Block and Lot wherever they
-                fitted.
+                The form's order is kept — House and Street, then Block, Lot
+                and Lot Area, then the barangay, the landmark below the map
+                and the two emergency contacts — in a three-column grid, with
+                the map beside it on a wide screen instead of a 320px block
+                under it (19 October 2026, "the WHOLE FORM in just 2-3 page
+                ups/downs"). On a narrower screen the map follows the
+                address, as it did.
+
+                The pin is the one fact here that can be CHECKED rather than
+                read — the wizard refuses one outside Malabon or outside the
+                barangay chosen — and CPDD rules the locational clearance from
+                it, which is why it stays on the sheet at all. `readOnly`, not
+                `lockedReason`: nothing is missing, so no scrim over the pin.
               */}
-              <div className="grid gap-3 sm:grid-cols-3">
-                {/*
-                  The real columns first, `splitLine1` only as a fallback.
-                  `house_bldg_no` and `street` are what the wizard sends since
-                  16 September 2026; before that it asked one combined question
-                  and this page guessed the split out of `line1` with a regex,
-                  which reversed the two on any filing whose entire street
-                  address was a number ("17" → Street "17", House "—"). The
-                  fallback stays for the filings made that way.
-                */}
-                <Field
-                  label="House / Bldg No."
-                  targets={['form:address']}
-                  value={address?.house_bldg_no || house}
-                  className="block"
-                  /*
-                   * The stored column, never the regex's guess. `house`
-                   * is `splitLine1`'s reading of a pre-split filing, and
-                   * saving it back would write a guess into the record as
-                   * though the applicant had typed it.
-                   */
-                  edit={{ key: 'address.house_bldg_no', value: address?.house_bldg_no ?? '' }}
-                />
-                <Field
-                  label="Street"
-                  targets={['form:address']}
-                  value={address?.street || street}
-                  className="block sm:col-span-2"
-                  edit={{ key: 'address.street', value: address?.street ?? '' }}
-                />
-              </div>
-
-              {/*
-                Block, Lot and Lot Area — asked of every applicant, on the
-                payload since the premises block was transcribed, and drawn by
-                no section of this sheet until 29 September 2026. Three
-                submitted answers the reviewing office could not see.
-
-                Optional on the form, so a blank is a question skipped rather
-                than an answer missing, and reads as the em dash every other
-                unanswered box uses.
-              */}
-              <div className="mt-3 grid gap-4 sm:grid-cols-3">
-                <Field
-                  label="Block"
-                  targets={['form:address']}
-                  value={address?.block ?? ''}
-                  className="block"
-                  edit={{ key: 'address.block' }}
-                />
-                <Field
-                  label="Lot"
-                  targets={['form:address']}
-                  value={address?.lot ?? ''}
-                  className="block"
-                  edit={{ key: 'address.lot' }}
-                />
-                <Field
-                  label="Lot Area (sq. m.)"
-                  targets={['form:address']}
-                  value={address?.lot_area_sqm == null ? '' : String(address.lot_area_sqm)}
-                  className="block"
-                  edit={{ key: 'address.lot_area_sqm' }}
-                />
-              </div>
-
-              {/* Its own block on the form, and the answer the zoning turns on. */}
-              <div className="mt-3">
-                <Field
-                  label="Barangay"
-                  targets={['form:barangay']}
-                  value={address?.barangay?.name ?? ''}
-                  className="block sm:max-w-[22rem]"
-                  /*
-                   * A choice from the city's own table, so a select and
-                   * not a text box — the wizard asks it the same way, and
-                   * a typed barangay is a zoning decision made against a
-                   * spelling. Empty while the list is still in flight,
-                   * which is a moment and not a state worth drawing.
-                   */
-                  edit={{
-                    key: 'address.barangay_id',
-                    value: address?.barangay?.id == null ? '' : String(address.barangay.id),
-                    control: {
-                      kind: 'select',
-                      /*
-                        The filing's own barangay while the list is still in
-                        flight, so the control never shows an empty row where
-                        the record has an answer. Replaced by the city's list
-                        the moment it lands.
-                      */
-                      options:
-                        (barangaysRef.data ?? []).length > 0
-                          ? (barangaysRef.data ?? []).map((b) => ({
-                              value: String(b.id),
-                              label: b.name,
-                            }))
-                          : address?.barangay?.id == null
-                            ? []
-                            : [
-                                {
-                                  value: String(address.barangay.id),
-                                  label: address.barangay.name ?? '',
-                                },
-                              ],
-                    },
-                  }}
-                />
-              </div>
-
-              {/*
-                Not the form's questions. The applicant is asked for none of
-                these — every address this system licenses is in Malabon, which
-                has one postal code — so they are record fields the API fills
-                and cannot take a place in the form's grid above. Kept, because
-                an officer transcribing onto paper still needs them.
-              */}
-              <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
-                <Field label="City / Municipality" value={address?.city ?? 'Malabon City'} className="grow basis-[12rem] max-w-full" />
-                <Field label="Province" value={address?.province ?? 'Metro Manila'} className="grow basis-[12rem] max-w-full" />
-                <Field label="Postal Code" value={address?.postal_code ?? ''} className="grow basis-[8rem] max-w-full" />
-              </div>
-
-              {/*
-              ── The pin, and the map it sits on ─────────────────────────────
-
-              Neither was on this page. The coordinates were not even printed
-              as text, so the one fact that decides the locational clearance
-              was invisible to the office giving the initial approval.
-
-              It matters more than the lines above it. A barangay name and a
-              street cannot be verified by reading them; a pin can. And this
-              pin is already CHECKED — the wizard refuses one outside Malabon
-              and refuses one that contradicts the barangay chosen from the
-              dropdown — so it carries signal the typed address does not.
-              CPDD rules the locational clearance from exactly this point, and
-              until now nobody looked at it before the money was taken.
-
-              `readOnly`, not `lockedReason`. Both stop the map being changed —
-              neither mounts the click handler, neither lets the marker be
-              dragged — but `lockedReason` also paints a scrim and a sentence
-              ACROSS the map, because it means "set aside until you answer
-              something else" and an applicant whose map stopped responding
-              needs telling why. Nothing is missing here, so that sentence sat
-              over the middle of the pin it was describing. The explanation
-              belongs beside the map, where it is.
-            */}
-              {address?.latitude != null && address?.longitude != null ? (
-                <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_minmax(0,22rem)]">
-                  <MapPicker
-                    latitude={address.latitude}
-                    longitude={address.longitude}
-                    highlightBarangay={address.barangay?.name ?? null}
-                    readOnly
+              <div className="grid items-start gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+                <div className="grid grid-cols-1 content-start gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {/*
+                    The real columns first, `splitLine1` only as a fallback for
+                    filings made before House and Street were asked apart
+                    (16 September 2026). The edit gets the stored column, never
+                    the regex's guess, which would write a guess into the record.
+                  */}
+                  <Field
+                    label="House / Bldg No."
+                    targets={['form:address']}
+                    notes={[]}
+                    value={address?.house_bldg_no || house}
+                    edit={{ key: 'address.house_bldg_no', value: address?.house_bldg_no ?? '' }}
                   />
-                  <div className="space-y-4">
-                    <Field label="Latitude" value={address.latitude.toFixed(6)} className="grow basis-[10rem] max-w-full" />
-                    <Field label="Longitude" value={address.longitude.toFixed(6)} className="grow basis-[10rem] max-w-full" />
-                  </div>
+                  <Field
+                    label="Street"
+                    targets={['form:address']}
+                    value={address?.street || street}
+                    className="lg:col-span-2"
+                    edit={{ key: 'address.street', value: address?.street ?? '' }}
+                  />
+                  <Field
+                    label="Block"
+                    targets={['form:address']}
+                    notes={[]}
+                    value={address?.block ?? ''}
+                    className="sm:col-start-1"
+                    edit={{ key: 'address.block' }}
+                  />
+                  <Field
+                    label="Lot"
+                    targets={['form:address']}
+                    notes={[]}
+                    value={address?.lot ?? ''}
+                    edit={{ key: 'address.lot' }}
+                  />
+                  <Field
+                    label="Lot Area (sq. m.)"
+                    targets={['form:address']}
+                    notes={[]}
+                    value={address?.lot_area_sqm == null ? '' : String(address.lot_area_sqm)}
+                    edit={{ key: 'address.lot_area_sqm' }}
+                  />
+                  {/* The answer the zoning turns on: a choice from the city's own table. */}
+                  <Field
+                    label="Barangay"
+                    targets={['form:barangay']}
+                    value={address?.barangay?.name ?? ''}
+                    className="sm:col-start-1"
+                    edit={{
+                      key: 'address.barangay_id',
+                      value: address?.barangay?.id == null ? '' : String(address.barangay.id),
+                      control: {
+                        kind: 'select',
+                        /*
+                          The filing's own barangay while the list is still in
+                          flight, so the control never shows an empty row where
+                          the record has an answer.
+                        */
+                        options:
+                          (barangaysRef.data ?? []).length > 0
+                            ? (barangaysRef.data ?? []).map((b) => ({
+                                value: String(b.id),
+                                label: b.name,
+                              }))
+                            : address?.barangay?.id == null
+                              ? []
+                              : [
+                                  {
+                                    value: String(address.barangay.id),
+                                    label: address.barangay.name ?? '',
+                                  },
+                                ],
+                      },
+                    }}
+                  />
+                  {/*
+                    The landmark is `address.line2` — how to FIND the premises,
+                    which the inspector needs. The wizard asks it below the map.
+                  */}
+                  <Field
+                    label="Locational Group / Landmark"
+                    targets={['form:address']}
+                    notes={[]}
+                    value={address?.line2 ?? ''}
+                    className="lg:col-span-2"
+                    edit={{ key: 'address.line2' }}
+                  />
+                  {/*
+                    Not the form's questions: every address licensed here is in
+                    Malabon, which has one postal code, so these are record
+                    fields the API fills. One line rather than three boxes.
+                  */}
+                  <Field
+                    label="City / Province / Postal Code"
+                    value={[
+                      address?.city ?? 'Malabon City',
+                      address?.province ?? 'Metro Manila',
+                      address?.postal_code ?? '',
+                    ]
+                      .filter(Boolean)
+                      .join(', ')}
+                    className="sm:col-start-1"
+                  />
+                  <Field
+                    label="Emergency Contact Person"
+                    targets={['form:emergency_contact_name']}
+                    value={business.emergency_contact_name ?? ''}
+                    edit={{ key: 'emergency_contact_name' }}
+                  />
+                  <Field
+                    label="Emergency Contact Number"
+                    targets={['form:emergency_contact_number']}
+                    value={business.emergency_contact_number ?? ''}
+                    edit={{ key: 'emergency_contact_number' }}
+                  />
                 </div>
-              ) : (
-                /*
-                Said rather than left blank. A filing with no pin is one made
-                before the map was required, and an empty space here reads as a
-                map that failed to load — which sends a reviewer looking for a
-                fault instead of telling them the answer.
-              */
-                <p className="mt-4 rounded-lg border border-line bg-shell px-4 py-3 text-sm text-ink-secondary">
-                  No map pin was recorded on this filing.
-                </p>
-              )}
-
-              {/*
-                ── After the map, as the form asks them ──────────────────
-
-                The wizard puts the landmark immediately below the barangay
-                zoning map and the two contacts under it, and the sheet now
-                does the same.
-
-                The landmark is `address.line2`. It has been on the payload
-                the whole time and no section drew it — an answer the
-                applicant gave about how to FIND the premises, withheld from
-                the inspector who has to. The contacts came from "Premises &
-                Contact" in Section B; the form asks them here, beside the
-                address they are the fallback for.
-              */}
-              {/* Its own block below the map on the form, as here. */}
-              <div className="mt-5">
-                <Field
-                  label="Locational Group / Landmark"
-                  targets={['form:address']}
-                  value={address?.line2 ?? ''}
-                  className="block"
-                  edit={{ key: 'address.line2' }}
-                />
-              </div>
-
-              {/* `grid sm:grid-cols-2`, the pair's own shape on the form. */}
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <Field
-                  label="Emergency Contact Person"
-                  targets={['form:emergency_contact_name']}
-                  value={business.emergency_contact_name ?? ''}
-                  className="block"
-                  edit={{ key: 'emergency_contact_name' }}
-                />
-                <Field
-                  label="Emergency Contact Number"
-                  targets={['form:emergency_contact_number']}
-                  value={business.emergency_contact_number ?? ''}
-                  className="block"
-                  edit={{ key: 'emergency_contact_number' }}
-                />
+                {address?.latitude != null && address?.longitude != null ? (
+                  <div className="min-w-0">
+                    <MapPicker
+                      latitude={address.latitude}
+                      longitude={address.longitude}
+                      highlightBarangay={address.barangay?.name ?? null}
+                      readOnly
+                      height={190}
+                    />
+                    <p className="mt-1 text-xs text-ink-muted">
+                      Pin{' '}
+                      <span className="tnum font-medium text-ink">
+                        {address.latitude.toFixed(6)}, {address.longitude.toFixed(6)}
+                      </span>
+                    </p>
+                  </div>
+                ) : (
+                  /*
+                    Said rather than left blank: a filing with no pin predates
+                    the map, and an empty space reads as a map that failed.
+                  */
+                  <p className="self-start rounded-lg border border-line bg-shell px-3 py-2 text-sm text-ink-secondary">
+                    No map pin was recorded on this filing.
+                  </p>
+                )}
               </div>
             </section>
 
             {/* A — Business Information & Registration */}
-            <section className="mt-7">
+            <section id="review-a" className="mt-5">
               <SectionHeading letter="A">Business Information &amp; Registration</SectionHeading>
-              <div className="space-y-5">
-                {/*
-                ── Ordered and worded as the applicant was asked ──────────────
+              {/*
+                ── The APPLICATION FORM's order, 1 to 17 with no gaps ───────
 
-                The sheet promises "sections A-E exactly as the applicant
-                submitted them", and it was not keeping that promise: five
-                facts the API already sends were never drawn — the type of
-                registration, the named owner, their gender, and the business's
-                own mobile and e-mail — so a reviewer could not see whose
-                business this was or reach them without leaving the page.
+                The wizard's numbering, not the paper's (client, 29 September
+                2026): "Fix item 2" has to mean one field across the Return
+                picker, the applicant's correction card and this sheet.
 
-                Three columns rather than two, and wider gaps. The sheet has
-                the room now that the remarks column only takes space when it
-                has remarks in it; before, it was squeezed into 760px of a
-                1072px page with a permanently blank 288px beside it.
+                The form's five rows are kept — 1–2, 3–5, 6–9, 10–13, 14–17 —
+                with `sm:col-start-1` on the field that opens each, in the
+                four-column grid of the owner's own section A.
+
+                Radio questions (Form of Organization, Gender) read as their
+                answer in View; in Edit, an answer this seat may correct
+                becomes the chips the applicant was given (client,
+                30 September 2026), and one it may not shows a lock.
               */}
+              <div className={SHEET_GRID}>
+                <Field
+                  label="1. Form of Organization"
+                  targets={['form:registration_type']}
+                  value={business.registration_type ? humanizeKey(business.registration_type) : ''}
+                  edit={{
+                    key: 'registration_type',
+                    value: business.registration_type ?? '',
+                    control: { kind: 'radio', options: ORGANIZATION_FORMS },
+                  }}
+                />
                 {/*
-                ── The paper's numbering was here, and is gone ────────────────
-
-                This section followed MCG-BPLO-FO-001's own numbers, skips and
-                all — 1, 2, 3, 4, 6 … with Form of Organization at 10 — against
-                a wizard that renumbers sequentially. The argument for it was
-                that an officer holding the paper wants the paper's numbers.
-
-                The client decided the other way on 29 September 2026, and the
-                reason outweighs it: the officer's counterpart is not the blank
-                paper, it is the filing the applicant made, and every other
-                screen in the Return loop already speaks the wizard's
-                numbering. "Fix item 2" has to mean one field across the
-                picker, the applicant's correction card and this sheet — and it
-                meant the registration number on two of them and the TIN here.
-
-                If the paper's numbers are ever wanted back, they belong
-                BESIDE these rather than instead of them.
-              */}
-                {/*
-                  ── The APPLICATION FORM's order, 1 to 17 with no gaps ───────
-
-                  Checked against ApplyWizard's Section A label by label; the
-                  list is in this patch's note. It ran 1, 2, 3, 4, 6 … 10, 11/12,
-                  13, 14, 15 before — the paper's numbering, with Form of
-                  Organization tenth, which is the client's report of
-                  29 September 2026.
-
-                  One row, so the numbers can ascend across the whole section
-                  rather than restarting in each container.
+                  The agency, not a slash-list: a cooperative is asked for its
+                  CDA number. Named off the BUFFER, so switching item 1 renames
+                  this box exactly as the applicant would see it renamed.
                 */}
+                <Field
+                  label={`2. ${registrationNumberLabel(
+                    fieldEdits.registration_type ?? business.registration_type ?? '',
+                  )}`}
+                  targets={['form:registration_number']}
+                  value={business.registration_number ?? ''}
+                  edit={{ key: 'registration_number' }}
+                />
+                <Field
+                  label="3. Tax Identification Number (TIN)"
+                  targets={['form:tin']}
+                  value={business.tin ?? ''}
+                  className="sm:col-start-1"
+                  edit={{ key: 'tin' }}
+                />
+                <Field
+                  label="4. Business Name"
+                  targets={['form:name']}
+                  value={business.name ?? ''}
+                  edit={{ key: 'name' }}
+                />
+                <Field
+                  label="5. Trade Name / Franchise"
+                  targets={['form:trade_name']}
+                  value={business.trade_name ?? ''}
+                  edit={{ key: 'trade_name' }}
+                />
                 {/*
-                  ── The form's five rows, pinned ─────────────────────────────
-
-                  `RowBreak` is ApplyWizard's own `-my-1.5 basis-full` spacer,
-                  which it uses once, before item 14. Used at each of the form's
-                  breaks here, because the sheet has to reproduce a grouping it
-                  cannot reproduce by width alone: the form's rows are shaped by
-                  radio chips and segmented number boxes, and a record box
-                  holding "Sole Proprietorship" is not that shape.
-
-                  Pinning also means the rows survive a narrow window, where
-                  widths alone would re-wrap into an order the form never had.
+                  Items 6 to 9 had columns and no input until the paper forms
+                  were transcribed, so older filings read "—": nobody was asked.
                 */}
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                <Field
+                  label="6. Telephone (Landline)"
+                  targets={['form:telephone']}
+                  value={business.address?.telephone ?? ''}
+                  className="sm:col-start-1"
+                  edit={{ key: 'address.telephone' }}
+                />
+                <Field
+                  label="7. Mobile Number"
+                  targets={['form:mobile_number']}
+                  value={business.address?.mobile_number ?? ''}
+                  edit={{ key: 'address.mobile_number' }}
+                />
+                <Field
+                  label="8. E-mail Address"
+                  targets={['form:email']}
+                  value={business.address?.email ?? ''}
+                  edit={{ key: 'address.email' }}
+                />
+                <Field
+                  label="9. Website Address"
+                  targets={['form:website']}
+                  value={business.address?.website ?? ''}
+                  edit={{ key: 'address.website' }}
+                />
+                {/* Items 10 to 13 — four answers, because the form asks four. */}
+                <Field
+                  label="10. Surname"
+                  targets={['form:owner_surname']}
+                  value={business.owner?.surname ?? ''}
+                  className="sm:col-start-1"
+                  edit={{ key: 'owner.surname' }}
+                />
+                <Field
+                  label="11. Given Name"
+                  targets={['form:owner_given_name']}
+                  value={business.owner?.given_name ?? ''}
+                  edit={{ key: 'owner.given_name' }}
+                />
+                <Field
+                  label="12. Middle Name"
+                  targets={['form:owner_middle_name']}
+                  value={business.owner?.middle_name ?? ''}
+                  edit={{ key: 'owner.middle_name' }}
+                />
+                <Field
+                  label="13. Suffix"
+                  targets={['form:owner_suffix']}
+                  value={business.owner?.suffix ?? ''}
+                  edit={{ key: 'owner.suffix' }}
+                />
+                {/* The word, not the code: the column holds 'M'. */}
+                <Field
+                  label="14. Gender"
+                  targets={['form:owner_gender']}
+                  value={genderLabel(business.owner?.gender)}
+                  className="sm:col-start-1"
+                  edit={{
+                    key: 'owner.gender',
+                    value: business.owner?.gender ?? '',
+                    control: { kind: 'radio', options: GENDERS },
+                  }}
+                />
+                {/*
+                  ── The officer box ──────────────────────────────────────
+
+                  15 to 17 are about the PRESIDENT OR OFFICER IN CHARGE, a
+                  different person from the owner in 10 to 13. The form boxes
+                  them; here a rule down their left edge does the same job in
+                  no extra height, so seven name-ish answers do not read as one
+                  person's.
+                */}
+                <div className="grid gap-x-6 gap-y-2 border-l-2 border-line pl-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-3">
                   <Field
-                    label="1. Form of Organization"
-                    className="grow basis-[26rem] max-w-full"
-                    targets={['form:registration_type']}
+                    label="15. Name of President / Officer in Charge"
+                    targets={['form:president_officer_name']}
+                    value={business.president_officer_name ?? ''}
+                    edit={{ key: 'president_officer_name' }}
+                  />
+                  <Field
+                    label="16. Citizenship (of President/OIC)"
+                    targets={['form:citizenship']}
+                    value={business.citizenship ?? ''}
+                    edit={{ key: 'citizenship' }}
+                  />
+                  <Field
+                    label="17. Capital Participation (% Filipino)"
+                    targets={['form:capital_participation']}
                     value={
-                      business.registration_type ? humanizeKey(business.registration_type) : ''
+                      business.capital_participation_filipino == null
+                        ? ''
+                        : `${business.capital_participation_filipino}%`
                     }
-                    /*
-                      Radio chips, because that is what the form gives the
-                      applicant — the client's instruction of 30 September
-                      2026. The raw value goes to the control: the box
-                      prints "Sole Proprietorship" and the column holds
-                      `sole_proprietorship`, and an input handed the label
-                      would post the label back.
-                    */
+                    /* The number, not "60%": the per cent sign is the sheet's. */
                     edit={{
-                      key: 'registration_type',
-                      value: business.registration_type ?? '',
-                      control: { kind: 'radio', options: ORGANIZATION_FORMS },
+                      key: 'capital_participation_filipino',
+                      value:
+                        business.capital_participation_filipino == null
+                          ? ''
+                          : String(business.capital_participation_filipino),
                     }}
                   />
-                  {/*
-                    The agency, not a slash-list. The wizard asks a cooperative
-                    for its CDA number and a corporation for its SEC number, and
-                    `registrationNumberLabel` is the function it asks with — so
-                    the officer reads back the question that was actually put,
-                    and falls back to the generic heading when the structure is
-                    not known.
-                  */}
-                  <Field
-                    /*
-                      Named off the BUFFER, not the record. An officer who
-                      switches item 1 to Cooperative is then asked for a CDA
-                      number, exactly as the applicant would be — a heading
-                      still saying DTI over a box the officer has just
-                      repurposed is how a wrong number gets typed in.
-                    */
-                    label={`2. ${registrationNumberLabel(
-                      fieldEdits.registration_type ?? business.registration_type ?? '',
-                    )}`}
-                    className="grow basis-[15rem] max-w-full"
-                    targets={['form:registration_number']}
-                    value={business.registration_number ?? ''}
-                    edit={{ key: 'registration_number' }}
-                  />
-
-                  <RowBreak />
-                  <Field
-                    label="3. Tax Identification Number (TIN)"
-                    targets={['form:tin']}
-                    value={business.tin ?? ''}
-                    className="grow basis-[14rem] max-w-full"
-                    edit={{ key: 'tin' }}
-                  />
-                  <Field
-                    label="4. Business Name"
-                    targets={['form:name']}
-                    value={business.name ?? ''}
-                    className="grow basis-[20rem] max-w-full"
-                    edit={{ key: 'name' }}
-                  />
-                  <Field
-                    label="5. Trade Name / Franchise"
-                    targets={['form:trade_name']}
-                    value={business.trade_name ?? ''}
-                    className="grow basis-[14rem] max-w-full"
-                    edit={{ key: 'trade_name' }}
-                  />
-
-                  <RowBreak />
-                  {/*
-                    Items 6 to 9. All four had columns and no input until the
-                    paper forms were transcribed, so on filings made before that
-                    they read "—" — which is the truth: nobody was asked.
-                  */}
-                  <Field
-                    label="6. Telephone (Landline)"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:telephone']}
-                    value={business.address?.telephone ?? ''}
-                    edit={{ key: 'address.telephone' }}
-                  />
-                  <Field
-                    label="7. Mobile Number"
-                    targets={['form:mobile_number']}
-                    value={business.address?.mobile_number ?? ''}
-                    className="grow basis-[11rem] max-w-full"
-                    edit={{ key: 'address.mobile_number' }}
-                  />
-                  <Field
-                    label="8. E-mail Address"
-                    targets={['form:email']}
-                    value={business.address?.email ?? ''}
-                    className="grow basis-[14rem] max-w-full"
-                    edit={{ key: 'address.email' }}
-                  />
-                  <Field
-                    label="9. Website Address"
-                    targets={['form:website']}
-                    value={business.address?.website ?? ''}
-                    className="grow basis-[12rem] max-w-full"
-                    edit={{ key: 'address.website' }}
-                  />
-
-                  <RowBreak />
-                  {/*
-                    Items 10 to 13 — four boxes, because the form asks four, and
-                    at the form's own widths: 11rem, 11rem, 11rem, 7rem. They
-                    were one assembled "Owner / Representative" line, which
-                    presented as a single answer what the applicant gave as four.
-                  */}
-                  <Field
-                    label="10. Surname"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:owner_surname']}
-                    value={business.owner?.surname ?? ''}
-                    edit={{ key: 'owner.surname' }}
-                  />
-                  <Field
-                    label="11. Given Name"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:owner_given_name']}
-                    value={business.owner?.given_name ?? ''}
-                    edit={{ key: 'owner.given_name' }}
-                  />
-                  <Field
-                    label="12. Middle Name"
-                    className="grow basis-[11rem] max-w-full"
-                    targets={['form:owner_middle_name']}
-                    value={business.owner?.middle_name ?? ''}
-                    edit={{ key: 'owner.middle_name' }}
-                  />
-                  <Field
-                    label="13. Suffix"
-                    className="grow basis-[7rem] max-w-full"
-                    targets={['form:owner_suffix']}
-                    value={business.owner?.suffix ?? ''}
-                    edit={{ key: 'owner.suffix' }}
-                  />
-
-                  {/* The form's own break, in the form's own place. */}
-                  <RowBreak />
-                  {/*
-                    The word, not the code. `humanizeKey` has no idea 'M' is
-                    short for anything and returned it unchanged.
-                  */}
-                  <Field
-                    label="14. Gender"
-                    className="shrink-0 basis-[8rem] max-w-full"
-                    targets={['form:owner_gender']}
-                    value={genderLabel(business.owner?.gender)}
-                    /* Two chips, as the paper prints two boxes. The box
-                       reads "Male"; the column holds 'M'. */
-                    edit={{
-                      key: 'owner.gender',
-                      value: business.owner?.gender ?? '',
-                      control: { kind: 'radio', options: GENDERS },
-                    }}
-                  />
-                  {/*
-                    ── The officer box ──────────────────────────────────────
-
-                    `rounded-xl border border-line p-3`, copied from the form,
-                    and the border is not decoration: 15 to 17 are about the
-                    PRESIDENT OR OFFICER IN CHARGE, who is a different person
-                    from the owner named in 10 to 13 immediately above. Run
-                    together, seven name-ish boxes read as one person's details.
-                  */}
-                  <div className="grow basis-[34rem] max-w-full rounded-xl border border-line p-3">
-                    <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                      <Field
-                        label="15. Name of President / Officer in Charge"
-                        className="grow basis-[15rem] max-w-full"
-                        targets={['form:president_officer_name']}
-                        value={business.president_officer_name ?? ''}
-                        edit={{ key: 'president_officer_name' }}
-                      />
-                      <Field
-                        label="16. Citizenship (of President/OIC)"
-                        className="grow basis-[11rem] max-w-full"
-                        targets={['form:citizenship']}
-                        value={business.citizenship ?? ''}
-                        edit={{ key: 'citizenship' }}
-                      />
-                      <Field
-                        label="17. Capital Participation (% Filipino)"
-                        className="grow basis-[11rem] max-w-full"
-                        targets={['form:capital_participation']}
-                        value={
-                          business.capital_participation_filipino == null
-                            ? ''
-                            : `${business.capital_participation_filipino}%`
-                        }
-                        /* The number, not "60%" — the per cent sign is the
-                           sheet's, and the column would refuse it. */
-                        edit={{
-                          key: 'capital_participation_filipino',
-                          value:
-                            business.capital_participation_filipino == null
-                              ? ''
-                              : String(business.capital_participation_filipino),
-                        }}
-                      />
-                    </div>
-                  </div>
                 </div>
-                {/*
-                 * Items B6 and B8 were printed here and have moved to Section B.
-                 * They are Business OPERATION questions — what kind of
-                 * establishment this is, and whether it holds tax incentives —
-                 * and printing them under "Business Information & Registration"
-                 * put two of the paper's B items under its A heading on a sheet
-                 * whose whole purpose is to be a faithful rendering of it.
-                 */}
               </div>
-
             </section>
 
             {/*
-            B — Business Operation.
-            ─────────────────────────────────────────────────────────────────
-            It was headed "Line of Business" and held only that table, while
-            items B6 and B8 were printed up in Section A and the premises and
-            emergency-contact answers were printed NOWHERE. So the sheet had an
-            A that carried B's questions, a B that carried one of them, and a
-            handful the applicant typed that no officer could read.
-
-            The paper's B is "Business Operation": what the business does, out
-            of what premises, on what terms, and who to ring. That is the
-            grouping now, and the letter finally means the same thing on both
-            sides of the desk.
-          */}
-            <section className="mt-9">
-              <SectionHeading letter="B">Business Operation</SectionHeading>
-
-              {/*
-              ── Items 1 to 4, back in the section that asks them ────────────
-
-              These were drawn under a heading called "Fee Declaration",
-              lettered E, and the client's objection on 16 September 2026 is
-              the right one: MCG-BPLO-FO-001 has no such section. It was ours,
-              and it held section B's own items 1, 2, 3 and 6 a second time —
-              so the sheet asked "what is the business area" twice, under two
-              different letters, and answered it once.
-
-              They are figures the fee engine reads, which is why they were
-              filed under fees. But the PAPER asks them here, as items 1 to 4
-              of Business Operation, and the sheet is a rendering of the paper.
-              `feeProfileFacts` supplies them, already labelled with the
-              paper's numbers.
+              B — Business Operation: what the business does, out of what
+              premises, on what terms. Items 1 to 4 come from the fee profile
+              (`feeProfileFacts`, already labelled with the paper's numbers and
+              sorted by `orderedFeeFacts`), 5 to 8 from the business record —
+              one grid, so the numbers ascend.
             */}
-              {/*
-                ── One row, so the numbers can ascend ───────────────────
-
-                The fee-profile facts used to sit in a container of their
-                own, above the business-column ones. Two containers cannot
-                interleave, so the sheet read 6, 1, 2, 2, 3 … 5, 6, 7 — the
-                arrangement the client reported. `feeFacts` are emitted
-                here, inside the same row as the rest, and `orderedFeeFacts`
-                sorts the whole of Section B on the paper's own numbering.
-              */}
-              <div className="mb-6 flex flex-wrap items-start gap-x-4 gap-y-3">
+            <section id="review-b" className="mt-5">
+              <SectionHeading letter="B">Business Operation</SectionHeading>
+              <div className={SHEET_GRID}>
+                {compactFeeFacts(orderedFeeFacts).map((fact) => (
+                  <Field key={fact.label} label={fact.label} value={fact.value} />
+                ))}
                 {/*
-                  Row 1 — items 1 to 4, with 2 and 4 in the form's own boxes.
+                  Item 5: a six-option radiogroup on the form, its answer in
+                  words here. In Edit it becomes the chips again (full row).
                 */}
-                <FeeFactRow facts={orderedFeeFacts} />
-
-                {/*
-                  Row 2 — item 5 alone, as the form gives it: a six-option
-                  radiogroup across the width, not a box in a row of boxes.
-                */}
-                <RowBreak />
                 <Field
-                  className="basis-full max-w-full"
                   label="5. Economic Organization"
+                  className="sm:col-start-1"
                   value={
                     business.economic_organization
                       ? business.economic_organization === 'others'
@@ -6753,8 +6880,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         : humanizeKey(business.economic_organization)
                       : ''
                   }
-                  /* Six chips across the width, the shape the form gives
-                     item B5 — and the reason this box is `basis-full`. */
                   edit={{
                     key: 'economic_organization',
                     value: business.economic_organization ?? '',
@@ -6762,60 +6887,30 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   }}
                 />
                 {/*
-                  "Others" is a choice that asks a second question, and the
-                  form asks it in a box that appears with the choice. Read
-                  off the BUFFER, not the record, so it appears the moment
-                  the officer picks Others rather than after a save.
+                  "Others" asks a second question, in a box that appears with
+                  the choice — read off the BUFFER so it appears at once.
                 */}
                 {editing
                   && (fieldEdits.economic_organization
                     ?? business.economic_organization) === 'others' && (
                   <Field
-                    className="basis-full max-w-full"
                     label="Others — say what it is"
                     value={business.economic_organization_others ?? ''}
                     edit={{ key: 'economic_organization_others' }}
                   />
                 )}
                 {/*
-                 * Item B8 (new form) / B7 (renewal).
-                 *
-                 * KNOWN LIMIT, and it is worth stating rather than papering
-                 * over: `businesses.has_tax_incentives` is `boolean default
-                 * false` and NOT NULL, so a business registered before the
-                 * wizard asked this question reads "No" here — not because the
-                 * applicant declared no incentives, but because nobody put the
-                 * question. Making the column nullable would not fix it either:
-                 * the rows already on disk are `false`, and every row written
-                 * from now on is a real answer. So there is nothing to migrate,
-                 * only something to know. If an officer is about to act on a
-                 * "No" from an older filing, ask through Messages — the same
-                 * remedy the Amendment From block prescribes for the same class
-                 * of gap.
-                 *
-                 * The null branch is kept for the case the resource omits the
-                 * field entirely (a business that has been removed from the
-                 * register renders an empty ReviewBusiness).
-                 */}
-                {/*
-                Item B6 — one figure for the whole business, as the paper asks.
-                Shown for a new filing only: a renewal is assessed on last
-                year's gross sales rather than on capital, which is why the
-                wizard does not ask a renewal for it either.
-              */}
-                {/* Row 3 — items 6, 7 and 8, as the form's last row. */}
-                <RowBreak />
+                  Item B6 — one figure for the whole business, as the paper
+                  asks. A renewal is assessed on gross sales instead.
+                */}
                 <Field
                   label="6. Capital Investment"
-                  className="grow basis-[13rem] max-w-full"
                   targets={['form:capital_investment']}
                   value={
                     business.capital_investment == null || business.capital_investment === ''
                       ? ''
                       : formatMoney(Number(business.capital_investment))
                   }
-                  /* The amount, not "₱250,000.00": the column takes a
-                     number and the peso sign is this sheet's doing. */
                   edit={{
                     key: 'capital_investment',
                     value:
@@ -6824,6 +6919,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         : String(business.capital_investment),
                   }}
                 />
+                {/*
+                  KNOWN LIMIT: `has_tax_incentives` is NOT NULL default false,
+                  so a business registered before the wizard asked reads "No"
+                  because nobody put the question. Ask through Messages before
+                  acting on a "No" from an older filing.
+                */}
                 <Field
                   label="7. Tax Incentives from a Government Entity"
                   targets={['form:has_tax_incentives']}
@@ -6836,11 +6937,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   }
                   edit={{
                     key: 'has_tax_incentives',
-                    /*
-                      Blank when the record is blank, so no chip is lit. A
-                      box reading — must not become a control reading "No":
-                      that turns "nobody was asked" into a declaration.
-                    */
+                    /* Blank when the record is blank, so no chip is lit. */
                     value:
                       business.has_tax_incentives == null
                         ? ''
@@ -6851,34 +6948,33 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   }}
                 />
                 {/*
-                  Item 8, in the row with the rest. It was under a "Premises &
-                  Contact" heading at the foot of the section, so Section B's
-                  numbers ran 1 to 7 and then jumped a heading to reach 8.
+                  Item 8, with the rent in the same line when the record holds
+                  one ("Yes — ₱5,000.00/month"): the lessor block the wizard
+                  stopped asking on 16 September 2026 is not drawn, but a
+                  monthly rental an older filing recorded is still the answer's
+                  other half.
                 */}
                 <Field
                   label="8. Do you pay rent for occupying a place of business?"
                   targets={['form:is_rented']}
-                  value={business.is_rented == null ? '' : business.is_rented ? 'Yes' : 'No'}
-                  className="grow basis-[20rem] max-w-full"
+                  value={
+                    business.is_rented == null
+                      ? ''
+                      : business.is_rented
+                        ? business.monthly_rental
+                          ? `Yes — ${formatMoney(Number(business.monthly_rental))}/month`
+                          : 'Yes'
+                        : 'No'
+                  }
                   edit={{
                     key: 'is_rented',
-                    value:
-                      business.is_rented == null ? '' : business.is_rented ? '1' : '0',
+                    value: business.is_rented == null ? '' : business.is_rented ? '1' : '0',
                     control: { kind: 'radio', options: YES_NO },
                   }}
                 />
                 {/*
-                  After the numbered run, not through it. It was between items 6
-                  and 7, so the row read 5, 6, <unnumbered>, 7, 8.
-
-                  MCG-BPLO-FO-002's own box, at the foot of its page 1, and a
-                  renewal's alone — FO-001 does not print one, so on a new
-                  filing this would report a default nobody chose.
-
-                  Recorded, not acted on. The Tax Order of Payment bills the
-                  full year whatever this says, the applicant is told so on the
-                  form, and the instalment is arranged at the Treasurer's
-                  window — so the officer reads an election, not a schedule.
+                  MCG-BPLO-FO-002's own box, a renewal's alone. Recorded, not
+                  acted on: the Tax Order bills the full year whatever this says.
                 */}
                 {app.application_type === 'renewal' && (
                   <Field
@@ -6894,168 +6990,88 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 )}
               </div>
 
-
               {/*
-               * The premises, and who to ring — asked of every applicant and
-               * shown to no officer until now.
-               *
-               * `BusinessResource` has emitted all seven of these fields the
-               * whole time; no section printed them. The lessor block is the
-               * costlier omission: whether a business rents, from whom, and for
-               * how much is exactly what an officer checks a lease against, and
-               * the lease is sitting in Section C two headings below. The
-               * emergency contact is the number an inspector rings when nobody
-               * answers at the premises.
-               *
-               * The lessor block is drawn only when the premises are rented,
-               * because four empty fields under "Lessor" read as missing answers
-               * rather than as an owned building. The one-line statement is
-               * printed either way, so the sheet always says which it is.
-               */}
-              {/*
-                Item 8 asks "Do you pay rent for occupying a place of
-                business?", so the answer is Yes or No — "Rented"/"Owned"
-                answered a question the paper does not put, and the wizard
-                stopped putting it on 16 September 2026.
+                ── What the paper does not ask, after everything it does ────────
 
-                It sits in the numbered Section B row above now, where the
-                form puts it. The emergency contacts that shared this
-                "Premises & Contact" heading have gone to Location & Zoning,
-                which is the step that asks them. The two were together only
-                because they had been drawn together.
+                The tax class, the gross sales per line and the activities that
+                carry a fee of their own: not on MCG-BPLO-FO-001, needed to work
+                out what is owed. Marked as ours, as the applicant's Business
+                Operation step marks them.
               */}
-              {/*
-              ── Four rows removed, because nothing fills them any more ────────
-              *
-              * Lessor's Name, Lessor's Address, Lessor's Contact Number and
-              * Monthly Rental were rendered here whenever the premises were
-              * rented. The applicant's wizard stopped collecting all four on
-              * 16 September 2026, when the client removed the lessor block as
-              * absent from MCG-BPLO-FO-001 — so from that day every new rented
-              * filing showed the reviewing officer four labelled rows reading
-              * "—", and an officer cannot tell a question the applicant
-              * skipped from one the system never asked.
-              *
-              * This is what a SECOND, hand-written rendering of the same
-              * answers costs: the wizard changed and nothing connected the two,
-              * so the drift shipped silently into the screen BPLO works from.
-              * Worth remembering the next time a read-only view of the form
-              * looks cheaper to write than to derive.
-              *
-              * The columns stay on `businesses`: filings made before that date
-              * recorded real values and deleting them would destroy a record
-              * the city took. MCG-CPDD-FO-003 is the paper that still asks, and
-              * its own sheet takes the answer — see the lessor fields in
-              * OfficeFormStep.
-              */}
-
-              {/*
-              ── What the paper does not ask, after everything it does ────────
-
-              The tax class the Revenue Code prices the trade under, the gross
-              sales a renewal is assessed on, and the activities that carry a
-              fee of their own. None is on MCG-BPLO-FO-001, and all three are
-              needed to work out what is owed — the counter's clerk determines
-              them by hand and writes the amount into the "Assessed Fee" box.
-
-              Placed here, after the paper's item 8, and marked as ours. That
-              is the same shape the applicant's Business Operation step uses,
-              which is the point: the two screens now divide the section the
-              same way, so a reviewer comparing them is reading one layout
-              twice rather than two layouts once.
-
-              They were under a heading called "Fee Declaration", lettered E as
-              though the paper had such a section. It does not.
-            */}
               {(feeLines.length > 0 || feeFlags.length > 0) && (
-                <div className="mt-6 border-t border-line pt-5">
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">
+                <div className="mt-3 border-t border-line pt-2">
+                  <h3 className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
                     Not on the paper form — worked out for the assessment
                   </h3>
-                  {feeLines.length > 0 && (
-                    <div className="mt-3 space-y-4">
-                      {feeLines.map((line, i) => (
-                        <div key={i} className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                          <Field
-                            label={`Taxed as ${feeLines.length > 1 ? i + 1 : ''}`.trim()}
-                            value={humanizeKey(line.category ?? '')}
-                          />
-                          {/*
-                          Gross sales is genuinely per line — the Revenue Code
-                          taxes each trade on its own turnover, and Sec.
-                          2J.02(c) reports two rates separately. Capital
-                          investment is not: one business, one figure, item 6,
-                          shown once with the paper's own items above.
+                  <div className={`mt-1.5 ${SHEET_GRID}`}>
+                    {feeLines.map((line, i) => (
+                      <div key={i} className="contents">
+                        <Field
+                          label={`Taxed as ${feeLines.length > 1 ? i + 1 : ''}`.trim()}
+                          value={humanizeKey(line.category ?? '')}
+                          className="sm:col-start-1"
+                        />
+                        {/*
+                          Named for its SCOPE: the Revenue Code taxes each trade
+                          on its own turnover, and Section B's Gross Sales box is
+                          the whole business's.
                         */}
-                          <Field
-                            /*
-                             * Named for its SCOPE. Section B carries a Gross
-                             * Sales box for the whole business, and an
-                             * identically-labelled figure inside a line row
-                             * read as the same number printed twice. It is
-                             * not — the Revenue Code taxes each trade on its
-                             * own turnover — so the label says which one this
-                             * is rather than leaving the reader to infer it
-                             * from the heading above.
-                             */
-                            label="Gross Sales — this line"
-                            value={line.gross_sales == null ? '' : formatMoney(line.gross_sales)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {feeFlags.length > 0 && (
-                    <div className="mt-4">
-                      <FieldLabel>Which of these apply to the business</FieldLabel>
-                      <div className="flex flex-wrap gap-2">
-                        {feeFlags.map((flag) => (
-                          <span
-                            key={flag}
-                            className="rounded-md bg-canvas px-2.5 py-1 text-xs font-semibold text-ink-secondary"
-                          >
-                            {humanizeKey(flag)}
-                          </span>
-                        ))}
+                        <Field
+                          label="Gross Sales — this line"
+                          value={line.gross_sales == null ? '' : formatMoney(line.gross_sales)}
+                        />
                       </div>
-                    </div>
-                  )}
+                    ))}
+                    {feeFlags.length > 0 && (
+                      <Field
+                        label="Which of these apply to the business"
+                        value={feeFlags.map((flag) => humanizeKey(flag)).join(', ')}
+                        className="sm:col-span-2"
+                      />
+                    )}
+                  </div>
                 </div>
               )}
             </section>
 
             {/* C — Documentary requirements */}
-            <section className="mt-9">
+            <section id="review-c" className="mt-5">
               <SectionHeading letter="C">Documentary Requirements</SectionHeading>
               {app.documents.length === 0 ? (
-                <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
+                <p className="rounded-lg border border-line px-4 py-2 text-sm text-ink-muted">
                   No documents were uploaded with this application.
                 </p>
               ) : (
                 /*
-                Only what the requirement list still asks for, and in the order
-                the applicant was asked.
+                  Only what the requirement list still asks for, in the order
+                  the applicant was asked (an "Also uploaded" block was taken
+                  out on 16 September 2026). Drawn once the list has arrived,
+                  so retired rows are never shown and then taken away.
 
-                An "Also uploaded" block listed the rest — files sent against
-                requirements since removed — and the client had it taken out on
-                16 September 2026. The files are not deleted and the API still
-                serves them; this sheet is the reviewer's checklist, and a
-                requirement nobody is asked for has no place on a checklist.
-
-                Drawn only once the requirement list has arrived. Rendering
-                first and filtering after would show the retired rows and then
-                take them away, which is the thing being removed, briefly.
-              */
-                <ul className="space-y-2.5">
+                  A compact list (19 October 2026): name, status, view and
+                  download, and — where this seat may return the filing — a
+                  Return that opens the composer with that requirement ticked.
+                */
+                <ul className={DOCUMENT_LIST}>
                   {permitTypesRef.loading
-                    ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 rounded-lg" />)
+                    ? [0, 1, 2].map((i) => <Skeleton key={i} className="my-1.5 h-6 rounded" />)
                     : requirementGroups.map((group) => (
-                        <DocumentRow key={group.code} group={group} />
+                        <DocumentRow
+                          key={group.code}
+                          group={group}
+                          onReturn={
+                            editing && mayReturn && canReject
+                              ? () => {
+                                  setReturnPreset([group.code])
+                                  setPopup('return')
+                                }
+                              : undefined
+                          }
+                        />
                       ))}
                 </ul>
               )}
             </section>
-
             {/*
              * Section D is GONE, and the sheet still runs A, B, C, E.
              *
@@ -7170,7 +7186,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           */}
           {foldsApplication &&
             taxOrderFold(
-              'flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
+              'flex w-full items-center gap-3 rounded-lg border border-line bg-canvas px-4 py-2 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal',
             )}
 
           {/*
@@ -7185,7 +7201,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           <div
             id="for-office-use"
             tabIndex={-1}
-            className="mt-8 scroll-mt-6 rounded-lg border border-officeuse-border bg-officeuse px-5 py-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+            className="mt-5 rounded-lg border border-officeuse-border bg-officeuse px-4 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
           >
             <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
               ✎ For Office Use Only {editing ? '· You are editing this panel' : '· Read only'}
@@ -7209,19 +7225,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               gets wrong.
             */}
 
-            <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+            <p className="mt-2 text-[11px] font-bold uppercase tracking-wide text-amber-800">
               Taken from the record
             </p>
-            <div className="mt-2 grid gap-4 sm:grid-cols-4">
+            <div className={`mt-1 ${SHEET_GRID}`}>
               {officeRecord.map((entry) => (
                 <OfficeReadout key={entry.label} label={entry.label} value={entry.value} />
               ))}
             </div>
 
-            <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+            <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-amber-800">
               Yours to fill in
             </p>
-            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+            <div className={`mt-1 ${SHEET_GRID}`}>
               {/*
                 Read-only for every reader on every filing: the figure is the
                 server's — the computed Tax Order of Payment, or an amendment's
@@ -7232,7 +7248,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 value={assessedFee !== null ? formatMoney(assessedFee) : ''}
               />
               {editing ? (
-                <label className="block">
+                <label className="block sm:col-span-2 lg:col-span-3">
                   <FieldLabel>Evaluator Remarks</FieldLabel>
                   <input
                     className={officeInput}
@@ -7313,7 +7329,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
              * of the tab order takes the sentence explaining WHY it is shut
              * with it, and that sentence is the whole point.
              */}
-            <div className="mt-5 border-t border-officeuse-border pt-4">
+            <div className="mt-3 border-t border-officeuse-border pt-2">
               <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
                 RA 11032 · Deadline
               </p>
@@ -7330,7 +7346,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   )}
                 </p>
               )}
-              <div className="mt-3">
+              <div className="mt-1">
                 {editing && canSetTier ? (
                   tierPicker()
                 ) : (
@@ -7352,7 +7368,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
             {/* Issuance dates: recorded here, never asked of the applicant. */}
             {issuedGroups.map((group) => (
-              <div key={group.code} className="mt-5 border-t border-officeuse-border pt-4">
+              <div key={group.code} className="mt-3 border-t border-officeuse-border pt-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
                   {group.name} · Issuance Dates
                 </p>
@@ -7363,7 +7379,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     not asked for them.
                   </p>
                 )}
-                <div className="mt-3 grid gap-4 sm:grid-cols-3 sm:items-end">
+                <div className="mt-1 grid gap-x-6 gap-y-2 sm:grid-cols-2 sm:items-end lg:grid-cols-4">
                   {group.fields.map((field) =>
                     editing ? (
                       <label key={field.key} className="block">
@@ -7629,7 +7645,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             officer can see what the last round was about — and seeding a
             NEW return from it would re-ask last round's questions.
           */
-          initialPicked={popup === 'amend' ? openReturnTargets : []}
+          initialPicked={popup === 'amend' ? openReturnTargets : returnPreset}
           initialNotes={popup === 'amend' ? openReturnNotes : {}}
           submitting={busy}
           error={actionError}
@@ -7651,14 +7667,16 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         <ProtoModal
           title="Save changes to this filing?"
           confirmLabel={savingFields ? 'Saving…' : 'Save changes'}
-          confirmDisabled={savingFields || !fieldEditsValid}
+          confirmDisabled={savingFields || !fieldEditsValid || fieldReason.trim() === ''}
+          confirmDescribedBy={fieldReason.trim() === '' ? 'field-reason-why' : undefined}
           onCancel={() => setConfirmFieldSave(false)}
           onConfirm={() => void saveFields()}
         >
           <p className="text-sm text-ink-secondary">
-            You are changing {Object.keys(fieldEdits).length} answer
+            You are correcting {Object.keys(fieldEdits).length} answer
             {Object.keys(fieldEdits).length === 1 ? '' : 's'} the applicant submitted. The
-            change is recorded against your account.
+            change and your reason are recorded against your account, and the applicant is
+            told.
           </p>
           <ul className="mt-3 space-y-1.5">
             {Object.entries(fieldEdits).map(([key, value]) => (
@@ -7671,6 +7689,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               </li>
             ))}
           </ul>
+          {/*
+            Required: a clerical correction without a reason is refused by
+            the server (OfficerEditRules), so it is asked here, before the
+            press, rather than reported after it.
+          */}
+          <label className="mt-3 block">
+            <span className="text-xs font-bold text-ink">
+              Reason for the correction <span className="text-s-red">*</span>
+            </span>
+            <textarea
+              value={fieldReason}
+              onChange={(e) => setFieldReason(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="What was wrong"
+              className="mt-1 w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+            />
+          </label>
+          {fieldReason.trim() === '' && (
+            <p id="field-reason-why" className="mt-1 text-xs text-ink-muted">
+              Give a short reason to save.
+            </p>
+          )}
           {fieldSaveError !== null && (
             <p role="alert" className="mt-3 text-sm font-semibold text-s-red">
               {fieldSaveError}
@@ -7679,6 +7720,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         </ProtoModal>
       )}
     </div>
+    </ReturnRounds.Provider>
     </FieldCorrections.Provider>
     </FieldEdits.Provider>
   )

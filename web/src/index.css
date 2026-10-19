@@ -222,6 +222,70 @@
   }
 }
 
+/*
+ * ── Form grids: every row's labels start on one line, its boxes on another ──
+ *
+ * Client, 19 October 2026, on section A of the new-application wizard: once
+ * "(optional)" went onto the optional labels, "3. Tax Identification Number
+ * (TIN) (optional)" and "5. Trade Name / Franchise (optional)" wrapped to two
+ * lines in a quarter column, and the row looked uneven beside "4. Business
+ * Name *" on one. The grid had `items-end`, which kept the BOXES level but
+ * left every label's top edge ragged; on an older build without it the boxes
+ * themselves stepped down.
+ *
+ * So each field is a column whose LABEL takes up the row's spare height: the
+ * label text starts at the top of the row, the box sits at the bottom, and
+ * both line up across the row however many lines any label wraps to.
+ *
+ * Why CSS here and not a prop on every cell: the cells are hand-written in
+ * half a dozen shapes — a <label> wrapping FieldLabel and its input, a div
+ * holding that label plus a floating FieldError, a div holding a fieldset
+ * (TinInput, the phone inputs) whose <legend> is the question, a div holding a
+ * label and a radiogroup. One rule keyed on the label (`.field-label`, which
+ * FieldLabel and those legends carry) reaches all of them, on every form that
+ * uses `.field-grid`, without a wrapper being threaded through each call site.
+ *
+ * What the selector matches: any element inside a field grid that holds a
+ * field label up to three levels down — the grid cell and each wrapper between
+ * it and the label. Each becomes a growing column, so the label's growth
+ * reaches the cell. A <legend> is not a flex item (the browser lays it out on
+ * the fieldset's edge), so for a fieldset it is `justify-content: flex-end`
+ * that puts the boxes at the bottom instead.
+ *
+ * Excluded: `display: contents` wrappers (they group cells and must not become
+ * boxes), nested grids (a subgrid frame keeps its own tracks — its cells are
+ * matched in their own right), anything hidden, and a flex ROW, which a column
+ * would break.
+ *
+ * Unlayered on purpose: the cells carry Tailwind's `block`, which is in the
+ * utilities layer and would otherwise win.
+ *
+ * What it cannot fix: a cell with a visible note UNDER its box. The label
+ * grows, the note takes the bottom, and that box sits a note's height above
+ * its neighbours. Errors float (Proto's FieldError) and section A's hints are
+ * `sr-only`, so neither does this; where a visible note is wanted, the cell
+ * takes three subgrid rows (label, control, note) — see Business Operation's
+ * items 6 to 8 — or the note is given its own row.
+ *
+ * In one column (phones) every row holds one field, so there is no spare
+ * height to share and nothing moves.
+ */
+.field-grid
+  :is(div, label, fieldset):not(.contents, .grid, .hidden, .sr-only, .flex:not(.flex-col), .inline-flex):has(
+    > .field-label,
+    > * > .field-label,
+    > * > * > .field-label
+  ) {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  flex-grow: 1;
+}
+
+.field-grid .field-label {
+  flex-grow: 1;
+}
+
 /* Auth screens keep touch-first sizing */
 .auth-form input:not([type='checkbox']),
 .auth-form select,

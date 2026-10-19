@@ -478,7 +478,6 @@ export function RegisterPage() {
               type="tel"
               autoComplete="tel-national"
               inputMode="numeric"
-              placeholder="Contact Number"
               value={values.mobile_number}
               onChange={(e) => setMobile(e.target.value)}
               onBlur={() => blurValidate('mobile_number')}

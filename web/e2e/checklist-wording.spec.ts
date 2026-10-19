@@ -101,7 +101,12 @@ async function draftPastBusinessInformation(page: Page, bizName = `E2E wording $
   }, bizName)
 }
 
-test('each employee and delivery box says "No. of" what it counts (Apply for Permit 5)', async ({
+/*
+ * The parts of items 2 and 4 are lettered under their item — 2a, 2b, 4a, 4b —
+ * since 19 October 2026 (client: "to avoid repetition of numbers, you may put
+ * 2a, 2b, etc. instead"). The derived total is not asked, so it has no letter.
+ */
+test('each employee and delivery box says "No. of" what it counts, lettered under its item (Apply for Permit 5)', async ({
   page,
 }) => {
   await page.goto('/dashboard')
@@ -115,12 +120,12 @@ test('each employee and delivery box says "No. of" what it counts (Apply for Per
 
   const employees = page.getByRole('group', { name: 'Total number of employees' })
   await expect(employees.getByRole('textbox', { name: /^Total No\. of Employees/ })).toBeVisible()
-  await expect(employees.getByRole('textbox', { name: /^No\. of Male Employees/ })).toHaveValue('7')
-  await expect(employees.getByRole('textbox', { name: /^No\. of Female Employees/ })).toHaveValue('5')
+  await expect(employees.getByRole('textbox', { name: /^2a\. No\. of Male Employees/ })).toHaveValue('7')
+  await expect(employees.getByRole('textbox', { name: /^2b\. No\. of Female Employees/ })).toHaveValue('5')
 
   const delivery = page.getByRole('group', { name: 'Number of delivery units' })
-  await expect(delivery.getByRole('textbox', { name: /^No\. of Motorized Delivery Units/ })).toBeVisible()
-  await expect(delivery.getByRole('textbox', { name: /^No\. of Other Delivery Units/ })).toBeVisible()
+  await expect(delivery.getByRole('textbox', { name: /^4a\. No\. of Motorized Delivery Units/ })).toBeVisible()
+  await expect(delivery.getByRole('textbox', { name: /^4b\. No\. of Other Delivery Units/ })).toBeVisible()
 })
 
 test('a draft tile spells the month in full (Apply for Permit 7)', async ({ page }) => {

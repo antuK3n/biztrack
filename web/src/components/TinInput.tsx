@@ -321,7 +321,7 @@ export function TinInput({
       aria-describedby={[hintId, error ? errorId : null].filter(Boolean).join(' ') || undefined}
       className="min-w-0 border-0 p-0"
     >
-      <legend className="mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
+      <legend className="field-label mb-1.5 block text-[13px] font-semibold leading-snug text-ink">
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
         {/*

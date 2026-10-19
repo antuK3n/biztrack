@@ -5,7 +5,6 @@ import {
   FieldLabel,
   FilterPills,
   OptionalTag,
-  PageTitle,
   ProtoCard,
   ProtoModal,
   inputCls,
@@ -23,7 +22,6 @@ import {
 import type { ReportColumn, ReportRow } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { AnalyticsError } from './AnalyticsError'
-import { AnalyticsTabs } from './AnalyticsTabs'
 import { OfficeScope } from './OfficeScope'
 
 /*
@@ -107,11 +105,11 @@ function Step({ n, title, optional, children }: { n: number; title: string; opti
   const id = useId()
   return (
     <section aria-labelledby={id} className="border-t border-line pt-4 first:border-t-0 first:pt-0">
-      <h2 id={id} className="mb-2.5 text-[15px] font-bold text-ink">
+      <h3 id={id} className="mb-2.5 text-[15px] font-bold text-ink">
         <span className="tnum mr-1.5 text-royal">{n}.</span>
         {title}
         {optional && <OptionalTag />}
-      </h2>
+      </h3>
       {children}
     </section>
   )
@@ -263,7 +261,17 @@ type Dialog =
   | { kind: 'delete'; saved: SavedCustomReport }
   | null
 
-export function CustomReportPage() {
+/**
+ * The builder, drawn as the second part of the Reports screen ("Build your
+ * own report", ReportsPage) since 19 October 2026 — client: "what's the
+ * difference between Report and Custom Report. I do think it is best to just
+ * merge them." It was its own page with its own title and tab strip; both went
+ * to the Reports screen around it, and its headings dropped a level (h3) to
+ * sit under that section's h2. Its office and choices stay component state, so
+ * nothing here can collide with the standard reports' `?report=`, `?from=`,
+ * `?to=`, `?office=` or with Home's `?tab=`/`?view=`.
+ */
+export function CustomReportBuilder() {
   const [office, setOffice] = useState<string | undefined>(undefined)
   const { data: catalogueBody, loading, error, reload } = useAsync(() => customReports.catalogue(office), [office])
   const catalogue = catalogueBody?.data ?? null
@@ -438,9 +446,6 @@ export function CustomReportPage() {
 
   return (
     <div>
-      <PageTitle>Custom Report</PageTitle>
-      <AnalyticsTabs />
-
       {loading && !catalogue ? (
         <ProtoCard className="space-y-3 px-5 py-5">
           <Skeleton className="h-6 w-1/3" />
@@ -453,7 +458,7 @@ export function CustomReportPage() {
         <>
           {/* Starting points: one click fills the steps and runs them. */}
           <ProtoCard className="mb-5 px-4 py-4 sm:px-5">
-            <h2 className="mb-2 text-[13px] font-semibold text-ink-secondary">Start from a common report</h2>
+            <h3 className="mb-2 text-[13px] font-semibold text-ink-secondary">Start from a common report</h3>
             <div className="flex flex-wrap gap-2" role="group" aria-label="Common reports">
               {catalogue.starters.map((starter) => (
                 <button
@@ -467,7 +472,7 @@ export function CustomReportPage() {
               ))}
             </div>
 
-            <h2 className="mb-2 mt-4 text-[13px] font-semibold text-ink-secondary">Your saved reports</h2>
+            <h3 className="mb-2 mt-4 text-[13px] font-semibold text-ink-secondary">Your saved reports</h3>
             {savedList.loading && saved.length === 0 ? (
               <Skeleton className="h-7 w-1/2" />
             ) : saved.length === 0 ? (
@@ -757,7 +762,7 @@ export function CustomReportPage() {
               <ProtoCard className="px-4 py-5 sm:px-5">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-[16px] font-bold text-ink">{result.title}</h2>
+                    <h3 className="text-[16px] font-bold text-ink">{result.title}</h3>
                     <p className="mt-0.5 text-[12.5px] text-ink-secondary">
                       {result.scope.office === null ? 'All offices' : result.scope.office_name}
                       {result.period &&

@@ -178,11 +178,24 @@ const NAV_ITEMS: NavItem[] = [
    * and has no business needing a bookmark shim to work, so it now addresses
    * /staff/analytics directly. The shim stays for links already sent out.
    */
+  /*
+   * Hidden from an office admin and BPLO since 19 October 2026 — client: "To
+   * avoid redundancy, we should only have one existing among them", then "Why
+   * not implement the report too on the analytics?". Their dashboard,
+   * Reports and (with the permission) Office Performance are sub-tabs of
+   * Home's Analytics tab (OfficeHome), and App.tsx sends these addresses
+   * there. The super admin keeps the entry: they have no such Home.
+   *
+   * `visibleWhen` replaces `anyPermission` here (it is checked first), so the
+   * two permissions are spelled out inside it.
+   */
   {
     label: 'Analytics',
     icon: ChartIcon,
     to: '/analytics',
-    anyPermission: ['analytics.view', 'analytics.processing_time'],
+    visibleWhen: (user) =>
+      ['analytics.view', 'analytics.processing_time'].some((p) => user.permissions.includes(p)) &&
+      !landsOnOfficeHome(user),
     /*
      * Issue #102 sent the super admin to Office Performance here, because
      * Office Performance and Processing Time were the only analytics screens

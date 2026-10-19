@@ -502,7 +502,6 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             name="email"
             autoComplete="email"
             inputMode="email"
-            placeholder={staff || admin ? 'Work email' : 'Email'}
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)

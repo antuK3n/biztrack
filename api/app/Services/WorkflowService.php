@@ -42,6 +42,7 @@ use App\Support\PermitFees;
 use App\Support\Ra11032;
 use App\Support\RenewablePermit;
 use App\Support\RenewalSeason;
+use App\Support\ReturnHistory;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
 use App\Support\ZoningRequirements;
@@ -125,7 +126,18 @@ class WorkflowService
         ]);
         Audit::log('application.status_changed', $app, ['from' => $from?->value, 'to' => $to->value]);
 
+        /*
+         * The return history (client, 19 October 2026: a complied return
+         * keeps its remark). Closed here, in the one writer of the status,
+         * so every route back to For Approval records the answer and every
+         * route to an ending marks an unanswered return moot.
+         */
+        if ($from === ApplicationStatus::Returned && $to === ApplicationStatus::ForApproval) {
+            ReturnHistory::comply($app, null);
+        }
+
         if (in_array($to, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
+            ReturnHistory::supersedeAll($app);
             $this->closeOpenReviews($app);
             // Deferred fees it claimed and never collected go back to the
             // pile, here for the same reason the reviews close here.
@@ -223,6 +235,12 @@ class WorkflowService
             'to' => $to->value,
             'note' => $note,
         ]);
+
+        /* A returned or refused sheet handed back is that round answered; see `transition()`. */
+        if (in_array($from, [ClearanceStatus::Returned, ClearanceStatus::Rejected], true)
+            && $to === ClearanceStatus::ForApproval) {
+            ReturnHistory::comply($row->application, $row->permit_type_id);
+        }
     }
 
     // ── B: submission ───────────────────────────────────────────────────────
@@ -1588,6 +1606,9 @@ class WorkflowService
             ])->save();
 
             $this->transition($app, ApplicationStatus::Returned, $remarks);
+
+            /* Kept after the owner answers; the columns above are cleared then. */
+            ReturnHistory::openMainForm($app, $remarks, $target, $notes, $this->bploDepartmentId());
         });
     }
 
@@ -1655,6 +1676,8 @@ class WorkflowService
                     ),
                 ],
             ])->save();
+
+            ReturnHistory::amend($app, null, $remarks, $target, $notes);
         });
 
         /*
@@ -1731,6 +1754,8 @@ class WorkflowService
                 ->where('permit_type_id', $row->permit_type_id)
                 ->delete();
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
+
+            ReturnHistory::amend($row->application, $row, $remarks, $target, $notes);
         });
 
         /* Told, for the reason `amendMainFormReturn` gives at length. */
@@ -3167,6 +3192,7 @@ class WorkflowService
             $this->writeReturnNotes($row->application_id, $row->permit_type_id, $notes);
 
             $this->transitionClearance($row, ClearanceStatus::Returned, $remarks);
+            ReturnHistory::openClearance($row, $remarks, $target, $notes, 'return');
             $this->notify->applicationNote(
                 $row->application,
                 $row->permitType->name.' was returned for revision: '.$remarks,
@@ -3344,6 +3370,8 @@ class WorkflowService
                 'updated_at' => now(),
             ]);
             $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
+            /* A refusal is a handing back too: kept, and answered by re-applying. */
+            ReturnHistory::openClearance($row, $reason, $target, $notes, 'refusal');
 
             /*
              * The office's own assignment is closed by the refusal. It has

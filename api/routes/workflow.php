@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AmendmentController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
+use App\Http\Controllers\Api\ApplicationFormPdfController;
 use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\ChatbotController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\ReturnHistoryController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
@@ -75,6 +77,8 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          * travelling with the per-filing values.
          */
         Route::get('amendable-fields', [ReferenceController::class, 'amendableFields']);
+        // The three Edit-mode groups (client, 19 October 2026) — OfficerEditRules.
+        Route::get('officer-edit-rules', [ReferenceController::class, 'officerEditRules']);
     });
 
     // Businesses (owner: business.manage_own)
@@ -115,9 +119,21 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
     Route::get('applications', [ApplicationController::class, 'index']);
     Route::get('applications/{application}', [ApplicationController::class, 'show']);
     Route::get('applications/{application}/timeline', [ApplicationController::class, 'timeline']);
+    // Every return, kept after it is complied (owner, the returning office, BPLO).
+    Route::get('applications/{application}/returns', [ReturnHistoryController::class, 'index']);
 
     // Per-office application forms (UI prototype Parts 4-7)
     Route::get('applications/{application}/office-forms', [OfficeFormController::class, 'index']);
+    /*
+     * The filing printed on the office's own paper form (client, 19 October
+     * 2026) — the Business Permit application, and one office's sheet. Read
+     * only; reviewing officers only, office-scoped, checked in the controller.
+     */
+    Route::get('applications/{application}/form-pdf', [ApplicationFormPdfController::class, 'businessPermit']);
+    Route::get(
+        'applications/{application}/office-forms/{permitTypeCode}/pdf',
+        [ApplicationFormPdfController::class, 'officeSheet'],
+    );
     // Write allowed for the owner (answers) OR a reviewing officer (issuance
     // dates only) — which keys each may set is enforced in the controller.
     Route::put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Skeleton } from '../../components/ui/primitives'
@@ -14,7 +14,9 @@ import type {
   ReportSection,
 } from '../../lib/types'
 import { AnalyticsError } from './AnalyticsError'
+import { ChevronRightIcon } from '../../components/icons'
 import { AnalyticsTabs } from './AnalyticsTabs'
+import { CustomReportBuilder } from './CustomReportPage'
 import { OfficeScope } from './OfficeScope'
 
 /*
@@ -450,7 +452,15 @@ function printCss(reports: LguReport[]): string {
 `
 }
 
-export function ReportsPage() {
+/**
+ * The five fixed reports: the first part of the Reports screen. Unchanged in
+ * what it does since it was the whole page — its choices are still in the URL
+ * (`?report=`, `?from=`, `?to=`, `?office=`), so a reload, a bookmark or the
+ * dashboard's Generate Report link keeps them. Home's own `?tab=`/`?view=`/
+ * `?part=` are left alone by `update` below, which only ever touches the
+ * names it is given.
+ */
+function StandardReports() {
   const [params, setParams] = useSearchParams()
   const defaults = presets()[0]
 
@@ -522,11 +532,8 @@ export function ReportsPage() {
   return (
     <div>
       <style>{printCss(reports ?? [])}</style>
-      <PageTitle>Reports</PageTitle>
 
       <div className="print:hidden">
-        <AnalyticsTabs />
-
         <ProtoCard className="mb-5 px-4 py-4">
           <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <div>
@@ -669,6 +676,144 @@ export function ReportsPage() {
           ))}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/* ── the screen: two parts ─────────────────────────────────────────────── */
+
+type ReportPartKey = 'standard' | 'build'
+
+/**
+ * One part of the Reports screen, as a disclosure: a heading that is a button,
+ * and the part under it.
+ *
+ * Exactly one part is open at a time. The five reports draw a full A4 document
+ * under their controls, so with both open the builder sat several screens
+ * down, under whichever report was showing; collapsed, each part is one line
+ * saying what is in it, one press away. The open part's button is
+ * `aria-disabled` rather than a toggle that closes it — the WAI-ARIA accordion
+ * pattern for "one panel always open" — because closing the only open part
+ * would leave a screen with nothing on it.
+ *
+ * The closed part stays MOUNTED, under `hidden`: a reader halfway through a
+ * custom report who glances at the standard reports comes back to their
+ * choices, not to a blank builder.
+ */
+function ReportPart({
+  id,
+  title,
+  summary,
+  open,
+  onOpen,
+  children,
+}: {
+  id: ReportPartKey
+  title: string
+  summary: string
+  open: boolean
+  onOpen: () => void
+  children: ReactNode
+}) {
+  return (
+    <section id={`reports-${id}`} aria-labelledby={`reports-${id}-heading`} className="mb-4 scroll-mt-4">
+      <h2 id={`reports-${id}-heading`} className="print:hidden">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={`reports-${id}-panel`}
+          aria-disabled={open ? true : undefined}
+          onClick={() => {
+            if (!open) onOpen()
+          }}
+          className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+            open ? 'cursor-default border-transparent px-0' : 'border-line bg-white hover:border-royal'
+          }`}
+        >
+          {!open && <ChevronRightIcon size={18} className="shrink-0 text-royal" />}
+          <span className="min-w-0">
+            <span className={`block font-bold text-ink ${open ? 'text-lg' : 'text-[15px]'}`}>{title}</span>
+            {!open && <span className="mt-0.5 block text-[12.5px] font-normal text-ink-secondary">{summary}</span>}
+          </span>
+        </button>
+      </h2>
+      <div id={`reports-${id}-panel`} hidden={!open} className="mt-2">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Reports: the five standard reports, then "Build your own report".
+ *
+ * Client, 19 October 2026: "what's the difference between Report and Custom
+ * Report. I do think it is best to just merge them." (picker: "1. One page,
+ * two parts"). The two were separate tabs; they are now one screen, and the
+ * builder is the CustomReportBuilder component itself, not a copy.
+ *
+ * Which part is open is `?part=build` (absent = the standard reports), so the
+ * old Custom Report address can land on the builder (App.tsx) and Back works.
+ * No other name in the query is this component's: the standard reports own
+ * `report`/`from`/`to`/`office`, the builder keeps its choices in state, and
+ * Home owns `tab`/`view`.
+ *
+ * `embedded`: drawn as the Reports sub-tab of an office's Home (OfficeHome),
+ * which already names the screen in its tab and draws its own tabs — so no
+ * page title and no AnalyticsTabs strip. The super admin, and anyone else not
+ * landing on that Home, gets the full page at /analytics/reports as before.
+ */
+export function ReportsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const [params, setParams] = useSearchParams()
+  const open: ReportPartKey = params.get('part') === 'build' ? 'build' : 'standard'
+
+  /*
+   * Arriving on the builder (the old Custom Report address, or a link that
+   * names it): bring it to the top. Once, on arrival — a reader who opens a
+   * part by pressing its heading is already looking at it.
+   */
+  const arrivedOn = useRef(open)
+  useEffect(() => {
+    if (arrivedOn.current === 'build') {
+      document.getElementById('reports-build')?.scrollIntoView({ block: 'start' })
+    }
+  }, [])
+
+  function choose(part: ReportPartKey) {
+    const next = new URLSearchParams(params)
+    if (part === 'build') next.set('part', 'build')
+    else next.delete('part')
+    setParams(next, { replace: true })
+  }
+
+  return (
+    <div>
+      {!embedded && <PageTitle>Reports</PageTitle>}
+      {!embedded && (
+        <div className="print:hidden">
+          <AnalyticsTabs />
+        </div>
+      )}
+
+      <ReportPart
+        id="standard"
+        title="Standard reports"
+        summary="The five reports an office files, for any period. Print, CSV or dashboard PDF."
+        open={open === 'standard'}
+        onOpen={() => choose('standard')}
+      >
+        <StandardReports />
+      </ReportPart>
+
+      <ReportPart
+        id="build"
+        title="Build your own report"
+        summary="Choose what to count, filter it and break it down. Save it, or export to Excel, CSV or PDF."
+        open={open === 'build'}
+        onOpen={() => choose('build')}
+      >
+        <CustomReportBuilder />
+      </ReportPart>
     </div>
   )
 }

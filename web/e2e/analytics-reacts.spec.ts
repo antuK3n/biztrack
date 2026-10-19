@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { mergedStorageState, sessionFor, waitForAnalytics } from './helpers'
+import { HOME_ANALYTICS, HOME_DASHBOARD_HEADING, mergedStorageState, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * Do the dashboards answer to the register, or do they merely draw?
@@ -225,9 +225,12 @@ async function openDashboard(page: Page) {
    * routed to any office yet (routing follows payment), and only the whole-city
    * view counts an unrouted filing. The office rides in the URL so the reload
    * after the refresh keeps it.
+   *
+   * BPLO's dashboard is the Dashboard sub-tab of Home's Analytics tab since
+   * 19 October 2026, and keeps its office in Home's URL the same way.
    */
-  await page.goto('/staff/analytics?office=all')
-  await waitForAnalytics(page, 'Analytics Dashboard')
+  await page.goto(`${HOME_ANALYTICS}&office=all`)
+  await waitForAnalytics(page, HOME_DASHBOARD_HEADING.name, HOME_DASHBOARD_HEADING.level)
   // The frame renders after the payload resolves, so the panel is the ready
   // signal for the figures specifically rather than for the page.
   await decisionsDrawn(page)
@@ -266,7 +269,7 @@ test.describe('the dashboard answers to the register', () => {
     await openDashboard(page)
     await refreshAnalytics(page)
     await page.reload()
-    await waitForAnalytics(page, 'Analytics Dashboard')
+    await waitForAnalytics(page, HOME_DASHBOARD_HEADING.name, HOME_DASHBOARD_HEADING.level)
     await decisionsDrawn(page)
 
     const barangaysBefore = await figures(page, BARANGAYS)
@@ -370,7 +373,7 @@ test.describe('the dashboard answers to the register', () => {
 
     await refreshAnalytics(page)
     await page.reload()
-    await waitForAnalytics(page, 'Analytics Dashboard')
+    await waitForAnalytics(page, HOME_DASHBOARD_HEADING.name, HOME_DASHBOARD_HEADING.level)
     await expect(page.getByRole('table', { name: DECISIONS })).toHaveCount(1)
 
     const after = await decisions(page)
@@ -868,9 +871,9 @@ test.describe('rejection is deliberately not gated', () => {
  * beside it. Both are the reading a screen reader gets, which is the only
  * property this assertion is about.
  */
-async function assertStatesFigures(page: Page, path: string, heading: string) {
+async function assertStatesFigures(page: Page, path: string, heading: string, level: 1 | 2 = 1) {
   await page.goto(path)
-  await waitForAnalytics(page, heading)
+  await waitForAnalytics(page, heading, level)
 
   const tables = page.locator('table')
   await expect(tables.first(), `${path} drew no data table at all`).toBeAttached()
@@ -884,7 +887,8 @@ test.describe('the screens BPLO is allowed, and the one it is not', () => {
   test.use({ storageState: BPLO_SESSION })
 
   test('the Analytics Dashboard arrives with figures on it', async ({ page }) => {
-    await assertStatesFigures(page, '/staff/analytics', 'Analytics Dashboard')
+    // On Home's Analytics tab, BPLO's only dashboard since 19 October 2026.
+    await assertStatesFigures(page, HOME_ANALYTICS, HOME_DASHBOARD_HEADING.name, HOME_DASHBOARD_HEADING.level)
   })
 
   test('Permit Processing Time Monitoring is not BPLO’s to open', async ({ page }) => {

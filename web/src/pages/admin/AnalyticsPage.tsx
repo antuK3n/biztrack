@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
@@ -1561,13 +1561,20 @@ function LoadingState() {
 export function AnalyticsPage({
   embedded = false,
   permitsLink,
+  reportsLink,
 }: {
   /**
-   * Drawn as the "Analytics" section of the office Home (19 October 2026,
-   * client: Home is "Analytics, then Permits"). The same dashboard, under a
-   * section heading instead of the page's: no tab strip and no Generate
-   * Report — both live on the full page, which a "View full analytics" link
-   * opens. The /analytics route renders it without, unchanged.
+   * Drawn as the Dashboard sub-tab of the office Home's Analytics tab. The
+   * same dashboard, under a screen-reader heading instead of the page's, and
+   * without the AnalyticsTabs strip: Home draws its own sub-tabs.
+   *
+   * Since 19 October 2026 it is the ONLY dashboard an office admin or BPLO
+   * has (client: "To avoid redundancy, we should only have one existing among
+   * them"); /analytics redirects them here (App.tsx). So it keeps everything
+   * the full page had — office switcher, window filter, Generate Report — and
+   * the "View full analytics" link it used to carry is gone, with nothing
+   * left to point at. The /analytics route (the super admin, and anyone not
+   * landing on that Home) renders it without, unchanged.
    */
   embedded?: boolean
   /**
@@ -1575,6 +1582,12 @@ export function AnalyticsPage({
    * Permits section, when the Home has one. Without it they are not drawn.
    */
   permitsLink?: (status: string) => string
+  /**
+   * Embedded only: where Generate Report goes — the Home's own Reports
+   * sub-tab. Without it the button is not drawn. The full page goes to
+   * /analytics/reports.
+   */
+  reportsLink?: string
 } = {}) {
   /*
    * Undefined until the reader picks one: the first request asks for "my
@@ -1593,21 +1606,19 @@ export function AnalyticsPage({
    * so the plain address stays the plain address.
    */
   /*
-   * Embedded, both are component state instead: the Home's URL belongs to the
-   * Permits table under it, which reads `?office=all` and `?status=` on
-   * arrival, and an `office` written here would be read there as a different
-   * question. The full page keeps them in its own URL.
+   * Embedded, these were component state until 19 October 2026, because the
+   * dashboard then shared the Home's URL with the Permits table, which reads
+   * `?office=all` and `?status=` on arrival. It no longer does: the dashboard
+   * is its own sub-tab (`?tab=analytics`), every Home tab link is written
+   * clean, and the Permits table is never mounted beside it. So the URL holds
+   * them in both places, and the old /analytics?office=…&months=… address,
+   * redirected onto Home with its query, opens on the same view.
    */
   const [params, setParams] = useSearchParams()
-  const [local, setLocal] = useState<Record<string, string | undefined>>({})
-  const read = (name: string) => (embedded ? local[name] : (params.get(name) ?? undefined))
+  const read = (name: string) => params.get(name) ?? undefined
   const office = read('office')
   const months = windowFrom(read('months') ?? null)
   const setParam = (name: string, value: string | undefined) => {
-    if (embedded) {
-      setLocal((prev) => ({ ...prev, [name]: value }))
-      return
-    }
     const next = new URLSearchParams(params)
     if (value === undefined) next.delete(name)
     else next.set(name, value)
@@ -1655,6 +1666,27 @@ export function AnalyticsPage({
   )
 
   /*
+   * "Generate Report" opens Report Generation (checklist 2026-09-27, item 7)
+   * for the office on screen, rather than downloading this dashboard as a PDF.
+   * The five LGU reports are what an office files; the dashboard PDF is still
+   * there, as one option on that screen. Embedded, that screen is the Home's
+   * Reports sub-tab.
+   */
+  const reportsBase = embedded ? reportsLink : portalPath(activePortal(), '/analytics/reports')
+  const generateReport = reportsBase && (
+    <Link
+      to={
+        scope?.can_switch
+          ? `${reportsBase}${reportsBase.includes('?') ? '&' : '?'}office=${scope.office ?? 'all'}`
+          : reportsBase
+      }
+      className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+    >
+      Generate Report
+    </Link>
+  )
+
+  /*
    * Embedded, the "Showing CHO figures" line is left out for a reader who
    * cannot switch: the Home's own heading is already the office's name.
    */
@@ -1666,16 +1698,11 @@ export function AnalyticsPage({
         <span className="flex flex-wrap items-center gap-3 pb-0.5">
           {scope?.can_switch && <OfficeScope scope={scope} onChange={setOffice} />}
           {windowFilter}
-          <Link
-            to={portalPath(activePortal(), '/analytics')}
-            className="text-sm font-semibold text-royal hover:underline"
-          >
-            View full analytics
-          </Link>
+          {generateReport}
         </span>
       }
     >
-      Analytics
+      Analytics Dashboard
     </SectionTitle>
   ) : (
       <PageTitle
@@ -1683,20 +1710,7 @@ export function AnalyticsPage({
           <span className="flex flex-wrap items-center gap-3 pb-1">
             {scope && <OfficeScope scope={scope} onChange={setOffice} />}
             {windowFilter}
-            {/*
-              "Generate Report" opens Report Generation (checklist 2026-09-27,
-              item 7) for the office on screen, rather than downloading this
-              dashboard as a PDF. The five LGU reports are what an office files;
-              the dashboard PDF is still there, as one option on that screen.
-            */}
-            <Link
-              to={`${portalPath(activePortal(), '/analytics/reports')}${
-                scope?.can_switch ? `?office=${scope.office ?? 'all'}` : ''
-              }`}
-              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
-            >
-              Generate Report
-            </Link>
+            {generateReport}
           </span>
         }
       >

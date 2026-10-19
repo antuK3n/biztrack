@@ -257,6 +257,37 @@ class NotificationService
         );
     }
 
+    /**
+     * An office corrected a clerical answer on the owner's filing.
+     *
+     * Client, 19 October 2026: the office admin may fix a misspelling or a
+     * contact number, with a reason, and the owner is told — "BPLO corrected
+     * your …". The reason is the officer's own sentence and goes with it,
+     * because "your street was changed" with no why reads as tampering.
+     *
+     * @param  list<string>  $fields  owner-facing names, e.g. "business name"
+     */
+    public function correctedByOffice(Application $app, string $office, array $fields, string $reason): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant || $fields === []) {
+            return;
+        }
+        $fields = array_values(array_unique($fields));
+        $list = count($fields) > 1
+            ? implode(', ', array_slice($fields, 0, -1)).' and '.end($fields)
+            : $fields[0];
+
+        $this->push(
+            $app->applicant,
+            'status_change',
+            "{$office} corrected your filing",
+            "{$office} corrected your {$list} on {$app->tracking_id}. Reason: {$reason}",
+            "/applications/{$app->id}",
+            $app,
+        );
+    }
+
     /** End state: the application cleared every office (tester item 51). */
     public function applicationApproved(Application $app): void
     {

@@ -33,7 +33,6 @@ import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ReportsPage } from './pages/admin/ReportsPage'
-import { CustomReportPage } from './pages/admin/CustomReportPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { UsersPage } from './pages/admin/UsersPage'
@@ -134,6 +133,67 @@ function OfficePermitsOrHome() {
       <AdminPermitsPage />
     </RequirePermission>
   )
+}
+
+/**
+ * An /analytics address, for a reader whose analytics live on Home.
+ *
+ * Client, 19 October 2026: "To avoid redundancy, we should only have one
+ * existing among them", then "Why not implement the report too on the
+ * analytics?" (picker: "1. Yes, all inside Analytics"). An office admin or
+ * BPLO — anyone `landsOnOfficeHome` — has the dashboard, Reports and (with
+ * `analytics.processing_time`) Office Performance as sub-tabs of Home's
+ * Analytics tab, and no rail entry here. Links to these addresses are already
+ * out there (bookmarks, and the legacy /analytics shim below), so each lands
+ * on its sub-tab rather than on a second copy of the screen.
+ *
+ * The query is carried across — `?office=`, `?months=`, `?report=`, `?from=`,
+ * `?to=` mean the same thing on the sub-tab — behind Home's own `tab`, `view`
+ * and `part`, which this sets and never takes from the old address. A `view`
+ * the reader may not open (Office Performance without the permission) opens
+ * the dashboard, which is where RequirePermission used to bounce them anyway.
+ *
+ * Everyone else — the super admin, on either site — gets the page itself,
+ * behind the same permission as before.
+ */
+function OfficeAnalyticsOr({
+  view,
+  part,
+  permission,
+  children,
+}: {
+  view: 'dashboard' | 'reports' | 'offices'
+  part?: 'build'
+  permission: string
+  children: ReactNode
+}) {
+  const user = useAuth((s) => s.user)
+  const { search } = useLocation()
+  if (user && landsOnOfficeHome(user)) {
+    const next = new URLSearchParams({ tab: 'analytics' })
+    if (view !== 'dashboard') next.set('view', view)
+    if (part) next.set('part', part)
+    for (const [name, value] of new URLSearchParams(search)) {
+      if (!['tab', 'view', 'part'].includes(name)) next.append(name, value)
+    }
+    return <Navigate to={`${portalPath('staff', '/dashboard')}?${next.toString()}`} replace />
+  }
+  return <RequirePermission permission={permission}>{children}</RequirePermission>
+}
+
+/**
+ * The old Custom Report address, on a site that still has /analytics.
+ *
+ * Client, 19 October 2026: "what's the difference between Report and Custom
+ * Report. I do think it is best to just merge them." The builder is now the
+ * second part of the Reports screen, opened by `?part=build`; this keeps the
+ * reader's query and opens that part.
+ */
+function MovedCustomReport() {
+  const { search } = useLocation()
+  const next = new URLSearchParams(search)
+  next.set('part', 'build')
+  return <Navigate to={`${portalPath(activePortal(), '/analytics/reports')}?${next.toString()}`} replace />
 }
 
 /**
@@ -461,12 +521,19 @@ export default function App() {
           */}
           <Route path="/staff/inspections/:id" element={<MovedInspection />} />
           {/* Admin */}
+          {/*
+            Each /staff/analytics route below goes through OfficeAnalyticsOr:
+            an office admin or BPLO is sent to the matching sub-tab of Home's
+            Analytics tab (client, 19 October 2026), everyone else gets the
+            page behind the permission it always had. Processing Time is not
+            on Home, so it stays a plain route.
+          */}
           <Route
             path="/staff/analytics"
             element={
-              <RequirePermission permission="analytics.view">
+              <OfficeAnalyticsOr view="dashboard" permission="analytics.view">
                 <AnalyticsPage />
-              </RequirePermission>
+              </OfficeAnalyticsOr>
             }
           />
           {/*
@@ -507,9 +574,9 @@ export default function App() {
           <Route
             path="/staff/analytics/offices"
             element={
-              <RequirePermission permission="analytics.processing_time">
+              <OfficeAnalyticsOr view="offices" permission="analytics.processing_time">
                 <OfficePerformancePage />
-              </RequirePermission>
+              </OfficeAnalyticsOr>
             }
           />
           {/*
@@ -519,21 +586,23 @@ export default function App() {
           <Route
             path="/staff/analytics/reports"
             element={
-              <RequirePermission permission="analytics.view">
+              <OfficeAnalyticsOr view="reports" permission="analytics.view">
                 <ReportsPage />
-              </RequirePermission>
+              </OfficeAnalyticsOr>
             }
           />
           {/*
-            Custom Report (client, 19 October 2026). Same permission as
-            Reports; the server applies the same office boundary.
+            Custom Report was its own screen here for part of 19 October 2026,
+            until the client merged it into Reports ("I do think it is best to
+            just merge them"). The address opens the builder part of Reports:
+            on Home for an office, at /staff/analytics/reports for anyone else.
           */}
           <Route
             path="/staff/analytics/custom-report"
             element={
-              <RequirePermission permission="analytics.view">
-                <CustomReportPage />
-              </RequirePermission>
+              <OfficeAnalyticsOr view="reports" part="build" permission="analytics.view">
+                <MovedCustomReport />
+              </OfficeAnalyticsOr>
             }
           />
           {/*
@@ -773,11 +842,12 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/* Merged into Reports (client, 19 October 2026) — see the staff twin. */}
           <Route
             path="/admin/analytics/custom-report"
             element={
               <RequirePermission permission="analytics.view">
-                <CustomReportPage />
+                <MovedCustomReport />
               </RequirePermission>
             }
           />

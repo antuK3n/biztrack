@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
-import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
+import { FilterMenu, PageTitle, ProtoCard, SectionTitle } from '../../components/ui/Proto'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type {
@@ -447,7 +447,16 @@ function LoadingState() {
   )
 }
 
-export function OfficePerformancePage() {
+/**
+ * `embedded`: drawn as a sub-tab of an office Home's Analytics tab
+ * (OfficeHome, client 19 October 2026: "Why not implement the report too on
+ * the analytics?"). The tab already names the screen, so the title becomes a
+ * screen-reader heading and the AnalyticsTabs strip is left out. Only a holder
+ * of `analytics.processing_time` gets that sub-tab, and today that is the super
+ * admin alone, who never lands on that Home — so this is for the day the
+ * permission reaches an office, not something any account sees now.
+ */
+export function OfficePerformancePage({ embedded = false }: { embedded?: boolean } = {}) {
   // 52 weeks, matching Processing Time's default. The two screens are read one
   // after the other and a reader should not have to check that the windows
   // agree before wondering which figure is right.
@@ -469,24 +478,26 @@ export function OfficePerformancePage() {
 
   const definitions = useMemo(() => distil(meta?.definitions), [meta?.definitions])
 
+  const windowFilter = (
+    <FilterMenu
+      label="Filter office performance"
+      fields={[{ label: 'Window', value: weeks, options: WINDOW_OPTIONS, onChange: setWeeks }]}
+    />
+  )
+
   return (
     <div>
-      <PageTitle
-        right={
-          <span className="flex items-center gap-3 pb-1">
-            <FilterMenu
-              label="Filter office performance"
-              fields={[
-                { label: 'Window', value: weeks, options: WINDOW_OPTIONS, onChange: setWeeks },
-              ]}
-            />
-          </span>
-        }
-      >
-        Office Performance
-      </PageTitle>
+      {embedded ? (
+        <SectionTitle quiet right={windowFilter}>
+          Office Performance
+        </SectionTitle>
+      ) : (
+        <PageTitle right={<span className="flex items-center gap-3 pb-1">{windowFilter}</span>}>
+          Office Performance
+        </PageTitle>
+      )}
 
-      <AnalyticsTabs />
+      {!embedded && <AnalyticsTabs />}
 
       {meta && <ComputedAt meta={meta} onRefreshed={reload} />}
 
