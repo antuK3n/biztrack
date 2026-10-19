@@ -944,11 +944,15 @@ export const formGridCls = '@container field-grid grid grid-cols-12 gap-x-5 gap-
  *   half    — a medium one: a name, an e-mail, a short select
  *   wide    — three quarters: a long name or a group of pills
  *   full    — an address, a description, a checklist, a map
+ *   third   — a card holding two lines, not one box: the amendment step's
+ *             Current/New pairs, which a quarter squeezed to a box narrower
+ *             than its own placeholder (20 October 2026)
  *
  * Each is one column on a phone and half the sheet from 36rem.
  */
 export const formCell = {
   quarter: 'col-span-12 @xl:col-span-6 @4xl:col-span-3',
+  third: 'col-span-12 @xl:col-span-6 @4xl:col-span-4',
   half: 'col-span-12 @xl:col-span-6',
   wide: 'col-span-12 @4xl:col-span-9',
   full: 'col-span-12',

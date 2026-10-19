@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { formatDate } from '../lib/format'
 import {
   inScope,
@@ -66,6 +66,22 @@ function ChangeText({ change }: { change: ReturnChange | undefined }) {
   )
 }
 
+/**
+ * A per-field return's `remarks` is only the items' notes joined
+ * ("Label: note; Label: note" — composed by the officer's Return dialog), so
+ * printing it above the items says everything twice. Matched on the notes,
+ * not the labels: the dialog's labels and `returnItemLabel` can differ.
+ */
+function remarksRepeatItems(round: ReturnRound): boolean {
+  if (!round.remarks || round.items.length === 0) return false
+  const notes = round.items.map((i) => (i.note ?? '').trim())
+  if (notes.some((n) => n === '')) return false
+
+  return round.remarks
+    .split('; ')
+    .every((part) => notes.some((note) => part.trim().endsWith(`: ${note}`)))
+}
+
 function Round({ round, audience }: { round: ReturnRound; audience: 'owner' | 'staff' }) {
   const status = statusText(round, audience)
   const permitCode = round.permit_type?.code ?? null
@@ -90,7 +106,9 @@ function Round({ round, audience }: { round: ReturnRound; audience: 'owner' | 's
         </StatusChip>
       </div>
 
-      {round.remarks && <p className="mt-1.5 break-words text-sm text-ink">“{round.remarks}”</p>}
+      {round.remarks && !remarksRepeatItems(round) && (
+        <p className="mt-1.5 break-words text-sm text-ink">“{round.remarks}”</p>
+      )}
 
       {round.items.length > 0 && (
         <ul className="mt-2 space-y-1.5">
@@ -143,41 +161,57 @@ export function ReturnHistory({
 }) {
   const own = useReturnHistory(given === undefined ? applicationId : null, refreshKey)
   const [all, setAll] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
+  const listId = useId()
   const rounds = (given ?? own.rounds).filter((r) => inScope(r, permitTypeCode))
   if (rounds.length === 0) return null
 
   const waiting = rounds.filter((r) => r.status === 'open').length
   const shown = all ? rounds : rounds.slice(0, SHOWN)
 
+  /*
+   * A <button aria-expanded>, not <details>. inspection-review.spec forbids
+   * any <details> on an office's finished-review screen — a <details> was the
+   * shape of the folded application form the client rejected — and this card
+   * renders there too. The button is the same disclosure to a screen reader.
+   */
   return (
-    <details open={defaultOpen} className={`group rounded-xl bg-white shadow-card ${className}`}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+    <section aria-label="Return history" className={`rounded-xl bg-white shadow-card ${className}`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left sm:px-5"
+      >
         <span className="text-base font-bold text-ink">Return history</span>
         <span className="flex items-center gap-2 text-xs text-ink-muted">
           {rounds.length === 1 ? '1 return' : `${rounds.length} returns`}
           {waiting > 0 ? ` · ${waiting} waiting` : ''}
-          <span aria-hidden="true" className="transition-transform group-open:rotate-180">
+          <span aria-hidden="true" className={`transition-transform ${open ? 'rotate-180' : ''}`}>
             ▾
           </span>
         </span>
-      </summary>
-      <ol className="divide-y divide-line border-t border-line">
-        {shown.map((round) => (
-          <Round key={round.id} round={round} audience={audience} />
-        ))}
-      </ol>
-      {rounds.length > SHOWN && (
-        <div className="border-t border-line px-4 py-2 sm:px-5">
-          <button
-            type="button"
-            onClick={() => setAll((v) => !v)}
-            className="text-sm font-semibold text-royal hover:underline"
-          >
-            {all ? 'Show fewer' : `Show ${rounds.length - SHOWN} earlier`}
-          </button>
-        </div>
-      )}
-    </details>
+      </button>
+      <div id={listId} hidden={!open}>
+        <ol className="divide-y divide-line border-t border-line">
+          {shown.map((round) => (
+            <Round key={round.id} round={round} audience={audience} />
+          ))}
+        </ol>
+        {rounds.length > SHOWN && (
+          <div className="border-t border-line px-4 py-2 sm:px-5">
+            <button
+              type="button"
+              onClick={() => setAll((v) => !v)}
+              className="text-sm font-semibold text-royal hover:underline"
+            >
+              {all ? 'Show fewer' : `Show ${rounds.length - SHOWN} earlier`}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

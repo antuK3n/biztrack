@@ -140,7 +140,7 @@ test('the wizard is the business permit alone, with no clearance step', async ({
   const joined = map.join(' | ').toLowerCase()
 
   /*
-   * Seven sections, fixed. Not "seven or more": the count is the whole point.
+   * Six sections, fixed. Not "six or more": the count is the whole point.
    * Under the previous arrangement the map GREW as office sheets joined it, so
    * an exact count is what distinguishes a wizard with no clearance machinery
    * from one whose machinery merely has not fired yet.
@@ -150,7 +150,7 @@ test('the wizard is the business permit alone, with no clearance step', async ({
    * appended by applying for something — so it moves when a phase is
    * deliberately added, and the assertions below are the ones with teeth.
    */
-  expect(map, `the section map is not the seven phases: ${joined}`).toHaveLength(7)
+  expect(map, `the section map is not the six phases: ${joined}`).toHaveLength(6)
 
   // The step itself, gone. This is the rule the client reversed.
   expect(joined, 'the LGU Clearances step is back in the wizard').not.toContain('clearance')

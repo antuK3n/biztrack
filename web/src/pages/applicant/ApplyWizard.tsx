@@ -7657,10 +7657,29 @@ export function ApplyWizard() {
 
   /** Jump to any already-opened section from the map (persisting first). */
   async function goTo(index: number) {
-    if (saving || index === stepIndex) return
+    if (index === stepIndex) return
+    /*
+     * A save under way is waited out, not a reason to drop the press. This
+     * returned on `saving`, and the pills do not grey out while an autosave
+     * runs, so a pill pressed during one looked pressable and did nothing —
+     * reliably on a reopened draft, whose landing sets off a save. Same wait
+     * as `flushAutosave`.
+     */
+    while (inFlightRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
     if (!visited.includes(sequence[index])) return
     // Moving forward re-checks every section being skipped, not just this one.
     if (jumpBlocked(index)) return
+    /*
+     * A section the applicant picked outranks the one the landing would pick.
+     * The landing waits for the zone at the pin (40e042d), so a pill pressed
+     * in that second used to be undone: the step changed, then the landing
+     * moved it on to the first unfinished section. Found by
+     * checklist-wording.spec.ts opening Business Operation on a draft and
+     * reading Documentary Requirements.
+     */
+    landedRef.current = true
     const ok = await persistOnLeave()
     if (!ok) return
     setStep(index)
@@ -10041,7 +10060,12 @@ export function ApplyWizard() {
       }}
     >
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
-      <div className="mb-3 flex items-center gap-3">
+      {/*
+        Wraps on a phone: the title takes the row beside the icon and the
+        save status goes under it. In one row at 390px the status and Clear
+        All left the title box about eighty pixels, "E2E…" (20 October 2026).
+      */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <ClipboardIcon size={34} className="shrink-0 text-royal" />
         {/*
           Name the filing, not the business: one business can have three
@@ -10055,7 +10079,7 @@ export function ApplyWizard() {
           there is a business, and stays editable because renaming a draft is
           its own requirement (checklist item 36).
         */}
-        <label className="min-w-0 flex-1">
+        <label className="min-w-[calc(100%-2.875rem)] flex-1 sm:min-w-0">
           <span className="sr-only">
             Application title — named automatically, edit it if you want your own
           </span>
@@ -12712,12 +12736,13 @@ export function ApplyWizard() {
                   {otherDocs.map((f) => (
                     <li
                       key={f.id}
-                      className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-input-border bg-input/50 px-3 py-2.5 sm:px-4"
                     >
                       <span className="text-s-green">
                         <CheckIcon size={16} />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-sm text-ink">{f.name}</span>
+                      {/* The rest of the first line on a phone; the size and actions go under it. */}
+                      <span className="min-w-[calc(100%-2rem)] flex-1 truncate text-sm text-ink sm:min-w-0">{f.name}</span>
                       <span className="tnum shrink-0 text-xs text-ink-muted">
                         {formatBytes(f.size)}
                       </span>
@@ -13296,15 +13321,21 @@ export function ApplyWizard() {
                     )}
 
                     {/*
-                      Two to a row on anything wider than a phone. A floor
-                      area, an employee count and a house number are each a
-                      few characters wide; giving them a full row apiece is
-                      what made this step a column of mostly-empty boxes.
+                      Section A's grid (Proto's `formGridCls`) since
+                      20 October 2026, on the client's ask to give the other
+                      sections and forms section A's compactness. Three cards
+                      to a row on a desktop sheet, two from 36rem, one on a
+                      phone: a card holds a Current line over a New box, and
+                      in a quarter that box came out narrower than its own
+                      placeholder, so the cards take `formCell.third`.
 
-                      `items-start`, so a field whose help text runs to two
-                      lines does not stretch the box beside it.
+                      Two to a row with `items-start` before this. The grid's
+                      `field-grid` rule replaces that: each card's name and
+                      help grow to the row's tallest, so the Current lines
+                      and New boxes of a row sit level and the cards are one
+                      height, however many lines a help text runs to.
                     */}
-                    <div className="grid items-start gap-3 sm:grid-cols-2">
+                    <div className={formGridCls}>
                       {group.rows.map((row) => (
                         <div
                           key={row.field}
@@ -13313,10 +13344,10 @@ export function ApplyWizard() {
                            * picker whose results drop down over what follows,
                            * and a note whose whole point is room to write.
                            */
-                          className={`rounded-lg border border-input-border bg-white px-4 py-3 ${
+                          className={`min-w-0 rounded-lg border border-input-border bg-white px-3.5 py-3 ${
                             row.type === 'pin' || row.type === 'psic' || row.type === 'note'
-                              ? 'sm:col-span-2'
-                              : ''
+                              ? formCell.full
+                              : formCell.third
                           }`}
                         >
                           {/*
@@ -13342,9 +13373,15 @@ export function ApplyWizard() {
                                it something like 'Current:' then 'New:' so that
                                the comparison is much more visible."*
                           */}
+                          {/*
+                            Name and help in one block, the `field-label` the
+                            grid grows (index.css), so both stay at the top of
+                            the card and the comparison sits at its foot.
+                          */}
+                          <div className="field-label">
                           <label
                             htmlFor={`amend-${row.field}`}
-                            className="text-sm font-medium text-ink"
+                            className="text-[13px] font-semibold leading-snug text-ink"
                           >
                             {row.label}
                             {/*
@@ -13363,10 +13400,11 @@ export function ApplyWizard() {
                           </label>
 
                           {row.help !== null && (
-                            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                            <p className="mt-1 text-xs leading-snug text-ink-secondary">
                               {row.help}
                             </p>
                           )}
+                          </div>
 
                           {/*
                             ── Current above New, on the same rail ───────────
@@ -13409,7 +13447,7 @@ export function ApplyWizard() {
                           {row.type !== 'note' ? (
                             <div className="mt-2 space-y-1.5">
                               <div className="flex items-baseline gap-2.5">
-                                <span className="w-[3.75rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">
+                                <span className="w-[3.25rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">
                                   Current
                                 </span>
                                 {(row.current_label ?? row.current_value) !== null ? (
@@ -13431,7 +13469,7 @@ export function ApplyWizard() {
                                   which is 300px tall and must not drag the
                                   label to its middle.
                                 */}
-                                <span className="mt-2.5 w-[3.75rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-royal">
+                                <span className="mt-2.5 w-[3.25rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-royal">
                                   New
                                 </span>
                                 <div className="min-w-0 flex-1">{renderAmendControl(row)}</div>

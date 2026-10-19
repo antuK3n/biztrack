@@ -561,6 +561,22 @@ export function WhatToCorrect({
     }
   })
 
+  /*
+   * Typed answers share a row two at a time, as on the sheet's own grid
+   * (Proto's `formGridCls`, client 19 October 2026: "EVEN OTHER FORMS").
+   * An upload box and a row of chips keep the full width: the first holds a
+   * file list, the second can be four pills long.
+   */
+  const typedCount = items.filter(
+    (i) => i.row === undefined && correctionControl(`${code}.${i.target}`)?.kind !== 'chips',
+  ).length
+  const cellFor = (item: (typeof items)[number]) =>
+    typedCount > 1 &&
+    item.row === undefined &&
+    correctionControl(`${code}.${item.target}`)?.kind !== 'chips'
+      ? formCell.half
+      : formCell.full
+
   return (
     <CorrectionModal
       office={office}
@@ -570,9 +586,10 @@ export function WhatToCorrect({
       submitting={submitting === true}
       blocked={blocked ?? null}
       error={error ?? null}
+      wide={typedCount > 1}
     >
       <div>
-        <div className="space-y-5">
+        <div className={formGridCls}>
           {items.map((item) => {
             const busy = requirementBusy === item.target
             /*
@@ -586,7 +603,13 @@ export function WhatToCorrect({
             const files = item.row?.documents ?? []
 
             return (
-              <div key={item.target}>
+              <div key={item.target} className={cellFor(item)}>
+                {/*
+                  Name and the officer's remark as one `field-label` block, so
+                  the remark stays under the name it is about and the boxes of
+                  a row sit level (index.css, the field-grid rule).
+                */}
+                <div className="field-label">
                 <p className="text-[13px] font-semibold text-ink">
                   {item.label}{' '}
                   <span aria-hidden="true" className="text-s-red">
@@ -603,6 +626,7 @@ export function WhatToCorrect({
                     “{item.note}”
                   </p>
                 )}
+                </div>
 
                 {item.row !== undefined ? (
                   <>
@@ -683,9 +707,9 @@ export function WhatToCorrect({
                         {files.map((file) => (
                           <li
                             key={file.id}
-                            className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-3 py-2"
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-input-border bg-input/50 px-3 py-2"
                           >
-                            <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                            <span className="min-w-full flex-1 truncate text-sm text-ink sm:min-w-0">
                               {file.filename}
                             </span>
                             <DocumentActions id={file.id} filename={file.filename} />
@@ -1155,7 +1179,7 @@ function CarriedTag({ field }: { field: string }) {
    * filing that does not exist.
    */
   return (
-    <span className="mt-1 block text-xs font-normal text-s-orange-ink">
+    <span className="carried-tag mt-1 block text-xs font-normal text-s-orange-ink">
       {source === 'account'
         ? 'From your account’s home address — check this is still right'
         : source === 'application'
@@ -2522,9 +2546,10 @@ function RequirementRow({
           {files.map((file) => (
             <li
               key={file.id}
-              className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-input-border bg-input/50 px-3 py-2.5 sm:px-4"
             >
-              <span className="min-w-0 flex-1 truncate text-sm text-ink">{file.filename}</span>
+              {/* A line of its own on a phone, where the size and three actions left it no room at all. */}
+              <span className="min-w-full flex-1 truncate text-sm text-ink sm:min-w-0">{file.filename}</span>
               {file.size_bytes !== null && (
                 <span className="tnum shrink-0 text-xs text-ink-muted">
                   {formatBytes(file.size_bytes)}

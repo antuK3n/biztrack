@@ -63,7 +63,8 @@ class WipeForDefense extends Command
     public const WIPED = [
         'analytics_snapshots', 'app_notifications', 'application_amendments', 'application_assignments',
         'application_corrections', 'application_documents', 'application_office_forms', 'application_permit_types',
-        'application_prior_permits', 'application_return_notes', 'application_status_history', 'applications',
+        'application_prior_permits', 'application_return_notes', 'application_returns', 'application_status_history',
+        'applications',
         'audit_logs', 'business_addresses', 'business_lines', 'business_owners', 'businesses', 'cache', 'cache_locks',
         'chatbot_conversations', 'chatbot_messages', 'clearance_refusals', 'compliance_checks', 'email_codes',
         'failed_jobs', 'fee_assessments', 'inspections', 'job_batches', 'jobs', 'legacy_imports', 'legacy_owners',

@@ -286,6 +286,33 @@
   flex-grow: 1;
 }
 
+/*
+ * ── A renewal's "From your previous application" flag sits ABOVE its box ──
+ *
+ * The flag (OfficeFormStep's CarriedTag) is written after the box, which put
+ * it in the one place the rule above cannot absorb: under the box. Its box
+ * then stood a line or two higher than its neighbours for as long as the
+ * flag showed, and dropped back into line when the applicant edited the
+ * answer and the flag cleared (20 October 2026).
+ *
+ * Inside a field grid it is moved up, between the label and the box, so it
+ * becomes part of the label zone that grows to the row's tallest: the boxes
+ * stay on one line with or without it. `order` and not a DOM move, because
+ * the flag is a sibling of its FieldLabel in every cell that draws one and
+ * the DOM order (answer, then where it came from) reads fine aloud.
+ *
+ * Outside a field grid nothing changes; the flag stays under its box.
+ */
+.field-grid :has(> .carried-tag) > .field-label {
+  order: -2;
+}
+
+.field-grid .carried-tag {
+  order: -1;
+  margin-top: 0;
+  margin-bottom: 0.375rem;
+}
+
 /* Auth screens keep touch-first sizing */
 .auth-form input:not([type='checkbox']),
 .auth-form select,
