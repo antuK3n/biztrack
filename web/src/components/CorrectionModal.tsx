@@ -42,6 +42,7 @@ export function CorrectionModal({
   submitLabel = 'Submit corrections',
   blocked = null,
   error = null,
+  wide = false,
 }: {
   /** Who sent it back, in their own short name: BPLO, CPDD, BFP. */
   office: string
@@ -57,6 +58,18 @@ export function CorrectionModal({
   blocked?: string | null
   /** A failure from the last attempt, or null. */
   error?: string | null
+  /**
+   * Two or more boxes to retype, laid out two to a row.
+   *
+   * Client, 19 October 2026, of section A's grid: *"Can this layout be
+   * applied too on the other sections or EVEN OTHER FORMS?"* At max-w-xl the
+   * dialog's body is under the grid's 36rem halves line, so every box took a
+   * row of its own; at max-w-3xl two returned answers share one. Both callers
+   * decide it by the same rule — more than one typed answer — so BPLO's return
+   * and an office's are still the same width for the same kind of return,
+   * which is what the note above is protecting. Uploads stay full width.
+   */
+  wide?: boolean
 }) {
   const panel = useRef<HTMLDivElement | null>(null)
 
@@ -93,9 +106,9 @@ export function CorrectionModal({
           on a small screen would otherwise push Submit off the bottom with
           no way to reach it — the one control the dialog exists for.
         */
-        className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-md bg-white shadow-overlay focus:outline-none"
+        className={`max-h-[85vh] w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} overflow-y-auto rounded-md bg-white shadow-overlay focus:outline-none`}
       >
-        <div className="border-b border-line px-7 py-5">
+        <div className="border-b border-line px-5 sm:px-7 py-5">
           <h2 id="correction-modal-title" className="text-xl font-bold text-ink">
             What you need to correct
           </h2>
@@ -105,15 +118,15 @@ export function CorrectionModal({
           </p>
         </div>
 
-        <div className="px-7 py-5">{children}</div>
+        <div className="px-5 sm:px-7 py-5">{children}</div>
 
         {error !== null && (
-          <p role="alert" className="px-7 pb-2 text-sm font-medium text-s-red">
+          <p role="alert" className="px-5 sm:px-7 pb-2 text-sm font-medium text-s-red">
             {error}
           </p>
         )}
 
-        <div className="flex items-center gap-3 border-t border-line px-7 py-4">
+        <div className="flex items-center gap-3 border-t border-line px-5 sm:px-7 py-4">
           <button
             type="button"
             onClick={() => {
@@ -159,7 +172,7 @@ export function CorrectionModal({
         </div>
 
         {blocked !== null && (
-          <p id="correction-modal-blocked" className="px-7 pb-5 text-xs text-ink-muted">
+          <p id="correction-modal-blocked" className="px-5 sm:px-7 pb-5 text-xs text-ink-muted">
             {blocked}
           </p>
         )}

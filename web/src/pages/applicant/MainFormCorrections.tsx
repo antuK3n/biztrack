@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CorrectionModal } from '../../components/CorrectionModal'
+import { FieldError, formCell, formGridCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { Link } from 'react-router-dom'
 import { DocumentActions } from '../../components/DocumentActions'
@@ -117,9 +118,7 @@ function CorrectionInput({
           />
         )}
         {error && (
-          <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
-            {error}
-          </p>
+          <FieldError id={errorId}>{error}</FieldError>
         )}
       </>
     )
@@ -144,9 +143,7 @@ function CorrectionInput({
         }`}
       />
       {error && (
-        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-s-red">
-          {error}
-        </p>
+        <FieldError id={errorId}>{error}</FieldError>
       )}
     </>
   )
@@ -334,9 +331,10 @@ function DocumentCorrection({
           {done.map((doc) => (
             <li
               key={doc.id}
-              className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-3 py-2"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-input-border bg-input/50 px-3 py-2"
             >
-              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+              {/* A line of its own on a phone, where the actions left it no room. */}
+              <span className="min-w-full flex-1 truncate text-sm text-ink sm:min-w-0">
                 {doc.original_filename}
               </span>
               <DocumentActions id={doc.id} filename={doc.original_filename} />
@@ -547,12 +545,25 @@ export function MainFormCorrections({
             submitting={savingCorrections}
             blocked={correctionsComplete ? null : 'Answer everything above first.'}
             error={correctionError}
+            wide={returnedScalars.length > 1}
           >
             <div>
+              {/*
+                Section A's grid (Proto's `formGridCls`), 20 October 2026: two
+                returned answers to a row once the dialog widens for them, one
+                when there is only one. Each cell's name, BPLO's remark and the
+                hint are one `field-label` block, so the remark stays directly
+                under the name it is about and the boxes of a row sit level
+                whichever of them carries the longer remark.
+              */}
               {returnedScalars.length > 0 && (
-                <div className="mt-4 space-y-4">
+                <div className={`mt-4 ${formGridCls}`}>
                   {returnedScalars.map((t) => (
-                    <label key={t.value} className="block">
+                    <label
+                      key={t.value}
+                      className={`relative ${returnedScalars.length > 1 ? formCell.half : formCell.full}`}
+                    >
+                      <span className="field-label block">
                       <span className="block text-[13px] font-semibold text-ink">
                         {/*
                           The registration number is named for the AGENCY that
@@ -609,6 +620,7 @@ export function MainFormCorrections({
                         </span>
                       )}
                       {!(app.return_notes ?? {})[t.value] && <span className="mb-1.5 block" />}
+                      </span>
                       <CorrectionInput
                         code={t.value}
                         label={t.label}

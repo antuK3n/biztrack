@@ -56,6 +56,7 @@ import {
 import { ReturnHistory, ReturnedFieldNote } from '../../components/ReturnHistory'
 import { useReturnHistory, type ReturnRound } from '../../lib/returnHistory'
 import {
+  businessPermitFormCode,
   downloadBusinessPermitForm,
   downloadOfficeSheet,
   printableOfficeSheets,
@@ -4949,6 +4950,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const printableSheets = printableOfficeSheets(officeForms)
   async function downloadFormPdf(key: string, save: () => Promise<void>) {
+    // aria-disabled does not stop a click; this does, so one press is one file.
+    if (formPdfBusy !== null) return
     setFormPdfBusy(key)
     setFormPdfError(null)
     try {
@@ -5592,7 +5595,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 Permit
               </h2>
               <p className="text-xs text-ink-muted">
-                Filed on the BPLO business permit form · Form Ref: MCG-BPLO-FO-001 · v2.0
+                Filed on the BPLO business permit form · Form Ref:{' '}
+                {businessPermitFormCode(app.application_type)} · v2.0
               </p>
             </div>
             {/*
@@ -6654,7 +6658,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   />
                 </div>
                 {address?.latitude != null && address?.longitude != null ? (
-                  <div className="min-w-0">
+                  /*
+                    `isolate` keeps Leaflet's own z-indexes (panes 400, controls
+                    1000) inside the map, so it scrolls UNDER the sticky bar
+                    (z-15) instead of drawing over it.
+                  */
+                  <div className="isolate min-w-0">
                     <MapPicker
                       latitude={address.latitude}
                       longitude={address.longitude}
