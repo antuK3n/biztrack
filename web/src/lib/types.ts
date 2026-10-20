@@ -3172,7 +3172,8 @@ export interface OwnerProfile {
     blacklist_reason: string | null
     blacklisted_by: string | null
   }
-  summary: { businesses: number; active_permits: number; filings: number; total_paid: number }
+  /** `needs_attention`: permits expired, suspended, revoked or rejected. */
+  summary: { businesses: number; active_permits: number; filings: number; needs_attention: number }
   businesses: {
     id: number
     name: string

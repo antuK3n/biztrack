@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
@@ -193,7 +192,16 @@ class OwnerProfileController extends Controller
                 'businesses' => $businesses->count(),
                 'active_permits' => $permits->where('status', PermitStatus::Active)->count(),
                 'filings' => $applications->count(),
-                'total_paid' => round((float) $payments->where('status', PaymentStatus::Completed)->sum('amount'), 2),
+                /*
+                 * Permits an officer would act on: lapsed, held or decided
+                 * against. It replaced a lifetime "total paid" [client, 20
+                 * October 2026: "do admins really need Total paid? kung ano
+                 * lang need"] — a sum nobody acts on, where this is the count
+                 * that sends an officer to the businesses below.
+                 */
+                'needs_attention' => $permits->whereIn('status', [
+                    PermitStatus::Expired, PermitStatus::Suspended, PermitStatus::Revoked, PermitStatus::Rejected,
+                ])->count(),
             ],
             'businesses' => $businesses->map(fn (Business $b) => [
                 'id' => $b->id,
