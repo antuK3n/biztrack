@@ -3136,17 +3136,27 @@ export interface OwnerDirectoryRow {
   businesses: { id: number; name: string; ban: string | null; status: BusinessStatus; status_label: string }[]
 }
 
-/** One event on an owner's profile timeline: the account, a business, or a permit. */
+/**
+ * One event on an owner's profile timeline: the account, a business, or a
+ * permit. A permit event names its office, certificate, number and business;
+ * `by_office` is the actor's office code, or "Super Admin".
+ */
 export interface OwnerProfileEvent {
   id: number
   at: string | null
   scope: 'account' | 'business' | 'permit'
-  subject: string
+  office_code: string | null
+  permit_type: string | null
+  permit_number: string | null
+  business_name: string | null
   label: string
+  from: string | null
+  from_label: string | null
   to: string | null
   to_label: string | null
   reason: string | null
   by: string | null
+  by_office: string | null
 }
 
 /** An owner's profile as an office reads it (`GET /owner-profiles/{id}`). */

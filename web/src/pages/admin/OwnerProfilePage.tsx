@@ -214,7 +214,11 @@ function Profile({ profile }: { profile: OwnerProfile }) {
                       {f.business_name ?? '—'}
                     </span>,
                     f.status_label ? (
-                      <StatusChip key="c3" className="whitespace-nowrap" tone={FILING_TONES[genericStatusTone(f.status ?? '')] ?? 'tint-gray'}>
+                      <StatusChip
+                        key="c3"
+                        className="whitespace-nowrap"
+                        tone={FILING_TONES[genericStatusTone(f.status ?? '')] ?? 'tint-gray'}
+                      >
                         {f.status_label}
                       </StatusChip>
                     ) : (
@@ -240,10 +244,7 @@ function Profile({ profile }: { profile: OwnerProfile }) {
             />
           </Section>
 
-          <Section
-            title="Payment history"
-            count={profile.payments.length}
-          >
+          <Section title="Payment history" count={profile.payments.length}>
             {profile.payments.length === 0 ? (
               <Empty>No payments on the filings you can see.</Empty>
             ) : (
@@ -427,11 +428,24 @@ function BusinessBlock({
 
 /* ── Status history ─────────────────────────────────────────────────────── */
 
-const SCOPE_LABEL: Record<OwnerProfileEvent['scope'], string> = {
-  account: 'Account',
-  business: 'Business',
-  permit: 'Permit',
-}
+/*
+ * ── Whose status history, said on every entry ─────────────────────────────
+ *
+ * [Client, 20 October 2026: "paki indicate, lahat paki indicate nang maayos
+ * para di confusing".] Every entry names what it is about before what
+ * happened to it: the office's code, the certificate and its number, the
+ * business, the move from one status to the next, the reason, and who — with
+ * their office.
+ *
+ * A clearance office is sent its own certificate's history only, so its list
+ * needs no filter. BPLO and the super admin are sent everything, and choose
+ * between all of it, the account and businesses, or one office's permit.
+ */
+
+/** The offices in the order the City lists them, each with its certificate. */
+const OFFICE_ORDER = ['BPLO', 'CPDO', 'CHO', 'BFP', 'OBO', 'CENRO']
+
+type HistoryFilter = 'all' | 'account' | string
 
 function eventDot(e: OwnerProfileEvent): string {
   switch (e.to) {
@@ -451,46 +465,135 @@ function eventDot(e: OwnerProfileEvent): string {
   }
 }
 
+/** The pill at the head of each entry: the office, or Account / Business. */
+function subjectPill(e: OwnerProfileEvent): string {
+  if (e.scope === 'account') return 'Account'
+  if (e.scope === 'business') return 'Business'
+  return e.office_code ?? 'Permit'
+}
+
 function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
   const [all, setAll] = useState(false)
-  const shown = all ? events : events.slice(0, HISTORY_SHOWN)
+  const [filter, setFilter] = useState<HistoryFilter>('all')
+
+  // What this reader was sent decides what there is to choose between.
+  const offices = OFFICE_ORDER.filter((code) => events.some((e) => e.scope === 'permit' && e.office_code === code))
+  const hasAccount = events.some((e) => e.scope !== 'permit')
+  const certificateOf = (code: string) => events.find((e) => e.office_code === code)?.permit_type ?? code
+  const choosable = hasAccount || offices.length > 1
+
+  const filtered = events.filter((e) =>
+    filter === 'all'
+      ? true
+      : filter === 'account'
+        ? e.scope !== 'permit'
+        : e.scope === 'permit' && e.office_code === filter,
+  )
+  const shown = all ? filtered : filtered.slice(0, HISTORY_SHOWN)
 
   return (
-    <Section title="Status history" count={events.length}>
-      <ol className="px-5 py-3">
-        {shown.map((e, i) => (
-          <li key={`${e.scope}-${e.id}-${i}`} className="relative flex gap-3 pb-4 last:pb-1">
-            {/* The rail between dots; the last entry has none below it. */}
-            {i < shown.length - 1 && (
-              <span aria-hidden="true" className="absolute left-[5px] top-4 h-full w-px bg-line" />
-            )}
-            <span
-              aria-hidden="true"
-              className={`relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-white ${eventDot(e)}`}
-            />
-            <div className="min-w-0 text-sm">
-              <p className="font-semibold leading-snug text-ink">
-                {e.label}
-                {e.to_label && !e.label.toLowerCase().includes(e.to_label.toLowerCase()) && (
-                  <span className="font-normal text-ink-secondary"> → {e.to_label}</span>
-                )}
-              </p>
-              {e.scope !== 'account' && (
-                <p className="truncate text-xs text-ink-secondary">
-                  <span className="sr-only">{SCOPE_LABEL[e.scope]}: </span>
-                  {e.subject}
-                </p>
+    <Section title="Status history" count={filtered.length}>
+      {choosable ? (
+        <div className="border-b border-line px-5 py-3">
+          <label htmlFor="history-filter" className="mb-1 block text-xs font-semibold text-ink-muted">
+            Show
+          </label>
+          <select
+            id="history-filter"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value)
+              setAll(false)
+            }}
+            className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+          >
+            <option value="all">All status history</option>
+            {hasAccount && <option value="account">Account and businesses</option>}
+            {offices.map((code) => (
+              <option key={code} value={code}>
+                {code} — {certificateOf(code)}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        offices.length === 1 && (
+          <p className="border-b border-line px-5 py-2.5 text-xs text-ink-muted">
+            Your office's <b className="font-semibold text-ink-secondary">{certificateOf(offices[0])}</b> only.
+          </p>
+        )
+      )}
+
+      {shown.length === 0 ? (
+        <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded here yet.</p>
+      ) : (
+        <ol className="px-5 py-3">
+          {shown.map((e, i) => (
+            <li key={`${e.scope}-${e.id}-${i}`} className="relative flex gap-3 pb-4 last:pb-1">
+              {/* The rail between dots; the last entry has none below it. */}
+              {i < shown.length - 1 && (
+                <span aria-hidden="true" className="absolute left-[5px] top-4 h-full w-px bg-line" />
               )}
-              {e.reason && <p className="mt-0.5 text-xs leading-snug text-ink-secondary">“{e.reason}”</p>}
-              <p className="mt-0.5 text-xs text-ink-muted">
-                {formatDateTime(e.at)}
-                {e.by && <> · {e.by}</>}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ol>
-      {events.length > HISTORY_SHOWN && (
+              <span
+                aria-hidden="true"
+                className={`relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-white ${eventDot(e)}`}
+              />
+              <div className="min-w-0 flex-1 text-sm">
+                <p className="font-semibold leading-snug text-ink">{e.label}</p>
+
+                {/* What it is about. */}
+                <p className="mt-1 flex min-w-0 items-start gap-1.5 text-xs text-ink-secondary">
+                  <span className="mt-px shrink-0 rounded bg-royal-tint px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-royal">
+                    {subjectPill(e)}
+                  </span>
+                  {e.scope === 'permit' && (
+                    <span className="min-w-0">
+                      {e.permit_type} · <span className="tnum whitespace-nowrap">{e.permit_number}</span>
+                    </span>
+                  )}
+                  {e.scope === 'account' && <span>The owner's account</span>}
+                  {e.scope === 'business' && <span className="min-w-0">{e.business_name}</span>}
+                </p>
+                {e.scope === 'permit' && e.business_name && (
+                  <p className="mt-0.5 truncate text-xs text-ink-muted">Business: {e.business_name}</p>
+                )}
+
+                {/* What happened to it. */}
+                {e.to_label && (
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    {e.from_label ? (
+                      <>
+                        {e.from_label} <span aria-hidden="true">→</span>
+                        <span className="sr-only">to</span> <b className="font-semibold text-ink">{e.to_label}</b>
+                      </>
+                    ) : (
+                      <>
+                        Status: <b className="font-semibold text-ink">{e.to_label}</b>
+                      </>
+                    )}
+                  </p>
+                )}
+                {e.reason && <p className="mt-0.5 text-xs leading-snug text-ink-secondary">Reason: “{e.reason}”</p>}
+
+                {/* When, and who. */}
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {formatDateTime(e.at)}
+                  {e.by ? (
+                    <>
+                      {' '}
+                      · {e.by}
+                      {e.by_office && ` (${e.by_office})`}
+                    </>
+                  ) : (
+                    e.label !== 'Account created' && ' · Automatic'
+                  )}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {filtered.length > HISTORY_SHOWN && (
         <div className="border-t border-line px-5 py-2.5">
           <button
             type="button"
@@ -498,7 +601,7 @@ function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
             aria-expanded={all}
             className="text-sm font-semibold text-royal hover:underline"
           >
-            {all ? 'Show the latest only' : `Show all ${events.length.toLocaleString()} entries`}
+            {all ? 'Show the latest only' : `Show all ${filtered.length.toLocaleString()} entries`}
           </button>
         </div>
       )}

@@ -134,7 +134,7 @@ class OwnerProfileController extends Controller
             ->tap(fn ($b) => $this->visibleBusinesses($b, $reader))
             ->with([
                 'address.barangay:id,name',
-                'permits' => fn ($p) => $p->with('permitType.department:id,code,name')
+                'permits' => fn ($p) => $p->with(['permitType.department:id,code,name', 'issuedBy.department:id,code'])
                     ->orderByDesc('issued_at')->orderByDesc('id'),
             ])
             ->orderBy('name')
@@ -247,7 +247,7 @@ class OwnerProfileController extends Controller
                 'paid_at' => $p->paid_at?->toIso8601String(),
                 'created_at' => $p->created_at?->toIso8601String(),
             ])->values(),
-            'history' => $this->history($owner, $businesses, $permits),
+            'history' => $this->history($owner, $reader, $businesses, $permits),
         ]]);
     }
 
@@ -289,57 +289,102 @@ class OwnerProfileController extends Controller
     }
 
     /**
-     * One timeline, newest first: the account's own status, each business's
-     * status, and each permit's status — the last in the same words as the
-     * Permits page's Status history (PermitController::describeHistory).
+     * One timeline, newest first, each entry saying exactly what it is about:
+     * which office's permit, its number, the business, the status it left and
+     * the one it reached, why, and who — with their office.
+     *
+     * ── Whose history an office reads [client, 20 October 2026] ───────────
+     *
+     * "Zoning status ng Zoning Clearance lang, CHO status ng Sanitary Permit
+     * lang …" — a clearance office reads the history of its OWN certificate
+     * only. BPLO and the super admin read everything, the account's and each
+     * business's status besides, and the screen gives them a filter by office.
+     *
+     * Each permit's issue is on the timeline too, so an office whose
+     * certificate never changed status still sees when it was issued rather
+     * than an empty box. Permit events are worded as the Permits page's
+     * Status history words them (PermitController::describeHistory).
      *
      * @param  Collection<int, Business>  $businesses
      * @param  Collection<int, Permit>  $permits
      * @return list<array<string, mixed>>
      */
-    private function history(User $owner, Collection $businesses, Collection $permits): array
+    private function history(User $owner, User $reader, Collection $businesses, Collection $permits): array
     {
-        $account = AuditLog::query()
-            ->where('auditable_type', User::class)
-            ->where('auditable_id', $owner->id)
-            ->whereIn('action', ['owner.blacklisted', 'owner.blacklist_lifted'])
-            ->with('user:id,name,first_name,last_name')
-            ->get()
-            ->map(fn (AuditLog $log) => [
-                'id' => $log->id,
-                'at' => $log->created_at?->toIso8601String(),
-                'scope' => 'account',
-                'subject' => 'Account',
-                'label' => $log->action === 'owner.blacklisted' ? 'Owner blacklisted' : 'Owner reinstated',
-                'to' => $log->action === 'owner.blacklisted' ? 'blacklisted' : 'active',
-                'to_label' => $log->action === 'owner.blacklisted' ? 'Blacklisted' : 'Active',
-                'reason' => $log->changes['reason'] ?? null,
-                'by' => $log->user ? $this->nameOf($log->user) : null,
-            ]);
-
+        $everyOffice = ApplicationVisibility::readsEveryOffice($reader);
         $names = $businesses->pluck('name', 'id');
-        $business = AuditLog::query()
-            ->where('auditable_type', Business::class)
-            ->whereIn('auditable_id', $businesses->pluck('id'))
-            ->where('action', 'business.status_changed')
-            ->with('user:id,name,first_name,last_name')
-            ->get()
-            ->map(fn (AuditLog $log) => [
-                'id' => $log->id,
-                'at' => $log->created_at?->toIso8601String(),
-                'scope' => 'business',
-                'subject' => $names[$log->auditable_id] ?? 'Business',
-                'label' => 'Business status changed',
-                'to' => $log->changes['to'] ?? null,
-                'to_label' => self::BUSINESS_LABELS[$log->changes['to'] ?? ''] ?? null,
-                'reason' => $log->changes['reason'] ?? null,
-                'by' => $log->user ? $this->nameOf($log->user) : null,
-            ]);
 
-        $subjects = $permits->mapWithKeys(fn (Permit $p) => [
-            $p->id => trim(($p->permitType?->name ?? 'Permit').' · '.$p->permit_number),
-        ]);
-        $permit = AuditLog::query()
+        if (! $everyOffice) {
+            $permits = $permits->filter(fn (Permit $p) => $reader->department_id !== null
+                && $p->permitType?->issuing_department_id === $reader->department_id)->values();
+        }
+
+        $base = fn (int $id, ?string $at, string $scope) => [
+            'id' => $id,
+            'at' => $at,
+            'scope' => $scope,
+            'office_code' => null,
+            'permit_type' => null,
+            'permit_number' => null,
+            'business_name' => null,
+            'label' => null,
+            'from' => null,
+            'from_label' => null,
+            'to' => null,
+            'to_label' => null,
+            'reason' => null,
+            'by' => null,
+            'by_office' => null,
+        ];
+        $actor = fn (AuditLog $log) => [
+            'by' => $log->user ? $this->nameOf($log->user) : null,
+            'by_office' => $this->officeOf($log->user),
+        ];
+
+        $events = collect();
+
+        if ($everyOffice) {
+            $events = $events->concat(AuditLog::query()
+                ->where('auditable_type', User::class)
+                ->where('auditable_id', $owner->id)
+                ->whereIn('action', ['owner.blacklisted', 'owner.blacklist_lifted'])
+                ->with('user.department:id,code')
+                ->get()
+                ->map(fn (AuditLog $log) => array_merge($base($log->id, $log->created_at?->toIso8601String(), 'account'), [
+                    'label' => $log->action === 'owner.blacklisted' ? 'Owner blacklisted' : 'Owner reinstated',
+                    'from' => $log->action === 'owner.blacklisted' ? 'active' : 'blacklisted',
+                    'from_label' => $log->action === 'owner.blacklisted' ? 'Active' : 'Blacklisted',
+                    'to' => $log->action === 'owner.blacklisted' ? 'blacklisted' : 'active',
+                    'to_label' => $log->action === 'owner.blacklisted' ? 'Blacklisted' : 'Active',
+                    'reason' => $log->changes['reason'] ?? null,
+                ], $actor($log))));
+
+            $events = $events->concat(AuditLog::query()
+                ->where('auditable_type', Business::class)
+                ->whereIn('auditable_id', $businesses->pluck('id'))
+                ->where('action', 'business.status_changed')
+                ->with('user.department:id,code')
+                ->get()
+                ->map(fn (AuditLog $log) => array_merge($base($log->id, $log->created_at?->toIso8601String(), 'business'), [
+                    'business_name' => $names[$log->auditable_id] ?? null,
+                    'label' => 'Business status changed',
+                    'from' => $log->changes['from'] ?? null,
+                    'from_label' => self::BUSINESS_LABELS[$log->changes['from'] ?? ''] ?? null,
+                    'to' => $log->changes['to'] ?? null,
+                    'to_label' => self::BUSINESS_LABELS[$log->changes['to'] ?? ''] ?? null,
+                    'reason' => $log->changes['reason'] ?? null,
+                ], $actor($log))));
+        }
+
+        $byId = $permits->keyBy('id');
+        $about = fn (Permit $p) => [
+            'office_code' => $p->permitType?->department?->code,
+            'permit_type' => $p->permitType?->name,
+            'permit_number' => $p->permit_number,
+            'business_name' => $names[$p->business_id] ?? null,
+        ];
+
+        $events = $events->concat(AuditLog::query()
             ->where('auditable_type', Permit::class)
             ->whereIn('auditable_id', $permits->pluck('id'))
             ->whereIn('action', [
@@ -348,30 +393,57 @@ class OwnerProfileController extends Controller
             ])
             ->with('user.department')
             ->get()
-            ->map(fn (AuditLog $log) => [
-                'id' => $log->id,
-                'scope' => 'permit',
-                'subject' => $subjects[$log->auditable_id] ?? 'Permit',
-            ] + array_intersect_key(
-                PermitController::describeHistory($log),
-                array_flip(['at', 'label', 'to', 'to_label', 'reason', 'by']),
-            ));
+            ->map(function (AuditLog $log) use ($base, $about, $byId) {
+                $told = PermitController::describeHistory($log);
+                $from = $told['from'] ?? null;
 
-        return $account->concat($business)->concat($permit)
-            ->sortByDesc(fn (array $e) => [$e['at'] ?? '', $e['id']])
-            ->push([
-                'id' => 0,
-                'at' => $owner->created_at?->toIso8601String(),
-                'scope' => 'account',
-                'subject' => 'Account',
+                return array_merge($base($log->id, $told['at'], 'permit'), $about($byId[$log->auditable_id]), [
+                    'label' => $told['label'],
+                    'from' => $from,
+                    'from_label' => $from ? PermitStatus::tryFrom($from)?->label() : null,
+                    'to' => $told['to'],
+                    'to_label' => $told['to_label'],
+                    'reason' => $told['reason'],
+                    'by' => $told['by'],
+                    // Nobody's office on an automatic event, as nobody's name.
+                    'by_office' => $told['by'] ? $this->officeOf($log->user) : null,
+                ]);
+            }));
+
+        // Each certificate's issue, so the history starts where the permit did.
+        $events = $events->concat($permits->filter(fn (Permit $p) => $p->issued_at !== null)
+            ->map(fn (Permit $p) => array_merge($base(-$p->id, $p->issued_at->toIso8601String(), 'permit'), $about($p), [
+                'label' => 'Issued',
+                'to' => PermitStatus::Active->value,
+                'to_label' => PermitStatus::Active->label(),
+                'by' => $p->issuedBy ? $this->nameOf($p->issuedBy) : null,
+                'by_office' => $this->officeOf($p->issuedBy),
+            ])));
+
+        $events = $events->sortByDesc(fn (array $e) => [$e['at'] ?? '', $e['id']])->values();
+
+        if ($everyOffice) {
+            $events->push(array_merge($base(0, $owner->created_at?->toIso8601String(), 'account'), [
                 'label' => 'Account created',
-                'to' => null,
-                'to_label' => null,
-                'reason' => null,
-                'by' => null,
-            ])
-            ->values()
-            ->all();
+            ]));
+        }
+
+        return $events->all();
+    }
+
+    /**
+     * The office an actor speaks for: their department's code, or "Super
+     * Admin" for the seat that administers accounts and belongs to none.
+     */
+    private function officeOf(?User $user): ?string
+    {
+        if ($user === null) {
+            return null;
+        }
+        $user->loadMissing('department:id,code');
+
+        return $user->department?->code
+            ?? ($user->hasPermission('user.manage') ? 'Super Admin' : null);
     }
 
     private function nameOf(User $user): string
