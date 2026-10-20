@@ -106,9 +106,10 @@ it('shows BPLO every owner, with the profile the screen draws', function () {
 
     expect($data['account']['name'])->toBe('Profilia Santos')
         ->and($data['account']['status'])->toBe('active')
-        ->and($data['summary'])->toMatchArray(['businesses' => 1, 'active_permits' => 2, 'filings' => 1])
-        // Only what was actually paid counts toward the total.
-        ->and($data['summary']['total_paid'])->toBe(1500.5)
+        ->and($data['summary'])->toMatchArray([
+            'businesses' => 1, 'active_permits' => 2, 'filings' => 1, 'needs_attention' => 0,
+        ])
+        ->and($data['summary'])->not->toHaveKey('total_paid')
         ->and($data['payments'])->toHaveCount(2)
         ->and($data['businesses'][0]['id'])->toBe($business->id);
 

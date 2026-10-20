@@ -146,7 +146,11 @@ function Profile({ profile }: { profile: OwnerProfile }) {
             <Stat label="Businesses" value={summary.businesses.toLocaleString()} />
             <Stat label="Active permits" value={summary.active_permits.toLocaleString()} />
             <Stat label="Filings" value={summary.filings.toLocaleString()} />
-            <Stat label="Total paid" value={formatMoney(summary.total_paid)} />
+            <Stat
+              label="Needs attention"
+              value={summary.needs_attention.toLocaleString()}
+              warn={summary.needs_attention > 0}
+            />
           </dl>
         </div>
 
@@ -239,13 +243,6 @@ function Profile({ profile }: { profile: OwnerProfile }) {
           <Section
             title="Payment history"
             count={profile.payments.length}
-            aside={
-              profile.payments.length > 0 ? (
-                <span className="text-sm text-ink-secondary">
-                  Paid in all <b className="tnum text-ink">{formatMoney(summary.total_paid)}</b>
-                </span>
-              ) : null
-            }
           >
             {profile.payments.length === 0 ? (
               <Empty>No payments on the filings you can see.</Empty>
@@ -536,11 +533,12 @@ function Section({
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** `warn`: amber, not red — a lapsed or held permit is a thing to look at, not an error. */
+function Stat({ label, value, warn = false }: { label: string; value: string; warn?: boolean }) {
   return (
     <div className="bg-canvas/60 px-4 py-2.5 lg:min-w-[7.5rem]">
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{label}</dt>
-      <dd className="tnum mt-0.5 text-lg font-bold text-ink">{value}</dd>
+      <dd className={`tnum mt-0.5 text-lg font-bold ${warn ? 'text-amber-800' : 'text-ink'}`}>{value}</dd>
     </div>
   )
 }
