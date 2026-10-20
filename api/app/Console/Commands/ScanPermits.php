@@ -9,6 +9,7 @@ use App\Models\Permit;
 use App\Models\PermitExpiryNotice;
 use App\Models\PermitType;
 use App\Services\NotificationService;
+use App\Support\AnnualInspection;
 use App\Support\Audit;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -27,6 +28,14 @@ use Illuminate\Support\Facades\DB;
  *      `permits.suspension_reminded_at` instead — a send only when that is
  *      null or 7+ days old, stamped as it goes. Cleared when the permit is
  *      Active again, so a later suspension starts its own count.
+ *   5. The Occupancy Permit's yearly inspection, opened for OBO on the day
+ *      it falls due (App\Support\AnnualInspection).
+ *
+ * The Occupancy Permit sits out 1–3. It never expires and is never renewed
+ * (client, 20 October 2026: *"only annual inspection instead of annual
+ * renewal"*), so its `valid_until` is the day its inspection is due, and
+ * reminding, expiring or nudging on it would be telling the owner something
+ * false. PermitType::NO_EXPIRY_CODES says which types.
  *
  * Two properties this command has to hold, because it runs unattended every
  * night against a register of thousands of permits:
@@ -100,6 +109,7 @@ class ScanPermits extends Command
         $reminders = 0;
         $expired = 0;
         $renewalNudges = 0;
+        $noExpiry = PermitType::noExpiryIds();
 
         // --- 1. Pre-expiry renewal reminders --------------------------------
         // One query for the whole reminder horizon, then bucket in PHP. The
@@ -109,6 +119,7 @@ class ScanPermits extends Command
 
         $upcoming = $this->notifiable()
             ->where('status', PermitStatus::Active->value)
+            ->whereNotIn('permit_type_id', $noExpiry)
             ->whereDate('valid_until', '>=', $today->toDateString())
             ->whereDate('valid_until', '<=', $horizon)
             ->get();
@@ -139,6 +150,7 @@ class ScanPermits extends Command
         // Not filtered by notifiability: correcting a stale `active` status is
         // bookkeeping the register needs whether or not anyone is told.
         $overdue = Permit::where('status', PermitStatus::Active->value)
+            ->whereNotIn('permit_type_id', $noExpiry)
             ->whereDate('valid_until', '<', $today->toDateString())
             ->with('business.owner')
             ->get();
@@ -177,6 +189,7 @@ class ScanPermits extends Command
         // --- 3. Renewal-due nudge (lapsed 7 to 30 days ago) ------------------
         $recentlyExpired = $this->notifiable()
             ->where('status', PermitStatus::Expired->value)
+            ->whereNotIn('permit_type_id', $noExpiry)
             ->whereDate('valid_until', '>=', $lapsedNoticeFloor->toDateString())
             ->whereDate('valid_until', '<=', $today->copy()->subDays(self::RENEWAL_NUDGE_AFTER_DAYS)->toDateString())
             ->get();
@@ -214,7 +227,10 @@ class ScanPermits extends Command
             $suspensionReminders++;
         }
 
-        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s), {$suspensionReminders} suspension reminder(s).");
+        // --- 5. Occupancy Permits due their yearly inspection ---------------
+        $annual = AnnualInspection::openDue($today->toImmutable());
+
+        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s), {$suspensionReminders} suspension reminder(s), {$annual} annual inspection(s) opened.");
 
         return self::SUCCESS;
     }

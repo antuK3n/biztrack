@@ -21,6 +21,13 @@ class PermitResource extends JsonResource
             'valid_from' => optional($this->valid_from)->toDateString(),
             'valid_until' => optional($this->valid_until)->toDateString(),
             'days_until_expiry' => (int) $this->daysUntilExpiry(),
+            /*
+             * False on the Occupancy Permit (client, 20 October 2026): it never
+             * expires, and `valid_until` is the day its next yearly inspection
+             * is due. Null when the type was not loaded; web/src/lib/permitTerm.ts
+             * then decides from the code.
+             */
+            'expires' => $this->relationLoaded('permitType') ? $this->resource->expires() : null,
             'permit_type' => $this->relationLoaded('permitType') && $this->permitType ? [
                 'code' => $this->permitType->code,
                 'name' => $this->permitType->name,

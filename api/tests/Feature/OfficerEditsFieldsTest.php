@@ -35,7 +35,13 @@ use App\Support\OfficerEditRules;
 /** The filing scopedAssignmentFiling builds, as an Application. */
 function filingForOfficerEdit(string $name): Application
 {
-    return Application::findOrFail(scopedAssignmentFiling($name));
+    $app = Application::findOrFail(scopedAssignmentFiling($name));
+    // Assigned to BPLO's officer: an edit is the holder's alone (20 October 2026).
+    ApplicationAssignment::where('application_id', $app->id)
+        ->where('department_id', Department::where('code', 'BPLO')->value('id'))
+        ->update(['officer_user_id' => User::where('email', 'bplo@biztrack.local')->value('id')]);
+
+    return $app;
 }
 
 /**
@@ -323,4 +329,21 @@ it('refuses a BPLO officer who does not hold the case', function () {
     test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'By The Holder', 'reason' => 'Typo.']))
         ->assertOk();
     expect($app->fresh()->business->name)->toBe('By The Holder');
+});
+
+it('refuses an edit on a case nobody has been assigned yet', function () {
+    /*
+     * Client, 20 October 2026: "How am I able to access the Edit mode of an
+     * application if this was NOT assigned to me in the first place." An
+     * unclaimed case used to be open to the whole office; now Assign to Me
+     * comes first.
+     */
+    $app = filingForOfficerEdit('Officer Edit Unassigned Co');
+    ApplicationAssignment::where('application_id', $app->id)->update(['officer_user_id' => null]);
+
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, ['name' => 'Unassigned Edit', 'reason' => 'Typo.']))
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Assign this filing to yourself before editing it.');
+    expect($app->fresh()->business->name)->not->toBe('Unassigned Edit');
 });

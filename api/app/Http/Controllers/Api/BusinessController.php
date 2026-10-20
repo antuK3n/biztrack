@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
@@ -272,19 +273,6 @@ class BusinessController extends Controller
         );
 
         /*
-         * The holder rule approve() uses (AssignmentController::authorizeHolder):
-         * an unclaimed case is open to the office, a claimed one to its holder.
-         */
-        $holderId = $application->assignments()
-            ->where('department_id', $user->department_id)
-            ->value('officer_user_id');
-        abort_unless(
-            $holderId === null || $holderId === $user->id,
-            403,
-            'Only the officer handling this filing can edit it.'
-        );
-
-        /*
          * ── The business permit form is BPLO's (OfficerEditRules) ───────────
          *
          * Client, 19 October 2026: some fields may be "edited only by the
@@ -297,6 +285,24 @@ class BusinessController extends Controller
             $user->department?->code === OfficerEditRules::BUSINESS_FORM_OFFICE,
             403,
             OfficerEditRules::NOT_YOUR_FORM_MESSAGE
+        );
+
+        /*
+         * Only the officer the case is assigned to. It was the holder rule
+         * approve() uses, which opens an unclaimed case to the whole office;
+         * the client, 20 October 2026: "How am I able to access the Edit mode
+         * of an application if this was NOT assigned to me in the first place.
+         * Please FIX." An edit no longer claims a case by itself.
+         */
+        $holderId = $application->assignments()
+            ->where('department_id', $user->department_id)
+            ->value('officer_user_id');
+        abort_unless(
+            $holderId !== null && $holderId === $user->id,
+            403,
+            $holderId === null
+                ? 'Assign this filing to yourself before editing it.'
+                : 'Only the officer handling this filing can edit it.'
         );
 
         $business = $application->business;
@@ -539,6 +545,8 @@ class BusinessController extends Controller
 
         $underReview = $business->applications()
             ->whereNotIn('status', [ApplicationStatus::Draft, ApplicationStatus::Returned])
+            // The Occupancy Permit's yearly inspection reviews no name or line.
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->get()
             ->contains(fn (Application $app) => ! $app->isDecided());
 
@@ -592,11 +600,19 @@ class BusinessController extends Controller
              * (`RenewablePermit::alreadyRenewed`).
              */
             ->whereDoesntHave('renewals')
+            /*
+             * Nor the Occupancy Permit: it never expires and gets a yearly
+             * inspection instead of a renewal (client, 20 October 2026;
+             * PermitType::NO_EXPIRY_CODES). RenewablePermit refuses it too.
+             */
+            ->whereNotIn('permit_type_id', PermitType::noExpiryIds())
             ->orderByRaw('valid_until is null, valid_until asc')
             ->orderBy('id')
             ->get();
 
+        // Filings the owner made: a yearly inspection carries no form to copy.
         $lastApplication = $business->applications()
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->with('permitTypes:id')
             ->orderByDesc('created_at')
             ->first();
@@ -618,6 +634,7 @@ class BusinessController extends Controller
          * from that would hand back the blanks it is trying to fill.
          */
         $lastFiled = $business->applications()
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('submitted_at')
             ->orderByDesc('submitted_at')
             ->first();

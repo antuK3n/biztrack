@@ -251,6 +251,8 @@ class ChatbotFacts
             "• The {$mayors} always expires on 31 December of the year it is issued or renewed. Renew it from 1 to {$closes} without penalty; it is late after {$closes}. Renewal opens on 1 January.",
             '• The other permits expire on 31 December of the year they are first issued, and a renewal runs one year from the day it is renewed'
                 .($opensBefore !== null ? ". They can be renewed from {$opensBefore} days before they expire." : '.'),
+            // Client, 20 October 2026 (PermitType::NO_EXPIRY_CODES).
+            '• The Occupancy Permit is the exception: it does not expire and is not renewed. It gets a yearly inspection instead, which OBO opens on the due date.',
             '• Each permit is renewed on its own application: one permit per renewal.',
             "• Renewing after a permit has expired (for the {$mayors}, after {$closes}) adds the late charges. ".$this->rules->penaltyPhrase(),
         ];

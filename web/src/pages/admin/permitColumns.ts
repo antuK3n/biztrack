@@ -1,6 +1,7 @@
 import type { PermitRegisterRow } from '../../lib/types'
 import type { PermitSort } from '../../lib/resources'
 import { businessName, formatDate } from '../../lib/format'
+import { nextInspectionLabel, permitExpires } from '../../lib/permitTerm'
 
 /*
  * The register table's columns, as data.
@@ -275,7 +276,17 @@ export const SHARED_COLUMNS: PermitColumn[] = [
     value: (r) => suspensionCell(r),
   },
   { key: 'valid_from', label: 'Valid from', sort: 'valid_from', tnum: true, value: (r) => formatDate(r.valid_from) },
-  { key: 'valid_until', label: 'Valid until', sort: 'valid_until', tnum: true, value: (r) => formatDate(r.valid_until) },
+  /*
+   * The Occupancy Permit never expires (client, 20 October 2026): its date is
+   * the next yearly inspection, and it says so rather than passing as a term.
+   */
+  {
+    key: 'valid_until',
+    label: 'Valid until',
+    sort: 'valid_until',
+    tnum: true,
+    value: (r) => (permitExpires(r) ? formatDate(r.valid_until) : `No expiry · ${nextInspectionLabel(r.valid_until)}`),
+  },
   {
     key: 'days',
     label: 'Days to expiry',
@@ -292,7 +303,7 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      * row reads as a live permit expiring (tester).
      */
     value: (r) =>
-      r.status === 'superseded' || r.status === 'revoked' || typeof r.days_until_expiry !== 'number'
+      r.status === 'superseded' || r.status === 'revoked' || !permitExpires(r) || typeof r.days_until_expiry !== 'number'
         ? null
         : String(r.days_until_expiry),
   },

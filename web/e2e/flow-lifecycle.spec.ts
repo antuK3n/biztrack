@@ -513,6 +513,8 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
           },
           emergency_contact_name: 'Ana Dela Cruz',
           emergency_contact_number: '0917 123 4567',
+          // Item 16, required by Business Information before Review opens.
+          citizenship: 'Filipino',
           /*
            * Paper items B6 and B7, both required on a NEW filing since
            * 9 September 2026 and both gating the Business Operation section.
@@ -593,9 +595,12 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
      */
     const pdf = '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n'
     for (const dt of businessType.document_types) {
-      const context: string | undefined = dt.context
+      // A context is a comma list now ("new,amend_sole", "owned,…"), read as
+      // RequiredDocuments::matcher does; this fixture's premises are owned.
+      const tokens = (dt.context ?? '').split(',').map((t: string) => t.trim()).filter(Boolean)
       const appliesNow =
-        !context || context === 'all' || context === 'new' || context.toUpperCase() === 'BUSINESS'
+        tokens.length === 0 ||
+        tokens.some((t: string) => ['all', 'new', 'owned'].includes(t) || t.toUpperCase() === 'BUSINESS')
       if (dt.is_required === false || !appliesNow) continue
       const body = new FormData()
       body.append('document_type_id', String(dt.id))
@@ -697,7 +702,9 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
    * reaching Review & Submit in one click IS the statement that nothing is
    * outstanding.
    */
-  await expect(map.locator('li')).toHaveCount(7)
+  // Six since Fees & Tax Computation left BASE_PHASES (3b3efb0); Business
+  // Operation is still its own section, so the point above stands.
+  await expect(map.locator('li')).toHaveCount(6)
 
   /*
    * Walked to Review & Submit, then submitted through the API rather than by
@@ -716,7 +723,10 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
    * The wizard is driven to the last step regardless, because reaching Review &
    * Submit is what proves the filing is complete.
    */
-  await map.getByRole('button', { name: /review & submit/i }).click()
+  // A reopened draft lands on its first unfinished part, so once consent is in
+  // it can land on Review & Submit itself (map button disabled); jump only if not.
+  const review = page.getByRole('heading', { name: 'Review & Submit', level: 1 })
+  if (!(await review.isVisible())) await map.getByRole('button', { name: /review & submit/i }).click()
   await expect(page.getByRole('button', { name: /^submit$/i })).toBeEnabled()
   /*
    * Wait for the draft to be WRITTEN before submitting around the button.

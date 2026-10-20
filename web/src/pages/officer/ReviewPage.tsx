@@ -24,6 +24,7 @@ import {
   formatVersionDate,
   lineOfBusinessText,
 } from '../../lib/format'
+import { nextInspectionLabel, permitExpires } from '../../lib/permitTerm'
 /*
  * The wizard's own function for item 2's heading, so the sheet reads back
  * the question that was actually put — a cooperative is asked for its CDA
@@ -279,6 +280,39 @@ const MODE_OPTIONS: { value: ReviewMode; label: string }[] = [
  * beside MCG-BPLO-FO-001, so the item numbers and sequence stay as they are.
  */
 const SHEET_GRID = 'grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4'
+
+/*
+ * Twelve columns, for a section whose answers differ in length (20 October
+ * 2026). Client: "you don't have to make everything of the same sizes because
+ * SOME ANSWERS ARE EXPECTED TO BE LONG, WHILE SOME ANSWERS ARE SHORT." Each
+ * Field takes a span sized by its answer: a suffix one, a TIN two, a business
+ * name four. gap-x-4 because twelve tracks at the sheet's 24px gutter leave a
+ * suffix box narrower than its own label.
+ */
+const SHEET_GRID_12 = 'grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-12'
+
+/**
+ * A span for an answer this page does not know in advance: an office sheet's,
+ * whose keys differ per office. Measured on the answer itself, so a count gets
+ * a sixth and an address half the row, on every office's sheet alike.
+ */
+function spanForAnswer(text: string): string {
+  const n = text.length
+  if (n <= 8) return 'lg:col-span-2'
+  if (n <= 22) return 'lg:col-span-3'
+  if (n <= 40) return 'lg:col-span-4'
+  if (n <= 80) return 'lg:col-span-6'
+  return 'lg:col-span-12'
+}
+
+/** Spans on SHEET_GRID_12, by how long the answer runs. */
+const SPAN = {
+  xs: 'lg:col-span-1',
+  sm: 'lg:col-span-2',
+  md: 'lg:col-span-3',
+  lg: 'lg:col-span-4',
+  xl: 'lg:col-span-6',
+} as const
 const officeInput =
   'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-officeuse-border'
 
@@ -919,6 +953,9 @@ function FieldEditorError({ id, children }: { id: string; children: ReactNode })
     </p>
   )
 }
+/** A read answer on the sheet: see Field. */
+const ANSWER_CLS = 'mt-auto break-words rounded-md bg-royal-tint px-2.5 py-1 text-sm font-semibold text-ink'
+
 function Field({
   label,
   value,
@@ -979,14 +1016,19 @@ function Field({
     .sort((a, b) => Date.parse(b.at ?? '') - Date.parse(a.at ?? ''))
 
   return (
-    <dl className={`min-w-0 ${wide ? 'sm:col-span-2 lg:col-span-4' : ''} ${className}`}>
+    <dl className={`flex min-w-0 flex-col ${className} ${wide ? '!col-span-full' : ''}`}>
       {/*
         The label small and muted, the value in ink at medium weight: the
         weight is what makes the answer read as the answer now that the box
         is gone. The CORRECTED badge stays inline after the label (rose, the
         palette's Returned hue — a correction is what answers a return).
       */}
-      <dt className="text-xs leading-snug text-ink-muted">
+      {/*
+        A column with the answer at its foot, so every box on a row sits on
+        one line even when a label beside it wraps to two (20 October 2026:
+        the TIN label pushed its answer down and the row went uneven).
+      */}
+      <dt className="mb-1 text-xs leading-snug text-ink-muted">
         {label}
         {locked && (
           <span title={tip} className="ml-1 inline-flex align-[-1px] text-ink-muted">
@@ -1004,7 +1046,7 @@ function Field({
         )}
       </dt>
       {editable && edits !== null && edit !== undefined ? (
-        <dd className="mt-0.5">
+        <dd className="mt-auto">
           <FieldEditor
             fieldKey={edit.key}
             label={label}
@@ -1020,7 +1062,13 @@ function Field({
           />
         </dd>
       ) : (
-        <dd className="mt-0.5 break-words text-sm font-medium text-ink">{value || '—'}</dd>
+        /*
+          The answer in a soft box of its own, so it cannot be read as another
+          label (20 October 2026). Client: "The field title and field answers
+          are hard to distinguish. Put something to make the answer stand
+          out." Weight alone was the previous answer, and it was not enough.
+        */
+        <dd className={ANSWER_CLS}>{value || '—'}</dd>
       )}
       {history.length > 0 && <FieldHistory history={history} label={label} />}
       {noteList.map((n) => (
@@ -1222,9 +1270,12 @@ function RequirementsRead({
 /** A FOR OFFICE USE ONLY value the officer is not filling in right now — as text, like the sheet. */
 function OfficeReadout({ label, value }: { label: string; value: string }) {
   return (
-    <dl className="min-w-0">
-      <dt className="text-xs leading-snug text-ink-muted">{label}</dt>
-      <dd className="mt-0.5 break-words text-sm font-medium text-ink">{value || '—'}</dd>
+    <dl className="flex min-w-0 flex-col">
+      <dt className="mb-1 text-xs leading-snug text-ink-muted">{label}</dt>
+      {/* White on the office-use card's amber, rather than the sheet's blue. */}
+      <dd className="mt-auto break-words rounded-md bg-white/80 px-2.5 py-1 text-sm font-semibold text-ink">
+        {value || '—'}
+      </dd>
     </dl>
   )
 }
@@ -2202,6 +2253,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   // Opens as a record of the filing; Edit turns on the office's own fields.
   const [mode, setMode] = useState<ReviewMode>('view')
+  const [claimingForEdit, setClaimingForEdit] = useState(false)
+  const [claimError, setClaimError] = useState<string | null>(null)
+  async function claimForEdit() {
+    if (claimingForEdit) return
+    setClaimingForEdit(true)
+    setClaimError(null)
+    try {
+      await assignments.claim(assignmentId)
+      reload()
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : 'Couldn’t assign it. Try again.')
+    } finally {
+      setClaimingForEdit(false)
+    }
+  }
 
   /*
    * ── The officer's unsaved edits ──────────────────────────────────────
@@ -3048,34 +3114,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * row whose formatting has to match the breakdown above it, and two copies is
    * how the peso sign ends up on one of them.
    */
-  /*
-   * ── A bill with no business tax on it, said out loud ────────────────────
-   *
-   * Found on 1 October 2026 by filing a renewal through the API and watching
-   * it to the end: with no Section B answers the engine had no gross receipts
-   * to assess, so the Tax Order of Payment was three fixed charges — filing
-   * fee, plates, sticker, ₱375 — and no business tax at all. It was paid and
-   * a permit was issued. The same filing with Section B answered is ₱19,125.
-   *
-   * A SUBMIT GATE was tried first and reverted the same day: requiring the
-   * profile before submission broke 277 tests across twelve files, because
-   * fixtures that exercise office scoping, assignments and messages submit
-   * filings without ever walking the tax step, and they are right not to.
-   *
-   * So it is told to the person who can act on it instead. BPLO reads this
-   * sheet before the first approval, which is the moment the bill becomes
-   * payable, and Return is already the remedy. The wizard always sends
-   * Section B, so a filing without it arrived another way and is worth a
-   * human look rather than an automatic refusal.
-   *
-   * Keyed on the ABSENT TAX LINE, not on the absent profile: what matters is
-   * the bill that resulted, and a profile that produced no tax for some other
-   * reason is just as worth seeing.
-   */
-  const hasBusinessTax = (app.fee_assessment?.line_items ?? []).some((item) =>
-    /tax/i.test(item.label ?? ''),
-  )
-
   const taxOrderBlock =
     (app.fee_assessment?.line_items?.length ?? 0) > 0 ? (
       <div className="mt-2 rounded-lg border border-line bg-white px-4 py-3">
@@ -3088,16 +3126,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           6 October 2026), which never carry the business tax — so on its seat
           the absence says nothing.
         */}
-        {!hasBusinessTax && !foldsFiledSheet && (
-          <p
-            role="alert"
-            className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-4 py-2.5 text-sm font-semibold text-s-orange-ink"
-          >
-            No business tax on this assessment. The filing carries no Business &amp; Tax
-            Profile, so only the fixed charges were computed — return it for Section B
-            before approving.
-          </p>
-        )}
         <div className="mt-2">
           <TaxOrderBreakdown fee={app.fee_assessment} showCitations />
         </div>
@@ -3355,6 +3383,17 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const heldByAnother = data.can_act === false
   const holderName = data.officer?.name ?? null
+  /*
+   * ── Edit is the assigned officer's alone (20 October 2026) ───────────────
+   *
+   * Client: "How am I able to access the Edit mode of an application if this
+   * was NOT assigned to me in the first place. Please FIX." An unheld case
+   * used to open Edit to the whole office, on the rule that acting on it
+   * claims it. Editing a declaration is not a step that should claim a case
+   * by accident, so Edit now waits for Assign to Me, and the API refuses an
+   * edit from anyone but the holder (BusinessController, OfficeFormController).
+   */
+  const heldByMe = data.officer !== null && data.officer?.id === user?.id
 
   /*
    * What is still outstanding on a paid filing that has not qualified for final
@@ -3419,7 +3458,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const withdrawn = app.status === 'cancelled'
   // A decided review is a record for good: there is nothing left to change.
-  const editing = mode === 'edit' && !decided && !withdrawn && !heldByAnother
+  const editing = mode === 'edit' && !decided && !withdrawn && !heldByAnother && heldByMe
 
   /*
    * The applicant's own rule for each edited field, run as it is typed.
@@ -3566,30 +3605,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * it drove are both gone. See `canSetTier` directly above.
    */
   const categoryMissing = false
-
-  /**
-   * Who set the tier this filing currently carries — the sentence that makes
-   * the control safe to hand an officer.
-   *
-   * Null unless an officer set it, since 24 September 2026. The two branches
-   * that stood here for an automatic or an absent category both said the
-   * filing could not be approved until somebody confirmed one — which is
-   * true, and is already said twice in amber above the fold whenever it
-   * applies: `#approve-blocked-why`, which the Approve button itself points
-   * at, and the `categoryMissing && canSetTier` block that carries a picker.
-   * A third copy at the foot of the sheet was the client's example of a
-   * description doing no work.
-   *
-   * What is left is not a description. WHO chose the tier and WHEN appears
-   * nowhere else on the sheet, and it is what makes a category somebody else
-   * set safe to rely on.
-   */
-  const tierProvenance =
-    ra?.source === 'officer'
-      ? `Category set by ${ra.set_by?.name ?? 'a reviewing officer'}${
-          ra.set_at ? ` on ${formatDate(ra.set_at)}` : ''
-        }.`
-      : null
 
   async function saveTier() {
     // Guarded here as well as on the button, because the button is shut with
@@ -3952,13 +3967,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       ?.created_at ?? null
   const onDate = (words: string, iso: string | null | undefined) =>
     iso ? `${words} ${formatDate(iso)}` : words
-  const dueNote = (): string | null => {
-    if (!app.deadline_at) return null
-    const days = app.ra11032?.statutory_working_days
-    return Date.parse(app.deadline_at) < Date.now()
-      ? `Overdue — was due ${formatDate(app.deadline_at)} (RA 11032)`
-      : `Decide by ${formatDate(app.deadline_at)}${days ? ` · RA 11032, ${days} working days` : ''}`
-  }
+  /*
+   * A filing waiting on a decision says nothing beside its status: the "Decide
+   * by … (RA 11032)" line went on 20 October 2026 with the Due column on
+   * Manage Applications. Client: "No need to put Due. Remove it please. Also
+   * remove it in the application form itself. Do for all offices that have
+   * this."
+   */
   const statusNote: string | null = (() => {
     if (ownClearanceStatus !== null) {
       switch (ownClearanceStatus) {
@@ -3977,8 +3992,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             'Approved',
             app.permit_types.find((p) => p.code === data.clearance?.code)?.decided_at,
           )
-        case 'for_approval':
-          return dueNote()
         default:
           return null
       }
@@ -3989,7 +4002,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     if (isGatheringOtherPermits(app)) return onDate('Paid', lastMoveInto('approved'))
     if (app.status === 'pending_payment') return `${onDate('Approved', lastMoveInto('pending_payment'))} — waiting for payment`
     if (app.status === 'approved') return onDate('Completed', lastMoveInto('approved'))
-    if (app.status === 'for_approval' || app.status === 'for_final_approval') return dueNote()
     return null
   })()
   const statusChip = (
@@ -4033,7 +4045,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             {businessRemoved ? 'Business removed from the register' : business.name}
           </p>
           <p className="mt-1 text-center text-sm font-semibold uppercase tracking-wide text-ink-muted">
-            {app.tracking_id}
+            {business.ban ?? app.tracking_id}
           </p>
           <p className="mt-2 flex justify-center text-center">{statusChip}</p>
 
@@ -4897,7 +4909,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     { id: 'review-a', label: 'A · Business', title: 'Section A · Business Information & Registration' },
     { id: 'review-b', label: 'B · Operation', title: 'Section B · Business Operation' },
     { id: 'review-c', label: 'C · Documents', title: 'Section C · Documentary Requirements' },
-    { id: 'for-office-use', label: 'Office use', title: 'For Office Use Only' },
+    ...(editing ? [{ id: 'for-office-use', label: 'Office use', title: 'For Office Use Only' }] : []),
     ...(taxOrderBlock ? [{ id: 'review-tax', label: 'Tax order', title: 'Tax Order of Payment' }] : []),
   ]
   const jumpTo = (id: string) => {
@@ -5024,7 +5036,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             <h1 className="min-w-0 truncate text-lg font-bold text-ink">
               {business.name ?? app.tracking_id}
             </h1>
-            <span className="tnum text-xs font-semibold text-ink-muted">{app.tracking_id}</span>
+            {/*
+              The Business Account No., as on Manage Applications (client, 20
+              October 2026: "why Tracking ID again? Show BAN instead."). A
+              business that has none yet — a first filing not yet issued —
+              still shows its tracking ID rather than nothing.
+            */}
+            <span className="tnum text-xs font-semibold text-ink-muted">{business.ban ?? app.tracking_id}</span>
             {businessRemoved && (
               <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
                 Business removed from the register
@@ -5074,7 +5092,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               <>This filing is with another officer, so it is read-only for you.</>
             )}
           </p>
-        ) : withdrawn ? null : (
+        ) : withdrawn ? null : !heldByMe ? (
+          /* Nobody holds it yet: Edit opens once it is assigned to this officer. */
+          <div className="flex flex-wrap items-center gap-2.5">
+            <p className="text-xs font-medium text-ink-secondary">Assign this to yourself to edit it.</p>
+            <button
+              type="button"
+              onClick={() => void claimForEdit()}
+              aria-disabled={claimingForEdit || undefined}
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-full bg-royal px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+            >
+              {claimingForEdit ? 'Assigning…' : 'Assign to Me'}
+            </button>
+            {claimError && <p className="text-xs font-medium text-s-red">{claimError}</p>}
+          </div>
+        ) : (
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2.5">
               <span
@@ -5590,14 +5622,30 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
                 {data.department.name} · Application Review
               </p>
-              <h2 className="text-base font-bold text-ink">
-                Application for {TYPE_TITLES[app.application_type] ?? app.application_type} Business
-                Permit
-              </h2>
-              <p className="text-xs text-ink-muted">
-                Filed on the BPLO business permit form · Form Ref:{' '}
-                {businessPermitFormCode(app.application_type)} · v2.0
-              </p>
+              {/*
+                The Occupancy Permit's yearly inspection was filed on no form:
+                the system opened it on the permit's due date (client,
+                20 October 2026). Said once, here, instead of a form reference.
+              */}
+              {app.application_type === 'annual_inspection' ? (
+                <>
+                  <h2 className="text-base font-bold text-ink">Annual inspection</h2>
+                  <p className="text-xs text-ink-muted">
+                    Opened on the Occupancy Permit’s inspection date · no fee
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-base font-bold text-ink">
+                    Application for {TYPE_TITLES[app.application_type] ?? app.application_type} Business
+                    Permit
+                  </h2>
+                  <p className="text-xs text-ink-muted">
+                    Filed on the BPLO business permit form · Form Ref:{' '}
+                    {businessPermitFormCode(app.application_type)} · v2.0
+                  </p>
+                </>
+              )}
             </div>
             {/*
               The printable forms (request B). Every reader of the filing gets
@@ -5606,6 +5654,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               screen reader — six buttons reading "PDF" are six identical stops.
             */}
             <div className="flex flex-wrap items-center gap-1.5">
+              {app.application_type !== 'annual_inspection' && (
               <button
                 type="button"
                 onClick={() =>
@@ -5620,6 +5669,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <DownloadIcon size={13} />
                 {formPdfBusy === 'BUSINESS' ? 'Preparing…' : 'Application form (PDF)'}
               </button>
+              )}
               {printableSheets.map((sheet) => (
                 <button
                   key={sheet.code}
@@ -5977,10 +6027,16 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                                 }`,
                                 cls: 'text-ink',
                               }
-                            : {
-                                text: `Valid to ${row.valid_until ? formatDate(row.valid_until) : 'an unrecorded date'}`,
-                                cls: 'text-ink-secondary',
-                              }
+                            : !permitExpires({ permit_type_code: row.permit_type_code })
+                              ? {
+                                  // The Occupancy Permit never expires (lib/permitTerm.ts).
+                                  text: `No expiry · ${nextInspectionLabel(row.valid_until)}`,
+                                  cls: 'text-ink-secondary',
+                                }
+                              : {
+                                  text: `Valid to ${row.valid_until ? formatDate(row.valid_until) : 'an unrecorded date'}`,
+                                  cls: 'text-ink-secondary',
+                                }
                   const gap = row.state === 'missing' || row.state === 'expired'
 
                   return (
@@ -6144,7 +6200,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     The applicant recorded no answers on your office’s form.
                   </p>
                 ) : (
-                  <div className={`mt-2 ${SHEET_GRID}`}>
+                  <div className={`mt-2 ${SHEET_GRID_12}`}>
                     {entries.map(([key, value]) =>
                       /*
                        * ── Which answers the office may correct here ──────
@@ -6160,7 +6216,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                        */
                       editing &&
                       !officeFormKeyIsDerived(form.permit_type_code, key) &&
-                      (editRules.data?.sheets[form.permit_type_code]?.clerical ?? []).includes(key) ? (                        <div key={key} className="min-w-0">
+                      (editRules.data?.sheets[form.permit_type_code]?.clerical ?? []).includes(key) ? (
+                        <div key={key} className={`min-w-0 ${spanForAnswer(officeFormValueText(key, value))}`}>
                           <p className="text-xs leading-snug text-ink-muted">
                             {officeFormFieldLabel(form.permit_type_code, key)}
                           </p>
@@ -6180,6 +6237,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                           key={key}
                           label={officeFormFieldLabel(form.permit_type_code, key)}
                           value={officeFormValueText(key, value)}
+                          className={spanForAnswer(officeFormValueText(key, value))}
                           notes={[{ code: key, permitTypeCode: form.permit_type_code }]}
                           lockTip={
                             officeFormKeyIsDerived(form.permit_type_code, key)
@@ -6497,18 +6555,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         // The applicant's own words first, then the class they
                         // were sorted into.
                         value={lineOfBusinessText(line)}
-                        className="sm:col-start-1"
+                        className="sm:col-start-1 lg:col-span-3"
                       />
                       {/*
                         Products / Services — the paper's own second column
-                        of this table, and what CENRO reviews. Given the rest
-                        of the row, because a list of goods is long.
+                        of this table, and what CENRO reviews. A quarter, and
+                        the line of business the rest: the client, 20 October
+                        2026, "Products/Services DOES NOT need to be that long,
+                        so shorten it and adjust the others." It was the other
+                        way round, and the class name wrapped to two lines
+                        beside a box holding three letters.
                       */}
-                      <Field
-                        label="Products / Services"
-                        value={line.products_services ?? ''}
-                        className="lg:col-span-3"
-                      />
+                      <Field label="Products / Services" value={line.products_services ?? ''} />
                     </div>
                   ))}
                 </div>
@@ -6540,7 +6598,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 `lockedReason`: nothing is missing, so no scrim over the pin.
               */}
               <div className="grid items-start gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
-                <div className="grid grid-cols-1 content-start gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                {/*
+                  Six columns on a wide screen, each box as wide as its answer
+                  (20 October 2026): House, Block, Lot and Lot Area are a few
+                  characters and take one; Street and the landmark take three;
+                  the rest two. Three rows where there were four.
+                */}
+                <div className="grid grid-cols-1 content-start gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-6">
                   {/*
                     The real columns first, `splitLine1` only as a fallback for
                     filings made before House and Street were asked apart
@@ -6558,7 +6622,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     label="Street"
                     targets={['form:address']}
                     value={address?.street || street}
-                    className="lg:col-span-2"
+                    className="lg:col-span-3"
                     edit={{ key: 'address.street', value: address?.street ?? '' }}
                   />
                   <Field
@@ -6566,7 +6630,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     targets={['form:address']}
                     notes={[]}
                     value={address?.block ?? ''}
-                    className="sm:col-start-1"
                     edit={{ key: 'address.block' }}
                   />
                   <Field
@@ -6588,7 +6651,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     label="Barangay"
                     targets={['form:barangay']}
                     value={address?.barangay?.name ?? ''}
-                    className="sm:col-start-1"
+                    className="lg:col-span-2"
                     edit={{
                       key: 'address.barangay_id',
                       value: address?.barangay?.id == null ? '' : String(address.barangay.id),
@@ -6625,7 +6688,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     targets={['form:address']}
                     notes={[]}
                     value={address?.line2 ?? ''}
-                    className="lg:col-span-2"
+                    className="lg:col-span-3"
                     edit={{ key: 'address.line2' }}
                   />
                   {/*
@@ -6642,18 +6705,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     ]
                       .filter(Boolean)
                       .join(', ')}
-                    className="sm:col-start-1"
+                    className="lg:col-span-2"
                   />
                   <Field
                     label="Emergency Contact Person"
                     targets={['form:emergency_contact_name']}
                     value={business.emergency_contact_name ?? ''}
+                    className="lg:col-span-2"
                     edit={{ key: 'emergency_contact_name' }}
                   />
                   <Field
                     label="Emergency Contact Number"
                     targets={['form:emergency_contact_number']}
                     value={business.emergency_contact_number ?? ''}
+                    className="lg:col-span-2"
                     edit={{ key: 'emergency_contact_number' }}
                   />
                 </div>
@@ -6709,9 +6774,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 becomes the chips the applicant was given (client,
                 30 September 2026), and one it may not shows a lock.
               */}
-              <div className={SHEET_GRID}>
+              <div className={SHEET_GRID_12}>
                 <Field
                   label="1. Form of Organization"
+                  className={SPAN.md}
                   targets={['form:registration_type']}
                   value={business.registration_type ? humanizeKey(business.registration_type) : ''}
                   edit={{
@@ -6729,6 +6795,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   label={`2. ${registrationNumberLabel(
                     fieldEdits.registration_type ?? business.registration_type ?? '',
                   )}`}
+                  className={SPAN.md}
                   targets={['form:registration_number']}
                   value={business.registration_number ?? ''}
                   edit={{ key: 'registration_number' }}
@@ -6737,17 +6804,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   label="3. Tax Identification Number (TIN)"
                   targets={['form:tin']}
                   value={business.tin ?? ''}
-                  className="sm:col-start-1"
+                  className={SPAN.md}
                   edit={{ key: 'tin' }}
                 />
                 <Field
                   label="4. Business Name"
+                  className={SPAN.md}
                   targets={['form:name']}
                   value={business.name ?? ''}
                   edit={{ key: 'name' }}
                 />
                 <Field
                   label="5. Trade Name / Franchise"
+                  className={SPAN.lg}
                   targets={['form:trade_name']}
                   value={business.trade_name ?? ''}
                   edit={{ key: 'trade_name' }}
@@ -6760,23 +6829,26 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   label="6. Telephone (Landline)"
                   targets={['form:telephone']}
                   value={business.address?.telephone ?? ''}
-                  className="sm:col-start-1"
+                  className={SPAN.sm}
                   edit={{ key: 'address.telephone' }}
                 />
                 <Field
                   label="7. Mobile Number"
+                  className={SPAN.sm}
                   targets={['form:mobile_number']}
                   value={business.address?.mobile_number ?? ''}
                   edit={{ key: 'address.mobile_number' }}
                 />
                 <Field
                   label="8. E-mail Address"
+                  className={SPAN.lg}
                   targets={['form:email']}
                   value={business.address?.email ?? ''}
                   edit={{ key: 'address.email' }}
                 />
                 <Field
                   label="9. Website Address"
+                  className={SPAN.md}
                   targets={['form:website']}
                   value={business.address?.website ?? ''}
                   edit={{ key: 'address.website' }}
@@ -6786,23 +6858,26 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   label="10. Surname"
                   targets={['form:owner_surname']}
                   value={business.owner?.surname ?? ''}
-                  className="sm:col-start-1"
+                  className={SPAN.md}
                   edit={{ key: 'owner.surname' }}
                 />
                 <Field
                   label="11. Given Name"
+                  className={SPAN.md}
                   targets={['form:owner_given_name']}
                   value={business.owner?.given_name ?? ''}
                   edit={{ key: 'owner.given_name' }}
                 />
                 <Field
                   label="12. Middle Name"
+                  className={SPAN.sm}
                   targets={['form:owner_middle_name']}
                   value={business.owner?.middle_name ?? ''}
                   edit={{ key: 'owner.middle_name' }}
                 />
                 <Field
                   label="13. Suffix"
+                  className={SPAN.xs}
                   targets={['form:owner_suffix']}
                   value={business.owner?.suffix ?? ''}
                   edit={{ key: 'owner.suffix' }}
@@ -6812,7 +6887,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   label="14. Gender"
                   targets={['form:owner_gender']}
                   value={genderLabel(business.owner?.gender)}
-                  className="sm:col-start-1"
+                  className={SPAN.sm}
                   edit={{
                     key: 'owner.gender',
                     value: business.owner?.gender ?? '',
@@ -6828,21 +6903,24 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   no extra height, so seven name-ish answers do not read as one
                   person's.
                 */}
-                <div className="grid gap-x-6 gap-y-2 border-l-2 border-line pl-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-3">
+                <div className="grid gap-x-4 gap-y-2 border-l-2 border-line pl-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-10 lg:grid-cols-10">
                   <Field
                     label="15. Name of President / Officer in Charge"
+                    className={"lg:col-span-4"}
                     targets={['form:president_officer_name']}
                     value={business.president_officer_name ?? ''}
                     edit={{ key: 'president_officer_name' }}
                   />
                   <Field
                     label="16. Citizenship (of President/OIC)"
+                    className={"lg:col-span-3"}
                     targets={['form:citizenship']}
                     value={business.citizenship ?? ''}
                     edit={{ key: 'citizenship' }}
                   />
                   <Field
                     label="17. Capital Participation (% Filipino)"
+                    className={"lg:col-span-3"}
                     targets={['form:capital_participation']}
                     value={
                       business.capital_participation_filipino == null
@@ -6871,9 +6949,16 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             */}
             <section id="review-b" className="mt-5">
               <SectionHeading letter="B">Business Operation</SectionHeading>
-              <div className={SHEET_GRID}>
+              <div className={SHEET_GRID_12}>
+                {/* Items 1-4 are counts and an area: a sixth each, a third for a grouped item. */}
                 {compactFeeFacts(orderedFeeFacts).map((fact) => (
-                  <Field key={fact.label} label={fact.label} value={fact.value} />
+                  <Field
+                    key={fact.label}
+                    label={fact.label}
+                    value={fact.value}
+                    // A grouped item ("4 total, 2 male, 2 female") reads longer than a lone count.
+                    className={fact.value.length > 12 ? SPAN.lg : SPAN.sm}
+                  />
                 ))}
                 {/*
                   Item 5: a six-option radiogroup on the form, its answer in
@@ -6881,7 +6966,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 */}
                 <Field
                   label="5. Economic Organization"
-                  className="sm:col-start-1"
+                  className={SPAN.md}
                   value={
                     business.economic_organization
                       ? business.economic_organization === 'others'
@@ -6904,6 +6989,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     ?? business.economic_organization) === 'others' && (
                   <Field
                     label="Others — say what it is"
+                    className={SPAN.lg}
                     value={business.economic_organization_others ?? ''}
                     edit={{ key: 'economic_organization_others' }}
                   />
@@ -6914,6 +7000,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 */}
                 <Field
                   label="6. Capital Investment"
+                  className={SPAN.sm}
                   targets={['form:capital_investment']}
                   value={
                     business.capital_investment == null || business.capital_investment === ''
@@ -6936,6 +7023,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 */}
                 <Field
                   label="7. Tax Incentives from a Government Entity"
+                  className={SPAN.md}
                   targets={['form:has_tax_incentives']}
                   value={
                     business.has_tax_incentives == null
@@ -6965,6 +7053,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 */}
                 <Field
                   label="8. Do you pay rent for occupying a place of business?"
+                  className={SPAN.lg}
                   targets={['form:is_rented']}
                   value={
                     business.is_rented == null
@@ -7207,9 +7296,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * following the link keeps their focus 1,200 lines up and tabs from
            * there. `scroll-mt-6` keeps the heading off the very top edge.
            */}
+          {/*
+            Hidden in View since 20 October 2026. Client, of the read-only
+            panel: "remove this part", then "I told you to remove this
+            already." Its read-outs repeat the record — the account number is
+            in the header, the PSIC code on the line of business — so it shows
+            only in Edit, where an office fills in its remarks and issuance
+            dates. `hidden`, not unmounted, so a half-typed entry survives a
+            switch back to View.
+          */}
           <div
             id="for-office-use"
             tabIndex={-1}
+            hidden={!editing}
             className="mt-5 rounded-lg border border-officeuse-border bg-officeuse px-4 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
           >
             <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
@@ -7338,42 +7437,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
              * of the tab order takes the sentence explaining WHY it is shut
              * with it, and that sentence is the whole point.
              */}
-            <div className="mt-3 border-t border-officeuse-border pt-2">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
-                RA 11032 · Deadline
-              </p>
-              {(tierProvenance || (editing && canSetTier)) && (
-                <p id="ra11032-note" className="mt-1 max-w-prose text-xs text-ink-secondary">
-                  {tierProvenance}
-                  {editing && canSetTier && (
-                    <>
-                      {' '}
-                      The three categories and their day counts are set by RA 11032 and cannot be
-                      edited. Changing which one this filing is re-counts its deadline from the
-                      date it was filed, not from today.
-                    </>
-                  )}
-                </p>
-              )}
-              <div className="mt-1">
-                {editing && canSetTier ? (
-                  tierPicker()
-                ) : (
-                  /*
-                    The date, not the category that produced it — see the note
-                    at the head of this patch. Blank rather than "—" when the
-                    filing has no deadline yet, which is every draft: an
-                    officer never opens one, and inventing a dash would imply
-                    a clock that is not running.
-                  */
-                  <OfficeReadout
-                    label="Decide by"
-                    value={app.deadline_at ? formatDate(app.deadline_at) : ''}
-                  />
-                )}
-              </div>
-              {tierNote && <p className="mt-2 text-xs font-medium text-s-green">{tierNote}</p>}
-            </div>
+            {/*
+              The RA 11032 · Deadline block ("Decide by") went on 20 October
+              2026 with every other Due on staff screens. Client: "remove this
+              part".
+            */}
 
             {/* Issuance dates: recorded here, never asked of the applicant. */}
             {issuedGroups.map((group) => (

@@ -1694,7 +1694,8 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
   const modal = page.getByRole('dialog', { name })
   await expect(modal).toBeVisible({ timeout: WIZARD_PAINT_MS })
 
-  await modal.getByRole('combobox', { name: /^business\b/i }).selectOption({ value: '1' })
+  // Named "Which business are you renewing?" by its aria-label since 3 October 2026.
+  await modal.getByRole('combobox', { name: /^which business\b/i }).selectOption({ value: '1' })
 
   /*
    * Checkboxes in a labelled list, not radios in a radiogroup. A renewal covers
@@ -1942,7 +1943,8 @@ test('the zoning step warns that the pin must be accurate, and asks block, lot a
   await expect(page.getByText(/the other permits come later/i)).toBeHidden()
   await expect(page.getByText(/once bplo approves your application/i)).toBeHidden()
 
-  for (const label of [/^block$/i, /^lot$/i, /^lot area \(sq\. m\.\)$/i]) {
+  // Each label ends "(optional)" since e800a1f (client: every optional field says so).
+  for (const label of [/^block \(optional\)$/i, /^lot \(optional\)$/i, /^lot area \(sq\. m\.\) \(optional\)$/i]) {
     await expect(page.getByLabel(label)).toBeEditable()
   }
   // Optional: none is listed as still needed while blank...
@@ -2137,7 +2139,8 @@ test('the type of registration is asked before the number it decides', async ({ 
 
   /* Sole proprietorship → DTI, and the label says so rather than listing three. */
   await structure.getByRole('radio', { name: 'Sole Proprietorship' }).click()
-  const dti = page.getByRole('textbox', { name: /DTI Business Name Registration Number/i })
+  // Shortened to "DTI Registration Number" on 24 September 2026.
+  const dti = page.getByRole('textbox', { name: /DTI Registration Number/i })
   await expect(dti).toBeVisible()
   await expect(dti).not.toHaveAttribute('readonly', '')
   await expect(help).toContainText(/department of trade and industry/i)
@@ -2376,7 +2379,9 @@ test('a TIN pasted into the first box spreads across all four', async ({ page, c
   await expect(page.locator('#tin-error')).toHaveCount(0)
 })
 
-test('a TIN already on file reads back into the four boxes', async ({ page }) => {
+// Skipped: a renewal has no Business Information step since b818978 (24 September
+// 2026: "the renewal asks only its own paper"), so it never reaches the TIN boxes.
+test.skip('a TIN already on file reads back into the four boxes', async ({ page }) => {
   /*
    * The other half of "the wire format does not change": a filing made before
    * this control existed holds "123-456-789-000" in businesses.tin, and it has
@@ -2476,18 +2481,13 @@ test('an unusual registration number is questioned, never refused', async ({ pag
   await structure.getByRole('radio', { name: 'Corporation' }).click()
 
   const sec = page.getByRole('textbox', { name: /SEC Registration Number/i })
-  const note = page.getByText(/does not look like the usual SEC format/i)
+  // The advisory shape note was removed at the client's request (30 September
+  // 2026), so an odd number draws nothing now; the "never refused" half stands.
+  const note = page.getByText(/does not look like the usual/i)
 
-  // A real SEC shape draws nothing.
-  await sec.fill('CS201912345')
-  await sec.blur()
-  await expect(note).toBeHidden()
-
-  // Something that is a plausible reference but not an SEC one is questioned.
   await sec.fill('ABC/2019/XY-1')
   await sec.blur()
-  await expect(note).toBeVisible()
-  await expect(note).toContainText(/accept it either way/i)
+  await expect(note).toBeHidden()
 
   /*
    * And it is not an error: the field is not marked invalid, and nothing on the
@@ -2500,7 +2500,7 @@ test('an unusual registration number is questioned, never refused', async ({ pag
 
   // DTI publishes no format, so nothing there is ever unusual.
   await structure.getByRole('radio', { name: 'Sole Proprietorship' }).click()
-  const dti = page.getByRole('textbox', { name: /DTI Business Name Registration Number/i })
+  const dti = page.getByRole('textbox', { name: /DTI Registration Number/i })
   await dti.fill('ABC/2019/XY-1')
   await dti.blur()
   await expect(page.getByText(/does not look like the usual/i)).toBeHidden()
@@ -2523,14 +2523,16 @@ test('the numbers on a step run in the order the fields are read', async ({ page
    */
   await goToBusinessStep(page)
 
+  // The number is part of the label text ("4. Business Name") since b818978,
+  // not a span of its own, so it is read off the start of each label.
   const numbers = await page
     .locator('main')
-    .locator('span.tnum')
+    .locator('.field-label')
     .evaluateAll((els) =>
       els
-        .map((e) => (e.textContent ?? '').trim())
-        .filter((t) => /^\d+\.$/.test(t))
-        .map((t) => Number(t.replace('.', ''))),
+        .map((e) => /^(\d+)\.\s/.exec((e.textContent ?? '').trim()))
+        .filter((m): m is RegExpExecArray => m !== null)
+        .map((m) => Number(m[1])),
     )
 
   expect(numbers.length, 'the step draws no numbered fields at all').toBeGreaterThan(5)

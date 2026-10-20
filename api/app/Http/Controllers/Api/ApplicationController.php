@@ -17,6 +17,7 @@ use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\AmendableFields;
 use App\Support\AmendmentScope;
+use App\Support\AnnualInspection;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\RenewablePermit;
@@ -1156,6 +1157,12 @@ class ApplicationController extends Controller
         ];
         if (! in_array($application->status, $allowed, true)) {
             throw ValidationException::withMessages(['status' => ['This application can no longer be cancelled.']]);
+        }
+
+        // The Occupancy Permit's yearly inspection is the city's, not a
+        // filing the owner made, so it is not theirs to withdraw.
+        if (AnnualInspection::is($application)) {
+            throw ValidationException::withMessages(['status' => ['The yearly inspection can’t be cancelled.']]);
         }
 
         $this->workflow->transition($application, ApplicationStatus::Cancelled, 'Cancelled by applicant.');

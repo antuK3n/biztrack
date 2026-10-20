@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
@@ -1392,8 +1392,32 @@ function pointBounds(points: MapPoint[]): [[number, number], [number, number]] |
   ]
 }
 
+const MAP_SELECT =
+  'min-w-0 max-w-[16rem] rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+
 function BusinessMap({ report, permit }: { report: DashboardReport; permit: OfficePermit }) {
-  const { points, plotted, mapped, total_businesses } = report.map
+  const { points: allPoints, plotted, mapped, total_businesses } = report.map
+
+  /*
+   * Filters (21 October 2026: "put a filtering here like filter by line of
+   * business or anything you can think of"): line of business, barangay and
+   * permit status, picked from what the plotted pins actually carry, so no
+   * choice can come up empty. The map re-frames on what is left.
+   */
+  const [line, setLine] = useState('')
+  const [barangay, setBarangay] = useState('')
+  const [state, setState] = useState<'' | 'active' | 'lapsed'>('')
+  const lineOptions = [...new Set(allPoints.flatMap((p) => p.lines ?? []))].sort((a, b) => a.localeCompare(b))
+  const barangayOptions = [...new Set(allPoints.map((p) => p.barangay).filter((b): b is string => !!b))].sort((a, b) =>
+    a.localeCompare(b),
+  )
+  const points = allPoints.filter(
+    (p) =>
+      (line === '' || (p.lines ?? []).includes(line)) &&
+      (barangay === '' || p.barangay === barangay) &&
+      (state === '' || p.permit_state === state),
+  )
+  const filtering = line !== '' || barangay !== '' || state !== ''
   const bounds = pointBounds(points)
 
   /*
@@ -1433,6 +1457,50 @@ function BusinessMap({ report, permit }: { report: DashboardReport; permit: Offi
        * not use to decode the map, which is the whole point of drawing the
        * states differently in the first place.
        */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor="map-line">Line of business</label>
+        <select id="map-line" value={line} onChange={(e) => setLine(e.target.value)} className={MAP_SELECT}>
+          <option value="">All lines of business</option>
+          {lineOptions.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <label className="sr-only" htmlFor="map-barangay">Barangay</label>
+        <select id="map-barangay" value={barangay} onChange={(e) => setBarangay(e.target.value)} className={MAP_SELECT}>
+          <option value="">All barangays</option>
+          {barangayOptions.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <label className="sr-only" htmlFor="map-state">Permit status</label>
+        <select
+          id="map-state"
+          value={state}
+          onChange={(e) => setState(e.target.value as '' | 'active' | 'lapsed')}
+          className={MAP_SELECT}
+        >
+          <option value="">Any permit status</option>
+          <option value="active">{validLabel}</option>
+          <option value="lapsed">{missingLabel}</option>
+        </select>
+        {filtering && (
+          <button
+            type="button"
+            onClick={() => {
+              setLine('')
+              setBarangay('')
+              setState('')
+            }}
+            className="rounded-full px-2.5 py-1 text-xs font-semibold text-royal hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
       <p className="mb-2 flex flex-wrap items-center gap-4 text-[11px] text-ink-muted">
         <span className="flex items-center gap-1.5">
           <span
@@ -1531,8 +1599,9 @@ function BusinessMap({ report, permit }: { report: DashboardReport; permit: Offi
           'No business has coordinates on record yet, so there is nothing to plot.'
         ) : (
           <>
-            {num(plotted)} of {num(total_businesses)} businesses plotted from their recorded
-            coordinates.
+            {filtering
+              ? `${num(points.length)} of ${num(plotted)} plotted businesses match the filters.`
+              : <>{num(plotted)} of {num(total_businesses)} businesses plotted from their recorded coordinates.</>}
             {mapped > plotted && (
               <> {num(mapped - plotted)} more have coordinates but are past this map&rsquo;s cap.</>
             )}

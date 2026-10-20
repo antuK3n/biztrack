@@ -297,6 +297,8 @@ it('lets the issuing office fix a clerical answer on its own sheet, with a reaso
         'application_id' => $app->id,
         'department_id' => Department::where('code', 'OBO')->value('id'),
         'status' => 'pending',
+        // Assigned to OBO's officer: an edit is the holder's alone (20 October 2026).
+        'officer_user_id' => User::where('email', 'obo@biztrack.local')->value('id'),
         'assigned_at' => now(),
     ]);
     $obo = authAs('obo@biztrack.local');

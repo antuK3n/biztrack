@@ -64,6 +64,10 @@ class VerifyController extends Controller
          * read Active past its term.
          */
         $inTerm = $permit->valid_until !== null && $permit->valid_until->endOfDay()->isFuture();
+        // The Occupancy Permit never expires: its date is the next yearly
+        // inspection, and a late one does not void it (client, 20 October 2026).
+        $expires = $permit->expires();
+        $inTerm = $inTerm || ! $expires;
         $isValid = $permit->status === PermitStatus::Active && $inTerm;
 
         /*
@@ -84,6 +88,8 @@ class VerifyController extends Controller
                 'status_label' => $state?->label(),
                 'valid_from' => optional($permit->valid_from)->toDateString(),
                 'valid_until' => optional($permit->valid_until)->toDateString(),
+                // False on the Occupancy Permit, whose `valid_until` is its next inspection.
+                'expires' => $expires,
                 // Only a date, never the reason — see the class note.
                 'revoked_at' => optional($permit->revoked_at)->toDateString(),
                 /*

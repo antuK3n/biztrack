@@ -8,6 +8,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Models\Business;
+use App\Models\PermitType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -256,7 +257,7 @@ final class CustomReports
                 ->orderBy('c')->limit(100)->pluck('c')
                 ->mapWithKeys(static fn ($c) => [(string) $c => ucwords((string) $c)])->all(),
             'tax_incentives', 'rented', 'standing' => self::YES_NO,
-            'app_type' => self::enumLabels(ApplicationType::cases()),
+            'app_type' => self::enumLabels(array_filter(ApplicationType::cases(), static fn (ApplicationType $t) => $t->isFiling())),
             'app_status' => array_filter(
                 self::enumLabels(ApplicationStatus::cases()),
                 static fn (string $k) => $k !== ApplicationStatus::Draft->value,
@@ -267,7 +268,7 @@ final class CustomReports
                 ->orderBy('id')->pluck('name', 'id')
                 ->mapWithKeys(static fn ($n, $id) => [(string) $id => (string) $n])->all(),
             'permit_status' => self::enumLabels(PermitStatus::cases()),
-            'filed_as' => self::enumLabels(ApplicationType::cases()) + ['none' => 'No filing (old register)'],
+            'filed_as' => self::enumLabels(array_filter(ApplicationType::cases(), static fn (ApplicationType $t) => $t->isFiling())) + ['none' => 'No filing (old register)'],
             'method' => self::enumLabels(PaymentMethod::cases()),
             default => [],
         };
@@ -767,6 +768,8 @@ final class CustomReports
                 $query = DB::table('applications as a')
                     ->join('businesses as b', 'b.id', '=', 'a.business_id')
                     ->whereNull('a.deleted_at')
+                    // Filings only, not the Occupancy Permit's yearly inspection.
+                    ->whereNotIn('a.application_type', ApplicationType::NOT_FILINGS)
                     ->whereNull('b.deleted_at')
                     ->where('a.status', '!=', ApplicationStatus::Draft->value);
                 if ($scope !== null) {
@@ -837,7 +840,9 @@ final class CustomReports
             $query->leftJoinSub(
                 DB::table('permits')
                     ->where('status', PermitStatus::Active->value)
-                    ->whereDate('valid_until', '>=', ManilaCalendar::today()->toDateString())
+                    // In term, or a type that never expires (PermitType::NO_EXPIRY_CODES).
+                    ->where(static fn ($q) => $q->whereDate('valid_until', '>=', ManilaCalendar::today()->toDateString())
+                        ->orWhereIn('permit_type_id', PermitType::noExpiryIds()))
                     ->when($scope !== null, static fn ($q) => $q->whereIn('permit_type_id', self::types($scope)))
                     ->distinct()->select('business_id'),
                 'act', 'act.business_id', '=', $bid,

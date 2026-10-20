@@ -481,6 +481,7 @@ final class DashboardAnalytics
             'active_businesses' => count(self::activeBusinessIds($today, $scope)),
             'applications_all_time' => self::routedTo(DB::table('applications'), $scope)
                 ->whereNull('deleted_at')
+                ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
                 ->where('status', '!=', ApplicationStatus::Draft->value)
                 ->where(static fn (QueryBuilder $q) => $q
                     ->whereNull('submitted_at')
@@ -505,6 +506,7 @@ final class DashboardAnalytics
     {
         return self::routedTo(DB::table('applications'), $scope)
             ->whereNull('deleted_at')
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('submitted_at');
     }
 
@@ -542,7 +544,10 @@ final class DashboardAnalytics
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
             ->where('permits.status', PermitStatus::Active->value)
-            ->whereDate('permits.valid_until', '>=', $today->toDateString())
+            // In term, or a type that never expires (the Occupancy Permit, whose
+            // date is its next yearly inspection — PermitType::NO_EXPIRY_CODES).
+            ->where(fn ($q) => $q->whereDate('permits.valid_until', '>=', $today->toDateString())
+                ->orWhereIn('permits.permit_type_id', PermitType::noExpiryIds()))
             ->distinct()
             ->select('permits.business_id');
     }
@@ -716,6 +721,7 @@ final class DashboardAnalytics
         $live = DB::table('applications')
             ->join('businesses', 'businesses.id', '=', 'applications.business_id')
             ->whereNull('applications.deleted_at')
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             ->whereNull('businesses.deleted_at')
             ->whereIn('applications.id', $decidedHere)
             ->select('applications.id');
@@ -926,13 +932,15 @@ final class DashboardAnalytics
 
         $everHeld = [];
         $validToday = [];
+        $noExpiry = array_flip(PermitType::noExpiryIds());
         foreach ($rows as $row) {
             $businessId = (int) $row->business_id;
             $typeId = (int) $row->permit_type_id;
             $everHeld[$businessId][$typeId] = true;
 
             if ($row->status === PermitStatus::Active->value
-                && CarbonImmutable::parse($row->valid_until)->toDateString() >= $today->toDateString()) {
+                && (isset($noExpiry[$typeId])
+                    || CarbonImmutable::parse($row->valid_until)->toDateString() >= $today->toDateString())) {
                 $validToday[$businessId][$typeId] = true;
             }
         }
@@ -1025,6 +1033,8 @@ final class DashboardAnalytics
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
             ->whereIn('permits.permit_type_id', $renewablePermitTypes === [] ? [0] : $renewablePermitTypes)
+            // Never renewed, so never due (PermitType::NO_EXPIRY_CODES).
+            ->whereNotIn('permits.permit_type_id', PermitType::noExpiryIds())
             // Manila dates: valid_until is a date the permit printed, and the
             // window runs from the Manila date it opened to today in Manila.
             ->whereDate('permits.valid_until', '>=', ManilaCalendar::dateOf($windowStart))
@@ -1167,6 +1177,9 @@ final class DashboardAnalytics
             ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
+            // The Occupancy Permit neither expires nor lapses: its date is the
+            // next yearly inspection (client, 20 October 2026).
+            ->whereNotIn('permit_types.code', PermitType::NO_EXPIRY_CODES)
             // Each business's permits of one type together, oldest to latest.
             ->orderBy('permits.business_id')
             ->orderBy('permits.permit_type_id')
@@ -1503,6 +1516,7 @@ final class DashboardAnalytics
         $firstFiling = DB::table('applications')
             ->whereIn('applications.business_id', $live()->select('businesses.id'))
             ->whereNull('applications.deleted_at')
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('applications.submitted_at')
             ->groupBy('applications.business_id')
             ->selectRaw('applications.business_id, min(applications.submitted_at) as first_at')
@@ -1840,6 +1854,23 @@ final class DashboardAnalytics
                 'business_addresses.longitude',
             ]);
 
+        /*
+         * Each business's lines of business, for the map's filter (21 October
+         * 2026: "put a filtering here like filter by line of business"). The
+         * line as declared, else its PSIC title, so a filed line with no
+         * wording of its own still has a name to pick.
+         */
+        $lines = [];
+        foreach (DB::table('business_lines')
+            ->leftJoin('psic_codes', 'psic_codes.id', '=', 'business_lines.psic_code_id')
+            ->whereIn('business_lines.business_id', $rows->pluck('id')->all())
+            ->get(['business_lines.business_id', 'business_lines.line_of_business', 'psic_codes.title']) as $line) {
+            $name = trim((string) ($line->line_of_business ?: $line->title));
+            if ($name !== '') {
+                $lines[(int) $line->business_id][$name] = true;
+            }
+        }
+
         $points = [];
         $seen = [];
         foreach ($rows as $row) {
@@ -1856,6 +1887,7 @@ final class DashboardAnalytics
                 'latitude' => Rounding::statistic((float) $row->latitude, 6),
                 'longitude' => Rounding::statistic((float) $row->longitude, 6),
                 'permit_state' => isset($active[$businessId]) ? 'active' : 'lapsed',
+                'lines' => array_keys($lines[$businessId] ?? []),
             ];
         }
 

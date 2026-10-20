@@ -6,6 +6,7 @@ import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatDate } from '../../lib/format'
+import { nextInspectionLabel, permitExpires } from '../../lib/permitTerm'
 import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit } from '../../lib/types'
@@ -271,7 +272,8 @@ export function PermitDetailPage() {
   }
   if (error || !permit) return <ErrorState error={error ?? new Error('Not found')} onRetry={reload} />
 
-  const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  // A permit that never expires (lib/permitTerm.ts) is not "Expired" because its inspection date passed.
+  const expired = permitExpires(permit) && permit.days_until_expiry !== null && permit.days_until_expiry < 0
   /*
    * ── Sanction, as distinct from a date passing ────────────────────────
    *
@@ -385,6 +387,16 @@ export function PermitDetailPage() {
             <XIcon size={22} />
           </button>
         </div>
+        {/*
+          The Occupancy Permit never expires (client, 20 October 2026); its
+          date is the next yearly inspection. Said here, off the paper, which
+          prints no validity line for it.
+        */}
+        {!permitExpires(permit) && (
+          <p className="border-b border-line px-4 py-1.5 text-xs text-ink-secondary print:hidden">
+            No expiry · {nextInspectionLabel(permit.valid_until)}
+          </p>
+        )}
 
         {/* The permit "document" */}
         <article

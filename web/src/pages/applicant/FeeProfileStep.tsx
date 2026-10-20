@@ -1427,6 +1427,23 @@ export function FeeProfileStep({
   const onExtras = scope === 'extras'
 
   /*
+   * ── "How your trade is taxed" only when it asks something ───────────────
+   *
+   * Client, 20 October 2026: *"Can you remove the How your trade is taxed Tax
+   * Classification part? I don't find displaying it necessary because there
+   * is nothing to answer in that part."* For most trades the classification
+   * is worked out from the line of business and the block only reported it.
+   * It stays for the filings where it does ask: a line with no derived
+   * class (the picker), one whose class turns on essential commodities, a
+   * renewal (gross sales), or a draft that arrived without a structure. The
+   * class itself is unchanged and still shown to the reviewing officer.
+   */
+  const taxAsksSomething =
+    !derivedStructure ||
+    isRenewal ||
+    lines.some((line) => !line.category || line.categoryBranch === 'essentials')
+
+  /*
    * Section letters only make sense on the fee half. The operation half is
    * drawn INSIDE the wizard's Section B, which puts up its own marker, so a
    * second lettered heading there would number a subsection as though it were a
@@ -1460,7 +1477,7 @@ export function FeeProfileStep({
       */}
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
-      {onExtras && (
+      {onExtras && taxAsksSomething && (
       <section>
         <h2 className="text-[15px] font-bold text-ink">How your trade is taxed</h2>
         <div className="mt-3 space-y-3">
@@ -1813,8 +1830,18 @@ export function FeeProfileStep({
             here: each reaches 8px into the gap, so at 16px their borders met.
           */}
           <div className="@container field-grid grid grid-cols-12 gap-x-5 gap-y-7">
+            {/*
+              ── Sized by the answer, not the label (20 October 2026) ─────────
+
+              Client: *"No. of Employees Residing within Malabon's answer surely
+              isn't that long, so why that big of a text box? … fix them to
+              MAXIMIZE SPACE."* Items 1-4 are all counts or an area — a few
+              digits each — so they share ONE row on a wide sheet: a sixth for
+              each single box, a third for each pair. Two thirds of the sheet
+              on the middle width, so a pair keeps both boxes side by side.
+            */}
             <NumberField
-              className="col-span-12 @xl:col-span-6 @3xl:col-span-3"
+              className="col-span-12 @xl:col-span-4 @3xl:col-span-2"
               box="w-full"
               label={OPERATION_LABELS.floor_area_sqm}
               required
@@ -1855,14 +1882,22 @@ export function FeeProfileStep({
               The legend still has to exist, because a <fieldset> without one
               conveys no grouping to a screen reader at all.
             */}
-            <fieldset className="relative col-span-12 min-w-0 @3xl:col-span-9">
+            <fieldset className="relative col-span-12 min-w-0 @xl:col-span-8 @3xl:col-span-4">
               <legend className="sr-only">Total number of employees</legend>
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute -inset-x-2.5 -inset-y-2 rounded-xl border border-line"
               />
+              {/*
+                The total rides on the heading instead of a grey box of its own:
+                it is never typed, and the box cost a third of the row (20
+                October 2026, the space pass above).
+              */}
               <p aria-hidden className="mb-1.5 text-[13px] font-semibold leading-snug text-ink">
                 {OPERATION_LABELS.employees}
+                <span className="font-normal text-ink-secondary">
+                  : {totalEmployees(value.male_employees, value.female_employees) || '—'}
+                </span>
               </p>
 
             {/*
@@ -1870,37 +1905,7 @@ export function FeeProfileStep({
               ___", so the two halves ARE the total — which is why they must add
               up to it below rather than merely not exceed it.
             */}
-              {/*
-                Thirds of the frame, which in quarters are the section's own
-                quarter lines: the frame spans nine columns, and three equal
-                tracks with the section's gap come out exactly three columns
-                wide each.
-              */}
-              <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-3">
-                {/*
-                  Read-only and derived. `locked` is NumberField's own word for
-                  it and uses `readOnly`, never `disabled` — a disabled box
-                  leaves the tab order and most screen readers skip it, so an
-                  applicant using one would never learn the total exists, let
-                  alone that it adds itself up.
-
-                  No `onChange` that does anything and no `onBlur` that marks it
-                  touched: there is nothing to touch. Its errors are reported
-                  against the male box, which is the first one the applicant can
-                  actually act on.
-                */}
-                <NumberField
-                  box="w-full"
-                  label="Total No. of Employees"
-                  required
-                  kind="count"
-                  locked
-                  value={totalEmployees(value.male_employees, value.female_employees)}
-                  onChange={() => {}}
-                  onBlur={() => {}}
-                  error=""
-                  placeholder="—"
-                />
+              <div className="grid grid-cols-2 items-end gap-x-5 gap-y-4">
                 <NumberField
                   box="w-full"
                   label={OPERATION_LABELS.male_employees}
@@ -1935,7 +1940,7 @@ export function FeeProfileStep({
 
             {/* Item 3 is its own box on the paper, so it is its own field here. */}
             <NumberField
-              className="col-span-12 @xl:col-span-6"
+              className="col-span-12 @xl:col-span-4 @3xl:col-span-2"
               box="w-full"
               label={OPERATION_LABELS.employees_in_lgu}
               required
@@ -1962,7 +1967,7 @@ export function FeeProfileStep({
               Grouped under one number, with the rates stated, so the split reads
               as the ordinance's doing rather than as the form asking twice.
             */}
-            <fieldset className="relative col-span-12 min-w-0 @xl:col-span-6">
+            <fieldset className="relative col-span-12 min-w-0 @xl:col-span-8 @3xl:col-span-4">
               {/*
                 Optional, both boxes — most of these businesses deliver
                 nothing, and `feeProfileIssues` checks the two counts only for
@@ -1981,8 +1986,7 @@ export function FeeProfileStep({
                 {OPERATION_LABELS.delivery_units}
                 <OptionalTag />
               </p>
-              {/* Halves of six columns: in quarters, under item 2's male and female counts. */}
-              <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 @xl:grid-cols-2">
+              <div className="grid grid-cols-2 items-end gap-x-5 gap-y-4">
                 <NumberField
                   box="w-full"
                   label={OPERATION_LABELS.delivery_vehicles_motorized}

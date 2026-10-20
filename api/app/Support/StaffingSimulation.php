@@ -368,6 +368,10 @@ final class StaffingSimulation
     {
         $rows = DB::table('application_assignments')
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
+            // Not the Occupancy Permit's yearly inspection: its review is opened
+            // and closed by the system in one instant (App\Support\AnnualInspection).
+            ->whereNotIn('application_assignments.application_id', DB::table('applications')
+                ->select('id')->whereIn('application_type', ApplicationType::NOT_FILINGS))
             ->whereNotNull('application_assignments.completed_at')
             ->whereNotNull('application_assignments.assigned_at')
             ->where('application_assignments.completed_at', '>=', $from)
@@ -447,6 +451,7 @@ final class StaffingSimulation
     {
         return DB::table('applications')
             ->whereNull('deleted_at')
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('submitted_at')
             ->where('submitted_at', '>=', $from)
             ->where('submitted_at', '<=', $to)
@@ -474,6 +479,7 @@ final class StaffingSimulation
     {
         $rows = DB::table('applications')
             ->whereNull('deleted_at')
+            ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('submitted_at')
             ->where('submitted_at', '>=', $from)
             ->where('submitted_at', '<=', $to)

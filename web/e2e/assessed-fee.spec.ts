@@ -145,7 +145,8 @@ const peso = (n: number) =>
 
 async function openInEditMode(page: Page, assignmentId: number) {
   await page.goto(`/staff/queue/${assignmentId}`)
-  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  // The review sheet takes ~16s to paint on the e2e stack, past the 15s default.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click({ timeout: 60_000 })
   await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveAttribute('aria-pressed', 'true')
 }
 

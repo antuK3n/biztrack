@@ -694,6 +694,11 @@ const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
     title: 'Application for Amendment of Business Permit',
     ref: 'MCG-BPLO-FO-003 · v2.0',
   },
+  // Never drawn: the yearly inspection is opened by the system, not filed here.
+  annual_inspection: {
+    title: 'Annual inspection',
+    ref: '',
+  },
 }
 
 /*
@@ -1466,11 +1471,18 @@ function WizardSection({
       <div
         id={`review-body-${name}`}
         hidden={!open}
-        className="rounded-b-sm bg-white px-5 py-3 shadow-card"
+        className="@container rounded-b-sm bg-white px-5 py-3 shadow-card"
       >
-        <dl hidden={editing}>
+        {/*
+          A grid of answers, not one long column (20 October 2026). Client:
+          *"relayout the Review & Submit section in a way that fields are
+          easily seen, so that the applicant can easily review each field
+          clearly."* Three across on a wide sheet, two on a tablet, one on a
+          phone; a long answer takes the whole row (see ReviewRow).
+        */}
+        <dl hidden={editing} className="grid grid-cols-1 gap-x-6 @xl:grid-cols-2 @4xl:grid-cols-3">
           {answers.length === 0 ? (
-            <p className="py-2 text-sm text-ink-muted">
+            <p className="col-span-full py-2 text-sm text-ink-muted">
               Nothing to show here yet. Press{' '}
               <span className="font-semibold">Edit this section</span> to fill it in.
             </p>
@@ -1527,30 +1539,50 @@ type ReviewAnswer = {
  * build instead of a blank on somebody's screen.
  */
 function ReviewRow({ answer, onChange }: { answer: ReviewAnswer; onChange: () => void }) {
+  /*
+   * ── Read as a tile: the question small, the answer large ────────────────
+   *
+   * It was a row — a 14rem label column, the answer beside it in the same
+   * size, Change at the far end — and sixty of those one under another read
+   * as a wall of grey labels. The answer is what is being checked, so it is
+   * the bigger, darker text, under its question, and the tiles sit in the
+   * section's grid (WizardSection). An answer too long for a third of the
+   * sheet — an address, a list of lines of business — takes the full row
+   * rather than wrapping to six lines in a narrow tile.
+   */
+  const long = answer.value.length > 48 || answer.value.includes('\n')
+
   return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line py-2.5 last:border-b-0 sm:flex-nowrap">
-      <dt className="w-full text-[13px] font-semibold text-ink-secondary sm:w-56 sm:shrink-0">
-        {answer.label}
-      </dt>
-      {/*
-        An unanswered question shows an em dash rather than nothing. A blank
-        looks like the row failed to load; "—" says the question was reached
-        and left empty, which is what the applicant needs to notice.
-      */}
-      <dd className={`flex-1 text-sm ${answer.value ? 'text-ink' : 'text-ink-muted'}`}>
-        {answer.value || '—'}
-      </dd>
+    <div
+      className={`flex min-w-0 items-start justify-between gap-3 border-b border-line py-3 ${
+        long ? 'col-span-full' : ''
+      }`}
+    >
+      <div className="min-w-0">
+        <dt className="text-xs font-semibold text-ink-secondary">{answer.label}</dt>
+        {/*
+          An unanswered question shows an em dash rather than nothing. A blank
+          looks like the row failed to load; "—" says the question was reached
+          and left empty, which is what the applicant needs to notice.
+        */}
+        <dd
+          className={`mt-0.5 whitespace-pre-line break-words text-[15px] font-medium ${
+            answer.value ? 'text-ink' : 'text-ink-muted'
+          }`}
+        >
+          {answer.value || '—'}
+        </dd>
+      </div>
       <button
         type="button"
         onClick={onChange}
-        className="shrink-0 text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal/80"
+        className="mt-0.5 shrink-0 text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal/80"
       >
         Change
         {/*
           The label alone reads as "Change" sixty times over to anybody using a
           screen reader's list of links. The question it changes goes in the
-          accessible name, and stays out of the visible one so the column of
-          links remains a column.
+          accessible name, and stays out of the visible one.
         */}
         <span className="sr-only"> {answer.label}</span>
       </button>
@@ -9781,7 +9813,7 @@ export function ApplyWizard() {
          * dialog would flash in over an already-drawn form. Both reads swallow
          * their own failures, so neither can trip `hydrateFailed`.
          */
-        if (app.application_type !== 'new') {
+        if (app.application_type === 'renewal' || app.application_type === 'amendment') {
           const [, prior] = await Promise.all([
             loadRenewablePermits(b.id, app.application_type),
             applications.priorPermit(app.id).catch(() => null),
@@ -10776,7 +10808,7 @@ export function ApplyWizard() {
                   line for it without marking it required.
                 */}
                 <div className="contents">
-                  <div className={formCell.quarter}>
+                  <div className={formCell.short}>
                     <label className="block">
                       <FieldLabel optional>House / Bldg. No.</FieldLabel>
                       <input
@@ -10828,7 +10860,7 @@ export function ApplyWizard() {
                * twice by mistake.
                */}
               <div className="contents">
-                <label className={formCell.quarter}>
+                <label className={formCell.short}>
                   <FieldLabel optional>Block</FieldLabel>
                   <input
                     value={form.block}
@@ -10837,7 +10869,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <label className={formCell.quarter}>
+                <label className={formCell.short}>
                   <FieldLabel optional>Lot</FieldLabel>
                   <input
                     value={form.lot}
@@ -10846,7 +10878,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <div className={`relative ${formCell.quarter}`}>
+                <div className={`relative ${formCell.short}`}>
                   <label className="block">
                     <FieldLabel optional>Lot Area (sq. m.)</FieldLabel>
                     <input
@@ -12089,11 +12121,11 @@ export function ApplyWizard() {
                 role="radiogroup"
                 aria-label="Economic Organization"
                 /*
-                  `gap-x-5`, the section grid's gutter, so the second column
-                  of cards starts on its middle line — under item 4's frame,
-                  and over item 7.
+                  `gap-x-5`, the section grid's gutter, so the columns of
+                  cards start on its column lines. Three across on a wide sheet
+                  (20 October 2026): six cards in two rows instead of three.
                 */
-                className="grid gap-x-5 gap-y-2.5 @xl:grid-cols-2"
+                className="grid gap-x-5 gap-y-2.5 @xl:grid-cols-2 @3xl:grid-cols-3"
               >
                 {ECONOMIC_ORGANIZATIONS.map((eo) => {
                   const selected = form.economic_organization === eo.value
@@ -12173,10 +12205,11 @@ export function ApplyWizard() {
               each sat in its own block-level div — nothing about the controls
               needed the height.
 
-              On the section's twelve columns since 6 October 2026: item 6
-              takes the left half, under the first column of cards, and 7 and
-              8 a quarter each, under items 2's and 4's counts. In halves 6 has
-              the row and 7 and 8 share the next.
+              On the section's twelve columns since 6 October 2026, and a third
+              each since 20 October 2026: a peso figure is a dozen characters,
+              and a half-width box for it was the space the client asked to have
+              back. Thirds also give 7 and 8 room to say their question on one
+              line, which takes a line off the row.
 
               Each item is three rows of this grid — label, control, note —
               taken as a SUBGRID (`row-span-3 grid-rows-subgrid`). In a quarter
@@ -12190,7 +12223,7 @@ export function ApplyWizard() {
               on each item is the gap to the next row of items.
             */}
             <div className="grid grid-cols-12 gap-x-5">
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @3xl:col-span-6">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
                 <label className="row-span-2 grid grid-rows-subgrid">
                   <span>
                     <FieldLabel
@@ -12256,7 +12289,7 @@ export function ApplyWizard() {
                * answer the officer needs to see given, not an unticked box that
                * could equally mean the applicant skipped the question.
                */}
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
                 <span>
                   <FieldLabel optional>7. Tax incentives from a Government Entity?</FieldLabel>
                 </span>
@@ -12339,7 +12372,7 @@ export function ApplyWizard() {
                * lessor, so the block stays closed until they say so rather
                * than showing four fields most applicants must leave blank.
                */}
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-6 @3xl:col-span-3">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
                 <span>
                   <FieldLabel optional>8. Do you pay rent for the premises?</FieldLabel>
                 </span>

@@ -14,6 +14,7 @@ use App\Services\FeeCalculator;
 use App\Services\KwikPay\KwikPayGateway;
 use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
+use App\Support\AnnualInspection;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\Numbering;
@@ -63,6 +64,10 @@ class PaymentController extends Controller
     public function fee(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
+
+        // The yearly inspection charges nothing; raising a bill here would
+        // write a Tax Order of Payment for it (App\Support\AnnualInspection).
+        abort_if(AnnualInspection::is($application), 404, 'The yearly inspection has no fee.');
 
         $fee = $application->feeAssessment;
         if (! $fee) {

@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Enums\ApplicationType;
 use App\Enums\AssignmentStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
@@ -185,6 +186,8 @@ final class OfficePerformanceAnalytics
         $holds = ApplicationAssignment::query()
             ->join('departments', 'departments.id', '=', 'application_assignments.department_id')
             ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
+            // Filings only: the yearly inspection's review is the system's, not an officer's.
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             /*
              * Left join, not inner: `businesses` is soft-deleted and 139 filings
              * on the live register point at a deleted one (see AGENTS.md §11).

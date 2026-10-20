@@ -31,6 +31,7 @@ use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
+use App\Support\AnnualInspection;
 use App\Support\Audit;
 use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
@@ -4725,12 +4726,17 @@ class WorkflowService
 
             if ($allGranted && $app->permitTypes->isNotEmpty()) {
                 $app->update(['decided_at' => now()]);
+                // A yearly inspection issues nothing, so it says so and no
+                // "permits ready to download" notice follows.
+                $annual = AnnualInspection::is($app);
                 $this->transition(
                     $app,
                     ApplicationStatus::Approved,
-                    'Every permit on this renewal has been issued.',
+                    $annual ? 'The yearly inspection passed.' : 'Every permit on this renewal has been issued.',
                 );
-                $this->notify->permitsIssued($app);
+                if (! $annual) {
+                    $this->notify->permitsIssued($app);
+                }
             }
 
             return;
@@ -5914,6 +5920,29 @@ class WorkflowService
 
         $row->update(['decided_at' => now()]);
         $this->transitionClearance($row, ClearanceStatus::Approved, $note);
+
+        /*
+         * ── The Occupancy Permit's yearly inspection mints nothing ──────────
+         *
+         * Client, 20 October 2026: the Occupancy Permit is *"only annual
+         * inspection instead of annual renewal"*. A pass here moves the permit
+         * already held to its next inspection, a year on; the rest — the note,
+         * `reconsiderSuspension`, closing the entry — is the regular path.
+         * See App\Support\AnnualInspection.
+         */
+        if (AnnualInspection::is($app)) {
+            $permit = AnnualInspection::passed($app);
+            $this->notify->applicationNote(
+                $app,
+                $row->permitType->name.' passed its yearly inspection.'
+                .($permit?->valid_until ? ' The next one is due '.$permit->valid_until->format('F j, Y').'.' : ''),
+            );
+            $this->reconsiderSuspension($app->fresh());
+            $this->refreshReadiness($app->fresh());
+
+            return;
+        }
+
         $this->issuePermitFor($app, $row->permitType);
         $this->recordDeferredFee($app, $row->permitType);
         $this->raiseDenrRequirements($app, $row->permitType);
@@ -6478,6 +6507,14 @@ class WorkflowService
                 CarbonImmutable::parse($validFrom),
             ),
             $prior !== null => CarbonImmutable::parse($validFrom)->addYear(),
+            /*
+             * The Occupancy Permit never expires (client, 20 October 2026), so
+             * its date is the first yearly inspection: "exactly 1 year after
+             * issue", not the 31 December a certificate with a term ends on.
+             * A pass then moves it a year on from the visit
+             * (App\Support\AnnualInspection::passed).
+             */
+            ! $type->expires() => CarbonImmutable::parse($validFrom)->addYear(),
             default => RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom)),
         };
 
@@ -6647,7 +6684,7 @@ class WorkflowService
     }
 
     /** Mark an office's queue item done. Silent when it holds none. */
-    private function completeAssignment(Application $app, ?int $departmentId, ?string $remarks): void
+    public function completeAssignment(Application $app, ?int $departmentId, ?string $remarks): void
     {
         if ($departmentId === null) {
             return;

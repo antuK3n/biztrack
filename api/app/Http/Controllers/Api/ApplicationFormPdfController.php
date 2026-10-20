@@ -65,6 +65,8 @@ class ApplicationFormPdfController extends Controller
         );
 
         $type = $application->application_type ?? ApplicationType::New;
+        // A yearly inspection was filed on no form (App\Support\AnnualInspection).
+        abort_unless(isset(PaperForms::BPLO_FORM[$type->value]), 404, 'There is no form for this entry.');
         $doc = PaperForms::BPLO_FORM[$type->value];
         $f = PaperForms::common($application);
 

@@ -710,7 +710,10 @@ export function ApplicationDetailPage() {
               */}
               {isAmendment
                 ? 'BPLO is reading your amendment.'
-                : app.application_type === 'new'
+                : app.application_type === 'annual_inspection'
+                  ? // Opened by the system, not filed (client, 20 October 2026).
+                    'Your Occupancy Permit is due for its yearly inspection. OBO will set the date. There is no fee.'
+                  : app.application_type === 'new'
                   ? 'BPLO is reading your form and will list the other permits you need. Your fees are assessed once it is approved.'
                   : 'BPLO is reading your form. Your fees are assessed once it is approved.'}
             </p>
