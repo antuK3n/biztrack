@@ -766,35 +766,7 @@ class PermitController extends Controller
             ->with('user.department')
             ->orderByDesc('id')
             ->get()
-            ->map(function (AuditLog $log) {
-                $c = $log->changes ?? [];
-                [$to, $label] = match ($log->action) {
-                    'permit.status_changed' => [$c['to'] ?? null, 'Status changed'],
-                    'permit.revoked' => ['revoked', 'Revoked'],
-                    'permit.suspended' => ['suspended', isset($c['because_permit_type'])
-                        ? "Suspended automatically — {$c['because_permit_type']} was rejected"
-                        : (($c['cause'] ?? null) === 'business_status' ? 'Suspended — the business was sanctioned' : 'Suspended')],
-                    'permit.suspended_on_rejection' => ['suspended', 'Suspended — the application was rejected'],
-                    'permit.reinstated' => ['active', 'Restored automatically — nothing is rejected any more'],
-                    'permit.suspension_lifted' => ['active', 'Suspension lifted'],
-                    'permit.expired' => ['expired', 'Expired — its term ran out'],
-                    'permit.superseded' => ['superseded', 'Superseded by a renewal'],
-                    'permit.revocation_undone' => ['active', 'Revocation undone'],
-                    default => [null, $log->action],
-                };
-
-                return [
-                    'at' => $log->created_at?->toIso8601String(),
-                    'action' => $log->action,
-                    'label' => $label,
-                    'from' => $c['from'] ?? null,
-                    'to' => $to,
-                    'to_label' => $to ? PermitStatus::tryFrom($to)?->label() : null,
-                    'reason' => $c['reason'] ?? $c['note'] ?? null,
-                    'by' => $log->user?->fullName(),
-                    'by_office' => $log->user?->department?->name,
-                ];
-            });
+            ->map(fn (AuditLog $log) => self::describeHistory($log));
 
         $entries->push([
             'at' => $permit->issued_at?->toIso8601String(),
@@ -809,6 +781,51 @@ class PermitController extends Controller
         ]);
 
         return response()->json(['data' => $entries->values()->all()]);
+    }
+
+    /**
+     * One permit status event, worded for a reader. Public and static so the
+     * owner profile (OwnerProfileController) tells a permit's history in the
+     * same words as the Status history dialog on the Permits page.
+     *
+     * @return array<string, mixed>
+     */
+    public static function describeHistory(AuditLog $log): array
+    {
+        $c = $log->changes ?? [];
+        /*
+         * A term running out is the nightly scan's doing, not a person's. The
+         * audit row carries whichever session happened to trigger the scan —
+         * once, the owner's own — so naming it read as the owner expiring
+         * their own permit.
+         */
+        $automatic = $log->action === 'permit.expired';
+        [$to, $label] = match ($log->action) {
+            'permit.status_changed' => [$c['to'] ?? null, 'Status changed'],
+            'permit.revoked' => ['revoked', 'Revoked'],
+            'permit.suspended' => ['suspended', isset($c['because_permit_type'])
+                ? "Suspended automatically — {$c['because_permit_type']} was rejected"
+                : (($c['cause'] ?? null) === 'business_status' ? 'Suspended — the business was sanctioned' : 'Suspended')],
+            'permit.suspended_on_rejection' => ['suspended', 'Suspended — the application was rejected'],
+            'permit.reinstated' => ['active', 'Restored automatically — nothing is rejected any more'],
+            'permit.suspension_lifted' => ['active', 'Suspension lifted'],
+            'permit.expired' => ['expired', 'Expired — its term ran out'],
+            'permit.superseded' => ['superseded', 'Superseded by a renewal'],
+            'permit.revocation_undone' => ['active', 'Revocation undone'],
+            default => [null, $log->action],
+        };
+
+        return [
+            'at' => $log->created_at?->toIso8601String(),
+            'action' => $log->action,
+            'label' => $label,
+            'from' => $c['from'] ?? null,
+            'to' => $to,
+            'to_label' => $to ? PermitStatus::tryFrom($to)?->label() : null,
+            'reason' => $c['reason'] ?? $c['note'] ?? null,
+            'by' => $automatic ? null : $log->user?->fullName(),
+            'by_office' => $automatic ? null : $log->user?->department?->name,
+        ];
     }
 
     /**
@@ -1504,7 +1521,8 @@ class PermitController extends Controller
              * listed at all — and when they are, they name the business and
              * say it is retired, which is what a reader asking for them wants.
              */
-            'business' => fn ($b) => $b->withTrashed()->select('id', 'name', 'ban', 'deleted_at'),
+            // owner_user_id: the Owner column links to the owner's profile.
+            'business' => fn ($b) => $b->withTrashed()->select('id', 'name', 'ban', 'owner_user_id', 'deleted_at'),
         ]);
     }
 }

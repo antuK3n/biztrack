@@ -40,6 +40,8 @@ import { OfficerCaseloadPage } from './pages/admin/OfficerCaseloadPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
+import { OwnerDirectoryPage } from './pages/admin/OwnerDirectoryPage'
+import { OwnerProfilePage } from './pages/admin/OwnerProfilePage'
 import { StaffMessagesPage } from './pages/admin/StaffMessagesPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
 import { ImportPage } from './pages/admin/ImportPage'
@@ -612,6 +614,22 @@ export default function App() {
             cannot show a reader a permit they could not already open.
           */}
           <Route
+            path="/staff/admin/business-owners"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <OwnerDirectoryPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/staff/admin/business-owners/:ownerId"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <OwnerProfilePage />
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/staff/admin/permits"
             element={
               <RequirePermission permission="permit.view_all">
@@ -818,6 +836,22 @@ export default function App() {
             element={
               <RequirePermission permission="oic.assign">
                 <OicPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/business-owners"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <OwnerDirectoryPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/business-owners/:ownerId"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <OwnerProfilePage />
               </RequirePermission>
             }
           />

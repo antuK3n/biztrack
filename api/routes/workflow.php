@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\OwnerProfileController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
@@ -454,6 +455,18 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             'applications/{application}/permits/{code}/inspection',
             [InspectionController::class, 'schedule'],
         );
+    });
+
+    /*
+     * Business owners as an office reads them, and one owner's profile
+     * [client, 20 October 2026]. `permit.view_all`, the permission the
+     * Permits table already runs on, so every office whose Owner column links
+     * here can follow the link. The controller narrows each office to the
+     * owners on its own caseload (ApplicationVisibility).
+     */
+    Route::middleware('permission:permit.view_all')->group(function () {
+        Route::get('owner-profiles', [OwnerProfileController::class, 'index']);
+        Route::get('owner-profiles/{owner}', [OwnerProfileController::class, 'show']);
     });
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)

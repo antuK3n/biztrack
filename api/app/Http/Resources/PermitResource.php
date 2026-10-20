@@ -33,6 +33,9 @@ class PermitResource extends JsonResource
                 'name' => $this->business->name,
                 // The Business Account Number, beside the name on My Permits.
                 'ban' => $this->business->ban,
+                // Whose account holds it — the Permits table's Owner column links
+                // to that owner's profile. Null where the select left it out.
+                'owner_user_id' => $this->business->owner_user_id,
             ] : null,
             'application' => $this->relationLoaded('application') && $this->application ? [
                 'id' => $this->application->id,

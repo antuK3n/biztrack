@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
 import { useAsync } from '../../lib/useAsync'
 import type { PermitRegisterRow } from '../../lib/types'
 import { BusinessMapPage } from './BusinessMapPage'
+import { ownerProfilePath } from './ownerProfilePath'
 import { ChangeStatusDialog, StatusHistoryDialog } from './PermitStatusDialogs'
 import { STATUS_TONES } from './permitStatusTones'
 import type { PermitSort } from '../../lib/resources'
@@ -1080,6 +1081,19 @@ export function PermitsPage() {
                             <StatusChip tone={STATUS_TONES[permit.status] ?? 'tint-gray'}>
                               {permit.status_label}
                             </StatusChip>
+                          ) : column.key === 'owner_name' && permit.business?.owner_user_id && text ? (
+                            /*
+                              The owner opens onto their profile [client, 20
+                              October 2026]. The name printed on the permit,
+                              linked to the account that holds the business.
+                            */
+                            <Link
+                              to={ownerProfilePath(permit.business.owner_user_id)}
+                              aria-label={`${text}, view owner profile`}
+                              className="font-semibold text-royal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+                            >
+                              {text}
+                            </Link>
                           ) : (
                             text
                           )}

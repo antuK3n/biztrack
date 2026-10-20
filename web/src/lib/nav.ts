@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   AuditIcon,
+  BuildingIcon,
   ChartIcon,
   DraftsIcon,
   FileTextIcon,
@@ -258,6 +259,15 @@ const NAV_ITEMS: NavItem[] = [
    * from a filing. If the client says the table is the super admin's alone,
    * narrow it to `user.manage` HERE and in App.tsx together.
    */
+  /*
+   * Business Owners — the people behind the businesses, each opening onto a
+   * profile [client, 20 October 2026]. `permit.view_all`, like Permits below,
+   * whose Owner column links into it: every office has it, and the server
+   * narrows each office to the owners on its own caseload
+   * (OwnerProfileController), so this is not the whole-register browsing
+   * Records was kept from. Same permission in App.tsx.
+   */
+  { label: 'Business Owners', icon: BuildingIcon, to: '/admin/business-owners', permission: 'permit.view_all' },
   { label: 'Permits', icon: FileTextIcon, to: '/admin/permits', permission: 'permit.view_all' },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
