@@ -436,7 +436,12 @@ export interface BusinessPayload {
 
 /* ── Applications ─────────────────────────────────────────────────────── */
 
-export type ApplicationType = 'new' | 'renewal' | 'amendment'
+/**
+ * `annual_inspection` is not a filing: the system opens one when an Occupancy
+ * Permit's yearly inspection falls due (client, 20 October 2026), and OBO
+ * works it under For Inspection like any other visit.
+ */
+export type ApplicationType = 'new' | 'renewal' | 'amendment' | 'annual_inspection'
 
 export type ApplicationStatus =
   | 'draft'
@@ -983,7 +988,7 @@ export interface Assignment {
      * page rather than the row. It hid because the newest 200 rows are clean;
      * the nulls start around page 5.
      */
-    business: { name: string } | null
+    business: { name: string; ban?: string | null } | null
     application_type: ApplicationType
     /** See `ApplicationListItem.decided`. */
     decided?: boolean
@@ -1208,6 +1213,8 @@ export interface Permit {
   valid_from: string | null
   valid_until: string | null
   days_until_expiry: number | null
+  /** False on the Occupancy Permit: it never expires, and `valid_until` is its next yearly inspection (lib/permitTerm.ts). */
+  expires?: boolean | null
   /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
   permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
   /** `ban`: the Business Account Number, shown beside the name on My Permits. */
@@ -2327,6 +2334,8 @@ export interface MapPoint {
   latitude: number
   longitude: number
   permit_state: 'active' | 'lapsed'
+  /** Lines of business, for the map's filter. */
+  lines?: string[]
 }
 
 /*
@@ -3568,6 +3577,8 @@ export interface VerifyResult {
   status_label: string
   valid_from: string | null
   valid_until: string | null
+  /** False on the Occupancy Permit, whose `valid_until` is its next yearly inspection. */
+  expires?: boolean
   /** The date a revoked permit was revoked; null otherwise. */
   revoked_at: string | null
   /** A suspended permit's date and the permit/office it waits on — never the reason. */

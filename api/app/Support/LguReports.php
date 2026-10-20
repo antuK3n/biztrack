@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\PaymentStatus;
 use App\Models\PermitType;
 use Carbon\CarbonImmutable;
@@ -547,6 +548,7 @@ final class LguReports
         $refused = DB::table('clearance_refusals')
             ->join('applications', 'applications.id', '=', 'clearance_refusals.application_id')
             ->whereNull('applications.deleted_at')
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             ->where('clearance_refusals.refused_at', '>=', $from)
             ->where('clearance_refusals.refused_at', '<', $to)
             ->when($scope !== null, static fn ($q) => $q->whereIn('clearance_refusals.permit_type_id', $scope['permit_type_ids']))
@@ -565,6 +567,7 @@ final class LguReports
                 ->where('to_status', ApplicationStatus::Rejected->value);
             $rows[$businessPermit]['refused'] += DB::table('applications')
                 ->whereNull('deleted_at')
+                ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
                 ->whereIn('id', (clone $rejectedHistory)
                     ->where('created_at', '>=', $from)
                     ->where('created_at', '<', $to)
@@ -572,6 +575,7 @@ final class LguReports
                 ->count();
             $rows[$businessPermit]['refused'] += DB::table('applications')
                 ->whereNull('deleted_at')
+                ->whereNotIn('application_type', ApplicationType::NOT_FILINGS)
                 ->where('status', ApplicationStatus::Rejected->value)
                 ->where('decided_at', '>=', $from)
                 ->where('decided_at', '<', $to)

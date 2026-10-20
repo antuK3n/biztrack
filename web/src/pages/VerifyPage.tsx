@@ -208,7 +208,12 @@ export function VerifyPage() {
               {showTradeName && <Row label="Trade name" value={tradeName} />}
               <Row label="Address" value={addressOf(data)} />
               <Row label="Permit type" value={data.permit_type?.name} />
-              <Row label="Valid until" value={data.valid_until ? formatDate(data.valid_until) : null} />
+              {/* The Occupancy Permit never expires (client, 20 October 2026). */}
+              {data.expires === false ? (
+                <Row label="Valid until" value="No expiry" />
+              ) : (
+                <Row label="Valid until" value={data.valid_until ? formatDate(data.valid_until) : null} />
+              )}
             </dl>
           </div>
         )}

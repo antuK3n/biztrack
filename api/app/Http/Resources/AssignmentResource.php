@@ -137,6 +137,8 @@ class AssignmentResource extends JsonResource
                 'tracking_id' => $this->application->tracking_id,
                 'business' => $this->application->relationLoaded('business') && $this->application->business ? [
                     'name' => $this->application->business->name,
+                    // Manage Applications names a row by this, not the tracking ID (20 October 2026).
+                    'ban' => $this->application->business->ban,
                 ] : null,
                 'application_type' => $this->application->application_type?->value,
                 'status' => $this->application->status?->value,

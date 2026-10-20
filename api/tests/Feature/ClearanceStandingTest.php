@@ -140,7 +140,7 @@ it('tells a lapsed certificate from one the business never held', function () {
         'FSIC' => null,
         'ZONING' => now()->addMonths(10),
         'OCCUPANCY' => now()->addDays(20),
-        'CEC' => now()->addMonths(9),
+        'CEC' => now()->addDays(20),
     ]);
     $app = standingRenewal($business, ['BUSINESS']);
 
@@ -151,7 +151,10 @@ it('tells a lapsed certificate from one the business never held', function () {
         ->and(standingRow($rows, 'FSIC')['permit_number'])->toBeNull()
         ->and(standingRow($rows, 'ZONING')['state'])->toBe('valid')
         // Inside 60 days: valid, and worth saying so before BPLO relies on it.
-        ->and(standingRow($rows, 'OCCUPANCY')['state'])->toBe('expiring');
+        ->and(standingRow($rows, 'CEC')['state'])->toBe('expiring')
+        // The Occupancy Permit never expires (20 October 2026): its date is the
+        // next yearly inspection, so held and Active is simply valid.
+        ->and(standingRow($rows, 'OCCUPANCY')['state'])->toBe('valid');
 
     // The lapsed one keeps its number: "your Sanitary Permit MCB-… expired on
     // 18 Jul" is actionable, "you have no Sanitary Permit" is wrong.

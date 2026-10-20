@@ -10,6 +10,7 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Support\AnalyticsDatasets;
 use App\Support\AnalyticsDefinitions;
 use App\Support\AnalyticsOffice;
@@ -374,14 +375,14 @@ class AnalyticsController extends Controller
 
     private function buildSummary(): array
     {
-        $byStatus = Application::select('status', DB::raw('count(*) as c'))
+        $byStatus = Application::filings()->select('status', DB::raw('count(*) as c'))
             ->groupBy('status')->pluck('c', 'status');
 
-        $byType = Application::select('application_type', DB::raw('count(*) as c'))
+        $byType = Application::filings()->select('application_type', DB::raw('count(*) as c'))
             ->groupBy('application_type')->pluck('c', 'application_type');
 
         // Applications per month (last 12 months).
-        $byMonth = Application::select(
+        $byMonth = Application::filings()->select(
             DB::raw($this->yearMonth('created_at').' as month'),
             DB::raw('count(*) as count')
         )
@@ -389,11 +390,11 @@ class AnalyticsController extends Controller
             ->groupBy('month')->orderBy('month')->get()
             ->map(fn ($r) => ['month' => $r->month, 'count' => (int) $r->count])->values();
 
-        $decided = Application::whereIn('status', [
+        $decided = Application::filings()->whereIn('status', [
             ApplicationStatus::Approved->value,
             ApplicationStatus::Rejected->value,
         ])->count();
-        $approved = Application::where('status', ApplicationStatus::Approved->value)->count();
+        $approved = Application::filings()->where('status', ApplicationStatus::Approved->value)->count();
         $approvalRate = $decided > 0 ? round($approved / $decided, 4) : 0;
 
         $avgProcessingDays = $this->avgProcessingDays();
@@ -401,6 +402,8 @@ class AnalyticsController extends Controller
         $activePermits = Permit::where('status', PermitStatus::Active->value)->count();
 
         $expiringPermits = Permit::where('status', PermitStatus::Active->value)
+            // Never expires; its date is the next yearly inspection.
+            ->whereNotIn('permit_type_id', PermitType::noExpiryIds())
             ->whereDate('valid_until', '>=', now()->toDateString())
             ->whereDate('valid_until', '<=', now()->addDays(30)->toDateString())
             ->count();

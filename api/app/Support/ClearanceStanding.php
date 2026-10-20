@@ -86,11 +86,19 @@ class ClearanceStanding
                     ? $today->diffInDays($held->valid_until, false)
                     : null;
 
+                // The Occupancy Permit never expires (client, 20 October
+                // 2026): held and Active is valid, whatever its inspection date.
+                if ($held !== null && ! $type->expires()) {
+                    $days = null;
+                }
+
                 return [
                     'permit_type_code' => $type->code,
                     'permit_type_name' => $type->name,
                     'department_code' => $type->department?->code,
-                    'state' => self::state($held, $days),
+                    'state' => $held !== null && ! $type->expires()
+                        ? ($held->status === PermitStatus::Active ? 'valid' : 'expired')
+                        : self::state($held, $days),
                     'days_until_expiry' => $days,
                     'on_this_filing' => in_array($type->code, $onThisFiling, true),
                     'permit_id' => $held?->id,

@@ -88,6 +88,37 @@ class PermitType extends Model
      */
     public const REQUIRED_CLEARANCE_CODES = ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'];
 
+    /**
+     * Permits that never expire and are never renewed.
+     *
+     * Client, 20 October 2026, of the Occupancy Permit: *"It is stated to us
+     * that it is only annual inspection instead of annual renewal (like the
+     * other permits)."* So it is issued once, and its `valid_until` is read
+     * as the date its next yearly inspection is due — not an expiry. When that
+     * date comes, ScanPermits opens an annual inspection for OBO
+     * (`App\Support\AnnualInspection`); a pass moves the date on a year.
+     *
+     * The one place the rule lives. Ask `expires()` / `noExpiryIds()` rather
+     * than testing the code; web/src/lib/permitTerm.ts is its twin.
+     */
+    public const NO_EXPIRY_CODES = ['OCCUPANCY'];
+
+    /** Does a permit of this type run out on its `valid_until`? */
+    public function expires(): bool
+    {
+        return ! in_array($this->code, self::NO_EXPIRY_CODES, true);
+    }
+
+    /**
+     * Ids of the types that never expire, for queries over `permits`.
+     *
+     * @return list<int>
+     */
+    public static function noExpiryIds(): array
+    {
+        return self::query()->whereIn('code', self::NO_EXPIRY_CODES)->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
     /** Is this one of the five clearances (the set BPLO ticks from on a new filing)? */
     public function isRequiredClearance(): bool
     {

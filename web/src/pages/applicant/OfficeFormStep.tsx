@@ -1627,7 +1627,7 @@ function ZoningFields({
         </label>
 
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Floor Area to be / being Utilized<FromApplicationTag /></>}
             value={get(data, 'total_floor_area_sqm')}
             hint="Square metres, from your Business Operation answers."
@@ -1647,7 +1647,7 @@ function ZoningFields({
             actually asks for it. Left derived, it would print empty forever —
             exactly what happened to the lessor boxes below.
           */}
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel optional>No. of Storey of Building</FieldLabel>
             <input
               value={get(data, 'building_storeys')}
@@ -1884,22 +1884,22 @@ function SanitaryFields({
             are carried, not asked again. See `OfficeFormAnswers`.
           */}
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Employees — Male<FromApplicationTag /></>}
             value={get(data, 'employees_male')}
           />
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Employees — Female<FromApplicationTag /></>}
             value={get(data, 'employees_female')}
           />
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Employees — Total<FromApplicationTag /></>}
             value={get(data, 'employees_total')}
           />
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Floor Area (sq. m.)<FromApplicationTag /></>}
             value={get(data, 'total_floor_area_sqm')}
           />
@@ -1946,7 +1946,7 @@ function SanitaryFields({
         <SectionMarker letter="C" label="Water and Sanitation Facilities" />
         <div className={formGridCls}>
           {select('water_source', WATER_SOURCES, true)}
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel required>No. of Toilets</FieldLabel>
             <input
               inputMode="numeric"
@@ -1988,7 +1988,7 @@ function SanitaryFields({
         <section className="space-y-3">
           <SectionMarker letter="D" label="Food Establishment" />
           <div className={formGridCls}>
-            <label className={formCell.quarter}>
+            <label className={formCell.short}>
               <FieldLabel optional>Seating Capacity</FieldLabel>
               <input
                 inputMode="numeric"
@@ -2881,17 +2881,17 @@ function CecFields({
 
         {/* BUSINESS AREA | TOTAL NO. OF EMPLOYEES (MALE / FEMALE) */}
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Business Area (in sq. m.)<FromApplicationTag /></>}
             value={business.businessAreaSqm}
           />
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Total No. of Employees — Male<FromApplicationTag /></>}
             value={business.maleEmployees}
           />
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label={<>Total No. of Employees — Female<FromApplicationTag /></>}
             value={business.femaleEmployees}
           />
@@ -3115,7 +3115,7 @@ function FsicFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3133,7 +3133,7 @@ function FsicFields({
             Operation — so it is carried rather than asked a third time.
           */}
           <DerivedField
-            className={formCell.quarter}
+            className={formCell.short}
             label="Total Floor Area (sq. m.)"
             value={business.businessAreaSqm}
           />
@@ -3289,7 +3289,7 @@ function OccupancyFields({
             <CarriedTag field="owner_address" />
           </label>
           {/* Printed beside the address on the paper; the OBO posts to it. */}
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel optional>ZIP Code</FieldLabel>
             <input
               inputMode="numeric"
@@ -3412,7 +3412,7 @@ function OccupancyFields({
             />
             <CarriedTag field="occupancy_type" />
           </label>
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
               inputMode="numeric"
@@ -3424,7 +3424,7 @@ function OccupancyFields({
             />
             <CarriedTag field="building_storeys" />
           </label>
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel required>No. of Units</FieldLabel>
             <input
               inputMode="numeric"
@@ -3445,7 +3445,7 @@ function OccupancyFields({
             so a long note wraps; keep that in mind before giving a cell a
             fixed width again.
           */}
-          <label className={formCell.quarter}>
+          <label className={formCell.short}>
             <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
             <input
               inputMode="decimal"

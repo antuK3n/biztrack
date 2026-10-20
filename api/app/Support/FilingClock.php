@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -121,6 +122,7 @@ final class FilingClock
 
         $filings = self::routedTo(DB::table('applications'), $scope)
             ->whereNull('applications.deleted_at')
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('applications.submitted_at')
             ->whereNotNull('applications.decided_at')
             ->where('applications.decided_at', '>=', $from)
@@ -182,6 +184,7 @@ final class FilingClock
             $rows = DB::table('application_assignments')
                 ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
                 ->whereNull('applications.deleted_at')
+                ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
                 ->where('application_assignments.department_id', $scope['department_id'])
                 ->whereNotNull('application_assignments.assigned_at')
                 ->where('application_assignments.assigned_at', '<', $end)
@@ -191,6 +194,7 @@ final class FilingClock
         } else {
             $rows = self::routedTo(DB::table('applications'), $scope)
                 ->whereNull('applications.deleted_at')
+                ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
                 ->whereNotNull('applications.submitted_at')
                 ->where('applications.submitted_at', '<', $end)
                 ->where(static fn ($q) => $q->whereNull('applications.decided_at')
@@ -284,6 +288,7 @@ final class FilingClock
         $reviews = DB::table('application_assignments')
             ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
             ->whereNull('applications.deleted_at')
+            ->whereNotIn('applications.application_type', ApplicationType::NOT_FILINGS)
             ->whereNotNull('applications.submitted_at')
             ->where('application_assignments.department_id', $scope['department_id'])
             ->whereNotNull('application_assignments.assigned_at')

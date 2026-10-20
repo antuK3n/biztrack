@@ -1126,12 +1126,14 @@ test.describe('what BPLO is shown on a filing it coordinates', () => {
      * OPENED — Section D lived inside that disclosure, and a hidden leak is
      * still a leak but a lazily-rendered one would slip a bare count.
      */
+    // The "Show the application as filed" disclosure went on 6 October 2026; the
+    // compact view renders every section at once, so its section bar is the anchor.
+    const sections = page.getByRole('navigation', { name: 'Sections of this filing' })
     await expect(
-      page.getByRole('button', { name: /Show the application as filed/ }),
+      sections,
       `assignment ${target!.assignment} never rendered the review sheet — nothing was proved`,
-    ).toBeVisible()
-    await page.getByRole('button', { name: /Show the application as filed/ }).click()
-    await expect(page.getByRole('heading', { name: 'Documentary Requirements' })).toBeVisible()
+    ).toBeVisible({ timeout: 60_000 })
+    await expect(sections.getByRole('button', { name: /Documentary Requirements/ })).toBeVisible()
 
     await expect(page.getByRole('heading', { name: /Other Offices/i })).toHaveCount(0)
     await expect(

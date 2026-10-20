@@ -273,6 +273,18 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     expect($clearances)->toHaveCount(5);
 
     foreach ($clearances as $clearance) {
+        /*
+         * Except the Occupancy Permit: it never expires, and its date is the
+         * first yearly inspection, exactly a year after issue (client,
+         * 20 October 2026).
+         */
+        if ($clearance->permitType->code === 'OCCUPANCY') {
+            expect($clearance->valid_until->toDateString())
+                ->toBe($clearance->valid_from->copy()->addYear()->toDateString(), 'the Occupancy Permit is due its inspection a year after issue');
+
+            continue;
+        }
+
         expect($clearance->valid_until->format('m-d'))
             ->toBe('12-31', 'a clearance no longer ends on 31 December')
             ->and($clearance->valid_until->year)

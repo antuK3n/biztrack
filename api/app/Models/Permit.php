@@ -217,6 +217,26 @@ class Permit extends Model
     }
 
     /**
+     * Does this permit run out on its `valid_until`? The Occupancy Permit does
+     * not — there the date is its next yearly inspection (PermitType::NO_EXPIRY_CODES).
+     */
+    public function expires(): bool
+    {
+        return $this->permitType?->expires() ?? true;
+    }
+
+    /** Active and, for a permit that expires, still inside its term. */
+    public function inForce(): bool
+    {
+        if ($this->status !== PermitStatus::Active) {
+            return false;
+        }
+
+        return ! $this->expires()
+            || ($this->valid_until !== null && $this->valid_until->copy()->endOfDay()->isFuture());
+    }
+
+    /**
      * Days until expiry (negative if already past), counted from BusinessDate:
      * the Debug page's pretend date when one is set, so the countdown on every
      * permit screen agrees with the late surcharge the same filing would get.

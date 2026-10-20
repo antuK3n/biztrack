@@ -940,7 +940,12 @@ export const formGridCls = '@container field-grid grid grid-cols-12 gap-x-5 gap-
 /**
  * How much of a `formGridCls` row a field takes.
  *
- *   quarter — a short answer: a count, a date, a number, a name part
+ *   short   — a few digits: a count, an area, a ZIP code, a lot or block
+ *             number. A sixth of a wide sheet, two to a row on a phone.
+ *             Client, 20 October 2026: *"No. of Employees Residing within
+ *             Malabon's answer surely isn't that long, so why that big of a
+ *             text box?"*
+ *   quarter — a short answer: a date, a phone number, a name part
  *   half    — a medium one: a name, an e-mail, a short select
  *   wide    — three quarters: a long name or a group of pills
  *   full    — an address, a description, a checklist, a map
@@ -951,6 +956,7 @@ export const formGridCls = '@container field-grid grid grid-cols-12 gap-x-5 gap-
  * Each is one column on a phone and half the sheet from 36rem.
  */
 export const formCell = {
+  short: 'col-span-6 @xl:col-span-4 @4xl:col-span-2',
   quarter: 'col-span-12 @xl:col-span-6 @4xl:col-span-3',
   third: 'col-span-12 @xl:col-span-6 @4xl:col-span-4',
   half: 'col-span-12 @xl:col-span-6',

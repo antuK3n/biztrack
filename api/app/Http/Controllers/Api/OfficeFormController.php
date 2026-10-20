@@ -633,12 +633,16 @@ class OfficeFormController extends Controller
          */
         if (array_diff_key($corrected, array_flip(self::OFFICER_KEYS)) !== []) {
             $reviews = $application->assignments()->where('department_id', $user->department_id)->get();
-            abort_if(
-                $reviews->isNotEmpty() && $reviews->every(
-                    fn ($review) => $review->officer_user_id !== null && $review->officer_user_id !== $user->id,
-                ),
+            /*
+             * Assigned to this officer, not merely unclaimed (client, 20
+             * October 2026 — see BusinessController::officerUpdate).
+             */
+            abort_unless(
+                $reviews->contains(fn ($review) => $review->officer_user_id === $user->id),
                 403,
-                'This filing is with another officer. Only the Super Administrator can move it.'
+                $reviews->contains(fn ($review) => $review->officer_user_id !== null)
+                    ? 'This filing is with another officer. Only the Super Administrator can move it.'
+                    : 'Assign this filing to yourself before editing it.'
             );
             abort_if(
                 $application->permitTypes()

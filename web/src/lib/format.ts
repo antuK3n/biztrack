@@ -218,6 +218,8 @@ const APPLICATION_TYPE_LABELS: Record<string, string> = {
   new: 'New application',
   renewal: 'Renewal',
   amendment: 'Amendment',
+  // Opened by the system for the Occupancy Permit, not filed (20 October 2026).
+  annual_inspection: 'Annual inspection',
 }
 
 export function applicationTypeLabel(type: string): string {

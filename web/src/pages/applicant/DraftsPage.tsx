@@ -115,7 +115,7 @@ const FILTERS: { value: Filter; label: string }[] = [
  * for. `RenewIcon` is still right where a renewal is an ACTION being
  * offered; on a card describing what a draft IS, the calendar says it.
  */
-const TYPE_ICON = { new: FilePlusIcon, renewal: CalendarIcon, amendment: AmendIcon } as const
+const TYPE_ICON = { new: FilePlusIcon, renewal: CalendarIcon, amendment: AmendIcon, annual_inspection: CalendarIcon } as const
 
 /*
  * Each card names its own kind.
@@ -157,6 +157,8 @@ const TYPE_LABEL: Record<ApplicationType, string> = {
   new: 'New Permit',
   renewal: 'Renewal',
   amendment: 'Amendment',
+  // Never a draft; here for the type's completeness.
+  annual_inspection: 'Annual inspection',
 }
 
 function TrashIcon({ size = 24, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {

@@ -76,7 +76,13 @@ final class RenewablePermit
             return null;
         }
 
-        $permits = Permit::whereIn('id', $ids)->withExists('renewals')->get(['id', 'status']);
+        $permits = Permit::whereIn('id', $ids)->withExists('renewals')->with('permitType:id,code')->get(['id', 'status', 'permit_type_id']);
+
+        // Client, 20 October 2026: the Occupancy Permit gets a yearly
+        // inspection, not a renewal (PermitType::NO_EXPIRY_CODES).
+        if ($permits->contains(fn (Permit $p) => ! $p->expires())) {
+            return 'The Occupancy Permit isn’t renewed. It gets a yearly inspection instead.';
+        }
 
         if ($permits->contains('status', PermitStatus::Revoked)) {
             return 'This permit was revoked, so it can’t be renewed.';

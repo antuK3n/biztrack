@@ -423,6 +423,7 @@ class Application extends Model
 
         return $this->status?->label();
     }
+
     /**
      * The SQL half of `isDecided()`, for the places that ask it of a set.
      *
@@ -441,6 +442,16 @@ class Application extends Model
                     ->where('status', ApplicationStatus::Approved->value)
                     ->whereNotNull('decided_at'));
         });
+    }
+
+    /**
+     * Applications somebody filed — not the Occupancy Permit's yearly
+     * inspection the system opens (ApplicationType::NOT_FILINGS). For counts
+     * that mean "filings".
+     */
+    public function scopeFilings(Builder $query): void
+    {
+        $query->whereNotIn($query->qualifyColumn('application_type'), ApplicationType::NOT_FILINGS);
     }
 
     /** Everything `scopeDecided` leaves out. Written as its complement so the two are exhaustive. */
@@ -471,6 +482,16 @@ class Application extends Model
          * correction (measured) — the whole annual permit charged again.
          */
         if ($this->application_type === ApplicationType::Amendment) {
+            return true;
+        }
+
+        /*
+         * The Occupancy Permit's yearly inspection charges nothing (client,
+         * 20 October 2026; App\Support\AnnualInspection). True here is what
+         * lets its clearance be acted on without a payment, and what closes it
+         * the moment the visit passes (`refreshReadiness`).
+         */
+        if ($this->application_type === ApplicationType::AnnualInspection) {
             return true;
         }
 

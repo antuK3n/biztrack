@@ -303,7 +303,10 @@ class PermitController extends Controller
                     now()->startOfDay()->toDateString(),
                     now()->startOfDay()->addDays($days)->toDateString(),
                 ])
-                ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Suspended->value]);
+                ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Suspended->value])
+                // The Occupancy Permit never lapses; its date is the next
+                // yearly inspection (PermitType::NO_EXPIRY_CODES).
+                ->whereNotIn('permit_type_id', PermitType::noExpiryIds());
         }
 
         if ($over = $request->integer('suspended_over_days')) {

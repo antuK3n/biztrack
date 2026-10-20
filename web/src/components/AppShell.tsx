@@ -100,7 +100,7 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
                   ? `${item.label}, ${unreadMessages} unread`
                   : undefined
               }
-              className="group flex w-20 flex-col items-center gap-0.5 py-1.5"
+              className="group flex w-20 flex-col items-center gap-1 py-1.5"
             >
               {({ isActive }) => (
                 <>
@@ -117,8 +117,12 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
                   {/* Two lines' worth of box on every item, wrapped or not, so
                       the icons above them stay on one pitch down the rail.
                       "Other Requirements" wrapping used to push everything
-                      below it 12px out of step. */}
-                  <span className="min-h-6 max-w-[72px] text-center text-[10px] leading-3 text-white underline-offset-2 group-hover:underline">
+                      below it 12px out of step. A one-line label is centred
+                      in that box rather than hung from its top (20 October
+                      2026, "some have unequal spacing and are not really
+                      centered"): hung, it sat 2px under its icon and 14px
+                      over the next. */}
+                  <span className="flex h-6 w-[72px] items-center justify-center text-center text-[10px] leading-3 text-white underline-offset-2 group-hover:underline">
                     {item.label}
                   </span>
                 </>
@@ -129,12 +133,14 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
               key={item.label}
               aria-disabled="true"
               title="Coming soon"
-              className="flex w-20 flex-col items-center gap-0.5 py-1.5 opacity-55"
+              className="flex w-20 flex-col items-center gap-1 py-1.5 opacity-55"
             >
               <span className="flex h-11 w-11 items-center justify-center rounded-xl">
                 <item.icon size={22} className="text-white" />
               </span>
-              <span className="min-h-6 max-w-[72px] text-center text-[10px] leading-3 text-white">{item.label}</span>
+              <span className="flex h-6 w-[72px] items-center justify-center text-center text-[10px] leading-3 text-white">
+                {item.label}
+              </span>
             </span>
           ),
         )}
@@ -402,7 +408,7 @@ function MobileTabBar({ user }: { user: User }) {
                   and at the inherited 24px line-height that pushed the item past
                   the bar's 56px and clipped its icon off the top edge while the
                   other four sat 5px lower. */}
-              <span className="min-h-6 text-center leading-3">{item.label}</span>
+              <span className="flex h-6 items-center justify-center text-center leading-3">{item.label}</span>
             </NavLink>
           </li>
         ))}

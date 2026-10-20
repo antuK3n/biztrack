@@ -120,6 +120,11 @@ final class RenewalWindow
             return $refusal;
         }
 
+        // Never renewed, whatever the date (PermitType::NO_EXPIRY_CODES).
+        if (! $prior->expires()) {
+            return 'The Occupancy Permit isn’t renewed. It gets a yearly inspection instead.';
+        }
+
         if ($prior->valid_until === null) {
             return null;
         }

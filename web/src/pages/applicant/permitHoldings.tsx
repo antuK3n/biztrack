@@ -9,6 +9,7 @@ import {
 import { StatusChip, type SortFilterOption } from '../../components/ui/Proto'
 import { STATUS_TONES } from '../admin/permitStatusTones'
 import { businessName, formatDate } from '../../lib/format'
+import { nextInspectionLabel, permitExpires } from '../../lib/permitTerm'
 import { permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
@@ -228,7 +229,8 @@ function PermitDownloadButton({
 function isPastPermit(permit: Permit): boolean {
   if (permit.status === 'superseded' || permit.status === 'revoked') return true
 
-  return permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  // The Occupancy Permit never lapses; its date is the next inspection.
+  return permitExpires(permit) && permit.days_until_expiry !== null && permit.days_until_expiry < 0
 }
 
 /**
@@ -270,7 +272,8 @@ function PermitRow({
      then the type and the business name together still do not tell them
      apart. */
   const label = `${typeName} for ${business} (${permit.permit_number})`
-  const lapsed = permit.status === 'active' && permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  const expires = permitExpires(permit)
+  const lapsed = expires && permit.status === 'active' && permit.days_until_expiry !== null && permit.days_until_expiry < 0
   const statusKey = lapsed ? 'expired' : permit.status
   const statusText = lapsed ? 'Expired' : permit.status_label
 
@@ -294,8 +297,18 @@ function PermitRow({
           <StatusChip tone={STATUS_TONES[statusKey] ?? 'tint-gray'}>{statusText}</StatusChip>
         </div>
         <p className="col-span-2 text-sm text-ink-secondary sm:col-span-1">
-          <span className="text-xs text-ink-muted sm:hidden">Valid until </span>
-          {formatDate(permit.valid_until) || '—'}
+          {expires ? (
+            <>
+              <span className="text-xs text-ink-muted sm:hidden">Valid until </span>
+              {formatDate(permit.valid_until) || '—'}
+            </>
+          ) : (
+            // Never expires (client, 20 October 2026); the date is its next yearly inspection.
+            <>
+              No expiry
+              <span className="block text-xs text-ink-muted">{nextInspectionLabel(permit.valid_until)}</span>
+            </>
+          )}
         </p>
         <div className="col-span-2 flex items-center gap-2 sm:col-span-1 sm:justify-end">
           <Link
@@ -573,7 +586,10 @@ export function BusinessRow({
       ? { text: `Permit expired · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-red-tint text-s-red' }
       : group.nearing
         ? { text: `Expires soon · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-yellow-tint text-amber-800' }
-        : { text: `Valid until ${formatDate(group.latestExpiry)}`, className: 'bg-s-green-tint text-s-green' }
+        : group.latestExpiry
+          ? { text: `Valid until ${formatDate(group.latestExpiry)}`, className: 'bg-s-green-tint text-s-green' }
+          : // Only permits that never expire (an Occupancy Permit alone).
+            { text: 'No expiry', className: 'bg-s-green-tint text-s-green' }
 
   const count = group.permits.length
   const meta = [
@@ -746,11 +762,17 @@ export function useHoldings(enabled: boolean) {
        */
       if (permit.status === 'superseded') continue
 
-      if (permit.valid_until) {
+      /*
+       * Nor the Occupancy Permit's date for expiry: it never expires, and its
+       * `valid_until` is the next yearly inspection (lib/permitTerm.ts). Its
+       * sanction still counts below.
+       */
+      const expires = permitExpires(permit)
+      if (expires && permit.valid_until) {
         if (!group.latestExpiry || permit.valid_until > group.latestExpiry) group.latestExpiry = permit.valid_until
         if (!group.soonestExpiry || permit.valid_until < group.soonestExpiry) group.soonestExpiry = permit.valid_until
       }
-      const days = permit.days_until_expiry
+      const days = expires ? permit.days_until_expiry : null
       if (days !== null && days < 0) group.expired = true
       if (days !== null && days >= 0 && days <= NEARING_DAYS) group.nearing = true
       /*

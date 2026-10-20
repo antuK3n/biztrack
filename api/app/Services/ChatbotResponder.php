@@ -1008,6 +1008,12 @@ class ChatbotResponder
                 ."Renew it from 1 to {$closes} without penalty; after {$closes} it is late. ".$this->penaltyPhrase();
         }
 
+        // Client, 20 October 2026: issued once, inspected yearly, never renewed.
+        if ($type && ! $type->expires()) {
+            return "The {$type->name} does not expire and is not renewed. It gets a yearly inspection instead: "
+                .'the office opens it on the due date and sets the visit, and you are notified.';
+        }
+
         if ($type) {
             $opens = RenewalWindow::opensDaysBefore();
 

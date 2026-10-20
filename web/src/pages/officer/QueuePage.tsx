@@ -190,6 +190,7 @@ const TYPE_PLURAL: Record<ApplicationType, string> = {
   new: 'new applications',
   renewal: 'renewals',
   amendment: 'amendments',
+  annual_inspection: 'annual inspections',
 }
 
 
@@ -648,6 +649,14 @@ interface QueueItem {
    */
   href: string | null
   trackingId: string
+  /*
+   * The Business Account No., which is what a row shows under the business
+   * name. Client, 20 October 2026, picker: "1. Business Account No. only" —
+   * the same number the Permits tables lead with since 5 October, one per
+   * business across all its filings. The tracking ID stays for search, the
+   * buttons' accessible names, and the fallback when a business has none.
+   */
+  ban: string | null
   /** Business name, or the tracking ID when the register row is gone. */
   name: string
   /** True when the business was removed and `name` is standing in for it. */
@@ -771,6 +780,7 @@ function fromAssignment(item: Assignment): QueueItem {
     applicationId: app.id,
     href: `/staff/queue/${item.id}`,
     trackingId: app.tracking_id,
+    ban: app.business?.ban ?? null,
     ...nameOf(app.business, app.tracking_id),
     at: item.assigned_at,
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
@@ -815,6 +825,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     canAct: false,
     mine: false,
     trackingId: app.tracking_id,
+    ban: app.business?.ban ?? null,
     ...nameOf(app.business, app.tracking_id),
     /*
      * Filed-at, not routed-at, and the row says so. `submitted_at` is the only
@@ -1054,7 +1065,7 @@ function isDeep(query: string, sort: SortKey, serverSort: SortKey): boolean {
  */
 function matchesSearch(item: QueueItem, needle: string): boolean {
   if (!needle) return true
-  return `${item.trackingId} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
+  return `${item.trackingId} ${item.ban ?? ''} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
 }
 
 /**
@@ -1064,10 +1075,29 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
  * empty state's sentence ("No renewals are at this stage") and is plural
  * and lower case for that reason. A chip wants the singular.
  */
+/*
+ * A colour per kind of filing, so New, Renewal and Amendment tell apart at a
+ * glance (client, 20 October 2026: "make it more apparent, you may put colors
+ * to distinguish new, renewal, and amendment"). Rose for Amendment rather
+ * than purple, which is already the For Approval badge's colour.
+ */
+const TYPE_TONE: Record<string, string> = {
+  new: 'border-s-green bg-s-green-tint text-[#0f6b43]',
+  renewal: 'border-royal/50 bg-royal-tint text-royal',
+  amendment: 'border-s-rose/50 bg-s-rose-tint text-s-rose-ink',
+  annual_inspection: 'border-s-orange bg-s-orange-tint text-s-orange-ink',
+}
+
 const TYPE_LABEL: Record<string, string> = {
   new: 'New',
   renewal: 'Renewal',
   amendment: 'Amendment',
+  /*
+   * The Occupancy Permit's yearly inspection, opened by the system on its due
+   * date (client, 20 October 2026). Same row, same actions as any visit; the
+   * chip is how staff tell it from a filing.
+   */
+  annual_inspection: 'Annual inspection',
 }
 
 /*
@@ -1135,63 +1165,6 @@ function badgeOf(item: QueueItem, ownPermit: boolean) {
       }
 
   return { badge, ownPermitBadge }
-}
-
-/**
- * How far the filing is from its RA 11032 deadline, in calendar days.
- *
- * Calendar days, not working days, and the column says a date beside the
- * count: the deadline itself is already counted in working days by
- * `App\Support\Ra11032` on the server, so all this does is say how far away
- * that date is from today. Re-counting working days here would be a second
- * copy of the statute's arithmetic, without the holiday calendar.
- *
- * `tone` is `null` when there is nothing to flag. Overdue is the one red on
- * the row — a breached statutory clock is a failure, which is what red is
- * kept for (DESIGN.md) — and it is always worded too, never colour alone.
- */
-function dueOf(iso: string | null): { date: string; text: string; tone: 'overdue' | 'near' | null } | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  const now = new Date()
-  const days = Math.round(
-    (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
-      - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-      / 86_400_000,
-  )
-  const plural = (n: number) => `${n} day${n === 1 ? '' : 's'}`
-  const text = days < 0 ? `${plural(-days)} overdue` : days === 0 ? 'Due today' : `${plural(days)} left`
-
-  return { date: formatDate(iso), text, tone: days < 0 ? 'overdue' : days <= 2 ? 'near' : null }
-}
-
-/** The Received column's second line. */
-const TIME_FMT = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit' })
-
-const DUE_TONE: Record<'overdue' | 'near', string> = {
-  overdue: 'bg-s-red-tint text-s-red-deep',
-  near: 'bg-s-orange-tint text-s-orange-ink',
-}
-
-/** The countdown, as a chip when it needs attention and plain text when not. */
-function DueText({ due }: { due: ReturnType<typeof dueOf> }) {
-  if (!due) return <span className="text-ink-muted">—</span>
-
-  return (
-    <span className="flex flex-col items-start gap-0.5">
-      <span
-        className={
-          due.tone
-            ? `rounded-md px-2 py-0.5 text-xs font-bold ${DUE_TONE[due.tone]}`
-            : 'text-sm font-semibold text-ink-secondary'
-        }
-      >
-        {due.text}
-      </span>
-      <span className="text-xs text-ink-muted">{due.date}</span>
-    </span>
-  )
 }
 
 /*
@@ -1297,9 +1270,7 @@ function QueueRow({
    * is an application and belongs to no office yet, and showing the filing's
    * status there is better than showing none.
    */
-  const { badge, ownPermitBadge } = badgeOf(item, ownPermit)
-  const due = dueOf(item.deadline)
-
+  const { badge } = badgeOf(item, ownPermit)
   const body = (
     <>
       {/*
@@ -1342,7 +1313,7 @@ function QueueRow({
           * carries the tracking ID exactly once.
           */}
         <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+          {item.nameIsFallback ? 'Business removed from the register' : (item.ban ?? item.trackingId)}
           {/*
             A quiet outline, not a second coloured chip: the row already has
             one on the right and it means the STAGE. Two coloured chips would
@@ -1360,19 +1331,6 @@ function QueueRow({
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
         </p>
-        {/* The RA 11032 countdown, as on the table's Due column. */}
-        {due && (
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-ink-muted">
-            <span
-              className={
-                due.tone ? `rounded-md px-2 py-0.5 text-xs font-bold ${DUE_TONE[due.tone]}` : 'font-semibold text-ink-secondary'
-              }
-            >
-              {due.text}
-            </span>
-            <span>Due {due.date}</span>
-          </p>
-        )}
         {/*
           * A Pending Payment row does not open, and used to say why in a
           * sentence here ("Waiting on the applicant's payment. It reaches an
@@ -1393,30 +1351,6 @@ function QueueRow({
           * belongs to the reader's office, so printing it would repeat the same
           * word down the page; the PERMIT is what varies.
           */}
-        {item.clearance && (
-          <p className="mt-1 text-sm text-ink-secondary">
-            {item.clearance.name}
-            {/*
-              * The status comes off this line when the badge is carrying it —
-              * which is every office row. Printing "Sanitary Permit / Health
-              * Certificate · For Approval" three inches from a badge reading
-              * "For Approval" spends the row's most readable line on a word
-              * already on screen. BPLO's badge shows the FILING's status, so
-              * there the permit's own status is still this line's to say.
-              */}
-            {item.clearance.status_label && !ownPermitBadge && (
-              <span className="text-ink-muted"> · {item.clearance.status_label}</span>
-            )}
-            {/*
-              * An uploaded copy has no form behind it — only an image — so the
-              * officer needs to know before they open it that there is nothing
-              * to read but the attachment.
-              */}
-            {item.clearance.mode === 'upload' && (
-              <span className="text-ink-muted"> · copy on file</span>
-            )}
-          </p>
-        )}
       </div>
       {/*
         * Whether the fees are settled — and NOT the filing's stage, which is
@@ -1629,14 +1563,14 @@ function QueueTable({
   }
 
   const th =
-    'sticky top-0 z-20 whitespace-nowrap border-b border-line bg-[#f3f6fb] px-3.5 py-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted'
+    'sticky top-0 z-20 whitespace-nowrap border-b border-line bg-[#f3f6fb] px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted'
   /*
    * Every cell paints its own background, zebra and hover included. A sticky
    * cell has to be opaque or the columns scrolling under it show through, and
    * the row's tint has to reach the sticky cells too or a hovered row would
    * read as three separate pieces.
    */
-  const td = 'border-b border-line/70 bg-white px-3.5 py-3.5 align-middle group-even:bg-[#f7f9fd] group-hover:bg-royal-tint'
+  const td = 'border-b border-line/70 bg-white px-3 py-2.5 align-middle group-even:bg-[#f7f9fd] group-hover:bg-royal-tint'
   const btn =
     'inline-flex items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60'
   const primary = `${btn} bg-royal text-white hover:bg-royal-hover`
@@ -1665,20 +1599,19 @@ function QueueTable({
               <th scope="col" className={th}>
                 Status
               </th>
-              <th scope="col" className={th}>
-                Due (RA 11032)
-              </th>
-              <th scope="col" className={th}>
-                Officer in charge
-              </th>
-              <th scope="col" className={th}>
-                Permit
-              </th>
-              <th scope="col" className={th}>
-                Type
-              </th>
+              {/*
+                Five columns, not eight (20 October 2026). Client, of the table
+                scrolling sideways: *"Can you do something where I don't need
+                to scroll anymore? Compact the spaces too if necessary."* Type
+                rides with the tracking ID. The Due column went the same day
+                ("No need to put Due. Remove it please."), and the permit line
+                under the status ("does this still matter? Remove please.").
+              */}
               <th scope="col" className={th}>
                 Received
+              </th>
+              <th scope="col" className={th}>
+                Officer
               </th>
               <th scope="col" className={`${th} right-0 z-30 border-l`}>
                 Actions
@@ -1687,8 +1620,7 @@ function QueueTable({
           </thead>
           <tbody>
             {items.map((item) => {
-              const { badge, ownPermitBadge } = badgeOf(item, ownPermit)
-              const due = dueOf(item.deadline)
+              const { badge } = badgeOf(item, ownPermit)
               const visit = visitOf(item)
               const claiming = claimingId !== null && claimingId === item.assignmentId
               const markingPaid = markingPaidId === item.applicationId
@@ -1706,7 +1638,7 @@ function QueueTable({
                   {/* Business: the row's name, its tracking ID and who filed it. */}
                   <th
                     scope="row"
-                    className={`${td} sticky left-0 z-10 min-w-[14rem] max-w-[18rem] border-r border-r-line text-left font-normal`}
+                    className={`${td} sticky left-0 z-10 min-w-[13rem] max-w-[20rem] border-r border-r-line text-left font-normal`}
                   >
                     {item.href ? (
                       <Link
@@ -1717,14 +1649,14 @@ function QueueTable({
                           {item.name}
                         </span>
                         <span className="tnum mt-0.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+                          {item.nameIsFallback ? 'Business removed from the register' : (item.ban ?? item.trackingId)}
                         </span>
                       </Link>
                     ) : (
                       <>
                         <span className="block break-words font-bold leading-snug text-ink">{item.name}</span>
                         <span className="tnum mt-0.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+                          {item.nameIsFallback ? 'Business removed from the register' : (item.ban ?? item.trackingId)}
                         </span>
                       </>
                     )}
@@ -1733,9 +1665,17 @@ function QueueTable({
                         {item.owner}
                       </span>
                     )}
+                    <span
+                      className={`mt-1 inline-block rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                        TYPE_TONE[item.type] ?? 'border-royal/40 text-royal'
+                      }`}
+                    >
+                      {TYPE_LABEL[item.type] ?? item.type}
+                    </span>
                   </th>
 
-                  <td className={`${td} min-w-[9rem]`}>
+                  {/* The status. */}
+                  <td className={td}>
                     <span
                       className={`inline-block rounded-md border px-2.5 py-1 text-xs font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
                     >
@@ -1743,11 +1683,19 @@ function QueueTable({
                     </span>
                   </td>
 
-                  <td className={`${td} whitespace-nowrap`}>
-                    <DueText due={due} />
+                  {/* When the row arrived. */}
+                  <td className={`${td} whitespace-nowrap text-ink-secondary`}>
+                    {item.at ? (
+                      <>
+                        {item.href ? '' : 'Filed '}
+                        {formatDate(item.at)}
+                      </>
+                    ) : (
+                      <span className="text-ink-muted">—</span>
+                    )}
                   </td>
 
-                  <td className={`${td} min-w-[11rem]`}>
+                  <td className={td}>
                     {item.assignmentId === null ? (
                       // Not routed yet, so nobody can hold it; see QueueRow.
                       <span className="text-ink-muted">—</span>
@@ -1776,52 +1724,19 @@ function QueueTable({
                     )}
                   </td>
 
-                  {/* Which permit this row is — the one thing four offices' rows on one filing differ by. */}
-                  <td className={`${td} min-w-[11rem] text-ink-secondary`}>
-                    {item.clearance ? (
-                      <>
-                        <span className="block leading-snug">{item.clearance.name}</span>
-                        {item.clearance.status_label && !ownPermitBadge && (
-                          <span className="block text-xs text-ink-muted">{item.clearance.status_label}</span>
-                        )}
-                        {item.clearance.mode === 'upload' && (
-                          <span className="block text-xs text-ink-muted">Copy on file</span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-ink-muted">—</span>
-                    )}
-                  </td>
-
-                  <td className={`${td} whitespace-nowrap`}>
-                    <span className="rounded border border-royal/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
-                      {TYPE_LABEL[item.type] ?? item.type}
-                    </span>
-                  </td>
-
-                  {/* Date over time, so the column is a date's width rather than a sentence's. */}
-                  <td className={`${td} whitespace-nowrap text-ink-secondary`}>
-                    {item.at ? (
-                      <>
-                        <span className="block">
-                          {item.href ? '' : 'Filed '}
-                          {formatDate(item.at)}
-                        </span>
-                        <span className="block text-xs text-ink-muted">{TIME_FMT.format(new Date(item.at))}</span>
-                      </>
-                    ) : (
-                      <span className="text-ink-muted">—</span>
-                    )}
-                  </td>
-
                   {/*
                     Pinned. Labelled buttons, never icons alone and never a menu
                     — the client chose this over a ⋯ menu. Each name carries the
                     tracking ID, because a column of twenty-five "Open" buttons
                     is twenty-five identical stops to a screen reader (§6.2).
                   */}
-                  <td className={`${td} sticky right-0 z-10 w-px whitespace-nowrap border-l border-l-line`}>
-                    <div className="flex items-center gap-1.5">
+                  <td className={`${td} sticky right-0 z-10 w-px border-l border-l-line`}>
+                    {/*
+                      Stacked, one button per line: side by side they made this
+                      column the widest in the table, and it is the reason the
+                      table scrolled (20 October 2026).
+                    */}
+                    <div className="flex flex-col items-stretch gap-1.5">
                       {item.href && (
                         <button
                           type="button"

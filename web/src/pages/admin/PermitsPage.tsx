@@ -774,7 +774,7 @@ export function PermitsPage({
   /* The table's controls; the map carries its own, so none of these would act on it. */
   const controls =
           mode === 'map' ? undefined : (
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
             {/*
               A placeholder is not an accessible name — it disappears on the
               first keystroke — so the field carries a real label, and that
@@ -865,6 +865,37 @@ export function PermitsPage({
           )
 
   /*
+   * Table or Map, for the two readers the map is for. A tab strip in the
+   * style the Analytics screens use, with the selected view marked by
+   * `aria-pressed` as well as fill, so the choice is not colour alone.
+   * Every office gets the map now, on its own certificate [client, 4 October 2026].
+   */
+  const viewTabs = (
+    <div role="group" aria-label="Permits view" className="flex flex-wrap gap-2">
+      {(
+        [
+          { value: 'table', label: 'Table' },
+          { value: 'map', label: 'Map' },
+        ] as const
+      ).map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          aria-pressed={mode === tab.value}
+          onClick={() => setMode(tab.value)}
+          className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
+            mode === tab.value
+              ? 'border-royal bg-royal text-white'
+              : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+
+  /*
    * A region named by its heading, on its own page and on the Home alike: the
    * Home stacks the analytics dashboard above, with tables of its own, and
    * this is how a reader (or a test) finds the register among them.
@@ -872,43 +903,26 @@ export function PermitsPage({
   return (
     <section aria-labelledby="permits-title">
       {embedded ? (
-        <SectionTitle id="permits" right={controls} quiet>
-          Permits
-        </SectionTitle>
+        /*
+         * On the Home the heading is hidden, so Table/Map and the table's
+         * controls share one row (21 October 2026: "Why not just align them
+         * in a single row?"). They were a row each, the tabs under the
+         * search, with the space between them looking accidental.
+         */
+        <div id="permits" className="mb-5 flex scroll-mt-4 flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <h2 id="permits-title" className="sr-only">
+            Permits
+          </h2>
+          {viewTabs}
+          {controls}
+        </div>
       ) : (
         <PageTitle id="permits-title" right={controls}>
           Permits
         </PageTitle>
       )}
 
-      {/*
-        Table or Map, for the two readers the map is for. A tab strip in the
-        style the Analytics screens use, with the selected view marked by
-        `aria-pressed` as well as fill, so the choice is not colour alone.
-      */}
-      {/* Every office gets the map now, on its own certificate [client, 4 October 2026]. */}
-      <div role="group" aria-label="Permits view" className="-mt-2 mb-5 flex flex-wrap gap-2">
-        {(
-          [
-            { value: 'table', label: 'Table' },
-            { value: 'map', label: 'Map' },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            aria-pressed={mode === tab.value}
-            onClick={() => setMode(tab.value)}
-            className={`rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
-              mode === tab.value
-                ? 'border-royal bg-royal text-white'
-                : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {!embedded && <div className="-mt-2 mb-5">{viewTabs}</div>}
 
       {mode === 'map' ? (
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
@@ -978,16 +992,22 @@ export function PermitsPage({
             by keyboard hides every column past the fold from a reader who does
             not use a mouse. `tabIndex={0}` on a scroll container is the one
             case where that is correct rather than a stray tab stop.
+
+            Held to the window's height (21 October 2026: "I have to scroll all
+            the way to the bottom just to access the scroll bar for the
+            table"). The rows scroll inside it, so the sideways scrollbar sits
+            on screen, and the headings and the first column stay put while
+            either way is scrolled.
           */}
           <div
-            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
+            className="max-h-[calc(100dvh-7rem)] overflow-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
             tabIndex={0}
             role="region"
             aria-label={`Issued permits for ${officeLabel}, scrolls sideways`}
           >
             <table className={`${permitOnly ? "w-full" : "w-max"} text-left text-sm`}>
-              <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+              <thead className="sticky top-0 z-20">
+                <tr className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
                   {columns.map((column) => {
                     const active = sort !== null && column.sort === sort.key
                     return (
@@ -1009,7 +1029,12 @@ export function PermitsPage({
                         }
                         // The permit-only view lets a long heading take two lines
                         // ("Business Account No.") so the certificate stays on screen.
-                        className={permitOnly ? 'px-4 py-3 align-bottom' : 'whitespace-nowrap px-4 py-3'}
+                        className={[
+                          // Solid, not the canvas at half strength: rows scroll under it.
+                          'bg-[#e8edf5]',
+                          column.key === columns[0]?.key ? 'sticky left-0 z-10' : '',
+                          permitOnly ? 'px-4 py-3 align-bottom' : 'whitespace-nowrap px-4 py-3',
+                        ].join(' ')}
                       >
                         {column.sort === undefined ? (
                           /*
@@ -1065,15 +1090,15 @@ export function PermitsPage({
                     which named the buttons rather than the thing they open.
                   */}
                   {!permitOnly && (
-                    <th scope="col" className="whitespace-nowrap px-4 py-3">
+                    <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3">
                       Requirements Submitted
                     </th>
                   )}
-                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
+                  <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3 text-right">
                     Permit
                   </th>
                   {/* Last, after the certificate itself [client, 5 October 2026]. */}
-                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right">
+                  <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3 text-right">
                     Actions
                   </th>
                 </tr>
@@ -1093,7 +1118,7 @@ export function PermitsPage({
                             column.tnum ? 'tnum' : '',
                             // The lead identifier carries the row, so it is
                             // the one drawn in full ink.
-                            column.key === columns[0]?.key ? 'font-bold text-ink' : 'text-ink-secondary',
+                            column.key === columns[0]?.key ? 'sticky left-0 z-[1] bg-white font-bold text-ink' : 'text-ink-secondary',
                           ]
                             .filter(Boolean)
                             .join(' ')}
