@@ -6445,13 +6445,20 @@ class WorkflowService
          * it costs. The anniversary itself, matching the register's own
          * convention: the demo certificates run 23 October to 23 October.
          */
-        $validUntil = match (true) {
-            $type->code === PermitType::OUTCOME_CODE => RenewalSeason::endOfTermFor(
-                CarbonImmutable::parse($validFrom),
-            ),
-            $prior !== null => CarbonImmutable::parse($validFrom)->addYear(),
-            default => RenewalSeason::endOfCalendarYearFor(CarbonImmutable::parse($validFrom)),
-        };
+        /*
+         * ── Every clearance runs one year from the day it is issued ──────────
+         *
+         * Client, 20 October 2026: *"BPLO Mayor's / Business Permit - dec 31;
+         * the rest 1 year on the date issued"* — Zoning, Sanitary, FSIC,
+         * Occupancy and CENRO alike. This retires the first-issue calendar
+         * anchor above for the five clearances: a first issue now runs a year
+         * exactly as a renewal does, so a clearance issued in November is no
+         * longer a seven-week certificate. Only the Mayor's Permit keeps 31
+         * December.
+         */
+        $validUntil = $type->code === PermitType::OUTCOME_CODE
+            ? RenewalSeason::endOfTermFor(CarbonImmutable::parse($validFrom))
+            : CarbonImmutable::parse($validFrom)->addYear();
 
         /*
          * Who signs it, with one addition only this moment can make.
