@@ -249,7 +249,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
      * now the penalty-free window instead (`RenewalSeason::penaltyFreeUntil`).
      *
      * Asserted as the DATE, which is the rule, so it holds whenever the suite
-     * runs. The five clearances end on 31 December too, asserted below.
+     * runs. The five clearances run a year from issue, asserted below.
      */
     /*
      * `->toDateString()` on both sides: `valid_until` is a DATE CAST on the
@@ -266,17 +266,15 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
         ->and($businessPermit->valid_until->year)->toBe(CarbonImmutable::parse($businessPermit->valid_from)->year);
 
     /*
-     * And every other certificate ends on the last day of the year it was
-     * issued in — the client's rule, and the split described above.
+     * And every other certificate runs one year from the day it is issued
+     * [client, 20 October 2026: "the rest 1 year on the date issued"].
      */
     $clearances = $permits->where('permit_type_id', '!=', $businessPermit->permit_type_id);
     expect($clearances)->toHaveCount(5);
 
     foreach ($clearances as $clearance) {
-        expect($clearance->valid_until->format('m-d'))
-            ->toBe('12-31', 'a clearance no longer ends on 31 December')
-            ->and($clearance->valid_until->year)
-            ->toBe($clearance->valid_from->year, 'a clearance ran past the year it was issued in');
+        expect($clearance->valid_until->toDateString())
+            ->toBe($clearance->valid_from->copy()->addYear()->toDateString(), 'a clearance does not run a year from issue');
     }
 });
 
