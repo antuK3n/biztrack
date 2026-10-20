@@ -160,7 +160,37 @@ it('tells each permit status change once, and never names a person for a term ru
     expect($expired['by'])->toBeNull()
         ->and($rejected['reason'])->toBe('Failed inspection')
         ->and($rejected['by'])->not->toBeNull()
-        ->and($rejected['subject'])->toContain($sanitary->permit_number);
+        // Each entry says what it is about and what moved.
+        ->and($rejected)->toMatchArray([
+            'office_code' => 'CHO',
+            'permit_type' => 'Sanitary Permit',
+            'permit_number' => $sanitary->permit_number,
+            'from_label' => 'Active',
+            'by_office' => 'CHO',
+        ])
+        ->and($rejected['business_name'])->not->toBeNull();
+});
+
+it('gives a clearance office its own certificate\'s history only, and BPLO all of it', function () {
+    ['owner' => $owner, 'app' => $app, 'sanitary' => $sanitary, 'mayors' => $mayors] = profileOwner();
+    assignOffice($app->id, 'CHO');
+
+    Auth::login(User::where('email', 'bplo@biztrack.local')->firstOrFail());
+    Audit::log('permit.status_changed', $mayors, ['from' => 'active', 'to' => 'suspended', 'reason' => 'Unpaid tax']);
+    Auth::logout();
+
+    $read = fn (string $email) => collect(test()->withHeaders(authAs($email))
+        ->getJson("/api/v1/owner-profiles/{$owner->id}")->assertOk()->json('data.history'));
+
+    $cho = $read('sanitary@biztrack.local');
+    // The Sanitary Permit's issue and nothing else: no Mayor's Permit, no account.
+    expect($cho->pluck('office_code')->unique()->values()->all())->toBe(['CHO'])
+        ->and($cho->pluck('permit_number')->unique()->values()->all())->toBe([$sanitary->permit_number]);
+
+    $bplo = $read('bplo@biztrack.local');
+    expect($bplo->pluck('office_code')->filter()->unique()->sort()->values()->all())->toBe(['BPLO', 'CHO'])
+        ->and($bplo->firstWhere('reason', 'Unpaid tax')['permit_number'])->toBe($mayors->permit_number)
+        ->and($bplo->last()['label'])->toBe('Account created');
 });
 
 it('carries the owner account on each Permits row, for the Owner column link', function () {
