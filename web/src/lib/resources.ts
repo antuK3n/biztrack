@@ -58,6 +58,8 @@ import type {
   PaymentOptions,
   Permit,
   AdminOwner,
+  OwnerDirectoryRow,
+  OwnerProfile,
   OwnerHistoryEntry,
   PermitHistoryEntry,
   PermitRegisterRow,
@@ -1846,6 +1848,14 @@ export const admin = {
     ),
   ownerHistory: (ownerId: number) =>
     unwrap<OwnerHistoryEntry[]>(api.get(`/admin/owners/${ownerId}/history`)),
+
+  /*
+   * Business Owners, as every office reads them [client, 20 October 2026]:
+   * a list and one owner's profile, each scoped to the reader's caseload.
+   */
+  ownerDirectory: (params: { q?: string; status?: 'active' | 'blacklisted'; page?: number; per_page?: number } = {}) =>
+    unwrapPaged<OwnerDirectoryRow>(api.get('/owner-profiles', { params })),
+  ownerProfile: (ownerId: number) => unwrap<OwnerProfile>(api.get(`/owner-profiles/${ownerId}`)),
 
   businessesPage: (filters: AdminBusinessFilters = {}) =>
     unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),

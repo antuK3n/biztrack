@@ -1204,7 +1204,8 @@ export interface Permit {
   /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
   permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
   /** `ban`: the Business Account Number, shown beside the name on My Permits. */
-  business: { id: number; name: string; ban?: string | null }
+  /** `owner_user_id`: whose account holds it — the Permits table links the owner to their profile. */
+  business: { id: number; name: string; ban?: string | null; owner_user_id?: number | null }
   application: { id: number; tracking_id: string }
   verify_url: string
   /*
@@ -3118,6 +3119,105 @@ export interface OwnerHistoryEntry {
   label: string
   reason: string | null
   by: string | null
+}
+
+/**
+ * One row of the Business Owners list (`GET /owner-profiles`). Scoped to the
+ * reader: an office sees only the owners, and the businesses, on its caseload.
+ */
+export interface OwnerDirectoryRow {
+  id: number
+  name: string
+  email: string | null
+  mobile_number: string | null
+  status: 'active' | 'blacklisted'
+  status_label: string
+  active_permits: number
+  businesses: { id: number; name: string; ban: string | null; status: BusinessStatus; status_label: string }[]
+}
+
+/** One event on an owner's profile timeline: the account, a business, or a permit. */
+export interface OwnerProfileEvent {
+  id: number
+  at: string | null
+  scope: 'account' | 'business' | 'permit'
+  subject: string
+  label: string
+  to: string | null
+  to_label: string | null
+  reason: string | null
+  by: string | null
+}
+
+/** An owner's profile as an office reads it (`GET /owner-profiles/{id}`). */
+export interface OwnerProfile {
+  account: {
+    id: number
+    name: string
+    first_name: string | null
+    middle_name: string | null
+    last_name: string | null
+    suffix: string | null
+    gender: string | null
+    email: string | null
+    mobile_number: string | null
+    home_address: string | null
+    created_at: string | null
+    email_verified_at: string | null
+    last_login_at: string | null
+    is_active: boolean
+    status: 'active' | 'blacklisted'
+    status_label: string
+    blacklisted_at: string | null
+    blacklist_reason: string | null
+    blacklisted_by: string | null
+  }
+  summary: { businesses: number; active_permits: number; filings: number; total_paid: number }
+  businesses: {
+    id: number
+    name: string
+    ban: string | null
+    status: BusinessStatus
+    status_label: string
+    address: string | null
+    registered_at: string | null
+    permits: {
+      id: number
+      permit_number: string
+      type_code: string | null
+      type_name: string | null
+      office_code: string | null
+      status: string
+      status_label: string
+      valid_from: string | null
+      valid_until: string | null
+    }[]
+  }[]
+  filings: {
+    id: number
+    tracking_id: string | null
+    business_name: string | null
+    type: string | null
+    type_label: string | null
+    status: string | null
+    status_label: string | null
+    submitted_at: string | null
+    decided_at: string | null
+  }[]
+  payments: {
+    id: number
+    reference_number: string | null
+    tracking_id: string | null
+    business_name: string | null
+    amount: number
+    method: string | null
+    method_label: string | null
+    status: string | null
+    status_label: string
+    paid_at: string | null
+    created_at: string | null
+  }[]
+  history: OwnerProfileEvent[]
 }
 
 export interface AdminBusiness {
