@@ -107,9 +107,9 @@ export interface BusinessGroup {
    * derived value below — expiry, nearing, expired, flagged — is a fact about
    * an ISSUED permit, and a held copy has none of them to contribute.
    */
-  /** Latest expiry in the group — the date shown when nothing is wrong. */
+  /** Latest expiry in the group. */
   latestExpiry: string | null
-  /** Soonest expiry — the date shown when a renewal is due or already late. */
+  /** Soonest expiry — the date the heading shows, whatever the state. */
   soonestExpiry: string | null
   /** Something in the group expires within NEARING_DAYS but has not yet. */
   nearing: boolean
@@ -573,7 +573,14 @@ export function BusinessRow({
       ? { text: `Permit expired · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-red-tint text-s-red' }
       : group.nearing
         ? { text: `Expires soon · ${formatDate(group.soonestExpiry)}`, className: 'bg-s-yellow-tint text-amber-800' }
-        : { text: `Valid until ${formatDate(group.latestExpiry)}`, className: 'bg-s-green-tint text-s-green' }
+        : /*
+           The SOONEST date, not the latest: a clearance now runs a year from
+           issue while the Mayor's Permit ends on 31 December [client, 20
+           October 2026], so the latest date read "Valid until September
+           2027" on a business whose Mayor's Permit lapses this December.
+           The business is whole only until its first permit ends.
+         */
+          { text: `Valid until ${formatDate(group.soonestExpiry)}`, className: 'bg-s-green-tint text-s-green' }
 
   const count = group.permits.length
   const meta = [
