@@ -232,8 +232,7 @@ final class Portfolio
                 'submit' => $this->submit($this->current),
                 'bplo_approve' => $this->bploApproves($event['remarks']),
                 'bplo_return' => $this->bploReturns($event),
-                'pay_at_counter' => $this->asOffice(PermitType::OUTCOME_CODE)
-                    ->post('BPLO marks the bill paid at the counter', "applications/{$this->current}/counter-payment"),
+                'pay_at_counter' => Playbook::payAtCounter($this->api, $this->current, $at),
                 'apply' => array_map(fn (string $code) => $this->handIn($code), $biz['ticks']),
                 'office_approve' => $this->officeApproves($event['office'], $event['remarks']),
                 'book' => $this->book($event['office'], self::moment($event['visit'])),

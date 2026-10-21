@@ -7,6 +7,7 @@ use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\Message;
 use App\Models\OfficerRequest;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
@@ -76,8 +77,13 @@ it('builds one owner per scenario, each in the state the scenario names', functi
 
     [$reviewing] = defenseFilings('offices-reviewing');
     $rows = $reviewing->permitTypes->mapWithKeys(fn ($t) => [$t->code => $t->pivot->status]);
+    $counter = $reviewing->payments()->where('method', 'counter')->sole();
     expect($reviewing->status)->toBe(ApplicationStatus::Approved)->and($reviewing->isDecided())->toBeFalse()
-        ->and($reviewing->payments()->where('method', 'counter')->exists())->toBeTrue()
+        // Marked by the officer holding the filing at BPLO, with a seven-digit OR
+        // dated the day it was marked (thesis panel revisions).
+        ->and($counter->recorded_by_user_id)->toBe($reviewing->bploAssignment->officer_user_id)
+        ->and($counter->or_number)->toMatch('/^\d{7}$/')
+        ->and($counter->or_date->toDateString())->toBe($counter->paid_at->toDateString())
         ->and(collect($rows)->contains(ClearanceStatus::ForInspection))->toBeTrue()
         ->and($reviewing->inspections()->where('status', 'scheduled')->count())->toBe(1);
 
@@ -130,6 +136,11 @@ it('builds one owner per scenario, each in the state the scenario names', functi
     expect($talking->status)->toBe(ApplicationStatus::ForApproval)
         ->and($talking->assignments()->whereNotNull('officer_user_id')->exists())->toBeTrue()
         ->and(Message::whereHas('thread', fn ($t) => $t->where('application_id', $talking->id))->count())->toBe(3);
+
+    // No two counter payments share an OR number.
+    $ors = Payment::where('method', 'counter')->pluck('or_number');
+    expect($ors)->not->toBeEmpty()
+        ->and($ors->filter()->unique()->count())->toBe($ors->count());
 
     // The run's sign-in tokens are gone, and the clock is the real one again.
     expect(PersonalAccessToken::count())->toBe(0)

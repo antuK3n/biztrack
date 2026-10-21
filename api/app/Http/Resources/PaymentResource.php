@@ -48,6 +48,15 @@ class PaymentResource extends JsonResource
             'set_aside' => $this->abandoned_at !== null,
             // Paid twice for one bill; staff are reviewing a refund.
             'refund_review' => $this->refund_review_at !== null,
+            /*
+             * A counter payment's Official Receipt: its number and the day it
+             * was paid, as BPLO recorded them (thesis panel, matrix item 5).
+             * The owner's Payment History shows them; null on every payment
+             * made online, and on a counter payment recorded before the OR was
+             * asked for.
+             */
+            'or_number' => $this->or_number,
+            'or_date' => optional($this->or_date)->toDateString(),
             'application' => $this->whenLoaded('application', fn () => [
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,

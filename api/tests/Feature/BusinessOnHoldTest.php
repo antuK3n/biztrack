@@ -216,8 +216,14 @@ it('refuses BPLO marking a held filing paid at the counter, with the sentence fo
     $app = holdFiling();
     holdSetStatus($app->business_id, $status)->assertOk();
 
+    /*
+     * The officer holding the filing, with its OR: since the thesis panel's
+     * revisions anyone else is refused before the hold is reached, and the OR
+     * is required. The hold is still what refuses it here.
+     */
+    takeFiling($app->id, 'BPLO');
     test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson("/api/v1/applications/{$app->id}/counter-payment")
+        ->postJson("/api/v1/applications/{$app->id}/counter-payment", ['or_number' => '4200888', 'or_date' => now()->toDateString()])
         ->assertStatus(422)
         ->assertJsonPath('message', $sentence);
 

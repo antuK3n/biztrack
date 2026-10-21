@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Business;
 use App\Models\Payment;
 use App\Models\User;
@@ -65,6 +66,26 @@ function opbFiling(): Application
     return bploApprovesForm($app);
 }
 
+/**
+ * The demo BPLO officer takes the filing and marks it paid with its OR.
+ *
+ * Since the thesis panel's revisions Mark as paid is the case holder's alone
+ * and asks for the OR number and the date paid, so the counter tests below
+ * take the filing first and send both.
+ */
+function opbTakeAsBplo(Application $app): void
+{
+    $assignment = ApplicationAssignment::where('application_id', $app->id)
+        ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
+        ->firstOrFail();
+    $assignment->forceFill([
+        'officer_user_id' => User::where('email', 'bplo@biztrack.local')->value('id'),
+        'assigned_at' => now(),
+    ])->save();
+}
+
+const OPB_OR = ['or_number' => '4200999', 'or_date' => '2026-10-01'];
+
 /** Run `$second` once, from inside the first request, at its in-flight query. */
 function opbInsideTheFirst(Closure $second): void
 {
@@ -116,13 +137,14 @@ it('opens one KwikPay order when a second Pay lands while the first is opening i
 
 it('records one counter payment when Mark as paid is pressed twice at once', function () {
     $app = opbFiling();
+    opbTakeAsBplo($app);
     authAs('bplo@biztrack.local');
     $inner = null;
     opbInsideTheFirst(function () use (&$inner, $app) {
-        $inner = test()->postJson("/api/v1/applications/{$app->id}/counter-payment");
+        $inner = test()->postJson("/api/v1/applications/{$app->id}/counter-payment", OPB_OR);
     });
 
-    $this->postJson("/api/v1/applications/{$app->id}/counter-payment")->assertCreated();
+    $this->postJson("/api/v1/applications/{$app->id}/counter-payment", OPB_OR)->assertCreated();
 
     $balance = PermitFees::balance($app->fresh());
     expect($inner?->status())->not->toBe(201)
@@ -132,6 +154,7 @@ it('records one counter payment when Mark as paid is pressed twice at once', fun
 
 it('takes no online payment when the owner pays while BPLO is marking the bill paid', function () {
     $app = opbFiling();
+    opbTakeAsBplo($app);
     authAs('bplo@biztrack.local');
     $inner = null;
     opbInsideTheFirst(function () use (&$inner, $app) {
@@ -142,7 +165,7 @@ it('takes no online payment when the owner pays while BPLO is marking the bill p
         Sanctum::actingAs($bplo);
     });
 
-    $this->postJson("/api/v1/applications/{$app->id}/counter-payment")->assertCreated();
+    $this->postJson("/api/v1/applications/{$app->id}/counter-payment", OPB_OR)->assertCreated();
 
     expect($inner?->status())->not->toBe(201)
         ->and(Payment::where('application_id', $app->id)->where('status', 'completed')->pluck('method')->map->value->all())

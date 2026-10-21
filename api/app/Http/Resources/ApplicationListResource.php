@@ -55,6 +55,17 @@ class ApplicationListResource extends JsonResource
             'submitted_at' => optional($this->submitted_at)->toISOString(),
             'deadline_at' => optional($this->deadline_at)->toISOString(),
             /*
+             * BPLO's own assignment — who holds the filing at BPLO, and whether
+             * this reader may take it or act on it — for the Manage
+             * Applications Pending Payment tab, whose rows come from this list.
+             * Since the thesis panel's revisions only the officer holding it
+             * may mark the bill paid (matrix item 1), so the row has to know.
+             * Only when the list loaded it; see ApplicationController::index.
+             */
+            'bplo_assignment' => $this->whenLoaded('bploAssignment', fn () => $this->bploAssignment
+                ? new AssignmentResource($this->bploAssignment)
+                : null),
+            /*
              * Each permit with its OWN status, not just its name.
              *
              * This sent `{ code, name }` and the tracking screen inferred the

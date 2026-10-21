@@ -136,6 +136,16 @@ class ApplicationController extends Controller
         ApplicationVisibility::scope($query, $request->user());
 
         /*
+         * Who holds each filing at BPLO, for the two readers of the register:
+         * the Pending Payment tab shows it, and offers Mark as paid only to the
+         * holder (thesis panel, matrix item 1). Not loaded for owners or the
+         * clearance offices, whose screens have no use for it.
+         */
+        if ($request->user()->hasPermission('application.view_any_office')) {
+            $query->with(['bploAssignment.officer:id,name', 'bploAssignment.department:id,code,name']);
+        }
+
+        /*
          * `status` takes a list, not just one value: ?status=submitted,pending_payment
          *
          * The officer queue's Pending Payment tab asks for a whole *stage* of the

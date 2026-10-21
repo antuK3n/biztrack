@@ -9,6 +9,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\OfficerRequest;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -28,13 +29,14 @@ use Illuminate\Support\Str;
  *
  * Every state change below is a request through AppClient, made by the
  * account a person would make it as: the owner files, BPLO approves and ticks
- * the other permits (client, 5 October 2026), BPLO marks the bill paid at the
- * counter (never KwikPay), each office takes its own clearance, approves it,
- * books its visit and records the result, the super admin blacklists. The
- * only direct reads of the database are to find what a screen would have
- * shown the person — the id of BPLO's queue item, the requirement list the
- * Documents step draws, the permit row the Revoke button sits on. Nothing is
- * written except through the API.
+ * the other permits (client, 5 October 2026), the BPLO officer holding the
+ * filing marks the bill paid at the counter with its OR (never KwikPay), each
+ * office takes its own clearance, approves it, books its visit and records the
+ * result, the super admin blacklists. The only direct reads of the database
+ * are to find what a screen would have shown the person — the id of BPLO's
+ * queue item and who holds it, the requirement list the Documents step draws,
+ * the permit row the Revoke button sits on. Nothing is written except through
+ * the API.
  *
  * If the app refuses a step, StepRefused propagates and the command rolls the
  * whole owner back and reports the refusal. A scenario the rules will not
@@ -627,12 +629,53 @@ final class Playbook
         $this->bploApproves($id);
 
         $this->day(2, '09:30');
-        $this->asOffice(PermitType::OUTCOME_CODE)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment");
+        self::payAtCounter($this->api, $id, $this->clock->now());
         foreach ($this->ticks() as $code) {
             $this->handIn($id, $code);
         }
 
         return $id;
+    }
+
+    /**
+     * BPLO marks the bill paid at the counter, as the officer holding the
+     * filing and with the Official Receipt the owner paid against.
+     *
+     * Both are the app's rules since the thesis panel's revisions: only the
+     * officer in charge of BPLO's assignment may mark a bill paid, and the OR
+     * number and the date paid are required. The holder is read the way the
+     * queue shows it ("Officer in charge"), never assumed. Shared with
+     * Portfolio, whose clicks are these.
+     */
+    public static function payAtCounter(AppClient $api, int $id, CarbonImmutable $paidOn): void
+    {
+        $holder = ApplicationAssignment::where('application_id', $id)
+            ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
+            ->with('officer')
+            ->first()?->officer;
+        if ($holder === null) {
+            throw new StepRefused('find who holds the filing at BPLO', 404, "application {$id} has no officer in charge at BPLO");
+        }
+
+        $api->as($holder)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment", [
+            'or_number' => self::nextOrNumber(),
+            'or_date' => $paidOn->toDateString(),
+        ]);
+    }
+
+    /**
+     * Seven digits, like the serial printed on an Official Receipt, and on no
+     * payment yet — the register's own and every earlier run's included, so
+     * two runs never hand out one number.
+     */
+    public static function nextOrNumber(): string
+    {
+        $n = 4_200_001 + Payment::whereNotNull('or_number')->count();
+        while (Payment::where('or_number', (string) $n)->exists()) {
+            $n++;
+        }
+
+        return (string) $n;
     }
 
     /** Apply for a clearance, upload its checklist, hand in its sheet. */
