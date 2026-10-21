@@ -231,9 +231,11 @@ function notificationHref(link: string, portal: Portal): string {
    * Crossing over, so the SUBJECT has to be re-addressed rather than re-prefixed
    * — `/staff/applications/{id}` is nobody's route. One filing has two screens:
    * the applicant's detail page and the reviewer's queue entry. The officer form
-   * carries an application id into a route that binds an assignment, which
-   * ReviewPage resolves against the office's own queue (see the note there); it
-   * is what NotificationService has written for officers since commit c922a8a.
+   * carried an application id into a route that binds an assignment, which
+   * ReviewPage resolves against the office's own queue after a 404 (see the note
+   * there); it is what NotificationService wrote for officers from commit
+   * c922a8a until 21 October 2026, when officer notices began naming the
+   * office's own review. Rows written before then still arrive here.
    */
   const filing = /^(?:\/staff\/queue|\/applications)\/(\d+)/.exec(path)
   if (filing) {

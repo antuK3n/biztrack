@@ -49,8 +49,9 @@ use Throwable;
  * from the screen, which is how this reads as "clicking a notification logs me
  * out" (issue #98).
  *
- * Hence filingLink(): the one filing has two addresses, and which one is right
- * depends on who is being told about it, never on which method is telling them.
+ * Hence filingLink(): the one filing has an address on each site — on the LGU
+ * one, its review by the reader's own office — and which one is right depends on
+ * who is being told about it, never on which method is telling them.
  */
 class NotificationService
 {
@@ -636,15 +637,10 @@ class NotificationService
      * Staff only, so push() mails nobody and there is no fanOut(): texts are
      * for an owner's key moments (see the note above fanOut).
      *
-     * ── The office's own review, not `filingLink()` ─────────────────────────
-     *
-     * That helper puts the APPLICATION id into `/staff/queue/{id}`, a route
-     * that binds an assignment, because it cannot know which office the
-     * reader means; ReviewPage only re-resolves the id after a 404. Here the
-     * office is the point of the notice, so its review is known — and the
-     * application id can name another filing's review outright: on the seeded
-     * register `/staff/queue/1`, meant for BIZ-2026-00001, opens BPLO's review
-     * of BIZ-2026-00002.
+     * Addressed to the office's own review, as `filingLink()` addresses every
+     * officer notice (see the note there for why never the filing's number).
+     * The review is passed in rather than looked up because the caller has
+     * just routed it.
      */
     public function filingSubmitted(
         Application $app,
@@ -1015,27 +1011,43 @@ class NotificationService
      * The address of a filing ON THE SITE THIS READER IS SIGNED INTO.
      *
      * A filing has two screens, not one: the applicant reads it at
-     * `/applications/{id}` on the citizen site, a reviewer reads it at
-     * `/staff/queue/{id}` on the LGU one. They are not interchangeable — see the
-     * note at the top of this file for what handing over the wrong one does.
+     * `/applications/{id}` on the citizen site, a reviewer reads its office's
+     * review at `/staff/queue/{review}` on the LGU one. They are not
+     * interchangeable — see the note at the top of this file for what handing
+     * over the wrong one does.
      *
      * `application.review` is the discriminator because it is what App.tsx gates
      * the queue route on; asking the same question the router asks is what keeps
      * the answer true when roles change. Anyone without it is a business owner,
      * and the citizen path is the only one they could open anyway.
      *
-     * The officer link carries an APPLICATION id into a route that binds an
-     * ASSIGNMENT. That is deliberate and long-standing (commit c922a8a):
-     * ReviewPage resolves a stray id against the office's own queue and replaces
-     * the URL, so the link self-corrects. An assignment id is not available here
-     * — a filing routed to six offices has six of them, and which one is meant
-     * depends on the reader, not on the filing.
+     * ── The reader's own review, not the filing's number ────────────────────
+     *
+     * The officer link carried the APPLICATION id into that route, which binds
+     * an ASSIGNMENT (commit c922a8a), on the reasoning that ReviewPage resolves
+     * a stray id against the office's queue and that an assignment id was not
+     * available here. Both halves were wrong. ReviewPage re-resolves only after
+     * a 404, so a number that is another filing's review opens that filing:
+     * on the seeded register `/staff/queue/1`, meant for BIZ-2026-00001, is
+     * BPLO's review of BIZ-2026-00002. And the review IS available: a filing
+     * has one per office, and the reader's office says which. Ken, 21 October
+     * 2026: every officer notice opens the office's own case.
+     *
+     * An officer whose office has no review of the filing has no screen for it,
+     * so they are sent to the queue rather than to a number that names someone
+     * else's filing.
      */
     private function filingLink(User $reader, Application $app): string
     {
-        return $reader->hasPermission('application.review')
-            ? "/staff/queue/{$app->id}"
-            : "/applications/{$app->id}";
+        if (! $reader->hasPermission('application.review')) {
+            return "/applications/{$app->id}";
+        }
+
+        $review = $reader->department_id === null ? null : ApplicationAssignment::where('application_id', $app->id)
+            ->where('department_id', $reader->department_id)
+            ->value('id');
+
+        return $review !== null ? "/staff/queue/{$review}" : '/staff/queue';
     }
 
     private function permitOwner(Permit $permit): ?User
