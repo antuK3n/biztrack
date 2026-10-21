@@ -7,6 +7,7 @@ use App\Enums\PermitStatus;
 use App\Jobs\SendOwnerUpdateEmail;
 use App\Jobs\SendSms;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\Business;
 use App\Models\OfficerRequest;
@@ -615,6 +616,52 @@ class NotificationService
             // Into the LGU site, chosen by who is being TOLD rather than by a
             // literal — the same reasoning `requestResponded` records.
             $this->filingLink($recipient, $app),
+            $app,
+        );
+    }
+
+    /**
+     * An applicant has handed an office a filing, so it is that office's turn.
+     *
+     * Thesis panel revision (Tool Defense matrix, item 8): "The office
+     * handling an application is notified when an applicant submits it." Who
+     * in the office is told is `WorkflowService::tellOfficeOfSubmission`;
+     * this is the notice they read, in the words Ken approved.
+     *
+     * Two sentences for the two hand-overs. BPLO is handed the filing itself
+     * — a new application, a Business Permit renewal, an amendment — and
+     * `$permit` is null. Any other office is handed one permit: its sheet
+     * handed in after payment, or a clearance-only renewal.
+     *
+     * Staff only, so push() mails nobody and there is no fanOut(): texts are
+     * for an owner's key moments (see the note above fanOut).
+     *
+     * ── The office's own review, not `filingLink()` ─────────────────────────
+     *
+     * That helper puts the APPLICATION id into `/staff/queue/{id}`, a route
+     * that binds an assignment, because it cannot know which office the
+     * reader means; ReviewPage only re-resolves the id after a 404. Here the
+     * office is the point of the notice, so its review is known — and the
+     * application id can name another filing's review outright: on the seeded
+     * register `/staff/queue/1`, meant for BIZ-2026-00001, opens BPLO's review
+     * of BIZ-2026-00002.
+     */
+    public function filingSubmitted(
+        Application $app,
+        User $recipient,
+        ApplicationAssignment $review,
+        ?PermitType $permit = null,
+    ): void {
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'New application',
+            $permit === null
+                ? "{$app->tracking_id} · {$business} was submitted."
+                : "{$app->tracking_id} · {$business} applied for the {$permit->name}.",
+            "/staff/queue/{$review->id}",
             $app,
         );
     }
