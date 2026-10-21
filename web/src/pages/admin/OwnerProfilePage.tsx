@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangleIcon, ChevronRightIcon, MailIcon } from '../../components/icons'
+import { AlertTriangleIcon, ChevronRightIcon, MailIcon, SearchIcon } from '../../components/icons'
 import { Modal } from '../../components/ui/Modal'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { ProtoCard, StatusChip } from '../../components/ui/Proto'
@@ -195,8 +195,9 @@ function Profile({ profile }: { profile: OwnerProfile }) {
         description={account.name}
         size="xl"
         flush
+        fixedHeight
       >
-        <BusinessList businesses={profile.businesses} />
+        <BusinessBrowser businesses={profile.businesses} />
       </Modal>
       <Modal
         open={view === 'filings'}
@@ -205,8 +206,9 @@ function Profile({ profile }: { profile: OwnerProfile }) {
         description={account.name}
         size="xl"
         flush
+        fixedHeight
       >
-        <FilingsTable filings={profile.filings} />
+        <FilingsBrowser filings={profile.filings} />
       </Modal>
       <Modal
         open={view === 'payments'}
@@ -215,8 +217,9 @@ function Profile({ profile }: { profile: OwnerProfile }) {
         description={`${account.name} · press a payment to see what it paid for`}
         size="xl"
         flush
+        fixedHeight
       >
-        <PaymentsTable payments={payments} />
+        <PaymentsBrowser payments={payments} />
       </Modal>
       <Modal
         open={view === 'fees'}
@@ -225,8 +228,9 @@ function Profile({ profile }: { profile: OwnerProfile }) {
         description={account.name}
         size="xl"
         flush
+        fixedHeight
       >
-        <FeesTable fees={fees} />
+        <FeesBrowser fees={fees} />
       </Modal>
       <Modal
         open={view === 'history'}
@@ -235,6 +239,7 @@ function Profile({ profile }: { profile: OwnerProfile }) {
         description={account.name}
         size="lg"
         flush
+        fixedHeight
       >
         <HistoryBrowser events={profile.history} />
       </Modal>
@@ -652,46 +657,292 @@ function HistorySection({ events, onViewAll }: { events: OwnerProfileEvent[]; on
  */
 function HistoryBrowser({ events }: { events: OwnerProfileEvent[] }) {
   const [filter, setFilter] = useState<HistoryFilter>('all')
+  const [query, setQuery] = useState('')
   const offices = OFFICE_ORDER.filter((code) => events.some((e) => e.scope === 'permit' && e.office_code === code))
   const hasAccount = events.some((e) => e.scope !== 'permit')
   const certificateOf = (code: string) => events.find((e) => e.office_code === code)?.permit_type ?? code
   const choosable = hasAccount || offices.length > 1
-  const filtered = events.filter((e) =>
-    filter === 'all'
-      ? true
-      : filter === 'account'
-        ? e.scope !== 'permit'
-        : e.scope === 'permit' && e.office_code === filter,
+  const filtered = events.filter(
+    (e) =>
+      (filter === 'all'
+        ? true
+        : filter === 'account'
+          ? e.scope !== 'permit'
+          : e.scope === 'permit' && e.office_code === filter) &&
+      matches(query, [
+        e.label,
+        e.permit_type,
+        e.permit_number,
+        e.business_name,
+        e.reason,
+        e.by,
+        e.by_office,
+        e.from_label,
+        e.to_label,
+      ]),
   )
 
   return (
     <div>
-      {choosable && (
-        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
-          <label htmlFor="history-filter" className="shrink-0 text-sm font-semibold text-ink-secondary">
-            Show
-          </label>
-          <select
-            id="history-filter"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="min-w-0 flex-1 rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-          >
-            <option value="all">All status history · {events.length}</option>
-            {hasAccount && (
-              <option value="account">
-                Account and businesses · {events.filter((e) => e.scope !== 'permit').length}
-              </option>
-            )}
-            {offices.map((code) => (
-              <option key={code} value={code}>
-                {code} — {certificateOf(code)} · {events.filter((e) => e.office_code === code).length}
-              </option>
-            ))}
-          </select>
+      <Toolbar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Permit no., business, reason or person"
+        searchLabel="Search the status history"
+        shown={filtered.length}
+        total={events.length}
+        filter={
+          choosable
+            ? {
+                label: 'Show',
+                value: filter,
+                onChange: setFilter,
+                options: [
+                  { value: 'all', label: 'All offices' },
+                  ...(hasAccount ? [{ value: 'account', label: 'Account and businesses' }] : []),
+                  ...offices.map((code) => ({ value: code, label: `${code} — ${certificateOf(code)}` })),
+                ],
+              }
+            : undefined
+        }
+      />
+      {filtered.length === 0 ? <NoMatch /> : <HistoryList events={filtered} full />}
+    </div>
+  )
+}
+
+/*
+ * ── Search and filter, in each "View all" modal ───────────────────────────
+ *
+ * [Client, 21 October 2026: "add sa modal yung search bar o filter o both kung
+ * ano mas maganda".] Both, because they answer different questions: the search
+ * finds a particular thing by what the reader already knows of it — a tracking
+ * ID, a reference, a permit number, a business name — and the filter narrows
+ * by the state an officer is looking for: what needs attention, what is not
+ * yet paid. Each modal filters on the field its list is about, with the
+ * choices read off the data so none of them comes up empty.
+ *
+ * The bar sits at the top of the modal's own scroll and stays there, and says
+ * how many of how many it is showing, so a narrowed list never reads as the
+ * whole of it.
+ */
+function matches(query: string, fields: (string | null | undefined)[]): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return fields.some((field) => field?.toLowerCase().includes(needle))
+}
+
+interface ToolbarFilter {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string }[]
+}
+
+function Toolbar({
+  query,
+  onQuery,
+  placeholder,
+  searchLabel,
+  shown,
+  total,
+  filter,
+}: {
+  query: string
+  onQuery: (q: string) => void
+  placeholder: string
+  searchLabel: string
+  shown: number
+  total: number
+  filter?: ToolbarFilter
+}) {
+  const filterId = useId()
+
+  return (
+    <div className="sticky top-0 z-10 border-b border-line bg-surface px-5 py-3">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+        <div className="relative min-w-0 flex-1">
+          <SearchIcon
+            size={16}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder={placeholder}
+            aria-label={searchLabel}
+            className="w-full rounded-lg border border-input-border bg-input py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+          />
         </div>
-      )}
-      {filtered.length === 0 ? <Empty>Nothing recorded here yet.</Empty> : <HistoryList events={filtered} full />}
+        {filter && (
+          <div className="flex shrink-0 items-center gap-2">
+            <label htmlFor={filterId} className="text-sm font-semibold text-ink-secondary">
+              {filter.label}
+            </label>
+            <select
+              id={filterId}
+              value={filter.value}
+              onChange={(e) => filter.onChange(e.target.value)}
+              className="min-w-0 rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal sm:max-w-[16rem]"
+            >
+              {filter.options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+      <p className="mt-1.5 text-xs text-ink-muted" aria-live="polite">
+        {shown === total
+          ? `${total.toLocaleString()} in all`
+          : `Showing ${shown.toLocaleString()} of ${total.toLocaleString()}`}
+      </p>
+    </div>
+  )
+}
+
+function NoMatch() {
+  return <p className="px-5 py-8 text-center text-sm text-ink-muted">Nothing matches. Try another search or filter.</p>
+}
+
+/** The distinct labels a list holds, in first-seen order, as filter choices. */
+function choicesOf(labels: (string | null | undefined)[]): { value: string; label: string }[] {
+  return [...new Set(labels.filter((l): l is string => Boolean(l)))].map((l) => ({ value: l, label: l }))
+}
+
+const ATTENTION = ['expired', 'suspended', 'revoked', 'rejected']
+
+function BusinessBrowser({ businesses }: { businesses: OwnerProfile['businesses'] }) {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const live = (b: OwnerProfile['businesses'][number]) => b.permits.filter((p) => p.status !== 'superseded')
+  const filtered = businesses.filter(
+    (b) =>
+      (filter === 'all' ||
+        (filter === 'attention' && live(b).some((p) => ATTENTION.includes(p.status))) ||
+        (filter === 'clear' && live(b).length > 0 && live(b).every((p) => p.status === 'active')) ||
+        (filter === 'none' && live(b).length === 0)) &&
+      matches(query, [b.name, b.ban, b.address, ...b.permits.map((p) => p.permit_number)]),
+  )
+
+  return (
+    <div>
+      <Toolbar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Business name, BAN or permit no."
+        searchLabel="Search the businesses"
+        shown={filtered.length}
+        total={businesses.length}
+        filter={{
+          label: 'Show',
+          value: filter,
+          onChange: setFilter,
+          options: [
+            { value: 'all', label: 'All businesses' },
+            { value: 'attention', label: 'Needs attention' },
+            { value: 'clear', label: 'All permits active' },
+            { value: 'none', label: 'No permit yet' },
+          ],
+        }}
+      />
+      {/* Keyed on the narrowing, so Expand all starts over for the list now shown. */}
+      {filtered.length === 0 ? <NoMatch /> : <BusinessList key={`${filter}|${query}`} businesses={filtered} />}
+    </div>
+  )
+}
+
+function FilingsBrowser({ filings }: { filings: OwnerProfile['filings'] }) {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const filtered = filings.filter(
+    (f) =>
+      (filter === 'all' || f.status_label === filter) && matches(query, [f.tracking_id, f.business_name, f.type_label]),
+  )
+
+  return (
+    <div>
+      <Toolbar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Tracking ID or business"
+        searchLabel="Search the filings"
+        shown={filtered.length}
+        total={filings.length}
+        filter={{
+          label: 'Status',
+          value: filter,
+          onChange: setFilter,
+          options: [{ value: 'all', label: 'All statuses' }, ...choicesOf(filings.map((f) => f.status_label))],
+        }}
+      />
+      {filtered.length === 0 ? <NoMatch /> : <FilingsTable filings={filtered} />}
+    </div>
+  )
+}
+
+function PaymentsBrowser({ payments }: { payments: ProfilePayment[] }) {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const filtered = payments.filter(
+    (p) =>
+      (filter === 'all' || p.status_label === filter) &&
+      matches(query, [p.reference_number, p.tracking_id, p.business_name, p.method_label]),
+  )
+
+  return (
+    <div>
+      <Toolbar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Reference, tracking ID or business"
+        searchLabel="Search the payments"
+        shown={filtered.length}
+        total={payments.length}
+        filter={{
+          label: 'Status',
+          value: filter,
+          onChange: setFilter,
+          options: [{ value: 'all', label: 'All statuses' }, ...choicesOf(payments.map((p) => p.status_label))],
+        }}
+      />
+      {filtered.length === 0 ? <NoMatch /> : <PaymentsTable payments={filtered} />}
+    </div>
+  )
+}
+
+function FeesBrowser({ fees }: { fees: NonNullable<OwnerProfile['fees']> }) {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+  const filtered = fees.filter(
+    (f) => (filter === 'all' || (filter === 'paid') === f.paid) && matches(query, [f.tracking_id, f.business_name]),
+  )
+
+  return (
+    <div>
+      <Toolbar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Tracking ID or business"
+        searchLabel="Search your office's fees"
+        shown={filtered.length}
+        total={fees.length}
+        filter={{
+          label: 'Show',
+          value: filter,
+          onChange: setFilter,
+          options: [
+            { value: 'all', label: 'All fees' },
+            { value: 'paid', label: 'Paid' },
+            { value: 'unpaid', label: 'Not yet paid' },
+          ],
+        }}
+      />
+      {filtered.length === 0 ? <NoMatch /> : <FeesTable fees={filtered} />}
     </div>
   )
 }
