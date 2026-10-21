@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { AlertTriangleIcon, ChevronRightIcon, MailIcon } from '../../components/icons'
+import { Modal } from '../../components/ui/Modal'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { ProtoCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
@@ -56,11 +57,21 @@ const FILING_TONES: Record<string, ChipTone> = {
   neutral: 'tint-gray',
 }
 
-/** Status history entries shown before "Show all". */
-const HISTORY_SHOWN = 8
-
-/** Filings and payments shown before "Show all": the latest are what is asked about. */
+/*
+ * ── The page shows the latest; "View all" opens the rest in a modal ────────
+ *
+ * [Client, 21 October 2026: "masyadong mahaba yung iba … kapag pinindot ang
+ * show all pwede bang modal na lang at sa modal mag scroll".] Each register
+ * shows its first few rows — the ones asked about — and "View all" opens the
+ * whole list in a modal that scrolls on its own. The page stays one screen
+ * of summary; expanding a list in place had pushed everything below it out
+ * of reach, and the side column's history alone ran longer than the page.
+ */
+const HISTORY_SHOWN = 5
 const ROWS_SHOWN = 5
+const BUSINESSES_SHOWN = 6
+
+type FullView = 'businesses' | 'filings' | 'payments' | 'fees' | 'history' | null
 
 const SEX: Record<string, string> = { M: 'Male', F: 'Female' }
 
@@ -94,193 +105,57 @@ export function OwnerProfilePage() {
 }
 
 function Profile({ profile }: { profile: OwnerProfile }) {
-  const { account, summary } = profile
-  const blacklisted = account.status === 'blacklisted'
-  /*
-   * Businesses start closed, one line each, so an owner with thirteen of them
-   * reads as a list rather than thirteen tables. One business opens itself:
-   * there is nothing to choose between.
-   */
-  const [open, setOpen] = useState<Set<number>>(
-    () => new Set(profile.businesses.length === 1 ? [profile.businesses[0].id] : []),
-  )
-  const allOpen = profile.businesses.length > 0 && open.size === profile.businesses.length
-  const toggle = (id: number) =>
-    setOpen((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  const [allFilings, setAllFilings] = useState(false)
-  const [allPayments, setAllPayments] = useState(false)
-  const filings = allFilings ? profile.filings : profile.filings.slice(0, ROWS_SHOWN)
-  const allOfPayments = profile.payments ?? []
-  const payments = allPayments ? allOfPayments : allOfPayments.slice(0, ROWS_SHOWN)
+  const { account } = profile
+  const [view, setView] = useState<FullView>(null)
+  const close = () => setView(null)
+  const payments = profile.payments ?? []
   const fees = profile.fees ?? []
-  const shownFees = allPayments ? fees : fees.slice(0, ROWS_SHOWN)
 
   return (
     <div className="space-y-5">
       {/* ── Who, and in what standing ─────────────────────────────────── */}
-      <ProtoCard className="p-5 sm:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-center gap-4">
-            <span
-              aria-hidden="true"
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-royal text-lg font-bold text-white"
-            >
-              {initialsOf(account.name)}
-            </span>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="truncate text-2xl font-bold text-ink">{account.name}</h1>
-                <StatusChip tone={blacklisted ? 'tint-red' : 'tint-green'}>{account.status_label}</StatusChip>
-              </div>
-              {('email' in account || 'mobile_number' in account) && (
-                <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-ink-secondary">
-                  <span className="break-all">{account.email ?? 'No email'}</span>
-                  <span className="tnum">{account.mobile_number ?? 'No mobile number'}</span>
-                </p>
-              )}
-              {'created_at' in account && (
-                <p className="mt-0.5 text-xs text-ink-muted">Owner since {formatDate(account.created_at)}</p>
-              )}
-              {/*
-                The owner's General enquiry with the reader's own office
-                [client, 21 October 2026]. Every office seat in Messages has
-                it; the super admin, who holds no conversation with owners,
-                does not (can_message). The name rides along for the pane's
-                title, in case the owner is past the inbox's first page.
-              */}
-              {profile.can_message && (
-                <Link
-                  to={`${portalPath(activePortal(), '/messages')}?application=general-${account.id}`}
-                  state={{ ownerName: account.name }}
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-sm font-semibold text-white hover:bg-royal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
-                >
-                  <MailIcon size={16} aria-hidden="true" />
-                  Message
-                  <span className="sr-only"> {account.name}</span>
-                </Link>
-              )}
-            </div>
-          </div>
+      <ProfileHeader profile={profile} />
 
-          <dl className="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-xl bg-line sm:grid-cols-4">
-            <Stat label="Businesses" value={summary.businesses.toLocaleString()} />
-            <Stat label="Active permits" value={summary.active_permits.toLocaleString()} />
-            <Stat label="Filings" value={summary.filings.toLocaleString()} />
-            <Stat
-              label="Needs attention"
-              value={summary.needs_attention.toLocaleString()}
-              warn={summary.needs_attention > 0}
-            />
-          </dl>
-        </div>
-
-        {blacklisted && (
-          <div
-            role="note"
-            className="mt-5 flex gap-3 rounded-lg border border-s-red/40 bg-s-red-tint px-4 py-3 text-sm"
-          >
-            <AlertTriangleIcon size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-s-red" />
-            <p className="text-ink">
-              <b className="text-s-red">Blacklisted {formatDate(account.blacklisted_at)}</b>
-              {account.blacklisted_by && <> by {account.blacklisted_by}</>}
-              {account.blacklist_reason && <> — {account.blacklist_reason}</>}. Every business this owner holds is
-              suspended while it stands.
-            </p>
-          </div>
-        )}
-      </ProtoCard>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_21rem]">
         {/* ── The registers ──────────────────────────────────────────── */}
         <div className="min-w-0 space-y-5">
-          <Section
-            title="Businesses and permits"
-            count={profile.businesses.length}
-            aside={
-              profile.businesses.length > 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setOpen(allOpen ? new Set() : new Set(profile.businesses.map((b) => b.id)))}
-                  className="text-sm font-semibold text-royal hover:underline"
-                >
-                  {allOpen ? 'Collapse all' : 'Expand all'}
-                </button>
-              ) : null
-            }
-          >
-            <ul className="divide-y divide-line">
-              {profile.businesses.map((b) => (
-                <BusinessBlock key={b.id} business={b} open={open.has(b.id)} onToggle={() => toggle(b.id)} />
-              ))}
-            </ul>
+          <Section title="Businesses and permits" count={profile.businesses.length}>
+            <BusinessList businesses={profile.businesses.slice(0, BUSINESSES_SHOWN)} />
+            <ViewAll
+              shown={Math.min(BUSINESSES_SHOWN, profile.businesses.length)}
+              total={profile.businesses.length}
+              noun="businesses"
+              lead="First"
+              onClick={() => setView('businesses')}
+            />
           </Section>
 
           <Section title="Filings" count={profile.filings.length}>
             {profile.filings.length === 0 ? (
               <Empty>No filings submitted.</Empty>
             ) : (
-              <Table
-                head={['Tracking ID', 'Business', 'Status', 'Filed']}
-                rows={filings.map((f) => ({
-                  key: f.id,
-                  cells: [
-                    <span key="c1" className="block">
-                      <span className="tnum block whitespace-nowrap font-semibold text-ink">
-                        {f.tracking_id ?? '—'}
-                      </span>
-                      <span className="block text-xs text-ink-muted">{f.type_label ?? '—'}</span>
-                    </span>,
-                    <span key="c2" className="block min-w-[8rem] text-ink">
-                      {f.business_name ?? '—'}
-                    </span>,
-                    f.status_label ? (
-                      <StatusChip
-                        key="c3"
-                        className="whitespace-nowrap"
-                        tone={FILING_TONES[genericStatusTone(f.status ?? '')] ?? 'tint-gray'}
-                      >
-                        {f.status_label}
-                      </StatusChip>
-                    ) : (
-                      '—'
-                    ),
-                    <span key="c4" className="block">
-                      <span className="block whitespace-nowrap">{formatDate(f.submitted_at)}</span>
-                      {f.decided_at && (
-                        <span className="block whitespace-nowrap text-xs text-ink-muted">
-                          Decided {formatDate(f.decided_at)}
-                        </span>
-                      )}
-                    </span>,
-                  ],
-                }))}
-              />
+              <FilingsTable filings={profile.filings.slice(0, ROWS_SHOWN)} />
             )}
-            <ShowAll
+            <ViewAll
+              shown={Math.min(ROWS_SHOWN, profile.filings.length)}
               total={profile.filings.length}
-              all={allFilings}
-              onToggle={() => setAllFilings((a) => !a)}
               noun="filings"
+              onClick={() => setView('filings')}
             />
           </Section>
 
           {profile.payments !== null ? (
-            <Section title="Payment history" count={allOfPayments.length}>
-              {allOfPayments.length === 0 ? (
-                <Empty>No payments on the filings you can see.</Empty>
+            <Section title="Payment history" count={payments.length}>
+              {payments.length === 0 ? (
+                <Empty>No payments on these filings.</Empty>
               ) : (
-                <PaymentsTable payments={payments} />
+                <PaymentsTable payments={payments.slice(0, ROWS_SHOWN)} />
               )}
-              <ShowAll
-                total={allOfPayments.length}
-                all={allPayments}
-                onToggle={() => setAllPayments((a) => !a)}
+              <ViewAll
+                shown={Math.min(ROWS_SHOWN, payments.length)}
+                total={payments.length}
                 noun="payments"
+                onClick={() => setView('payments')}
               />
             </Section>
           ) : (
@@ -293,82 +168,298 @@ function Profile({ profile }: { profile: OwnerProfile }) {
               {fees.length === 0 ? (
                 <Empty>No fee for your office on these filings.</Empty>
               ) : (
-                <Table
-                  head={['Tracking ID', 'Business', 'Paid', 'Your fee']}
-                  alignLastRight
-                  rows={shownFees.map((f) => ({
-                    key: f.application_id,
-                    cells: [
-                      <span key="f1" className="tnum whitespace-nowrap font-semibold text-ink">
-                        {f.tracking_id ?? '—'}
-                      </span>,
-                      <span key="f2" className="block min-w-[8rem] text-ink">
-                        {f.business_name ?? '—'}
-                      </span>,
-                      f.paid ? (
-                        <span key="f3" className="block">
-                          <StatusChip tone="tint-green">Paid</StatusChip>
-                          <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-muted">
-                            {formatDate(f.paid_at)}
-                          </span>
-                        </span>
-                      ) : (
-                        <StatusChip key="f3" tone="tint-yellow">
-                          Not yet paid
-                        </StatusChip>
-                      ),
-                      <span key="f4" className="tnum whitespace-nowrap font-semibold text-ink">
-                        {formatMoney(f.amount)}
-                      </span>,
-                    ],
-                  }))}
-                />
+                <FeesTable fees={fees.slice(0, ROWS_SHOWN)} />
               )}
-              <ShowAll total={fees.length} all={allPayments} onToggle={() => setAllPayments((a) => !a)} noun="fees" />
+              <ViewAll
+                shown={Math.min(ROWS_SHOWN, fees.length)}
+                total={fees.length}
+                noun="fees"
+                onClick={() => setView('fees')}
+              />
             </Section>
           )}
         </div>
 
         {/* ── Reference facts and the timeline ───────────────────────── */}
         <div className="min-w-0 space-y-5">
-          <Section title="Account information">
-            <dl className="divide-y divide-line px-5">
-              <Fact label="Full name">{account.name}</Fact>
-              <Fact label="Sex">{account.gender ? (SEX[account.gender] ?? account.gender) : '—'}</Fact>
-              {'email' in account && (
-                <Fact label="Email">
-                  <span className="break-all">{account.email ?? '—'}</span>
-                  {account.email && 'email_verified_at' in account && (
-                    <span
-                      className={`mt-0.5 block text-xs ${account.email_verified_at ? 'text-s-green' : 'text-ink-muted'}`}
-                    >
-                      {account.email_verified_at ? 'Confirmed' : 'Not confirmed'}
-                    </span>
-                  )}
-                </Fact>
-              )}
-              {'mobile_number' in account && (
-                <Fact label="Mobile">
-                  <span className="tnum">{account.mobile_number ?? '—'}</span>
-                </Fact>
-              )}
-              {'created_at' in account && <Fact label="Registered">{formatDate(account.created_at)}</Fact>}
-              {'last_login_at' in account && (
-                <Fact label="Last signed in">{formatDateTime(account.last_login_at)}</Fact>
-              )}
-              {'is_active' in account && <Fact label="Sign-in">{account.is_active ? 'Allowed' : 'Turned off'}</Fact>}
-            </dl>
-            {!('email' in account) && (
-              <p className="border-t border-line px-5 py-2.5 text-xs leading-snug text-ink-muted">
-                Reach the owner through Message, or the business's own contact numbers on the filing.
-              </p>
-            )}
-          </Section>
-
-          <HistorySection events={profile.history} />
+          <AccountSection account={account} />
+          <HistorySection events={profile.history} onViewAll={() => setView('history')} />
         </div>
       </div>
+
+      {/* ── The full lists, each in a modal that scrolls on its own ────── */}
+      <Modal
+        open={view === 'businesses'}
+        onClose={close}
+        title={`Businesses and permits · ${profile.businesses.length}`}
+        description={account.name}
+        size="xl"
+        flush
+      >
+        <BusinessList businesses={profile.businesses} />
+      </Modal>
+      <Modal
+        open={view === 'filings'}
+        onClose={close}
+        title={`Filings · ${profile.filings.length}`}
+        description={account.name}
+        size="xl"
+        flush
+      >
+        <FilingsTable filings={profile.filings} />
+      </Modal>
+      <Modal
+        open={view === 'payments'}
+        onClose={close}
+        title={`Payment history · ${payments.length}`}
+        description={`${account.name} · press a payment to see what it paid for`}
+        size="xl"
+        flush
+      >
+        <PaymentsTable payments={payments} />
+      </Modal>
+      <Modal
+        open={view === 'fees'}
+        onClose={close}
+        title={`Your office's fees · ${fees.length}`}
+        description={account.name}
+        size="xl"
+        flush
+      >
+        <FeesTable fees={fees} />
+      </Modal>
+      <Modal
+        open={view === 'history'}
+        onClose={close}
+        title="Status history"
+        description={account.name}
+        size="lg"
+        flush
+      >
+        <HistoryBrowser events={profile.history} />
+      </Modal>
     </div>
+  )
+}
+
+/** Name, standing, contact, the Message button and the four counts. */
+function ProfileHeader({ profile }: { profile: OwnerProfile }) {
+  const { account, summary } = profile
+  const blacklisted = account.status === 'blacklisted'
+  const hasContact = 'email' in account || 'mobile_number' in account
+
+  return (
+    <ProtoCard className="p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <span
+            aria-hidden="true"
+            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-royal text-lg font-bold text-white"
+          >
+            {initialsOf(account.name)}
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h1 className="truncate text-2xl font-bold text-ink">{account.name}</h1>
+              <StatusChip tone={blacklisted ? 'tint-red' : 'tint-green'}>{account.status_label}</StatusChip>
+            </div>
+            {(hasContact || 'created_at' in account) && (
+              <p className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-ink-secondary">
+                {'email' in account && <span className="break-all">{account.email ?? 'No email'}</span>}
+                {'mobile_number' in account && <span className="tnum">{account.mobile_number ?? 'No mobile'}</span>}
+                {'created_at' in account && (
+                  <span className="text-ink-muted">Owner since {formatDate(account.created_at)}</span>
+                )}
+              </p>
+            )}
+            {/*
+              The owner's General enquiry with the reader's own office
+              [client, 21 October 2026]. Every office seat in Messages has it;
+              the super admin, who holds no conversation with owners, does not
+              (can_message). The name rides along for the pane's title, in
+              case the owner is past the inbox's first page.
+            */}
+            {profile.can_message && (
+              <Link
+                to={`${portalPath(activePortal(), '/messages')}?application=general-${account.id}`}
+                state={{ ownerName: account.name }}
+                className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-sm font-semibold text-white hover:bg-royal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+              >
+                <MailIcon size={16} aria-hidden="true" />
+                Message
+                <span className="sr-only"> {account.name}</span>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        <dl className="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-xl bg-line sm:grid-cols-4">
+          <Stat label="Businesses" value={summary.businesses.toLocaleString()} />
+          <Stat label="Active permits" value={summary.active_permits.toLocaleString()} />
+          <Stat label="Filings" value={summary.filings.toLocaleString()} />
+          <Stat
+            label="Needs attention"
+            value={summary.needs_attention.toLocaleString()}
+            warn={summary.needs_attention > 0}
+          />
+        </dl>
+      </div>
+
+      {blacklisted && (
+        <div
+          role="note"
+          className="mt-4 flex gap-3 rounded-lg border border-s-red/40 bg-s-red-tint px-4 py-2.5 text-sm"
+        >
+          <AlertTriangleIcon size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-s-red" />
+          <p className="text-ink">
+            <b className="text-s-red">Blacklisted {formatDate(account.blacklisted_at)}</b>
+            {account.blacklisted_by && <> by {account.blacklisted_by}</>}
+            {account.blacklist_reason && <> — {account.blacklist_reason}</>}. Every business this owner holds is
+            suspended while it stands.
+          </p>
+        </div>
+      )}
+    </ProtoCard>
+  )
+}
+
+/** Only the facts this reader was sent (OwnerProfileController::accountFor). */
+function AccountSection({ account }: { account: OwnerProfile['account'] }) {
+  return (
+    <Section title="Account information">
+      <dl className="divide-y divide-line px-5">
+        <Fact label="Full name">{account.name}</Fact>
+        <Fact label="Sex">{account.gender ? (SEX[account.gender] ?? account.gender) : '—'}</Fact>
+        {'email' in account && (
+          <Fact label="Email">
+            <span className="break-all">{account.email ?? '—'}</span>
+            {account.email && 'email_verified_at' in account && (
+              <span className={`ml-1.5 text-xs ${account.email_verified_at ? 'text-s-green' : 'text-ink-muted'}`}>
+                {account.email_verified_at ? '· Confirmed' : '· Not confirmed'}
+              </span>
+            )}
+          </Fact>
+        )}
+        {'mobile_number' in account && (
+          <Fact label="Mobile">
+            <span className="tnum">{account.mobile_number ?? '—'}</span>
+          </Fact>
+        )}
+        {'created_at' in account && <Fact label="Registered">{formatDate(account.created_at)}</Fact>}
+        {'last_login_at' in account && <Fact label="Last signed in">{formatDateTime(account.last_login_at)}</Fact>}
+        {'is_active' in account && <Fact label="Sign-in">{account.is_active ? 'Allowed' : 'Turned off'}</Fact>}
+      </dl>
+      {!('email' in account) && (
+        <p className="border-t border-line px-5 py-2.5 text-xs leading-snug text-ink-muted">
+          Reach the owner through Message, or the business's own contact numbers on the filing.
+        </p>
+      )}
+    </Section>
+  )
+}
+
+/** Businesses as one-line rows that open onto their permits; Expand all when there are several. */
+function BusinessList({ businesses }: { businesses: OwnerProfile['businesses'] }) {
+  // One business opens itself: there is nothing to choose between.
+  const [open, setOpen] = useState<Set<number>>(() => new Set(businesses.length === 1 ? [businesses[0].id] : []))
+  const allOpen = businesses.length > 0 && open.size === businesses.length
+  const toggle = (id: number) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  return (
+    <>
+      {businesses.length > 1 && (
+        <div className="flex justify-end border-b border-line px-5 py-1.5">
+          <button
+            type="button"
+            onClick={() => setOpen(allOpen ? new Set() : new Set(businesses.map((b) => b.id)))}
+            className="text-xs font-semibold text-royal hover:underline"
+          >
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+        </div>
+      )}
+      <ul className="divide-y divide-line">
+        {businesses.map((b) => (
+          <BusinessBlock key={b.id} business={b} open={open.has(b.id)} onToggle={() => toggle(b.id)} />
+        ))}
+      </ul>
+    </>
+  )
+}
+
+function FilingsTable({ filings }: { filings: OwnerProfile['filings'] }) {
+  return (
+    <Table
+      head={['Tracking ID', 'Business', 'Status', 'Filed']}
+      rows={filings.map((f) => ({
+        key: f.id,
+        cells: [
+          <span key="c1" className="block">
+            <span className="tnum block whitespace-nowrap font-semibold text-ink">{f.tracking_id ?? '—'}</span>
+            <span className="block text-xs text-ink-muted">{f.type_label ?? '—'}</span>
+          </span>,
+          <span key="c2" className="block min-w-[8rem] text-ink">
+            {f.business_name ?? '—'}
+          </span>,
+          f.status_label ? (
+            <StatusChip
+              key="c3"
+              className="whitespace-nowrap"
+              tone={FILING_TONES[genericStatusTone(f.status ?? '')] ?? 'tint-gray'}
+            >
+              {f.status_label}
+            </StatusChip>
+          ) : (
+            '—'
+          ),
+          <span key="c4" className="block">
+            <span className="block whitespace-nowrap">{formatDate(f.submitted_at)}</span>
+            {f.decided_at && (
+              <span className="block whitespace-nowrap text-xs text-ink-muted">Decided {formatDate(f.decided_at)}</span>
+            )}
+          </span>,
+        ],
+      }))}
+    />
+  )
+}
+
+function FeesTable({ fees }: { fees: NonNullable<OwnerProfile['fees']> }) {
+  return (
+    <Table
+      head={['Tracking ID', 'Business', 'Paid', 'Your fee']}
+      alignLastRight
+      rows={fees.map((f) => ({
+        key: f.application_id,
+        cells: [
+          <span key="f1" className="tnum whitespace-nowrap font-semibold text-ink">
+            {f.tracking_id ?? '—'}
+          </span>,
+          <span key="f2" className="block min-w-[8rem] text-ink">
+            {f.business_name ?? '—'}
+          </span>,
+          f.paid ? (
+            <span key="f3" className="block">
+              <StatusChip tone="tint-green">Paid</StatusChip>
+              <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-muted">{formatDate(f.paid_at)}</span>
+            </span>
+          ) : (
+            <StatusChip key="f3" tone="tint-yellow">
+              Not yet paid
+            </StatusChip>
+          ),
+          <span key="f4" className="tnum whitespace-nowrap font-semibold text-ink">
+            {formatMoney(f.amount)}
+          </span>,
+        ],
+      }))}
+    />
   )
 }
 
@@ -406,7 +497,7 @@ function BusinessBlock({
           onClick={onToggle}
           aria-expanded={open}
           aria-controls={panelId}
-          className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-royal"
+          className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-royal-tint/40 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-royal"
         >
           <ChevronRightIcon
             size={16}
@@ -525,16 +616,46 @@ function subjectPill(e: OwnerProfileEvent): string {
   return e.office_code ?? 'Permit'
 }
 
-function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
-  const [all, setAll] = useState(false)
-  const [filter, setFilter] = useState<HistoryFilter>('all')
+function HistorySection({ events, onViewAll }: { events: OwnerProfileEvent[]; onViewAll: () => void }) {
+  const offices = OFFICE_ORDER.filter((code) => events.some((e) => e.scope === 'permit' && e.office_code === code))
+  const onlyOwn = offices.length === 1 && !events.some((e) => e.scope !== 'permit')
 
-  // What this reader was sent decides what there is to choose between.
+  return (
+    <Section title="Status history" count={events.length}>
+      {onlyOwn && (
+        <p className="border-b border-line px-5 py-2 text-xs text-ink-muted">
+          Your office's{' '}
+          <b className="font-semibold text-ink-secondary">
+            {events.find((e) => e.office_code === offices[0])?.permit_type}
+          </b>{' '}
+          only.
+        </p>
+      )}
+      {events.length === 0 ? (
+        <Empty>Nothing recorded yet.</Empty>
+      ) : (
+        <HistoryList events={events.slice(0, HISTORY_SHOWN)} />
+      )}
+      <ViewAll
+        shown={Math.min(HISTORY_SHOWN, events.length)}
+        total={events.length}
+        noun="entries"
+        onClick={onViewAll}
+      />
+    </Section>
+  )
+}
+
+/**
+ * The whole history, in the modal: the Show filter (for BPLO and the super
+ * admin, who are sent every office's), then every entry in full.
+ */
+function HistoryBrowser({ events }: { events: OwnerProfileEvent[] }) {
+  const [filter, setFilter] = useState<HistoryFilter>('all')
   const offices = OFFICE_ORDER.filter((code) => events.some((e) => e.scope === 'permit' && e.office_code === code))
   const hasAccount = events.some((e) => e.scope !== 'permit')
   const certificateOf = (code: string) => events.find((e) => e.office_code === code)?.permit_type ?? code
   const choosable = hasAccount || offices.length > 1
-
   const filtered = events.filter((e) =>
     filter === 'all'
       ? true
@@ -542,125 +663,92 @@ function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
         ? e.scope !== 'permit'
         : e.scope === 'permit' && e.office_code === filter,
   )
-  const shown = all ? filtered : filtered.slice(0, HISTORY_SHOWN)
 
   return (
-    <Section title="Status history" count={filtered.length}>
-      {choosable ? (
-        <div className="border-b border-line px-5 py-3">
-          <label htmlFor="history-filter" className="mb-1 block text-xs font-semibold text-ink-muted">
+    <div>
+      {choosable && (
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
+          <label htmlFor="history-filter" className="shrink-0 text-sm font-semibold text-ink-secondary">
             Show
           </label>
           <select
             id="history-filter"
             value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value)
-              setAll(false)
-            }}
-            className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+            onChange={(e) => setFilter(e.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
           >
-            <option value="all">All status history</option>
-            {hasAccount && <option value="account">Account and businesses</option>}
+            <option value="all">All status history · {events.length}</option>
+            {hasAccount && (
+              <option value="account">
+                Account and businesses · {events.filter((e) => e.scope !== 'permit').length}
+              </option>
+            )}
             {offices.map((code) => (
               <option key={code} value={code}>
-                {code} — {certificateOf(code)}
+                {code} — {certificateOf(code)} · {events.filter((e) => e.office_code === code).length}
               </option>
             ))}
           </select>
         </div>
-      ) : (
-        offices.length === 1 && (
-          <p className="border-b border-line px-5 py-2.5 text-xs text-ink-muted">
-            Your office's <b className="font-semibold text-ink-secondary">{certificateOf(offices[0])}</b> only.
-          </p>
-        )
       )}
+      {filtered.length === 0 ? <Empty>Nothing recorded here yet.</Empty> : <HistoryList events={filtered} full />}
+    </div>
+  )
+}
 
-      {shown.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded here yet.</p>
-      ) : (
-        <ol className="px-5 py-3">
-          {shown.map((e, i) => (
-            <li key={`${e.scope}-${e.id}-${i}`} className="relative flex gap-3 pb-4 last:pb-1">
-              {/* The rail between dots; the last entry has none below it. */}
-              {i < shown.length - 1 && (
-                <span aria-hidden="true" className="absolute left-[5px] top-4 h-full w-px bg-line" />
+/*
+ * One entry in three short lines: what happened, what it happened to, and
+ * when and by whom — with the reason under it. A generic "Status changed"
+ * is replaced by the move itself ("Active → Suspended"), which is what it
+ * meant; a worded event ("Suspended — the business was sanctioned") keeps its
+ * words. On the page the subject and reason are cut to one line each; the
+ * modal prints them in full.
+ */
+function HistoryList({ events, full = false }: { events: OwnerProfileEvent[]; full?: boolean }) {
+  return (
+    <ol className="divide-y divide-line px-5">
+      {events.map((e, i) => {
+        const generic = e.label === 'Status changed' || e.label === 'Business status changed'
+        const title =
+          generic && e.to_label
+            ? `${e.scope === 'business' ? 'Business ' : ''}${e.from_label ? `${e.from_label} → ` : ''}${e.to_label}`
+            : e.label
+        const about =
+          e.scope === 'permit'
+            ? [`${e.permit_type} · ${e.permit_number}`, e.business_name].filter(Boolean).join(' · ')
+            : e.scope === 'business'
+              ? (e.business_name ?? 'Business')
+              : "The owner's account"
+        const who = e.by ? `${e.by}${e.by_office ? ` (${e.by_office})` : ''}` : e.by_office
+
+        return (
+          <li key={`${e.scope}-${e.id}-${i}`} className="flex gap-3 py-2.5">
+            <span aria-hidden="true" className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${eventDot(e)}`} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-snug text-ink">{title}</p>
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-ink-secondary" title={about}>
+                <span className="shrink-0 rounded bg-royal-tint px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-royal">
+                  {subjectPill(e)}
+                </span>
+                <span className={full ? 'min-w-0' : 'min-w-0 truncate'}>{about}</span>
+              </p>
+              {e.reason && (
+                <p
+                  className={`mt-0.5 text-xs italic leading-snug text-ink-secondary ${full ? '' : 'line-clamp-1'}`}
+                  title={e.reason}
+                >
+                  “{e.reason}”
+                </p>
               )}
-              <span
-                aria-hidden="true"
-                className={`relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-white ${eventDot(e)}`}
-              />
-              <div className="min-w-0 flex-1 text-sm">
-                <p className="font-semibold leading-snug text-ink">{e.label}</p>
-
-                {/* What it is about. */}
-                <p className="mt-1 flex min-w-0 items-start gap-1.5 text-xs text-ink-secondary">
-                  <span className="mt-px shrink-0 rounded bg-royal-tint px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-royal">
-                    {subjectPill(e)}
-                  </span>
-                  {e.scope === 'permit' && (
-                    <span className="min-w-0">
-                      {e.permit_type} · <span className="tnum whitespace-nowrap">{e.permit_number}</span>
-                    </span>
-                  )}
-                  {e.scope === 'account' && <span>The owner's account</span>}
-                  {e.scope === 'business' && <span className="min-w-0">{e.business_name}</span>}
-                </p>
-                {e.scope === 'permit' && e.business_name && (
-                  <p className="mt-0.5 truncate text-xs text-ink-muted">Business: {e.business_name}</p>
-                )}
-
-                {/* What happened to it. */}
-                {e.to_label && (
-                  <p className="mt-1 text-xs text-ink-secondary">
-                    {e.from_label ? (
-                      <>
-                        {e.from_label} <span aria-hidden="true">→</span>
-                        <span className="sr-only">to</span> <b className="font-semibold text-ink">{e.to_label}</b>
-                      </>
-                    ) : (
-                      <>
-                        Status: <b className="font-semibold text-ink">{e.to_label}</b>
-                      </>
-                    )}
-                  </p>
-                )}
-                {e.reason && <p className="mt-0.5 text-xs leading-snug text-ink-secondary">Reason: “{e.reason}”</p>}
-
-                {/* When, and who. */}
-                <p className="mt-0.5 text-xs text-ink-muted">
-                  {formatDateTime(e.at)}
-                  {e.by ? (
-                    <>
-                      {' '}
-                      · {e.by}
-                      {e.by_office && ` (${e.by_office})`}
-                    </>
-                  ) : e.by_office ? (
-                    ` · ${e.by_office}`
-                  ) : (
-                    e.label !== 'Account created' && ' · Automatic'
-                  )}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-      {filtered.length > HISTORY_SHOWN && (
-        <div className="border-t border-line px-5 py-2.5">
-          <button
-            type="button"
-            onClick={() => setAll((a) => !a)}
-            aria-expanded={all}
-            className="text-sm font-semibold text-royal hover:underline"
-          >
-            {all ? 'Show the latest only' : `Show all ${filtered.length.toLocaleString()} entries`}
-          </button>
-        </div>
-      )}
-    </Section>
+              <p className="mt-0.5 text-[11px] text-ink-muted">
+                {formatDateTime(e.at)}
+                {who ? ` · ${who}` : e.label !== 'Account created' ? ' · Automatic' : ''}
+              </p>
+            </div>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -890,18 +978,39 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** "Show all N" under a list cut to its latest rows; nothing when it all fits. */
-function ShowAll({ total, all, onToggle, noun }: { total: number; all: boolean; onToggle: () => void; noun: string }) {
-  if (total <= ROWS_SHOWN) return null
+/**
+ * "Latest 5 of 18 · View all" under a list cut to its first rows; opens the
+ * whole list in a modal. Short enough for the side column on one line; the
+ * button's accessible name carries the count and the noun. Nothing when it
+ * all fits.
+ */
+function ViewAll({
+  shown,
+  total,
+  noun,
+  onClick,
+  lead = 'Latest',
+}: {
+  shown: number
+  total: number
+  noun: string
+  onClick: () => void
+  /** "First" where the list is not newest-first (businesses, by name). */
+  lead?: string
+}) {
+  if (total <= shown) return null
   return (
-    <div className="border-t border-line px-5 py-2.5">
+    <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-2.5">
+      <span className="text-xs text-ink-muted">
+        {lead} {shown.toLocaleString()} of {total.toLocaleString()}
+      </span>
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={all}
-        className="text-sm font-semibold text-royal hover:underline"
+        onClick={onClick}
+        aria-label={`View all ${total.toLocaleString()} ${noun}`}
+        className="whitespace-nowrap text-sm font-semibold text-royal hover:underline"
       >
-        {all ? 'Show the latest only' : `Show all ${total.toLocaleString()} ${noun}`}
+        View all
       </button>
     </div>
   )
