@@ -48,5 +48,13 @@
             The Gemini tests set a key in config and fake every request.
         -->
         <env name="GEMINI_KEY" value="" force="true"/>
+        <!--
+            Permit PDFs unsigned in the suite, whatever certificate this
+            machine's storage holds: signing is on wherever one exists, and a
+            developer who made one to try it would otherwise have every PDF
+            test signing through pyHanko. PermitDigitalSignatureTest turns it on
+            in config, with a certificate it makes for itself.
+        -->
+        <env name="PERMIT_SIGNING_ENABLED" value="false"/>
     </php>
 </phpunit>

@@ -20,6 +20,8 @@
 /.idea
 /.nova
 /.phpunit.cache
+# The pyHanko venv permit signing runs locally (docs/digital-signature.md).
+/.venv
 /.vscode
 /.zed
 /auth.json

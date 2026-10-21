@@ -19,6 +19,7 @@ use App\Support\DownloadLog;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
+use App\Support\PermitSignature;
 use App\Support\QrCode;
 use App\Support\RenewablePermit;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -868,7 +869,9 @@ class PermitController extends Controller
         }
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
-        $file = PdfFile::render($pdf);
+        // Signed before it is archived, so the archive and the download stay
+        // the same bytes (revision matrix item 7; see PermitSignature).
+        $file = PermitSignature::sign(PdfFile::render($pdf));
 
         $path = "private/permits/{$permit->id}.pdf";
         Storage::disk('local')->put($path, $file->content);
