@@ -47,6 +47,7 @@ use App\Support\SheetRequirements;
 use App\Support\ZoningRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -2852,7 +2853,7 @@ class WorkflowService
             [ClearanceStatus::Returned, ClearanceStatus::Rejected],
             true,
         );
-        // A correction the office asked for: not announced as a new application.
+        // A correction the office asked for: told as one, not as a new application.
         $answeringReturn = $row->status === ClearanceStatus::Returned;
         if (! in_array($row->status, [
             ClearanceStatus::NotStarted,
@@ -2990,10 +2991,12 @@ class WorkflowService
                  * And the office is told it has the permit — a first
                  * application, or one made again after a refusal, which goes
                  * to the officer still holding the case. A sheet answering a
-                 * RETURN is a correction, not an application, and is not
-                 * announced as one.
+                 * RETURN is the correction the office asked for, and is told
+                 * as that rather than as a new application.
                  */
-                if (! $answeringReturn) {
+                if ($answeringReturn) {
+                    $this->tellOfficeOfCorrections($app, $type->issuing_department_id);
+                } else {
                     $this->tellOfficeOfSubmission($app, $type->issuing_department_id, $type);
                 }
             }
@@ -6652,7 +6655,43 @@ class WorkflowService
      * own question rather than applying for anything. For the main form,
      * `resubmit` already tells the officer who sent it back ("Corrections
      * received"), and a second notice for one act would be noise. A corrected
-     * office SHEET has no notice of its own yet; this rule does not add one.
+     * office SHEET is told the same way, by `tellOfficeOfCorrections`.
+     */
+    private function tellOfficeOfSubmission(Application $app, ?int $departmentId, ?PermitType $permit = null): void
+    {
+        $this->tellOffice(
+            $app,
+            $departmentId,
+            fn (User $officer, ApplicationAssignment $review) => $this->notify->filingSubmitted($app, $officer, $review, $permit),
+        );
+    }
+
+    /**
+     * Tell the office that a sheet it RETURNED has come back answered.
+     *
+     * `resubmit` has always said "Corrections received" to the officer who
+     * returned BPLO's main form; an office that returned its own sheet heard
+     * nothing when the owner sent it back, and found it only by reopening its
+     * queue. Ken, 21 October 2026: the same notice, to the same people as a
+     * submission — the officer holding the case, or the office's active
+     * officers when nobody does (`tellOffice`).
+     *
+     * Without a count. `recordClearanceCorrections` records every row the
+     * office asked about, changed or not, so "N fields corrected" would claim
+     * corrections that were not made; `filingResubmitted` drops the number
+     * when given none.
+     */
+    private function tellOfficeOfCorrections(Application $app, int $departmentId): void
+    {
+        $this->tellOffice(
+            $app,
+            $departmentId,
+            fn (User $officer) => $this->notify->filingResubmitted($app, $officer),
+        );
+    }
+
+    /**
+     * Hand a notice about this filing to the office, once the change commits.
      *
      * ── Who hears it ────────────────────────────────────────────────────────
      *
@@ -6669,16 +6708,18 @@ class WorkflowService
      * Every caller is inside the transaction that routes the office, and a
      * submission that rolls back — a clearance-only renewal whose second sheet
      * is refused — must leave nobody told about it. Inside a try, for the
-     * reason push()'s e-mail is: by then the submission is recorded, and it
+     * reason push()'s e-mail is: by then the owner's act is recorded, and it
      * must not answer 500 over a notice that was not written.
+     *
+     * @param  Closure(User, ApplicationAssignment): void  $notice
      */
-    private function tellOfficeOfSubmission(Application $app, ?int $departmentId, ?PermitType $permit = null): void
+    private function tellOffice(Application $app, ?int $departmentId, Closure $notice): void
     {
         if ($departmentId === null) {
             return;
         }
 
-        DB::afterCommit(function () use ($app, $departmentId, $permit) {
+        DB::afterCommit(function () use ($app, $departmentId, $notice) {
             try {
                 $review = ApplicationAssignment::where('application_id', $app->id)
                     ->where('department_id', $departmentId)
@@ -6698,10 +6739,10 @@ class WorkflowService
                     : User::where('department_id', $departmentId)->where('is_active', true)->get()->filter($canAct);
 
                 foreach ($officers as $officer) {
-                    $this->notify->filingSubmitted($app, $officer, $review, $permit);
+                    $notice($officer, $review);
                 }
             } catch (Throwable $e) {
-                Log::warning('The office was not told of a submission', [
+                Log::warning('An office was not told about a filing', [
                     'application_id' => $app->id,
                     'department_id' => $departmentId,
                     'error' => $e->getMessage(),

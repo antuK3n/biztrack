@@ -36,21 +36,22 @@ use Illuminate\Support\Facades\Log;
  *
  * Inside the office, the officer holding the case if one does, otherwise
  * every active account there. Never the super admin, another office or the
- * applicant. In the bell only — no e-mail, no text. And a filing sent back
- * and resubmitted is not announced again: the officer who returned it is
- * already told "Corrections received".
+ * applicant. In the bell only — no e-mail, no text. And a filing or an office
+ * sheet sent back and resubmitted is not announced as new: the officer who
+ * returned it is told "Corrections received" instead — for a sheet, since
+ * Ken's approval of 21 October 2026, by the same who-hears-it rule.
  *
  * Helpers are prefixed `turn`: Pest helpers share one namespace across the
  * suite, and a generic name here would collide with someone else's.
  */
 
-/** The submission notices one account has received, oldest first. */
-function turnNotices(User|string $reader): Collection
+/** The notices of one title an account has received, oldest first. */
+function turnNotices(User|string $reader, string $title = 'New application'): Collection
 {
     $reader = $reader instanceof User ? $reader : turnAccount($reader);
 
     return AppNotification::where('user_id', $reader->id)
-        ->where('title', 'New application')
+        ->where('title', $title)
         ->orderBy('id')
         ->get();
 }
@@ -455,14 +456,21 @@ it('does not announce a returned filing again when the owner resubmits it', func
 
     $bplo = turnAccount('bplo@biztrack.local');
     expect(turnNotices($bplo))->toHaveCount(1)
-        ->and(AppNotification::where('user_id', $bplo->id)->where('title', 'Corrections received')->count())->toBe(1)
+        ->and(turnNotices($bplo, 'Corrections received'))->toHaveCount(1)
         ->and(turnNotices($colleague))->toHaveCount(1);
+
+    // BPLO's own form came back: no clearance office hears of it.
+    foreach (TURN_OFFICE_ACCOUNTS as $nobody) {
+        expect(turnNotices($nobody, 'Corrections received'))->toBeEmpty();
+    }
 });
 
-it('does not announce a returned office sheet as a new application when it is handed back', function () {
+it('tells the officer who returned a sheet that the corrections are in, and only them', function () {
+    $colleague = turnSeat('CHO', 'cho.second@biztrack.local');
     $app = turnPaid();
     turnHandIn($app, 'SANITARY');
 
+    // sanitary@ returns it, and holds the case by doing so.
     $review = turnReview($app, 'CHO');
     authAs('sanitary@biztrack.local');
     test()->postJson("/api/v1/assignments/{$review->id}/return", ['remarks' => 'Name the water source.'])
@@ -472,8 +480,44 @@ it('does not announce a returned office sheet as a new application when it is ha
     test()->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", ['form_data' => [], 'submit' => true])
         ->assertSuccessful();
 
-    expect(app(WorkflowService::class)->pivotFor($app, 'SANITARY')->status)->toBe(ClearanceStatus::ForApproval)
-        ->and(turnNotices('sanitary@biztrack.local'))->toHaveCount(1);
+    expect(app(WorkflowService::class)->pivotFor($app, 'SANITARY')->status)->toBe(ClearanceStatus::ForApproval);
+
+    $corrections = turnNotices('sanitary@biztrack.local', 'Corrections received');
+    expect($corrections)->toHaveCount(1)
+        ->and($corrections->first()->body)->toBe("Corrections received on {$app->tracking_id}. It is back with your office for review.")
+        ->and($corrections->first()->link)->toBe("/staff/queue/{$review->id}")
+        // A correction, not a second application.
+        ->and(turnNotices('sanitary@biztrack.local'))->toHaveCount(1)
+        ->and(turnNotices($colleague, 'Corrections received'))->toBeEmpty()
+        // Not BPLO's main-form notice, and not BPLO's to hear.
+        ->and(turnNotices('bplo@biztrack.local', 'Corrections received'))->toBeEmpty();
+});
+
+it('tells the office’s active officers when nobody holds the case a returned sheet comes back to', function () {
+    $colleague = turnSeat('CHO', 'cho.active@biztrack.local');
+    $retired = turnSeat('CHO', 'cho.retired@biztrack.local', active: false);
+    $app = turnPaid();
+    turnHandIn($app, 'SANITARY');
+
+    $review = turnReview($app, 'CHO');
+    authAs('sanitary@biztrack.local');
+    test()->postJson("/api/v1/assignments/{$review->id}/return", ['remarks' => 'Name the water source.'])
+        ->assertOk();
+    // The officer in charge puts the case back in the office's pool.
+    app(WorkflowService::class)->releaseOfficer($review->fresh());
+
+    authAs('owner@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", ['form_data' => [], 'submit' => true])
+        ->assertSuccessful();
+
+    expect(turnNotices('sanitary@biztrack.local', 'Corrections received'))->toHaveCount(1)
+        ->and(turnNotices($colleague, 'Corrections received'))->toHaveCount(1)
+        ->and(turnNotices($retired, 'Corrections received'))->toBeEmpty()
+        ->and(turnNotices('admin@biztrack.local', 'Corrections received'))->toBeEmpty();
+
+    foreach (['bplo@biztrack.local', ...array_diff(TURN_OFFICE_ACCOUNTS, ['sanitary@biztrack.local'])] as $nobody) {
+        expect(turnNotices($nobody, 'Corrections received'))->toBeEmpty();
+    }
 });
 
 it('tells the office of a permit with no sheet the moment it is applied for', function () {
@@ -516,7 +560,7 @@ it('keeps the submission when the notice cannot be written', function () {
         ->and(turnReview($app, 'BPLO')->exists)->toBeTrue()
         ->and(turnNotices('bplo@biztrack.local'))->toBeEmpty();
     Log::shouldHaveReceived('warning')
-        ->withArgs(fn (string $message) => $message === 'The office was not told of a submission')
+        ->withArgs(fn (string $message) => $message === 'An office was not told about a filing')
         ->once();
 });
 
