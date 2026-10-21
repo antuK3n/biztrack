@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangleIcon, ChevronRightIcon } from '../../components/icons'
+import { AlertTriangleIcon, ChevronRightIcon, MailIcon } from '../../components/icons'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { ProtoCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
@@ -115,7 +115,10 @@ function Profile({ profile }: { profile: OwnerProfile }) {
   const [allFilings, setAllFilings] = useState(false)
   const [allPayments, setAllPayments] = useState(false)
   const filings = allFilings ? profile.filings : profile.filings.slice(0, ROWS_SHOWN)
-  const payments = allPayments ? profile.payments : profile.payments.slice(0, ROWS_SHOWN)
+  const allOfPayments = profile.payments ?? []
+  const payments = allPayments ? allOfPayments : allOfPayments.slice(0, ROWS_SHOWN)
+  const fees = profile.fees ?? []
+  const shownFees = allPayments ? fees : fees.slice(0, ROWS_SHOWN)
 
   return (
     <div className="space-y-5">
@@ -134,11 +137,33 @@ function Profile({ profile }: { profile: OwnerProfile }) {
                 <h1 className="truncate text-2xl font-bold text-ink">{account.name}</h1>
                 <StatusChip tone={blacklisted ? 'tint-red' : 'tint-green'}>{account.status_label}</StatusChip>
               </div>
-              <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-ink-secondary">
-                <span className="break-all">{account.email ?? 'No email'}</span>
-                <span className="tnum">{account.mobile_number ?? 'No mobile number'}</span>
-              </p>
-              <p className="mt-0.5 text-xs text-ink-muted">Owner since {formatDate(account.created_at)}</p>
+              {('email' in account || 'mobile_number' in account) && (
+                <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-ink-secondary">
+                  <span className="break-all">{account.email ?? 'No email'}</span>
+                  <span className="tnum">{account.mobile_number ?? 'No mobile number'}</span>
+                </p>
+              )}
+              {'created_at' in account && (
+                <p className="mt-0.5 text-xs text-ink-muted">Owner since {formatDate(account.created_at)}</p>
+              )}
+              {/*
+                The owner's General enquiry with the reader's own office
+                [client, 21 October 2026]. Every office seat in Messages has
+                it; the super admin, who holds no conversation with owners,
+                does not (can_message). The name rides along for the pane's
+                title, in case the owner is past the inbox's first page.
+              */}
+              {profile.can_message && (
+                <Link
+                  to={`${portalPath(activePortal(), '/messages')}?application=general-${account.id}`}
+                  state={{ ownerName: account.name }}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-sm font-semibold text-white hover:bg-royal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+                >
+                  <MailIcon size={16} aria-hidden="true" />
+                  Message
+                  <span className="sr-only"> {account.name}</span>
+                </Link>
+              )}
             </div>
           </div>
 
@@ -244,46 +269,91 @@ function Profile({ profile }: { profile: OwnerProfile }) {
             />
           </Section>
 
-          <Section title="Payment history" count={profile.payments.length}>
-            {profile.payments.length === 0 ? (
-              <Empty>No payments on the filings you can see.</Empty>
-            ) : (
-              <Table
-                head={['Reference', 'For', 'Method', 'Status', 'Amount']}
-                alignLastRight
-                rows={payments.map((p) => ({
-                  key: p.id,
-                  cells: [
-                    <span key="c6" className="block">
-                      <span className="tnum block whitespace-nowrap font-semibold text-ink">
-                        {p.reference_number ?? '—'}
-                      </span>
-                      <span className="block whitespace-nowrap text-xs text-ink-muted">
-                        {formatDate(p.paid_at ?? p.created_at)}
-                      </span>
-                    </span>,
-                    <span key="c7" className="block min-w-[8rem]">
-                      <span className="block text-ink">{p.business_name ?? '—'}</span>
-                      <span className="tnum block text-xs text-ink-muted">{p.tracking_id ?? ''}</span>
-                    </span>,
-                    p.method_label ?? '—',
-                    <StatusChip key="c8" tone={PAYMENT_TONES[p.status ?? ''] ?? 'tint-gray'}>
-                      {p.status_label}
-                    </StatusChip>,
-                    <span key="c10" className="tnum whitespace-nowrap font-semibold text-ink">
-                      {formatMoney(p.amount)}
-                    </span>,
-                  ],
-                }))}
+          {profile.payments !== null ? (
+            <Section title="Payment history" count={allOfPayments.length}>
+              {allOfPayments.length === 0 ? (
+                <Empty>No payments on the filings you can see.</Empty>
+              ) : (
+                <Table
+                  head={['Reference', 'For', 'Method', 'Status', 'Amount']}
+                  alignLastRight
+                  rows={payments.map((p) => ({
+                    key: p.id,
+                    cells: [
+                      <span key="c6" className="block">
+                        <span className="tnum block whitespace-nowrap font-semibold text-ink">
+                          {p.reference_number ?? '—'}
+                        </span>
+                        <span className="block whitespace-nowrap text-xs text-ink-muted">
+                          {formatDate(p.paid_at ?? p.created_at)}
+                        </span>
+                      </span>,
+                      <span key="c7" className="block min-w-[8rem]">
+                        <span className="block text-ink">{p.business_name ?? '—'}</span>
+                        <span className="tnum block text-xs text-ink-muted">{p.tracking_id ?? ''}</span>
+                      </span>,
+                      p.method_label ?? '—',
+                      <StatusChip key="c8" tone={PAYMENT_TONES[p.status ?? ''] ?? 'tint-gray'}>
+                        {p.status_label}
+                      </StatusChip>,
+                      <span key="c10" className="tnum whitespace-nowrap font-semibold text-ink">
+                        {formatMoney(p.amount)}
+                      </span>,
+                    ],
+                  }))}
+                />
+              )}
+              <ShowAll
+                total={allOfPayments.length}
+                all={allPayments}
+                onToggle={() => setAllPayments((a) => !a)}
+                noun="payments"
               />
-            )}
-            <ShowAll
-              total={profile.payments.length}
-              all={allPayments}
-              onToggle={() => setAllPayments((a) => !a)}
-              noun="payments"
-            />
-          </Section>
+            </Section>
+          ) : (
+            /*
+              A clearance office's view of the money: its own share of each
+              bill, as the review sheet shows it, and whether the bill was
+              paid — not the owner's payments to the other offices.
+            */
+            <Section title="Your office's fees" count={fees.length}>
+              {fees.length === 0 ? (
+                <Empty>No fee for your office on these filings.</Empty>
+              ) : (
+                <Table
+                  head={['Tracking ID', 'Business', 'Paid', 'Your fee']}
+                  alignLastRight
+                  rows={shownFees.map((f) => ({
+                    key: f.application_id,
+                    cells: [
+                      <span key="f1" className="tnum whitespace-nowrap font-semibold text-ink">
+                        {f.tracking_id ?? '—'}
+                      </span>,
+                      <span key="f2" className="block min-w-[8rem] text-ink">
+                        {f.business_name ?? '—'}
+                      </span>,
+                      f.paid ? (
+                        <span key="f3" className="block">
+                          <StatusChip tone="tint-green">Paid</StatusChip>
+                          <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-muted">
+                            {formatDate(f.paid_at)}
+                          </span>
+                        </span>
+                      ) : (
+                        <StatusChip key="f3" tone="tint-yellow">
+                          Not yet paid
+                        </StatusChip>
+                      ),
+                      <span key="f4" className="tnum whitespace-nowrap font-semibold text-ink">
+                        {formatMoney(f.amount)}
+                      </span>,
+                    ],
+                  }))}
+                />
+              )}
+              <ShowAll total={fees.length} all={allPayments} onToggle={() => setAllPayments((a) => !a)} noun="fees" />
+            </Section>
+          )}
         </div>
 
         {/* ── Reference facts and the timeline ───────────────────────── */}
@@ -292,24 +362,34 @@ function Profile({ profile }: { profile: OwnerProfile }) {
             <dl className="divide-y divide-line px-5">
               <Fact label="Full name">{account.name}</Fact>
               <Fact label="Sex">{account.gender ? (SEX[account.gender] ?? account.gender) : '—'}</Fact>
-              <Fact label="Email">
-                <span className="break-all">{account.email ?? '—'}</span>
-                {account.email && (
-                  <span
-                    className={`mt-0.5 block text-xs ${account.email_verified_at ? 'text-s-green' : 'text-ink-muted'}`}
-                  >
-                    {account.email_verified_at ? 'Confirmed' : 'Not confirmed'}
-                  </span>
-                )}
-              </Fact>
-              <Fact label="Mobile">
-                <span className="tnum">{account.mobile_number ?? '—'}</span>
-              </Fact>
-              <Fact label="Home address">{account.home_address ?? '—'}</Fact>
-              <Fact label="Account created">{formatDate(account.created_at)}</Fact>
-              <Fact label="Last signed in">{formatDateTime(account.last_login_at)}</Fact>
-              <Fact label="Sign-in">{account.is_active ? 'Allowed' : 'Turned off'}</Fact>
+              {'email' in account && (
+                <Fact label="Email">
+                  <span className="break-all">{account.email ?? '—'}</span>
+                  {account.email && 'email_verified_at' in account && (
+                    <span
+                      className={`mt-0.5 block text-xs ${account.email_verified_at ? 'text-s-green' : 'text-ink-muted'}`}
+                    >
+                      {account.email_verified_at ? 'Confirmed' : 'Not confirmed'}
+                    </span>
+                  )}
+                </Fact>
+              )}
+              {'mobile_number' in account && (
+                <Fact label="Mobile">
+                  <span className="tnum">{account.mobile_number ?? '—'}</span>
+                </Fact>
+              )}
+              {'created_at' in account && <Fact label="Registered">{formatDate(account.created_at)}</Fact>}
+              {'last_login_at' in account && (
+                <Fact label="Last signed in">{formatDateTime(account.last_login_at)}</Fact>
+              )}
+              {'is_active' in account && <Fact label="Sign-in">{account.is_active ? 'Allowed' : 'Turned off'}</Fact>}
             </dl>
+            {!('email' in account) && (
+              <p className="border-t border-line px-5 py-2.5 text-xs leading-snug text-ink-muted">
+                Reach the owner through Message, or the business's own contact numbers on the filing.
+              </p>
+            )}
           </Section>
 
           <HistorySection events={profile.history} />
@@ -584,6 +664,8 @@ function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
                       · {e.by}
                       {e.by_office && ` (${e.by_office})`}
                     </>
+                  ) : e.by_office ? (
+                    ` · ${e.by_office}`
                   ) : (
                     e.label !== 'Account created' && ' · Automatic'
                   )}

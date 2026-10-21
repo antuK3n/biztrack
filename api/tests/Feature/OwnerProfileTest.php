@@ -71,7 +71,10 @@ function profileOwner(): array
 
     $fee = FeeAssessment::create([
         'application_id' => $app->id,
-        'line_items' => [['label' => 'Fee', 'amount' => 2400.5, 'group' => 'regulatory', 'office' => 'BPLO']],
+        'line_items' => [
+            ['label' => 'Business permit fee', 'amount' => 2100.5, 'group' => 'regulatory', 'office' => 'BPLO'],
+            ['label' => 'Sanitary permit fee', 'amount' => 300.0, 'group' => 'regulatory', 'permit_codes' => ['SANITARY']],
+        ],
         'total_amount' => 2400.5,
     ]);
     foreach ([['completed', 1500.50], ['pending', 900]] as $i => [$status, $amount]) {
@@ -134,6 +137,40 @@ it('keeps an office to the owners on its own caseload', function () {
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/owner-profiles/{$owner->id}")->assertOk()
         ->assertJsonPath('data.summary.filings', 1);
+});
+
+it('gives each seat only the account facts it needs, and an office only its own fee', function () {
+    ['owner' => $owner, 'app' => $app] = profileOwner();
+    assignOffice($app->id, 'CHO');
+
+    $read = fn (string $email) => test()->withHeaders(authAs($email))
+        ->getJson("/api/v1/owner-profiles/{$owner->id}")->assertOk()->json('data');
+
+    // No seat is sent the home address.
+    foreach (['admin@biztrack.local', 'bplo@biztrack.local', 'sanitary@biztrack.local'] as $email) {
+        expect($read($email)['account'])->not->toHaveKey('home_address');
+    }
+
+    $office = $read('sanitary@biztrack.local');
+    expect($office['account'])->toHaveKeys(['name', 'gender', 'status'])
+        ->and($office['account'])->not->toHaveKeys(['email', 'mobile_number', 'last_login_at', 'is_active', 'blacklist_reason'])
+        // Its own share of the bill, not the owner's payments.
+        ->and($office['payments'])->toBeNull()
+        ->and($office['fees'])->toHaveCount(1)
+        ->and($office['fees'][0])->toMatchArray(['amount' => 300, 'paid' => true])
+        ->and($office['can_message'])->toBeTrue();
+
+    $bplo = $read('bplo@biztrack.local');
+    expect($bplo['account'])->toHaveKeys(['email', 'mobile_number', 'created_at'])
+        ->and($bplo['account'])->not->toHaveKeys(['last_login_at', 'is_active', 'blacklist_reason'])
+        ->and($bplo['payments'])->toHaveCount(2)
+        ->and($bplo['fees'])->toBeNull()
+        ->and($bplo['can_message'])->toBeTrue();
+
+    $admin = $read('admin@biztrack.local');
+    expect($admin['account'])->toHaveKeys(['email', 'last_login_at', 'is_active', 'blacklist_reason'])
+        // The super admin holds no conversation with owners.
+        ->and($admin['can_message'])->toBeFalse();
 });
 
 it('refuses the owner list to a business owner', function () {

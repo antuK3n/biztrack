@@ -2,16 +2,19 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\AuditLog;
 use App\Models\Business;
+use App\Models\FeeAssessment;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Support\ApplicationVisibility;
+use App\Support\OfficeFeeShare;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\JsonResponse;
@@ -99,12 +102,16 @@ class OwnerProfileController extends Controller
         $page = $query->orderBy('last_name')->orderBy('first_name')->orderBy('name')
             ->paginate((int) $request->query('per_page', 25));
 
+        $contact = ApplicationVisibility::readsEveryOffice($reader);
+
         return response()->json([
             'data' => collect($page->items())->map(fn (User $owner) => [
                 'id' => $owner->id,
                 'name' => $this->nameOf($owner),
-                'email' => $owner->email,
-                'mobile_number' => $owner->mobile_number,
+                // The account's contact details are BPLO's and the super
+                // admin's, as on the profile (accountFor).
+                'email' => $contact ? $owner->email : null,
+                'mobile_number' => $contact ? $owner->mobile_number : null,
                 'status' => $owner->isBlacklisted() ? 'blacklisted' : 'active',
                 'status_label' => $owner->isBlacklisted() ? 'Blacklisted' : 'Active',
                 'active_permits' => (int) $owner->businesses->sum('active_permits_count'),
@@ -121,6 +128,7 @@ class OwnerProfileController extends Controller
                 'last_page' => $page->lastPage(),
                 'per_page' => $page->perPage(),
                 'total' => $page->total(),
+                'shows_contact' => $contact,
             ],
         ]);
     }
@@ -160,34 +168,12 @@ class OwnerProfileController extends Controller
 
         $permits = $businesses->flatMap->permits;
         $names = $businesses->pluck('name', 'id');
+        $everyOffice = ApplicationVisibility::readsEveryOffice($reader);
         $tracking = $applications->pluck('tracking_id', 'id');
         $businessOf = $applications->pluck('business_id', 'id');
 
         return response()->json(['data' => [
-            'account' => [
-                'id' => $owner->id,
-                'name' => $this->nameOf($owner),
-                'first_name' => $owner->first_name,
-                'middle_name' => $owner->middle_name,
-                'last_name' => $owner->last_name,
-                'suffix' => $owner->suffix,
-                'gender' => $owner->gender,
-                'email' => $owner->email,
-                'mobile_number' => $owner->mobile_number,
-                'home_address' => collect([
-                    $owner->home_street, $owner->home_barangay, $owner->home_city,
-                    $owner->home_province, $owner->home_postal_code,
-                ])->filter()->implode(', ') ?: null,
-                'created_at' => $owner->created_at?->toIso8601String(),
-                'email_verified_at' => $owner->email_verified_at?->toIso8601String(),
-                'last_login_at' => $owner->last_login_at?->toIso8601String(),
-                'is_active' => (bool) $owner->is_active,
-                'status' => $owner->isBlacklisted() ? 'blacklisted' : 'active',
-                'status_label' => $owner->isBlacklisted() ? 'Blacklisted' : 'Active',
-                'blacklisted_at' => $owner->blacklisted_at?->toIso8601String(),
-                'blacklist_reason' => $owner->blacklist_reason,
-                'blacklisted_by' => $owner->blacklistedBy ? $this->nameOf($owner->blacklistedBy) : null,
-            ],
+            'account' => $this->accountFor($owner, $reader),
             'summary' => [
                 'businesses' => $businesses->count(),
                 'active_permits' => $permits->where('status', PermitStatus::Active)->count(),
@@ -234,7 +220,7 @@ class OwnerProfileController extends Controller
                 'submitted_at' => $a->submitted_at?->toIso8601String(),
                 'decided_at' => $a->decided_at?->toIso8601String(),
             ])->values(),
-            'payments' => $payments->map(fn (Payment $p) => [
+            'payments' => ! $everyOffice ? null : $payments->map(fn (Payment $p) => [
                 'id' => $p->id,
                 'reference_number' => $p->reference_number,
                 'tracking_id' => $tracking[$p->application_id] ?? null,
@@ -247,8 +233,129 @@ class OwnerProfileController extends Controller
                 'paid_at' => $p->paid_at?->toIso8601String(),
                 'created_at' => $p->created_at?->toIso8601String(),
             ])->values(),
+            'fees' => $everyOffice ? null : $this->officeFees($reader, $applications, $payments, $names),
+            /*
+             * Whether the Message button shows: an office seat that takes part
+             * in Messages. It opens the owner's General enquiry with the
+             * reader's own office (MessageController::generalIndex defaults an
+             * office to itself). The super admin holds no `message.participate`
+             * and has no conversation with owners, so it gets no button.
+             */
+            'can_message' => $reader->department_id !== null && $reader->hasPermission('message.participate'),
             'history' => $this->history($owner, $reader, $businesses, $permits),
         ]]);
+    }
+
+    /**
+     * The account, as much of it as this reader needs [client, 21 October
+     * 2026: "kung ano lang ang dapat at nakikita … make it correct at tama
+     * like real life"].
+     *
+     *   - Every office: the owner's name, sex and standing — who the person
+     *     is, as the owner block on the review sheet already shows each office
+     *     (BusinessResource), and whether they are blacklisted.
+     *   - BPLO and the super admin: the account's email and mobile number,
+     *     and when it was registered. BPLO keeps the register and is the office
+     *     an owner is told to ask; a clearance office reaches the owner through
+     *     Messages, or the business's own contact numbers on the filing.
+     *   - The super admin alone: whether the email was confirmed, the last
+     *     sign-in, whether sign-in is allowed, and why and by whom the owner
+     *     was blacklisted — the facts of administering an account, shown
+     *     nowhere else to an office (UsersPage, Owner Status).
+     *   - Nobody: the home address. "An owner's home is personal data nobody
+     *     at City Hall needs to browse" (UserResource; RA 10173
+     *     proportionality), and the business's address is what an office
+     *     inspects.
+     *
+     * Left out of the payload rather than blanked on screen: a field the
+     * browser hides is still in the network tab.
+     *
+     * @return array<string, mixed>
+     */
+    private function accountFor(User $owner, User $reader): array
+    {
+        $account = [
+            'id' => $owner->id,
+            'name' => $this->nameOf($owner),
+            'gender' => $owner->gender,
+            'status' => $owner->isBlacklisted() ? 'blacklisted' : 'active',
+            'status_label' => $owner->isBlacklisted() ? 'Blacklisted' : 'Active',
+            'blacklisted_at' => $owner->blacklisted_at?->toIso8601String(),
+        ];
+
+        if (ApplicationVisibility::readsEveryOffice($reader)) {
+            $account += [
+                'email' => $owner->email,
+                'mobile_number' => $owner->mobile_number,
+                'created_at' => $owner->created_at?->toIso8601String(),
+            ];
+        }
+
+        if ($this->isSuperAdmin($reader)) {
+            $account += [
+                'email_verified_at' => $owner->email_verified_at?->toIso8601String(),
+                'last_login_at' => $owner->last_login_at?->toIso8601String(),
+                'is_active' => (bool) $owner->is_active,
+                'blacklist_reason' => $owner->blacklist_reason,
+                'blacklisted_by' => $owner->blacklistedBy ? $this->nameOf($owner->blacklistedBy) : null,
+            ];
+        }
+
+        return $account;
+    }
+
+    /**
+     * A clearance office's fee on each of its filings, and whether the bill
+     * was paid.
+     *
+     * The same share the review sheet shows it (OfficeFeeShare; Ken, 6
+     * October 2026): an office sees what it charged, not the owner's whole
+     * bill and not what was paid to the other offices. The payment itself is
+     * one Tax Order of Payment for the filing, so "paid" is the filing's.
+     *
+     * @param  Collection<int, Application>  $applications
+     * @param  Collection<int, Payment>  $payments
+     * @param  \Illuminate\Support\Collection<int, string>  $names
+     * @return list<array<string, mixed>>
+     */
+    private function officeFees(User $reader, Collection $applications, Collection $payments, $names): array
+    {
+        $assessments = FeeAssessment::query()
+            ->whereIn('application_id', $applications->pluck('id'))
+            ->orderByDesc('id')
+            ->get(['id', 'application_id', 'line_items'])
+            ->unique('application_id')
+            ->keyBy('application_id');
+
+        return $applications
+            ->filter(fn (Application $a) => $assessments->has($a->id))
+            ->map(function (Application $a) use ($reader, $assessments, $payments, $names) {
+                $share = OfficeFeeShare::total(OfficeFeeShare::linesFor($assessments[$a->id]->line_items ?? [], $reader));
+                $paid = $payments
+                    ->where('application_id', $a->id)
+                    ->where('status', PaymentStatus::Completed)
+                    ->sortByDesc(fn (Payment $p) => $p->paid_at?->timestamp ?? 0)
+                    ->first();
+
+                return [
+                    'application_id' => $a->id,
+                    'tracking_id' => $a->tracking_id,
+                    'business_name' => $names[$a->business_id] ?? null,
+                    'amount' => $share,
+                    'paid' => $paid !== null,
+                    'paid_at' => $paid?->paid_at?->toIso8601String(),
+                ];
+            })
+            // A filing that charged this office nothing is not this office's fee.
+            ->filter(fn (array $row) => $row['amount'] > 0)
+            ->values()
+            ->all();
+    }
+
+    /** The seat that administers accounts: `user.manage`, and no office. */
+    private function isSuperAdmin(User $user): bool
+    {
+        return $user->hasPermission('user.manage') && $user->department_id === null;
     }
 
     /**
@@ -312,6 +419,7 @@ class OwnerProfileController extends Controller
     private function history(User $owner, User $reader, Collection $businesses, Collection $permits): array
     {
         $everyOffice = ApplicationVisibility::readsEveryOffice($reader);
+        $superAdmin = $this->isSuperAdmin($reader);
         $names = $businesses->pluck('name', 'id');
 
         if (! $everyOffice) {
@@ -356,8 +464,8 @@ class OwnerProfileController extends Controller
                     'from_label' => $log->action === 'owner.blacklisted' ? 'Active' : 'Blacklisted',
                     'to' => $log->action === 'owner.blacklisted' ? 'blacklisted' : 'active',
                     'to_label' => $log->action === 'owner.blacklisted' ? 'Blacklisted' : 'Active',
-                    'reason' => $log->changes['reason'] ?? null,
-                ], $actor($log))));
+                    'reason' => $superAdmin ? ($log->changes['reason'] ?? null) : null,
+                ], $superAdmin ? $actor($log) : ['by' => null, 'by_office' => 'Super Admin'])));
 
             $events = $events->concat(AuditLog::query()
                 ->where('auditable_type', Business::class)

@@ -3161,26 +3161,28 @@ export interface OwnerProfileEvent {
 
 /** An owner's profile as an office reads it (`GET /owner-profiles/{id}`). */
 export interface OwnerProfile {
+  /**
+   * As much of the account as the reader needs (OwnerProfileController::
+   * accountFor). Name, sex and standing go to every office; contact details
+   * and the registration date to BPLO and the super admin; the sign-in facts
+   * and the blacklisting's reason to the super admin alone. An absent key is
+   * one this reader is not sent — not a blank.
+   */
   account: {
     id: number
     name: string
-    first_name: string | null
-    middle_name: string | null
-    last_name: string | null
-    suffix: string | null
     gender: string | null
-    email: string | null
-    mobile_number: string | null
-    home_address: string | null
-    created_at: string | null
-    email_verified_at: string | null
-    last_login_at: string | null
-    is_active: boolean
     status: 'active' | 'blacklisted'
     status_label: string
     blacklisted_at: string | null
-    blacklist_reason: string | null
-    blacklisted_by: string | null
+    email?: string | null
+    mobile_number?: string | null
+    created_at?: string | null
+    email_verified_at?: string | null
+    last_login_at?: string | null
+    is_active?: boolean
+    blacklist_reason?: string | null
+    blacklisted_by?: string | null
   }
   /** `needs_attention`: permits expired, suspended, revoked or rejected. */
   summary: { businesses: number; active_permits: number; filings: number; needs_attention: number }
@@ -3215,7 +3217,9 @@ export interface OwnerProfile {
     submitted_at: string | null
     decided_at: string | null
   }[]
-  payments: {
+  /** The whole bill's payments: BPLO's and the super admin's. Null for a clearance office. */
+  payments:
+    | {
     id: number
     reference_number: string | null
     tracking_id: string | null
@@ -3228,6 +3232,11 @@ export interface OwnerProfile {
     paid_at: string | null
     created_at: string | null
   }[]
+    | null
+  /** A clearance office's own fee on each of its filings, and whether the bill was paid. Null for BPLO and the super admin. */
+  fees: { application_id: number; tracking_id: string | null; business_name: string | null; amount: number; paid: boolean; paid_at: string | null }[] | null
+  /** Whether the Message button shows: an office seat in Messages, never the super admin. */
+  can_message: boolean
   history: OwnerProfileEvent[]
 }
 
