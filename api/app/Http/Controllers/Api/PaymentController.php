@@ -16,6 +16,7 @@ use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use App\Support\Numbering;
 use App\Support\OtherRequirementRules;
 use App\Support\PaymentMode;
@@ -612,7 +613,7 @@ class PaymentController extends Controller
             $payment->update(['receipt_path' => $path]);
         }
 
-        return $file->download("invoice-{$payment->reference_number}.pdf");
+        return DownloadLog::record($file->download("invoice-{$payment->reference_number}.pdf"), 'invoice', $payment);
     }
 
     /**

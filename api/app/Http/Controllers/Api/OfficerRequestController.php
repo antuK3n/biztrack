@@ -14,6 +14,7 @@ use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\DenrRequirements;
+use App\Support\DownloadLog;
 use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -208,9 +209,13 @@ class OfficerRequestController extends Controller
             'The reference file is no longer on file.'
         );
 
-        return Storage::disk('local')->download(
-            $officerRequest->reference_path,
-            $officerRequest->reference_name ?? 'reference'
+        return DownloadLog::record(
+            Storage::disk('local')->download(
+                $officerRequest->reference_path,
+                $officerRequest->reference_name ?? 'reference'
+            ),
+            'requirement_reference',
+            $officerRequest,
         );
     }
 

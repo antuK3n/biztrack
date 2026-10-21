@@ -16,6 +16,7 @@ use App\Support\AnalyticsOffice;
 use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
 use App\Support\DashboardAnalytics;
+use App\Support\DownloadLog;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
 use App\Support\Spc;
@@ -80,7 +81,7 @@ class AnalyticsController extends Controller
 
         $suffix = $office === null ? '' : '-'.strtolower($office);
 
-        return PdfFile::render($pdf)->download("analytics-dashboard{$suffix}.pdf");
+        return DownloadLog::record(PdfFile::render($pdf)->download("analytics-dashboard{$suffix}.pdf"), 'dashboard_report');
     }
 
     /**
@@ -167,7 +168,7 @@ class AnalyticsController extends Controller
         ])->setPaper('a4');
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
-        return PdfFile::render($pdf)->download('processing-time-monitoring.pdf');
+        return DownloadLog::record(PdfFile::render($pdf)->download('processing-time-monitoring.pdf'), 'processing_time_report');
     }
 
     /**
@@ -340,7 +341,7 @@ class AnalyticsController extends Controller
 
         $s = $this->buildSummary();
 
-        return response()->streamDownload(function () use ($s) {
+        return DownloadLog::record(response()->streamDownload(function () use ($s) {
             $out = fopen('php://output', 'w');
 
             fputcsv($out, ['Applications by status', '']);
@@ -369,7 +370,7 @@ class AnalyticsController extends Controller
             fputcsv($out, ['Revenue', $s['simulated_revenue']]);
 
             fclose($out);
-        }, 'analytics-summary.csv', ['Content-Type' => 'text/csv']);
+        }, 'analytics-summary.csv', ['Content-Type' => 'text/csv']), 'analytics_export');
     }
 
     private function buildSummary(): array

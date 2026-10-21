@@ -15,6 +15,7 @@ use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\BusinessDate;
+use App\Support\DownloadLog;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
@@ -875,7 +876,7 @@ class PermitController extends Controller
             $permit->update(['pdf_path' => $path]);
         }
 
-        return $file->download("permit-{$permit->permit_number}.pdf");
+        return DownloadLog::record($file->download("permit-{$permit->permit_number}.pdf"), 'permit', $permit);
     }
 
     /**

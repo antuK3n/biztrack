@@ -7,6 +7,7 @@ use App\Jobs\RunLegacyImport;
 use App\Models\Barangay;
 use App\Models\LegacyImport;
 use App\Models\PermitType;
+use App\Support\DownloadLog;
 use App\Support\LegacyImport\ImportRunner;
 use App\Support\LegacyImport\Sources\CsvSource;
 use App\Support\LegacyImport\SourceUnreadable;
@@ -62,10 +63,10 @@ class LegacyImportController extends Controller
     /** The template: header row, one example row. */
     public function template(): Response
     {
-        return response(Template::csv(), 200, [
+        return DownloadLog::record(response(Template::csv(), 200, [
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="biztrack-legacy-import-template.csv"',
-        ]);
+        ]), 'import_template');
     }
 
     /** Upload a CSV and dry-run it. */
