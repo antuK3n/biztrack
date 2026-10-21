@@ -8,6 +8,7 @@
 #     against Azure Database for PostgreSQL (same major version as the server)
 #   - an entrypoint that caches config/routes/views at start, when the
 #     environment (env_file) is finally present
+#   - python3 and pyHanko, so every permit PDF is signed as it is served
 FROM php:8.4-fpm-alpine
 
 RUN apk add --no-cache su-exec postgresql16-client libpq libzip icu-libs libpng libjpeg-turbo freetype \
@@ -16,6 +17,20 @@ RUN apk add --no-cache su-exec postgresql16-client libpq libzip icu-libs libpng 
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" pdo_pgsql zip intl bcmath opcache gd pcntl \
     && apk del .build-deps
+
+# pyHanko signs permit PDFs (docs/digital-signature.md), in a venv of its own
+# so pip never writes into Alpine's Python, from the pinned list beside the
+# wrapper script. Wheels only: nothing is compiled, and a pin with no wheel for
+# this Alpine fails the build rather than every signature. python3-pyc is the
+# standard library's bytecode; without bytecode a signing run took 1.3 s
+# rather than 0.45 s.
+COPY api/resources/signing/requirements.txt /tmp/signing-requirements.txt
+RUN apk add --no-cache python3 python3-pyc \
+    && python3 -m venv /opt/pyhanko \
+    && /opt/pyhanko/bin/pip install --no-cache-dir --disable-pip-version-check --only-binary=:all: \
+        -r /tmp/signing-requirements.txt \
+    && rm /tmp/signing-requirements.txt
+ENV PERMIT_SIGNING_PYTHON=/opt/pyhanko/bin/python
 
 COPY infra/azure/php.ini /usr/local/etc/php/conf.d/biztrack.ini
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
