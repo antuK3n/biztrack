@@ -99,7 +99,9 @@ final class PermitSignature
         if (! $result->successful() || strlen($signed) <= strlen($file->content) || ! str_starts_with($signed, $file->content)) {
             Log::warning('Permit PDF served unsigned: the signing tool failed.', [
                 'exit_code' => $result->exitCode(),
-                'error' => Str::limit(trim($result->errorOutput()), 500),
+                // The end of it: sign_pdf.py says why in one line, and where
+                // something else failed first, a traceback ends with the cause.
+                'error' => Str::substr(trim($result->errorOutput()), -500),
             ]);
 
             return $file;

@@ -170,6 +170,30 @@ it('draws the signed permit exactly as the unsigned one', function () {
         ->and($after->getText())->toBe($before->getText());
 })->skip(fn () => ! pyhankoInstalled(), 'pyHanko is not installed (docs/digital-signature.md).');
 
+/*
+ * The app image is Alpine, which has no time zone database, and pyHanko looks
+ * a zone up as it loads. A Mac always has one, so without this the signer
+ * passed every test here and would have failed every download in production.
+ */
+it('signs on a server with no time zone database, as the app image is', function () {
+    $this->artisan('biztrack:signing-certificate')->assertSuccessful();
+    config(['permit_signing.enabled' => false]);
+    $unsigned = downloadedPermit(signablePermit('BUSINESS'));
+
+    $run = Process::input($unsigned)
+        // No zoneinfo for Python to find, and a TZ naming a zone, as a
+        // container may be given one.
+        ->env(['PYTHONTZPATH' => '', 'TZ' => 'Asia/Manila'])
+        ->run([
+            (string) config('permit_signing.python'), resource_path('signing/sign_pdf.py'),
+            '--p12', config('permit_signing.p12'), '--reason', 'Permit issued through BizTrack', '--location', 'Malabon City',
+        ]);
+
+    expect($run->successful())->toBeTrue($run->errorOutput())
+        ->and(str_starts_with($run->output(), $unsigned))->toBeTrue()
+        ->and(hasSignature($run->output()))->toBeTrue();
+})->skip(fn () => ! pyhankoInstalled(), 'pyHanko is not installed (docs/digital-signature.md).');
+
 it('serves the permit unsigned and logs a warning when pyHanko cannot be run', function () {
     $this->artisan('biztrack:signing-certificate')->assertSuccessful();
     config(['permit_signing.python' => '/nonexistent/bin/python']);

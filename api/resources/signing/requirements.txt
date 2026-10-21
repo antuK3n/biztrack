@@ -1,7 +1,14 @@
 # pyHanko and everything it installs, pinned, for sign_pdf.py beside this file.
 # The app image installs exactly this list (infra/azure/app.Dockerfile), and so
-# does a developer's venv (docs/digital-signature.md). To upgrade: install the
-# new pyHanko in a clean venv and replace the list below with its `pip freeze`.
+# does a developer's venv (docs/digital-signature.md).
+#
+# tzdata is here although pyHanko does not ask for it: pyHanko looks up a time
+# zone as it loads, and the Alpine image has no zone database, so without this
+# every signature there would fail. A Mac has one, so a test run there cannot
+# tell (PermitDigitalSignatureTest takes the database away to check).
+#
+# To upgrade: `pip install pyHanko==<new> tzdata` in a clean venv and replace
+# the list below with its `pip freeze`.
 asn1crypto==1.5.1
 certifi==2026.10.19
 cffi==2.1.1
@@ -14,6 +21,7 @@ pycparser==3.11
 pyHanko==0.36.2
 pyhanko-certvalidator==0.31.4
 requests==2.34.2
+tzdata==2026.5
 tzlocal==5.4.4
 uritools==6.1.3
 urllib3==2.8.0

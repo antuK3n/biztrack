@@ -42,11 +42,14 @@ def main() -> int:
     parser.add_argument('--location', required=True)
     args = parser.parse_args()
 
+    # Anything, not just ImportError: pyHanko looks up a time zone as it
+    # loads, and fails with a KeyError where there is no zone database
+    # (requirements.txt carries tzdata for that). One line either way.
     try:
         from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
         from pyhanko.sign import fields, signers
-    except ImportError as error:
-        print(f'pyHanko is not installed for {sys.executable}: {error}', file=sys.stderr)
+    except Exception as error:
+        print(f'pyHanko could not be loaded by {sys.executable}: {error!r}', file=sys.stderr)
         return 3
 
     password = os.environ.get('PERMIT_SIGNING_PASSWORD') or None
