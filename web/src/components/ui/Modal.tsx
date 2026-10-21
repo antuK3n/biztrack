@@ -18,11 +18,27 @@ interface ModalProps {
   size?: 'md' | 'lg' | 'xl'
   /** Drop the body's padding, for a table that runs edge to edge. */
   flush?: boolean
+  /**
+   * Hold the body at a fixed height, for a list the reader searches and
+   * filters: without it the panel shrinks and grows with every keystroke and
+   * the search box moves under the reader's hand.
+   */
+  fixedHeight?: boolean
 }
 
 const SIZES = { md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' } as const
 
-export function Modal({ open, onClose, title, description, children, footer, size = 'md', flush = false }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  size = 'md',
+  flush = false,
+  fixedHeight = false,
+}: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -71,7 +87,9 @@ export function Modal({ open, onClose, title, description, children, footer, siz
             <XIcon size={20} />
           </button>
         </header>
-        <div className={`max-h-[70vh] overflow-y-auto ${flush ? '' : 'px-5 py-4'}`}>{children}</div>
+        <div className={`${fixedHeight ? 'h-[70vh]' : 'max-h-[70vh]'} overflow-y-auto ${flush ? '' : 'px-5 py-4'}`}>
+          {children}
+        </div>
         {footer && (
           <footer className="flex flex-col-reverse gap-2 border-t border-line px-5 py-4 sm:flex-row sm:justify-end">
             {footer}
