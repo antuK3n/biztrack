@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { admin } from '../../lib/resources'
+import type { AuditLogFilters } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { formatDateTime } from '../../lib/format'
 import type { AuditLog } from '../../lib/types'
@@ -12,6 +13,25 @@ import { AuditIcon, ChevronRightIcon } from '../../components/icons'
  * Audit logs, restyled to the prototype table language (white ProtoCard,
  * uppercase muted headers, tinted action chips). Fetch + pagination unchanged.
  */
+
+/** A file served to a signed-in reader (App\Support\DownloadLog). */
+const DOWNLOADED = 'file.downloaded'
+
+/*
+ * The words an action is shown in, where it has been given any.
+ *
+ * Every other action still reads as its key, as it always has. The download
+ * row was worded when it was added (thesis panel revision matrix, item 2), and
+ * the filter below names it the same way, so the pill and the chip it finds
+ * say the same thing.
+ */
+const ACTION_LABELS: Record<string, string> = {
+  [DOWNLOADED]: 'Downloaded a file',
+}
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action
+}
 
 /** "App\Models\Application" → "Application". */
 function shortType(auditableType: string): string {
@@ -94,7 +114,7 @@ function LogRow({ log }: { log: AuditLog }) {
         <td className="whitespace-nowrap px-5 py-3.5 text-ink-secondary tnum">{formatDateTime(log.created_at)}</td>
         <td className="px-5 py-3.5">
           <StatusChip tone={actionTone(log.action)} className="tnum">
-            {log.action}
+            {actionLabel(log.action)}
           </StatusChip>
           {/* Said in words as well as by the chip's tone (Never Color Alone). */}
           {removed && <span className="ml-2 text-xs font-semibold text-ink-secondary">Removed</span>}
@@ -115,7 +135,7 @@ function LogRow({ log }: { log: AuditLog }) {
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              aria-label={`${removed ? 'Removed record' : 'Details'} for ${log.action}${target !== null ? ` on ${target}` : ''}`}
+              aria-label={`${removed ? 'Removed record' : 'Details'} for ${actionLabel(log.action)}${target !== null ? ` on ${target}` : ''}`}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-royal transition-colors duration-150 hover:bg-royal-tint"
             >
               {removed ? 'View record' : 'Details'}
@@ -142,13 +162,20 @@ function LogRow({ log }: { log: AuditLog }) {
   )
 }
 
-type Scope = 'all' | 'removed'
+type Scope = 'all' | 'removed' | 'downloads'
+
+/** What each filter asks the API for. */
+const SCOPE_FILTERS: Record<Scope, AuditLogFilters> = {
+  all: {},
+  removed: { removed: 1 },
+  downloads: { action: DOWNLOADED },
+}
 
 export function AuditLogsPage() {
   const [page, setPage] = useState(1)
   const [scope, setScope] = useState<Scope>('all')
   const { data, loading, error, reload } = useAsync(
-    () => admin.auditLogs(scope === 'removed' ? { page, removed: 1 } : { page }),
+    () => admin.auditLogs({ page, ...SCOPE_FILTERS[scope] }),
     [page, scope],
   )
 
@@ -164,6 +191,7 @@ export function AuditLogsPage() {
           options={[
             { value: 'all', label: 'All actions' },
             { value: 'removed', label: 'Removed' },
+            { value: 'downloads', label: actionLabel(DOWNLOADED) },
           ]}
           value={scope}
           onChange={(v) => {
