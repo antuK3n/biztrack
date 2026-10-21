@@ -68,8 +68,8 @@ class WipeForDefense extends Command
         'chatbot_conversations', 'chatbot_messages', 'clearance_refusals', 'compliance_checks', 'email_codes',
         'failed_jobs', 'fee_assessments', 'inspections', 'job_batches', 'jobs', 'legacy_imports', 'legacy_owners',
         'message_attachments', 'message_threads', 'messages', 'officer_request_responses', 'officer_requests',
-        'password_reset_tokens', 'payments', 'permit_expiry_notices', 'permits', 'sessions', 'unbilled_permit_fees',
-        'wizard_drafts',
+        'password_reset_tokens', 'payment_proofs', 'payments', 'permit_expiry_notices', 'permits', 'sessions',
+        'unbilled_permit_fees', 'wizard_drafts',
     ];
 
     /** Kept whole: reference and configuration data. */
@@ -88,7 +88,7 @@ class WipeForDefense extends Command
      * avatars are per user and go only for the owners.
      */
     private const FILE_DIRECTORIES = [
-        'private/documents', 'private/messages', 'private/permits', 'private/receipts',
+        'private/documents', 'private/messages', 'private/payment-proofs', 'private/permits', 'private/receipts',
         'private/requirement-references', 'legacy-imports',
     ];
 
@@ -215,7 +215,8 @@ class WipeForDefense extends Command
         foreach ([
             'application_documents' => ['stored_path'], 'message_attachments' => ['stored_path'], 'messages' => ['attachment_path'],
             'officer_requests' => ['reference_path', 'file_path'], 'officer_request_responses' => ['file_path'],
-            'permits' => ['pdf_path'], 'payments' => ['receipt_path'], 'legacy_imports' => ['stored_path'],
+            'permits' => ['pdf_path'], 'payments' => ['receipt_path'], 'payment_proofs' => ['file_path'],
+            'legacy_imports' => ['stored_path'],
         ] as $table => $columns) {
             foreach ($columns as $column) {
                 array_push($paths, ...DB::table($table)->whereNotNull($column)->pluck($column)->all());

@@ -423,6 +423,7 @@ class Application extends Model
 
         return $this->status?->label();
     }
+
     /**
      * The SQL half of `isDecided()`, for the places that ask it of a set.
      *
@@ -486,6 +487,12 @@ class Application extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /** Proof of a counter payment, every row ever sent; see PaymentProof. */
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
     }
 
     public function inspections(): HasMany

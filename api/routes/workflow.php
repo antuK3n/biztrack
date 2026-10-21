@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\PaymentProofController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
@@ -310,9 +311,22 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::post('payments/{payment}/abandon', [PaymentController::class, 'abandon'])
             ->whereNumber('payment')
             ->middleware('throttle:10,1');
+        /*
+         * Proof of a payment made at the counter: the OR number and date paid,
+         * a photo of the receipt, or both (thesis panel, matrix item 4). It
+         * marks nothing paid; BPLO's Mark as paid reads it.
+         */
+        Route::post('applications/{application}/payment-proofs', [PaymentProofController::class, 'store']);
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
+    /*
+     * The proof waiting on BPLO, and its photo. Read by the owner AND by BPLO
+     * and the super admin, who hold no `payment.make`, so outside that group;
+     * PaymentProofController::mayRead is the gate.
+     */
+    Route::get('applications/{application}/payment-proof', [PaymentProofController::class, 'pending']);
+    Route::get('payment-proofs/{paymentProof}/file', [PaymentProofController::class, 'file']);
     /*
      * Fee adjustment is GONE [client, 2026-09-06]: the fee is system-computed
      * and BPLO cannot change it.
