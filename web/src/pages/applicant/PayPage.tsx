@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeftIcon, CheckCircleFilledIcon, ClockIcon, XCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { SendProofForm } from '../../components/CounterProof'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoCard, ProtoModal, StatusCard } from '../../components/ui/Proto'
@@ -75,7 +76,10 @@ export function PayPage() {
    * Held on this page and nowhere else: choosing it records nothing and opens
    * no gateway. The bill stays unpaid until BPLO takes the cash and records it
    * with the counter payment it already has (POST /counter-payment), which is
-   * what moves the filing on - "over the counter should be paid" [Ken].
+   * what moves the filing on - "over the counter should be paid" [Ken]. Since
+   * the thesis panel's revisions the owner can send proof from here once they
+   * have paid (SendProofForm), and that too leaves the bill unpaid until BPLO
+   * confirms it.
    */
   const [overCounter, setOverCounter] = useState(false)
   const [paying, setPaying] = useState(false)
@@ -460,9 +464,17 @@ export function PayPage() {
       </fieldset>
 
       {overCounter ? (
-        <p className="mt-7 text-center text-sm text-ink">
-          Pay at the BPLO counter, Malabon City Hall. BPLO records your payment.
-        </p>
+        <>
+          <p className="mt-7 text-center text-sm text-ink">
+            Pay at the BPLO counter, Malabon City Hall. BPLO records your payment.
+          </p>
+          {/*
+            Once paid at City Hall, the owner sends the OR or a photo of the
+            receipt (thesis panel, matrix item 4). It marks nothing paid; BPLO's
+            Mark as paid reads it.
+          */}
+          <SendProofForm applicationId={appId} />
+        </>
       ) : (
         <div className="mt-7">
           <PillButton
