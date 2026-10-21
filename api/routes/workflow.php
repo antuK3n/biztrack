@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
+use App\Http\Controllers\Api\OrRecordController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PaymentProofController;
 use App\Http\Controllers\Api\PermitController;
@@ -327,6 +328,14 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      */
     Route::get('applications/{application}/payment-proof', [PaymentProofController::class, 'pending']);
     Route::get('payment-proofs/{paymentProof}/file', [PaymentProofController::class, 'file']);
+    /*
+     * OR Records (thesis panel, matrix item 5): every payment carrying an
+     * Official Receipt, searchable. BPLO and the super admin — the two
+     * holders of `application.view_any_office` — and nobody else; the rail
+     * entry and the web route carry the same claim.
+     */
+    Route::middleware('permission:application.view_any_office')
+        ->get('or-records', [OrRecordController::class, 'index']);
     /*
      * Fee adjustment is GONE [client, 2026-09-06]: the fee is system-computed
      * and BPLO cannot change it.

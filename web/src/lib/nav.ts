@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   AuditIcon,
   ChartIcon,
+  ClipboardIcon,
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
@@ -259,6 +260,18 @@ const NAV_ITEMS: NavItem[] = [
    * narrow it to `user.manage` HERE and in App.tsx together.
    */
   { label: 'Permits', icon: FileTextIcon, to: '/admin/permits', permission: 'permit.view_all' },
+  /*
+   * OR Records (thesis panel, matrix item 5): every payment carrying an
+   * Official Receipt, searchable. BPLO and the super admin alone — the two
+   * holders of `application.view_any_office`, which is also what the endpoint
+   * and both routes in App.tsx ask for. Beside Permits: both are registers.
+   */
+  {
+    label: 'OR Records',
+    icon: ClipboardIcon,
+    to: '/admin/or-records',
+    permission: 'application.view_any_office',
+  },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
    * only way to it was to type the address. Transparency is the thing this

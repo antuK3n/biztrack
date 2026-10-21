@@ -855,6 +855,38 @@ export interface Payment {
   application?: { id: number; tracking_id: string }
 }
 
+/**
+ * Proof of a payment made at the counter (PaymentProofController): the OR
+ * number and date paid, a photo of the receipt, or both. The photo itself is
+ * fetched through `paymentProofs.view`, never carried here.
+ */
+export interface PaymentProof {
+  id: number
+  or_number: string | null
+  /** A bare calendar date, "2026-10-20". */
+  or_date: string | null
+  has_photo: boolean
+  photo_name: string | null
+  submitted_at: string | null
+}
+
+/** One row of OR Records: a payment with an Official Receipt (OrRecordController). */
+export interface OrRecord {
+  id: number
+  or_number: string
+  /** A bare calendar date, "2026-10-20". */
+  or_date: string | null
+  amount: string
+  /** When BPLO recorded it. */
+  recorded_at: string | null
+  application: { id: number; tracking_id: string } | null
+  /** Null when the business has been removed from the register. */
+  business: { id: number; name: string } | null
+  recorded_by: { id: number; name: string } | null
+  /** The photo the row's View opens: the officer's, else the owner's. */
+  proof: { id: number; name: string | null } | null
+}
+
 export interface PaymentOptions {
   mode: 'simulated' | 'kwikpay'
   methods: { value: PaymentMethod; label: string }[]

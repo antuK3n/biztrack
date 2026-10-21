@@ -56,6 +56,8 @@ import type {
   Payment,
   PaymentMethod,
   PaymentOptions,
+  PaymentProof,
+  OrRecord,
   Permit,
   AdminOwner,
   OwnerHistoryEntry,
@@ -1043,6 +1045,40 @@ export const payments = {
    * synchronously inside the click handler; see `viewBlob`.
    */
   viewReceipt: (id: number, target?: Window | null) => viewBlob(`/payments/${id}/receipt`, target),
+}
+
+/* ── Proof of a counter payment (thesis panel, matrix item 4) ────────────── */
+
+export const paymentProofs = {
+  /** The proof waiting on BPLO for this filing, or null. The owner, BPLO and the super admin. */
+  pending: (applicationId: number) =>
+    unwrap<PaymentProof | null>(api.get(`/applications/${applicationId}/payment-proof`)),
+  /**
+   * The owner sends proof after paying at the counter: the OR number with the
+   * date paid, a photo of the receipt, or both. Marks nothing paid; a second
+   * send before BPLO confirms replaces the pending one.
+   */
+  send: (applicationId: number, body: { or_number?: string; or_date?: string; photo?: File | null }) => {
+    const form = new FormData()
+    if (body.or_number) form.append('or_number', body.or_number)
+    if (body.or_date) form.append('or_date', body.or_date)
+    if (body.photo) form.append('photo', body.photo)
+    return unwrap<PaymentProof>(
+      api.post(`/applications/${applicationId}/payment-proofs`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    )
+  },
+  /** The photo of the receipt, opened in a tab (pass one opened inside the click). */
+  view: (id: number, target?: Window | null) => viewBlob(`/payment-proofs/${id}/file`, target),
+}
+
+/* ── OR Records (thesis panel, matrix item 5) ─────────────────────────────── */
+
+export const orRecords = {
+  /** Payments carrying an OR, newest date paid first. BPLO and the super admin. */
+  page: (params: PageParams & { q?: string } = {}) =>
+    unwrapPaged<OrRecord>(api.get('/or-records', { params })),
 }
 
 /* ── Officer queues + review ──────────────────────────────────────────── */
