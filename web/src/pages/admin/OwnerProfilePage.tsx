@@ -274,34 +274,7 @@ function Profile({ profile }: { profile: OwnerProfile }) {
               {allOfPayments.length === 0 ? (
                 <Empty>No payments on the filings you can see.</Empty>
               ) : (
-                <Table
-                  head={['Reference', 'For', 'Method', 'Status', 'Amount']}
-                  alignLastRight
-                  rows={payments.map((p) => ({
-                    key: p.id,
-                    cells: [
-                      <span key="c6" className="block">
-                        <span className="tnum block whitespace-nowrap font-semibold text-ink">
-                          {p.reference_number ?? '—'}
-                        </span>
-                        <span className="block whitespace-nowrap text-xs text-ink-muted">
-                          {formatDate(p.paid_at ?? p.created_at)}
-                        </span>
-                      </span>,
-                      <span key="c7" className="block min-w-[8rem]">
-                        <span className="block text-ink">{p.business_name ?? '—'}</span>
-                        <span className="tnum block text-xs text-ink-muted">{p.tracking_id ?? ''}</span>
-                      </span>,
-                      p.method_label ?? '—',
-                      <StatusChip key="c8" tone={PAYMENT_TONES[p.status ?? ''] ?? 'tint-gray'}>
-                        {p.status_label}
-                      </StatusChip>,
-                      <span key="c10" className="tnum whitespace-nowrap font-semibold text-ink">
-                        {formatMoney(p.amount)}
-                      </span>,
-                    ],
-                  }))}
-                />
+                <PaymentsTable payments={payments} />
               )}
               <ShowAll
                 total={allOfPayments.length}
@@ -688,6 +661,186 @@ function HistorySection({ events }: { events: OwnerProfileEvent[] }) {
         </div>
       )}
     </Section>
+  )
+}
+
+/* ── Payments, each opening onto what it paid for ──────────────────────────
+ *
+ * [Client, 21 October 2026: "di ba may mga breakdown pa yon kung ano ano ang
+ * babayaran bago ang total amount? i want once click lalabas yon, tas clinick
+ * uli yon mawawala dropdown".] A row opens its Tax Order of Payment beneath
+ * it; pressing it again closes it, and opening another closes the first, so
+ * one breakdown is read at a time.
+ *
+ * The lines are grouped by the office each is charged for, with a subtotal,
+ * because "which office is this money for" is the question a BPLO clerk asks
+ * of a bill that pays six offices at once.
+ *
+ * The toggle is a real button with `aria-expanded` in the first cell; the
+ * rest of the row forwards a press to it, so a mouse can hit anywhere and a
+ * keyboard has one stop per payment.
+ */
+type ProfilePayment = NonNullable<OwnerProfile['payments']>[number]
+
+function PaymentsTable({ payments }: { payments: ProfilePayment[] }) {
+  const [openId, setOpenId] = useState<number | null>(null)
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5">
+              Reference
+            </th>
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5">
+              For
+            </th>
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5">
+              Method
+            </th>
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5">
+              Status
+            </th>
+            <th scope="col" className="whitespace-nowrap px-4 py-2.5 text-right">
+              Amount
+            </th>
+          </tr>
+        </thead>
+        {payments.map((p) => (
+          <PaymentRows
+            key={p.id}
+            payment={p}
+            open={openId === p.id}
+            onToggle={() => setOpenId((current) => (current === p.id ? null : p.id))}
+          />
+        ))}
+      </table>
+    </div>
+  )
+}
+
+function PaymentRows({ payment: p, open, onToggle }: { payment: ProfilePayment; open: boolean; onToggle: () => void }) {
+  const panelId = useId()
+  const hasBreakdown = p.breakdown.length > 0
+
+  return (
+    <tbody className="border-t border-line">
+      <tr
+        onClick={(e) => {
+          if (!hasBreakdown || (e.target as HTMLElement).closest('button')) return
+          onToggle()
+        }}
+        className={`text-ink-secondary ${hasBreakdown ? 'cursor-pointer hover:bg-royal-tint/40' : ''} ${open ? 'bg-royal-tint/30' : ''}`}
+      >
+        <td className="px-4 py-2.5 align-middle">
+          {hasBreakdown ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-controls={panelId}
+              aria-label={`${p.reference_number ?? 'Payment'}: ${open ? 'hide' : 'show'} what it paid for`}
+              className="flex items-start gap-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+            >
+              <ChevronRightIcon
+                size={14}
+                aria-hidden="true"
+                className={`mt-0.5 shrink-0 text-ink-muted transition-transform ${open ? 'rotate-90' : ''}`}
+              />
+              <span>
+                <span className="tnum block whitespace-nowrap font-semibold text-ink">{p.reference_number ?? '—'}</span>
+                <span className="block whitespace-nowrap text-xs text-ink-muted">
+                  {formatDate(p.paid_at ?? p.created_at)}
+                </span>
+              </span>
+            </button>
+          ) : (
+            <span className="block pl-5">
+              <span className="tnum block whitespace-nowrap font-semibold text-ink">{p.reference_number ?? '—'}</span>
+              <span className="block whitespace-nowrap text-xs text-ink-muted">
+                {formatDate(p.paid_at ?? p.created_at)}
+              </span>
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 align-middle">
+          <span className="block min-w-[8rem]">
+            <span className="block text-ink">{p.business_name ?? '—'}</span>
+            <span className="tnum block text-xs text-ink-muted">{p.tracking_id ?? ''}</span>
+          </span>
+        </td>
+        <td className="px-4 py-2.5 align-middle">{p.method_label ?? '—'}</td>
+        <td className="px-4 py-2.5 align-middle">
+          <StatusChip tone={PAYMENT_TONES[p.status ?? ''] ?? 'tint-gray'}>{p.status_label}</StatusChip>
+        </td>
+        <td className="tnum whitespace-nowrap px-4 py-2.5 text-right align-middle font-semibold text-ink">
+          {formatMoney(p.amount)}
+        </td>
+      </tr>
+      {hasBreakdown && (
+        <tr id={panelId} hidden={!open}>
+          <td colSpan={5} className="px-4 pb-4 pt-1">
+            <Breakdown payment={p} />
+          </td>
+        </tr>
+      )}
+    </tbody>
+  )
+}
+
+/** The Tax Order of Payment, grouped by office, with each office's subtotal and the total. */
+function Breakdown({ payment: p }: { payment: ProfilePayment }) {
+  const groups = new Map<string, { label: string; amount: number }[]>()
+  for (const line of p.breakdown) {
+    const office = line.office ?? 'Other'
+    groups.set(office, [...(groups.get(office) ?? []), line])
+  }
+  const ordered = [...groups.entries()].sort(
+    ([a], [b]) =>
+      (OFFICE_ORDER.indexOf(a) === -1 ? 99 : OFFICE_ORDER.indexOf(a)) -
+      (OFFICE_ORDER.indexOf(b) === -1 ? 99 : OFFICE_ORDER.indexOf(b)),
+  )
+  const total = p.assessed_total ?? p.breakdown.reduce((sum, line) => sum + line.amount, 0)
+  const partial = Math.abs(total - p.amount) >= 0.005
+
+  return (
+    <div className="rounded-lg border border-line bg-canvas/40 px-4 py-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">What this paid for</p>
+      <div className="space-y-3">
+        {ordered.map(([office, lines]) => (
+          <div key={office}>
+            <div className="flex items-baseline justify-between gap-4 border-b border-line pb-1">
+              <span className="rounded bg-royal-tint px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-royal">
+                {office}
+              </span>
+              <span className="tnum text-xs font-semibold text-ink-secondary">
+                {formatMoney(lines.reduce((sum, line) => sum + line.amount, 0))}
+              </span>
+            </div>
+            <ul className="mt-1 space-y-0.5">
+              {lines.map((line, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-4 text-xs text-ink-secondary">
+                  <span className="min-w-0">{line.label}</span>
+                  <span className="tnum shrink-0">{formatMoney(line.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-baseline justify-between gap-4 border-t-2 border-ink/20 pt-2 text-sm">
+        <span className="font-semibold text-ink">Total assessed</span>
+        <span className="tnum font-bold text-ink">{formatMoney(total)}</span>
+      </div>
+      {/* Only when they differ — a re-bill or a part payment — and then both are said. */}
+      {partial && (
+        <div className="mt-1 flex items-baseline justify-between gap-4 text-xs text-ink-secondary">
+          <span>Paid in this payment</span>
+          <span className="tnum font-semibold">{formatMoney(p.amount)}</span>
+        </div>
+      )}
+    </div>
   )
 }
 

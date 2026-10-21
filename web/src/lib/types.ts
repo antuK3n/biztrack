@@ -3231,6 +3231,9 @@ export interface OwnerProfile {
     status_label: string
     paid_at: string | null
     created_at: string | null
+    /** The Tax Order of Payment this payment settled, line by line. */
+    breakdown: { label: string; office: string | null; amount: number }[]
+    assessed_total: number | null
   }[]
     | null
   /** A clearance office's own fee on each of its filings, and whether the bill was paid. Null for BPLO and the super admin. */

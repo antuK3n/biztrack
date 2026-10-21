@@ -164,6 +164,10 @@ it('gives each seat only the account facts it needs, and an office only its own 
     expect($bplo['account'])->toHaveKeys(['email', 'mobile_number', 'created_at'])
         ->and($bplo['account'])->not->toHaveKeys(['last_login_at', 'is_active', 'blacklist_reason'])
         ->and($bplo['payments'])->toHaveCount(2)
+        // Each payment opens onto the bill it settled, line by line.
+        ->and($bplo['payments'][0]['assessed_total'])->toBe(2400.5)
+        ->and(collect($bplo['payments'][0]['breakdown'])->pluck('office')->all())->toBe(['BPLO', null])
+        ->and(collect($bplo['payments'][0]['breakdown'])->sum('amount'))->toBe(2400.5)
         ->and($bplo['fees'])->toBeNull()
         ->and($bplo['can_message'])->toBeTrue();
 

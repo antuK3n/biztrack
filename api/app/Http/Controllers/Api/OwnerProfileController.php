@@ -164,7 +164,19 @@ class OwnerProfileController extends Controller
         $payments = Payment::query()
             ->whereIn('application_id', $applications->pluck('id'))
             ->orderByRaw('COALESCE(paid_at, created_at) DESC')->orderByDesc('id')
-            ->get(['id', 'application_id', 'reference_number', 'amount', 'method', 'status', 'paid_at', 'created_at']);
+            ->get(['id', 'application_id', 'fee_assessment_id', 'reference_number', 'amount', 'method', 'status', 'paid_at', 'created_at']);
+
+        /*
+         * What each payment paid for: the Tax Order of Payment it settled,
+         * line by line [client, 21 October 2026: "di ba may mga breakdown pa
+         * yon kung ano ano ang babayaran bago ang total amount?"]. Read for
+         * BPLO and the super admin only — they are the only seats sent the
+         * payments at all.
+         */
+        $assessmentsPaid = FeeAssessment::query()
+            ->whereIn('id', $payments->pluck('fee_assessment_id')->filter()->unique())
+            ->get(['id', 'line_items', 'total_amount'])
+            ->keyBy('id');
 
         $permits = $businesses->flatMap->permits;
         $names = $businesses->pluck('name', 'id');
@@ -232,6 +244,10 @@ class OwnerProfileController extends Controller
                 'status_label' => self::PAYMENT_LABELS[$p->status?->value] ?? ucfirst((string) $p->status?->value),
                 'paid_at' => $p->paid_at?->toIso8601String(),
                 'created_at' => $p->created_at?->toIso8601String(),
+                'breakdown' => $this->breakdownOf($assessmentsPaid->get($p->fee_assessment_id)),
+                'assessed_total' => ($a = $assessmentsPaid->get($p->fee_assessment_id))
+                    ? (float) $a->total_amount
+                    : null,
             ])->values(),
             'fees' => $everyOffice ? null : $this->officeFees($reader, $applications, $payments, $names),
             /*
@@ -348,6 +364,31 @@ class OwnerProfileController extends Controller
             })
             // A filing that charged this office nothing is not this office's fee.
             ->filter(fn (array $row) => $row['amount'] > 0)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * A Tax Order of Payment's lines as a reader needs them: what it is, the
+     * office it is charged for, and how much. The ordinance citations and the
+     * calculator's internals stay behind; the review sheet carries those for
+     * an officer defending an assessment.
+     *
+     * @return list<array{label: string, office: string|null, amount: float}>
+     */
+    private function breakdownOf(?FeeAssessment $assessment): array
+    {
+        if ($assessment === null) {
+            return [];
+        }
+
+        return collect($assessment->line_items ?? [])
+            ->filter(fn ($item) => is_array($item))
+            ->map(fn (array $item) => [
+                'label' => (string) ($item['label'] ?? 'Fee'),
+                'office' => $item['office'] ?? null,
+                'amount' => round((float) ($item['amount'] ?? 0), 2),
+            ])
             ->values()
             ->all();
     }
