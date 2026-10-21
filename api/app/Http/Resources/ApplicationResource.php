@@ -11,6 +11,7 @@ use App\Models\UnbilledPermitFee;
 use App\Support\AmendableFields;
 use App\Support\ApplicationVisibility;
 use App\Support\ClearanceStanding;
+use App\Support\OfficeFeeShare;
 use App\Support\Numbering;
 use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
@@ -789,29 +790,11 @@ class ApplicationResource extends JsonResource
             return ['line_items' => $items, 'total_amount' => $this->feeAssessment->total_amount];
         }
 
-        $ownCodes = PermitType::query()
-            ->where('issuing_department_id', $user->department_id)
-            ->pluck('code')
-            ->all();
-        $officeCode = $user->department?->code;
-
-        $own = array_values(array_filter($items, function ($item) use ($ownCodes, $officeCode) {
-            if (! is_array($item)) {
-                return false;
-            }
-            $codes = $item['permit_codes'] ?? [];
-
-            return $codes !== []
-                ? array_intersect($codes, $ownCodes) !== []
-                : $officeCode !== null && ($item['office'] ?? null) === $officeCode;
-        }));
+        $own = OfficeFeeShare::linesFor($items, $user);
 
         return [
             'line_items' => $own,
-            'total_amount' => number_format(
-                array_sum(array_map(fn (array $item) => (float) ($item['amount'] ?? 0), $own)),
-                2, '.', '',
-            ),
+            'total_amount' => number_format(OfficeFeeShare::total($own), 2, '.', ''),
         ];
     }
 

@@ -67,6 +67,8 @@ export function OwnerDirectoryPage() {
   const rows = data?.data ?? []
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
+  // The owner's own email and mobile are BPLO's and the super admin's.
+  const showsContact = Boolean((data?.meta as { shows_contact?: boolean } | undefined)?.shows_contact)
 
   return (
     <div>
@@ -119,9 +121,11 @@ export function OwnerDirectoryPage() {
                   <th scope="col" className="px-5 py-3">
                     Owner
                   </th>
-                  <th scope="col" className="px-5 py-3">
-                    Mobile
-                  </th>
+                  {showsContact && (
+                    <th scope="col" className="px-5 py-3">
+                      Mobile
+                    </th>
+                  )}
                   <th scope="col" className="px-5 py-3">
                     Businesses
                   </th>
@@ -138,7 +142,12 @@ export function OwnerDirectoryPage() {
               </thead>
               <tbody>
                 {rows.map((owner) => (
-                  <OwnerRow key={owner.id} owner={owner} onOpen={() => navigate(ownerProfilePath(owner.id))} />
+                  <OwnerRow
+                    key={owner.id}
+                    owner={owner}
+                    showsContact={showsContact}
+                    onOpen={() => navigate(ownerProfilePath(owner.id))}
+                  />
                 ))}
               </tbody>
             </table>
@@ -181,7 +190,15 @@ export function OwnerDirectoryPage() {
 /** Two business names, then a count — the row stays one line tall. */
 const NAMES_SHOWN = 2
 
-function OwnerRow({ owner, onOpen }: { owner: OwnerDirectoryRow; onOpen: () => void }) {
+function OwnerRow({
+  owner,
+  showsContact,
+  onOpen,
+}: {
+  owner: OwnerDirectoryRow
+  showsContact: boolean
+  onOpen: () => void
+}) {
   const shown = owner.businesses.slice(0, NAMES_SHOWN)
   const more = owner.businesses.length - shown.length
 
@@ -209,11 +226,13 @@ function OwnerRow({ owner, onOpen }: { owner: OwnerDirectoryRow; onOpen: () => v
             >
               {owner.name}
             </Link>
-            <span className="block truncate text-xs text-ink-muted">{owner.email ?? '—'}</span>
+            {showsContact && <span className="block truncate text-xs text-ink-muted">{owner.email ?? '—'}</span>}
           </span>
         </div>
       </td>
-      <td className="tnum whitespace-nowrap px-5 py-3.5 text-ink-secondary">{owner.mobile_number ?? '—'}</td>
+      {showsContact && (
+        <td className="tnum whitespace-nowrap px-5 py-3.5 text-ink-secondary">{owner.mobile_number ?? '—'}</td>
+      )}
       <td className="px-5 py-3.5">
         <ul className="space-y-1">
           {shown.map((b) => (
