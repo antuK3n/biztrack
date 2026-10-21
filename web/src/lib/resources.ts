@@ -1006,13 +1006,26 @@ export const payments = {
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
   /**
-   * BPLO marks this filing paid over the counter at City Hall. Nothing to
-   * send — the amount is the balance due, same as `pay` above, and the
-   * server refuses with a plain sentence if the filing is not actually
-   * waiting on payment. BPLO staff only.
+   * BPLO marks this filing paid over the counter at City Hall. The amount is
+   * the balance due, same as `pay` above. Since the thesis panel's revisions
+   * the officer sends the OR number and the date paid (both required) and may
+   * attach a photo of the receipt, and only the officer holding the filing at
+   * BPLO may — anyone else is refused with a plain sentence.
    */
-  markPaidAtCounter: (applicationId: number) =>
-    unwrap<Payment>(api.post(`/applications/${applicationId}/counter-payment`)),
+  markPaidAtCounter: (
+    applicationId: number,
+    body: { or_number: string; or_date: string; photo?: File | null },
+  ) => {
+    const form = new FormData()
+    form.append('or_number', body.or_number)
+    form.append('or_date', body.or_date)
+    if (body.photo) form.append('photo', body.photo)
+    return unwrap<Payment>(
+      api.post(`/applications/${applicationId}/counter-payment`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    )
+  },
   /**
    * The mode, the methods it offers and any online payment already in flight.
    * The pay screen lists what this returns rather than its own list, because

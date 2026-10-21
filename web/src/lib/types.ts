@@ -628,6 +628,14 @@ export interface ApplicationListItem {
   submitted_at: string | null
   deadline_at: string | null
   /**
+   * BPLO's own assignment on the filing: who holds it there, and whether this
+   * reader may take it or act on it. Sent to BPLO and the super admin only, so
+   * the Pending Payment tab can offer Mark as paid to the officer holding the
+   * filing and no one else (thesis panel, matrix item 1). Absent for every
+   * other reader; null where BPLO holds no assignment on it.
+   */
+  bplo_assignment?: Assignment | null
+  /**
    * Each permit on the filing with its own status — the second state machine,
    * carried on the list so a row never has to infer it.
    *
