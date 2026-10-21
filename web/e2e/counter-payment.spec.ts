@@ -12,7 +12,7 @@ import { makeBilledApplication } from './payments'
  * Mark as paid; the dialog shows the owner's proof and asks for the OR number
  * and the date paid, pre-filled from it; and a filing nobody holds is taken
  * with Assign to Me first. The row still leaves the tab once paid, and the
- * owner's payments still say "Paid at the counter".
+ * owner's Payment History shows the OR No. and the date paid.
  */
 test.describe.configure({ timeout: 180_000 })
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
@@ -106,6 +106,16 @@ test('the owner sends the OR, and the BPLO officer holding the filing marks it p
 
   expect(after.status).not.toBe('pending_payment')
   expect(after.payments).toContain(`counter:completed:${orNumber}`)
+
+  // The owner's Payment History names the OR and the day it was paid.
+  await page.goto('/payments')
+  const paid = page.getByRole('listitem').filter({ hasText: `OR No. ${orNumber}` })
+  await expect(paid).toBeVisible({ timeout: 30_000 })
+  await expect(paid).toContainText(
+    new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }),
+  )
+  await paid.scrollIntoViewIfNeeded()
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/oc-history.png` })
 })
 
 test('a filing nobody at BPLO holds offers Assign to Me and no Mark as paid until it is taken', async ({ page }) => {

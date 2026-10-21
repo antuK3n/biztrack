@@ -859,6 +859,14 @@ export interface Payment {
   set_aside?: boolean
   /** Marked for a refund (paid twice, or paid after the filing closed); staff are reviewing it. */
   refund_review?: boolean
+  /**
+   * A counter payment's Official Receipt, as BPLO recorded it (thesis panel,
+   * matrix item 5): its number and the day it was paid, a bare "2026-10-20".
+   * Null on a payment made online, and on a counter payment recorded before
+   * the OR was asked for.
+   */
+  or_number?: string | null
+  or_date?: string | null
   /** Present in the owner's cross-application payment history. */
   application?: { id: number; tracking_id: string }
 }

@@ -4,7 +4,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { formatDate, formatMoney } from '../../lib/format'
+import { formatCalendarDate, formatDate, formatMoney } from '../../lib/format'
 import { applications, payments } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { FeeAssessment, Payment } from '../../lib/types'
@@ -308,6 +308,17 @@ export function PaymentHistory() {
                               ? 'Did not go through'
                               : 'Refunded'}
                       </span>
+                      {/*
+                        * The Official Receipt of a payment made at the counter,
+                        * as BPLO recorded it, and the day it was paid (thesis
+                        * panel, matrix item 5). Online payments carry none.
+                        */}
+                      {p.or_number && (
+                        <span className="mt-0.5 block text-sm text-ink-secondary">
+                          OR No. <span className="tnum">{p.or_number}</span>
+                          {p.or_date && ` · ${formatCalendarDate(p.or_date)}`}
+                        </span>
+                      )}
                     </span>
                     <span className="display-serif tnum shrink-0 text-2xl text-ink">
                       {serifPeso(p.amount)}
