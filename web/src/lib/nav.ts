@@ -138,6 +138,15 @@ const NAV_ITEMS: NavItem[] = [
    * and the super admin never had it.
    */
   /*
+   * The office's pool of inspectors [client, 27 October 2026]: who goes out,
+   * which barangays each covers, which days, and when they are away. Not the
+   * Inspections register above, which listed VISITS; this lists PEOPLE, and
+   * the booking on Track's For Inspection reads it to suggest one.
+   * `inspection.manage`, the five clearance offices' own, and the route in
+   * App.tsx carries the same.
+   */
+  { label: 'Inspectors', icon: UsersIcon, to: '/inspectors', permission: 'inspection.manage' },
+  /*
    * ── The applicant could not reach their own requirements ─────────────────
    *
    * Gated on `request.create` alone, which is an OFFICE's permission: a

@@ -9,9 +9,11 @@ use App\Http\Resources\InspectionResource;
 use App\Models\Application;
 use App\Models\ApplicationPermitType;
 use App\Models\Inspection;
+use App\Models\Inspector;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use App\Support\InspectorSuggestion;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -166,6 +168,9 @@ class InspectionController extends Controller
              * put it. Same rule as nameInspector().
              */
             'inspector_name' => ['nullable', 'string', 'max:120'],
+            // Or one from the office's pool (27 October 2026); its name is
+            // written to `inspector_name` so every screen reads the same.
+            'inspector_id' => ['nullable', 'integer'],
         ], [
             'scheduled_at.required' => 'Choose the date of the inspection.',
             'inspector_name.max' => 'Keep the name under 120 characters.',
@@ -184,15 +189,11 @@ class InspectionController extends Controller
             ->where('permit_type_id', $type->id)
             ->firstOrFail();
 
+        $pool = $this->poolInspectorFor($type->issuing_department_id, $data['inspector_id'] ?? null);
+
         $visit = $this->workflow->scheduleClearanceInspection($row, $data['scheduled_at']);
 
-        $inspector = trim((string) ($data['inspector_name'] ?? '')) ?: null;
-        if ($inspector !== null) {
-            $visit->forceFill(['inspector_name' => $inspector])->save();
-            // The same audit row nameInspector() writes, so the name's history
-            // reads the same however it was first given.
-            Audit::log('inspection.inspector_named', $visit, ['from' => null, 'to' => $inspector]);
-        }
+        $this->assignInspector($visit, $pool, $data['inspector_name'] ?? null);
 
         return response()->json([
             'data' => new InspectionResource($visit->load($this->eager)),
@@ -206,11 +207,19 @@ class InspectionController extends Controller
 
         $data = $request->validate([
             'scheduled_at' => $this->visitRules(),
+            'inspector_id' => ['sometimes', 'nullable', 'integer'],
+            'inspector_name' => ['sometimes', 'nullable', 'string', 'max:120'],
         ]);
 
         // In the service since 5 October 2026, so the move refuses a past
         // date and tells the applicant, as the first booking does.
         $inspection = $this->workflow->rescheduleInspection($inspection, $data['scheduled_at']);
+
+        // A moved visit may change hands: the day changed, and so may who is free.
+        if (array_key_exists('inspector_id', $data) || array_key_exists('inspector_name', $data)) {
+            $pool = $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null);
+            $this->assignInspector($inspection, $pool, $data['inspector_name'] ?? null);
+        }
 
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
@@ -240,6 +249,8 @@ class InspectionController extends Controller
 
         $data = $request->validate([
             'scheduled_at' => $this->visitRules(),
+            'inspector_id' => ['nullable', 'integer'],
+            'inspector_name' => ['nullable', 'string', 'max:120'],
         ]);
 
         abort_unless(
@@ -249,7 +260,9 @@ class InspectionController extends Controller
                 .'while the application is still for inspection.'
         );
 
+        $pool = $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null);
         $visit = $this->workflow->scheduleReinspection($inspection, $data['scheduled_at']);
+        $this->assignInspector($visit, $pool, $data['inspector_name'] ?? null);
 
         // 201 with the NEW visit, not the failed one: the caller has to navigate
         // to it to record the result, and it is a different row with a different
@@ -258,6 +271,101 @@ class InspectionController extends Controller
         return response()->json([
             'data' => new InspectionResource($visit->load($this->eager)),
         ], 201);
+    }
+
+    /**
+     * Who should take the visit on a given day (27 October 2026): the
+     * office's pool, ranked by InspectorSuggestion, for the business's
+     * barangay. GET /applications/{application}/permits/{code}/inspection-suggestion?date=
+     *
+     * Read-only. The officer still presses "Book this visit"; this fills the
+     * inspector in and says why, and names the next free day when nobody is.
+     */
+    public function suggest(Request $request, Application $application, string $code): JsonResponse
+    {
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            // The visit being moved, if any: its own booking is not a load.
+            'except' => ['sometimes', 'nullable', 'integer'],
+        ]);
+
+        $type = PermitType::where('code', strtoupper($code))->firstOrFail();
+        $user = $request->user();
+        abort_unless(
+            $user->hasRole('admin') || $user->department_id === $type->issuing_department_id,
+            403,
+            'This permit is issued by another office.'
+        );
+
+        $application->loadMissing('business.address');
+        $barangayId = $application->business?->address?->barangay_id;
+
+        return response()->json(['data' => InspectorSuggestion::forVisit(
+            $type->issuing_department_id,
+            $barangayId ? (int) $barangayId : null,
+            CarbonImmutable::parse($data['date'], config('app.timezone')),
+            isset($data['except']) ? (int) $data['except'] : null,
+        )]);
+    }
+
+    /**
+     * The same suggestion for an EXISTING visit — a re-inspection after a
+     * failure, or a move — keyed by the visit, whose office and filing are
+     * known. GET /inspections/{inspection}/suggestion?date=&moving=1
+     *
+     * `moving` leaves the visit's own booking out of the loads: the day it
+     * is being moved to should not count the slot it is leaving.
+     */
+    public function suggestFor(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            'moving' => ['sometimes', 'boolean'],
+        ]);
+
+        $inspection->loadMissing('application.business.address');
+        $barangayId = $inspection->application?->business?->address?->barangay_id;
+
+        return response()->json(['data' => InspectorSuggestion::forVisit(
+            (int) $inspection->department_id,
+            $barangayId ? (int) $barangayId : null,
+            CarbonImmutable::parse($data['date'], config('app.timezone')),
+            $request->boolean('moving') ? $inspection->id : null,
+        )]);
+    }
+
+    /**
+     * The pool inspector a request names, checked to be the office's own and
+     * active, or null when none is named.
+     */
+    private function poolInspectorFor(?int $departmentId, ?int $inspectorId): ?Inspector
+    {
+        if ($inspectorId === null) {
+            return null;
+        }
+        $inspector = Inspector::query()->whereKey($inspectorId)->where('is_active', true)->first();
+        abort_unless($inspector !== null && $inspector->department_id === $departmentId, 422, 'That inspector is not in this office’s pool.');
+
+        return $inspector;
+    }
+
+    /**
+     * Write who takes the visit: the pool inspector and their name, or a name
+     * typed by hand, or neither. Audited as nameInspector() audits, so the
+     * name's history reads the same however it was given.
+     */
+    private function assignInspector(Inspection $visit, ?Inspector $pool, ?string $typed): void
+    {
+        $name = $pool?->name ?? (trim((string) $typed) ?: null);
+        $from = $visit->inspector_name;
+        if ($name === $from && $visit->inspector_id === $pool?->id) {
+            return;
+        }
+        $visit->forceFill(['inspector_name' => $name, 'inspector_id' => $pool?->id])->save();
+        if ($name !== $from) {
+            Audit::log('inspection.inspector_named', $visit, ['from' => $from, 'to' => $name]);
+        }
     }
 
     /**
@@ -354,7 +462,10 @@ class InspectionController extends Controller
         $to = trim((string) ($data['inspector_name'] ?? '')) ?: null;
 
         if ($from !== $to) {
-            $inspection->forceFill(['inspector_name' => $to])->save();
+            // A name typed by hand is no longer the pool inspector's: the
+            // link goes, so a renamed visit does not count against somebody
+            // who is not going.
+            $inspection->forceFill(['inspector_name' => $to, 'inspector_id' => null])->save();
             Audit::log('inspection.inspector_named', $inspection, ['from' => $from, 'to' => $to]);
         }
 

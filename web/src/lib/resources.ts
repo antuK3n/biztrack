@@ -40,6 +40,9 @@ import type {
   FeeAssessment,
   FeeProfile,
   Inspection,
+  InspectorPoolMeta,
+  InspectorSuggestion,
+  PoolInspector,
   InspectionResult,
   LegacyImport,
   LegacyImportGuide,
@@ -1328,23 +1331,49 @@ export const inspections = {
    * Other Permits card prints it with `formatDateTime`, so a bare day would show
    * a visit booked for midnight.
    */
-  /** `inspector_name` is optional: the name can also be added on the card later. */
+  /**
+   * `inspector_name` is optional: the name can also be added on the card
+   * later. `inspector_id` names one from the office's pool instead (27
+   * October 2026); the server writes that inspector's name beside it.
+   */
   schedule: (
     applicationId: number,
     code: string,
     scheduled_at: string,
     inspector_name: string | null = null,
+    inspector_id: number | null = null,
   ) =>
     unwrap<Inspection>(
       api.post(`/applications/${applicationId}/permits/${code}/inspection`, {
         scheduled_at,
         inspector_name,
+        inspector_id,
       }),
+    ),
+  /**
+   * Who should take the visit on that day, from the office's pool, with the
+   * reasons — and the next free day when nobody is (27 October 2026).
+   */
+  suggest: (applicationId: number, code: string, date: string, except: number | null = null) =>
+    unwrap<InspectorSuggestion>(
+      api.get(`/applications/${applicationId}/permits/${code}/inspection-suggestion`, {
+        params: { date, except: except ?? undefined },
+      }),
+    ),
+  /** The same, for a re-inspection or a move of an existing visit; `moving` leaves its own slot out. */
+  suggestFor: (id: number, date: string, moving = false) =>
+    unwrap<InspectorSuggestion>(
+      api.get(`/inspections/${id}/suggestion`, { params: { date, moving: moving ? 1 : undefined } }),
     ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
-  reschedule: (id: number, scheduled_at: string) =>
-    unwrap<Inspection>(api.post(`/inspections/${id}/reschedule`, { scheduled_at })),
+  reschedule: (id: number, scheduled_at: string, inspector_id?: number | null) =>
+    unwrap<Inspection>(
+      api.post(`/inspections/${id}/reschedule`, {
+        scheduled_at,
+        ...(inspector_id === undefined ? {} : { inspector_id }),
+      }),
+    ),
   /**
    * Book a fresh visit after a failed one. Answers with the NEW inspection.
    *
@@ -1354,8 +1383,49 @@ export const inspections = {
    * premises failed once and passed later. The returned id is a different
    * inspection, and the caller has to go to it to record the result.
    */
-  reinspect: (id: number, scheduled_at: string) =>
-    unwrap<Inspection>(api.post(`/inspections/${id}/reinspect`, { scheduled_at })),
+  reinspect: (id: number, scheduled_at: string, inspector_id: number | null = null) =>
+    unwrap<Inspection>(api.post(`/inspections/${id}/reinspect`, { scheduled_at, inspector_id })),
+}
+
+/* ── An office's pool of inspectors (27 October 2026) ─────────────────────── */
+
+export type InspectorInput = {
+  name: string
+  mobile_number?: string | null
+  is_active?: boolean
+  works_days?: number[]
+  max_visits_per_day?: number
+  notes?: string | null
+  barangay_ids?: number[]
+  user_id?: number | null
+}
+
+export const inspectors = {
+  /** The office's own pool; the super admin names an office with `department_id`. */
+  list: (departmentId?: number) =>
+    api
+      .get<{ data: PoolInspector[]; meta: InspectorPoolMeta }>('/inspectors', {
+        params: { department_id: departmentId },
+      })
+      .then((r) => r.data),
+  /** The office's staff with accounts, to link an inspector to one. */
+  accounts: () => unwrap<{ id: number; name: string }[]>(api.get('/inspectors/accounts')),
+  create: (body: InspectorInput) => unwrap<PoolInspector>(api.post('/inspectors', body)),
+  update: (id: number, body: Partial<InspectorInput>) => unwrap<PoolInspector>(api.put(`/inspectors/${id}`, body)),
+  remove: (id: number) => unwrap<{ id: number }>(api.delete(`/inspectors/${id}`)),
+  addLeave: (id: number, body: { starts_on: string; ends_on: string; reason?: string | null }) =>
+    unwrap<PoolInspector>(api.post(`/inspectors/${id}/leaves`, body)),
+  removeLeave: (id: number, leaveId: number) =>
+    unwrap<PoolInspector>(api.delete(`/inspectors/${id}/leaves/${leaveId}`)),
+  /** A proposal: the barangays divided among the active inspectors, neighbours together. */
+  suggestAreas: () =>
+    unwrap<{ id: number; name: string; barangay_ids: number[]; barangays: string[] }[]>(
+      api.post('/inspectors/suggest-areas'),
+    ),
+  applyAreas: (areas: { id: number; barangay_ids: number[] }[]) =>
+    api
+      .post<{ data: PoolInspector[]; meta: InspectorPoolMeta }>('/inspectors/apply-areas', { areas })
+      .then((r) => r.data),
 }
 
 /* ── Permits ──────────────────────────────────────────────────────────── */

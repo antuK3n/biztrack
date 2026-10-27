@@ -41,6 +41,7 @@ import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { OwnerDirectoryPage } from './pages/admin/OwnerDirectoryPage'
+import { InspectorsPage } from './pages/officer/InspectorsPage'
 import { OwnerProfilePage } from './pages/admin/OwnerProfilePage'
 import { StaffMessagesPage } from './pages/admin/StaffMessagesPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
@@ -401,6 +402,14 @@ export default function App() {
             element={
               <RequirePermission permission="application.review">
                 <QueuePage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/staff/inspectors"
+            element={
+              <RequirePermission permission="inspection.manage">
+                <InspectorsPage />
               </RequirePermission>
             }
           />
