@@ -1370,6 +1370,18 @@ class PermitController extends Controller
                 'occ_professional' => $answer('completion_professional'),
                 'occ_documents' => $documents,
                 'occ_other_document' => $answer('completion_other_document'),
+                // "Others (specify)": the OBO's row for it, when it keeps one.
+                'occ_other_requirement' => collect($office)->firstWhere('role', 'Evaluator — Others')['name'] ?? null,
+                /*
+                 * Who signs off each discipline on the "Verified & complied"
+                 * lines: the OBO's office_signatories rows named
+                 * "Evaluator — <line>", keyed by the line [client, 28 October
+                 * 2026]. A line with no evaluator on file prints blank.
+                 */
+                'occ_evaluators' => collect($office)
+                    ->filter(fn (array $s) => str_starts_with($s['role'], 'Evaluator — '))
+                    ->mapWithKeys(fn (array $s) => [substr($s['role'], strlen('Evaluator — ')) => $s['name']])
+                    ->all(),
                 'occ_project' => $answer('project_name'),
                 'occ_use' => $answer('occupancy_type'),
                 'occ_area' => $area,
