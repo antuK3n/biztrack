@@ -1,0 +1,371 @@
+{
+  "about": "Five businesses for trying the inspector pool (27 October 2026): each is filed, approved by BPLO, paid, its other permits handed in and approved on paper by every office — and NO visit booked, so each office's Track > For Inspection has a permit waiting for its inspector. Spread over five barangays so each lands in a different inspector's area. Read by biztrack:build-owner-portfolio --spec=database/data/inspection-trial.json. Times are Manila, weekdays, 8 AM to 5 PM.",
+  "tin": "418-562-073-000",
+  "businesses": [
+    {
+      "key": "T1",
+      "name": "TRIAL Acacia Sari-Sari Store",
+      "state": "Every office approved the paperwork; no visit booked",
+      "psic": "47111",
+      "barangay": "Acacia",
+      "pin": [
+        14.668633,
+        120.967556
+      ],
+      "house_no": "14",
+      "street": "Sampaguita St.",
+      "dti": "6100101",
+      "capital": 50000,
+      "floor_area": 20,
+      "employees": 1,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-26 09:00",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-26 10:00",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-26 11:00",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-26 13:00",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 09:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 09:10",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 09:20",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 09:30",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 09:40",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "T2",
+      "name": "TRIAL Flores Carinderia",
+      "state": "Every office approved the paperwork; no visit booked",
+      "psic": "56101",
+      "barangay": "Flores",
+      "pin": [
+        14.6749,
+        120.942429
+      ],
+      "house_no": "8",
+      "street": "Gen. Luna St.",
+      "dti": "6100102",
+      "capital": 90000,
+      "floor_area": 35,
+      "employees": 3,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-26 09:05",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-26 10:05",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-26 11:05",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-26 13:05",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 10:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 10:10",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 10:20",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 10:30",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 10:40",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "T3",
+      "name": "TRIAL Tañong Hardware",
+      "state": "Every office approved the paperwork; no visit booked",
+      "psic": "47521",
+      "barangay": "Tañong",
+      "pin": [
+        14.655923,
+        120.952923
+      ],
+      "house_no": "3",
+      "street": "M.H. Del Pilar St.",
+      "dti": "6100103",
+      "capital": 250000,
+      "floor_area": 120,
+      "employees": 4,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-26 09:10",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-26 10:10",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-26 11:10",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-26 13:10",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 11:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 11:10",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 11:20",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 11:30",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 11:40",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "T4",
+      "name": "TRIAL Potrero Bakeshop",
+      "state": "Every office approved the paperwork; no visit booked",
+      "psic": "10711",
+      "barangay": "Potrero",
+      "pin": [
+        14.66645,
+        120.98595
+      ],
+      "house_no": "21",
+      "street": "C. Arellano St.",
+      "dti": "6100104",
+      "capital": 80000,
+      "floor_area": 40,
+      "employees": 2,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-26 09:15",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-26 10:15",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-26 11:15",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-26 13:15",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 13:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 13:10",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 13:20",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 13:30",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 13:40",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "T5",
+      "name": "TRIAL Longos Supermart",
+      "state": "Every office approved the paperwork; no visit booked",
+      "psic": "47111",
+      "barangay": "Longos",
+      "pin": [
+        14.6527,
+        120.9605
+      ],
+      "house_no": "100",
+      "street": "Rizal Ave. Ext.",
+      "dti": "6100105",
+      "capital": 900000,
+      "floor_area": 2400,
+      "employees": 25,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-26 09:20",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-26 10:20",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-26 11:20",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-26 13:20",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:10",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:20",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:30",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:40",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    }
+  ]
+}

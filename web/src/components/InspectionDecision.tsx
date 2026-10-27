@@ -851,6 +851,46 @@ function InspectorPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [day, sourceKey])
 
+  /*
+   * ── Before a date is picked: the earliest day somebody can go ────────────
+   *
+   * [Client, 28 October 2026: "make sure yung automation sa mga bagong
+   * applications".] The card used to wait for a date before it could say who
+   * was free. It now asks the pool straight away for the next working day,
+   * and offers that day with its inspector as one press — the officer still
+   * presses "Book this visit", so nothing is promised to the applicant until
+   * somebody at the office has looked at it.
+   */
+  const [quick, setQuick] = useState<{ date: string; name: string; id: number; why: string } | null>(null)
+  useEffect(() => {
+    if (day) return
+    let live = true
+    const first = nextWorkingDay()
+    const ask =
+      source.kind === 'first'
+        ? inspectionsApi.suggest(source.applicationId, source.code, first)
+        : inspectionsApi.suggestFor(source.inspectionId, first, source.moving)
+    ask
+      .then((next) => {
+        if (!live) return
+        if (next.suggested)
+          setQuick({ date: first, name: next.suggested.name, id: next.suggested.id, why: next.suggested.why })
+        else if (next.next_available)
+          setQuick({
+            date: next.next_available.date,
+            name: next.next_available.inspector.name,
+            id: next.next_available.inspector.id,
+            why: next.next_available.inspector.why,
+          })
+        else setQuick(null)
+      })
+      .catch(() => live && setQuick(null))
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day, sourceKey])
+
   const chosen = suggestion?.candidates.find((c) => c.id === inspectorId) ?? null
   const hasPool = (suggestion?.pool_size ?? 0) > 0
   const typedField =
@@ -876,6 +916,29 @@ function InspectorPicker({
         </datalist>
       </>
     ) : null
+
+  if (!day && quick) {
+    return (
+      <div className="mt-3 rounded-lg border border-royal/30 bg-royal-tint/40 px-3.5 py-2.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-royal">Suggested</p>
+        <p className="mt-0.5 text-sm text-ink">
+          <b>{formatCalendarDate(quick.date)}, 9:00 AM</b> — {quick.name}
+        </p>
+        <p className="text-xs text-ink-secondary">{quick.why}</p>
+        <button
+          type="button"
+          onClick={() => {
+            onInspectorIdChange(quick.id)
+            onPickDay(quick.date)
+          }}
+          className="mt-2 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+        >
+          Use this date and inspector
+        </button>
+        <span className="ml-2 text-xs text-ink-muted">or pick a date above</span>
+      </div>
+    )
+  }
 
   if (!day || !hasPool) return typedField
 
@@ -930,6 +993,15 @@ function InspectorPicker({
       {inspectorId === null && typedField}
     </div>
   )
+}
+
+/** Tomorrow, or Monday when tomorrow is a weekend, as YYYY-MM-DD in local time. */
+function nextWorkingDay(): string {
+  const d = new Date()
+  do {
+    d.setDate(d.getDate() + 1)
+  } while (d.getDay() === 0 || d.getDay() === 6)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** The YYYY-MM-DD of a datetime-local value, or '' before one is picked. */
