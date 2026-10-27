@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ClearanceController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\InspectionController;
+use App\Http\Controllers\Api\InspectorController;
 use App\Http\Controllers\Api\LegacyClaimController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
@@ -441,6 +442,8 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          * inspection until somebody conducts the new visit.
          */
         Route::post('inspections/{inspection}/reinspect', [InspectionController::class, 'reinspect']);
+        // Who should take a re-inspection or a moved visit, for the date picked (27 October 2026).
+        Route::get('inspections/{inspection}/suggestion', [InspectionController::class, 'suggestFor']);
 
         /*
          * The office books its FIRST visit on one permit and picks the date.
@@ -455,6 +458,26 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             'applications/{application}/permits/{code}/inspection',
             [InspectionController::class, 'schedule'],
         );
+        // Who should take it, for the date the officer picked (27 October 2026).
+        Route::get(
+            'applications/{application}/permits/{code}/inspection-suggestion',
+            [InspectionController::class, 'suggest'],
+        );
+
+        /*
+         * The office's pool of inspectors [client, 27 October 2026]: the
+         * people its visits are suggested to. Same permission, same people,
+         * and the controller pins every write to the caller's own office.
+         */
+        Route::get('inspectors', [InspectorController::class, 'index']);
+        Route::get('inspectors/accounts', [InspectorController::class, 'accounts']);
+        Route::post('inspectors', [InspectorController::class, 'store']);
+        Route::post('inspectors/suggest-areas', [InspectorController::class, 'suggestAreas']);
+        Route::post('inspectors/apply-areas', [InspectorController::class, 'applyAreas']);
+        Route::put('inspectors/{inspector}', [InspectorController::class, 'update']);
+        Route::delete('inspectors/{inspector}', [InspectorController::class, 'destroy']);
+        Route::post('inspectors/{inspector}/leaves', [InspectorController::class, 'storeLeave']);
+        Route::delete('inspectors/{inspector}/leaves/{leave}', [InspectorController::class, 'destroyLeave']);
     });
 
     /*

@@ -1101,6 +1101,60 @@ export interface InspectionParticulars {
   permit_types: { code: string; name: string }[]
 }
 
+/*
+ * ── An office's pool of inspectors (27 October 2026) ────────────────────────
+ *
+ * Who goes out for an office, the barangays each covers, the days they work,
+ * how many visits a day, and when they are away. Read by the Inspectors page
+ * and by the suggestion at booking.
+ */
+export interface PoolInspector {
+  id: number
+  name: string
+  mobile_number: string | null
+  is_active: boolean
+  /** ISO weekdays, 1 = Monday. */
+  works_days: number[]
+  max_visits_per_day: number
+  notes: string | null
+  user: { id: number; name: string } | null
+  barangays: { id: number; name: string }[]
+  leaves: { id: number; starts_on: string; ends_on: string; reason: string | null }[]
+  open_visits_count: number
+}
+
+export interface InspectorPoolMeta {
+  department: { id: number; code: string; name: string }
+  can_edit: boolean
+  barangays: { id: number; name: string; covered: boolean }[]
+}
+
+/** One inspector, as the booking suggestion ranks them. */
+export interface InspectorCandidate {
+  id: number
+  name: string
+  mobile_number: string | null
+  available: boolean
+  covers_barangay: boolean
+  distance_m: number | null
+  booked_that_day: number
+  max_visits_per_day: number
+  booked_that_week: number
+  barangays: string[]
+  reasons: string[]
+  /** Why they were, or were not, suggested — in words. */
+  why: string
+}
+
+export interface InspectorSuggestion {
+  suggested: InspectorCandidate | null
+  candidates: InspectorCandidate[]
+  /** When nobody is free on the asked day: the first working day somebody is. */
+  next_available: { date: string; inspector: InspectorCandidate } | null
+  barangay: { id: number; name: string } | null
+  pool_size: number
+}
+
 export interface Inspection {
   id: number
   status: string
@@ -1141,6 +1195,8 @@ export interface Inspection {
    * the record"). Null when blank, and always null for the applicant.
    */
   inspector_name?: string | null
+  /** Which pool inspector took it, when one was picked (27 October 2026). */
+  inspector_id?: number | null
   /** May the reader type or change `inspector_name` now? */
   can_name_inspector?: boolean
   /**

@@ -121,6 +121,8 @@ class InspectionResource extends JsonResource
              * staffing (ApplicationVisibility::readsInspectorName).
              */
             'inspector_name' => $readsName ? $this->inspector_name : null,
+            // Which pool inspector, when one was picked (27 October 2026).
+            'inspector_id' => $readsName ? $this->inspector_id : null,
             /*
              * May the reader type or change that name now? See
              * Inspection::inspectorNameEditableBy — the PATCH's own tests.
