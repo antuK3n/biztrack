@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\AuditLog;
+use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
@@ -1085,8 +1086,16 @@ class PermitController extends Controller
             $named = fn (string $needle) => collect($office)
                 ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
 
+            /*
+             * The Sanitary Inspector is WHO WENT: the inspector the office
+             * assigned to the visit that passed on this filing [client, 27
+             * October 2026: "magrereflect kung sinong inspector ang assigned
+             * at officer"], read off the visit itself (the inspector pool
+             * writes the name there). An office row naming an inspector is
+             * the fallback for a permit issued without a visit on record.
+             */
             $signatories = [
-                ['role' => 'Sanitary Inspector', 'name' => $named('inspector'), 'action' => 'Recommending Approval'],
+                ['role' => 'Sanitary Inspector', 'name' => $this->inspectorWhoPassed($permit) ?? $named('inspector'), 'action' => 'Recommending Approval'],
                 ['role' => 'City Health Officer', 'name' => $named('health officer'), 'action' => 'Approved'],
             ];
         }
@@ -1347,8 +1356,20 @@ class PermitController extends Controller
                 ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'OBO')
                 ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
 
+            /*
+             * The left page's own lines [client, 27 October 2026]: which
+             * documents were handed in, and who signed the Certificate of
+             * Completion — the licensed professional the owner hired. All
+             * from the OBO sheet (OfficeFormStep, section D).
+             */
+            $documents = array_values(array_filter(array_map('trim', explode(',', (string) ($sheet['completion_documents'] ?? '')))));
+
             $sheetFields = [
                 'date_submitted' => optional($application?->submitted_at)->format('F j, Y'),
+                'occ_submitted_by' => $answer('completion_submitted_by'),
+                'occ_professional' => $answer('completion_professional'),
+                'occ_documents' => $documents,
+                'occ_other_document' => $answer('completion_other_document'),
                 'occ_project' => $answer('project_name'),
                 'occ_use' => $answer('occupancy_type'),
                 'occ_area' => $area,
@@ -1412,6 +1433,28 @@ class PermitController extends Controller
             'signatories' => $signatories,
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$permit->permit_number,
         ];
+    }
+
+    /**
+     * The inspector the office assigned to the visit that PASSED on this
+     * permit's filing — the latest passed visit by the permit's own office —
+     * or null when none is on record or none was named.
+     */
+    private function inspectorWhoPassed(Permit $permit): ?string
+    {
+        $departmentId = $permit->permitType?->issuing_department_id;
+        if ($permit->application_id === null || $departmentId === null) {
+            return null;
+        }
+
+        $name = Inspection::query()
+            ->where('application_id', $permit->application_id)
+            ->where('department_id', $departmentId)
+            ->where('result', 'passed')
+            ->orderByDesc('conducted_at')->orderByDesc('id')
+            ->value('inspector_name');
+
+        return trim((string) $name) ?: null;
     }
 
     /**
