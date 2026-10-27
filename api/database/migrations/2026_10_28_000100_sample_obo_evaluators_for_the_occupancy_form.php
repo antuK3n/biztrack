@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\DB;
  * fills itself (Locational/Zoning with the Zoning Clearance number, Fire
  * Safety with the FSIC); the other ten are the OBO's own people.
  *
+ * "Others (specify)" is not an evaluator: what it names depends on the
+ * building (OccupancyChecklist), so it has no row here.
+ *
  * They are kept as `office_signatories` rows, role "Evaluator — <line>", so
  * the City replaces each placeholder on its own screen rather than in code,
  * and the certificate prints whatever the office has on file
@@ -36,8 +39,6 @@ return new class extends Migration
         'Electronics' => 'Engr. Kevin D. Tan',
         'Interior Design' => 'ID Patricia G. Reyes',
         'Accessibility' => 'Arch. Daniel F. Garcia',
-        // "Others (specify)" prints what was verified besides the twelve.
-        'Others' => 'Fire Sprinkler System',
     ];
 
     public function up(): void

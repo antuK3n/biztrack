@@ -178,7 +178,7 @@
         <table class="occ-fields">
             <tr>
                 <td class="occ-f-label">USE OR CHARACTER OF OCCUPANCY</td>
-                <td class="occ-f-value">{{ strtoupper($v($occ_use ?? null)) }}</td>
+                <td class="occ-f-value" style="white-space: nowrap">{{ strtoupper($v($occ_use ?? null)) }}</td>
                 <td class="occ-f-label occ-f-area">AREA</td>
                 <td class="occ-f-value occ-f-area-value">{{ $v($occ_area ?? null) }}</td>
             </tr>

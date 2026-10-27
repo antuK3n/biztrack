@@ -16,6 +16,7 @@ use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\BusinessDate;
+use App\Support\OccupancyChecklist;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
@@ -1348,9 +1349,38 @@ class PermitController extends Controller
                 : null;
 
             $profile = $application?->fee_profile ?? [];
-            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
-                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+            /*
+             * The building's floor area and storeys, best source first: the
+             * OBO sheet's own answers, then the business record and the fee
+             * profile, then the BFP sheet's storeys. One figure for the AREA
+             * box and for deciding which lines the building needs.
+             */
+            $floorArea = collect([$sheet['total_floor_area_sqm'] ?? null, $permit->business?->business_area_sqm, $profile['floor_area_sqm'] ?? null])
+                ->first(fn ($v) => is_numeric($v) && (float) $v > 0);
+            $fsicSheet = $application?->officeForms
+                ?->first(fn ($f) => $f->permit_type_id === PermitType::where('code', 'FSIC')->value('id'))?->form_data ?? [];
+            $storeys = collect([$sheet['building_storeys'] ?? null, $fsicSheet['building_storeys'] ?? null])
+                ->first(fn ($v) => is_numeric($v) && (int) $v > 0);
+            $area = $floorArea !== null
+                ? rtrim(rtrim(number_format((float) $floorArea, 2), '0'), '.').' sq m'
                 : null;
+
+            /*
+             * Which "Verified & complied" lines this building needs, each
+             * signed by the OBO's evaluator on file or marked N/A; and what
+             * "Others" and the use are for THIS business [client, 28 October
+             * 2026] — see OccupancyChecklist for the reading.
+             */
+            $checks = OccupancyChecklist::for(
+                $floorArea !== null ? (float) $floorArea : null,
+                $storeys !== null ? (int) $storeys : null,
+                $face['line_of_business'] ?? null,
+                $answer('occupancy_type'),
+                collect($office)
+                    ->filter(fn (array $s) => str_starts_with($s['role'], 'Evaluator — '))
+                    ->mapWithKeys(fn (array $s) => [substr($s['role'], strlen('Evaluator — ')) => $s['name']])
+                    ->all(),
+            );
 
             $oboShare = collect($application?->feeAssessment?->line_items ?? [])
                 ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'OBO')
@@ -1370,20 +1400,10 @@ class PermitController extends Controller
                 'occ_professional' => $answer('completion_professional'),
                 'occ_documents' => $documents,
                 'occ_other_document' => $answer('completion_other_document'),
-                // "Others (specify)": the OBO's row for it, when it keeps one.
-                'occ_other_requirement' => collect($office)->firstWhere('role', 'Evaluator — Others')['name'] ?? null,
-                /*
-                 * Who signs off each discipline on the "Verified & complied"
-                 * lines: the OBO's office_signatories rows named
-                 * "Evaluator — <line>", keyed by the line [client, 28 October
-                 * 2026]. A line with no evaluator on file prints blank.
-                 */
-                'occ_evaluators' => collect($office)
-                    ->filter(fn (array $s) => str_starts_with($s['role'], 'Evaluator — '))
-                    ->mapWithKeys(fn (array $s) => [substr($s['role'], strlen('Evaluator — ')) => $s['name']])
-                    ->all(),
+                'occ_evaluators' => $checks['lines'],
+                'occ_other_requirement' => $checks['others'],
                 'occ_project' => $answer('project_name'),
-                'occ_use' => $answer('occupancy_type'),
+                'occ_use' => $checks['use'],
                 'occ_area' => $area,
                 'occ_completion' => $date($answer('completion_date')),
                 'occ_building_permit_no' => $answer('building_permit_no'),

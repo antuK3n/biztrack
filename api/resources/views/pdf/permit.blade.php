@@ -403,7 +403,7 @@
         td.occ-f-label { width: 1%; white-space: nowrap; padding-right: 6px !important; }
         td.occ-f-value { border-bottom: 1px solid #2b2b2b; font-weight: bold; text-align: center; }
         td.occ-f-area { padding-left: 10px !important; }
-        td.occ-f-area-value { width: 90px; }
+        td.occ-f-area-value { width: 70px; white-space: nowrap; }
         .occ-small { font-size: 8.1px; line-height: 1.4; text-align: justify; margin-top: 8px; }
         .occ-sign { position: absolute; right: 26px; bottom: 16px; width: 230px; text-align: center; }
         .occ-sig-name { font-weight: bold; font-size: 10.5px; }
