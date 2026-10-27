@@ -31,6 +31,9 @@ export interface OccupancyCertificate {
   occ_professional?: string | null
   occ_documents?: string[]
   occ_other_document?: string | null
+  /** The OBO evaluator who signed off each "Verified & complied" line, keyed by the line. */
+  occ_evaluators?: Record<string, string | null>
+  occ_other_requirement?: string | null
   occ_project?: string | null
   occ_use?: string | null
   occ_area?: string | null
@@ -90,18 +93,19 @@ export function OccupancySheet({
   const official = cert.signatories[0] ?? { role: 'Building Official', name: null }
   const docs = cert.occ_documents ?? []
   const ticked = (doc: string) => docs.includes(doc)
+  const ev = cert.occ_evaluators ?? {}
   const requirements: [string, string | null | undefined][] = [
     ['Locational/Zoning of Land Use', cert.occ_zoning_no],
-    ['Line and Grade (Geodetic)', null],
-    ['Architectural', null],
-    ['Civil/Structural', null],
-    ['Electrical', null],
-    ['Mechanical', null],
-    ['Sanitary', null],
-    ['Plumbing', null],
-    ['Electronics', null],
-    ['Interior Design', null],
-    ['Accessibility', null],
+    ['Line and Grade (Geodetic)', ev['Line and Grade (Geodetic)']],
+    ['Architectural', ev['Architectural']],
+    ['Civil/Structural', ev['Civil/Structural']],
+    ['Electrical', ev['Electrical']],
+    ['Mechanical', ev['Mechanical']],
+    ['Sanitary', ev['Sanitary']],
+    ['Plumbing', ev['Plumbing']],
+    ['Electronics', ev['Electronics']],
+    ['Interior Design', ev['Interior Design']],
+    ['Accessibility', ev['Accessibility']],
     ['Fire Safety', cert.occ_fire_no],
   ]
 
@@ -131,14 +135,22 @@ export function OccupancySheet({
           </li>
         </ul>
 
-        <p className="mt-4 indent-6 text-[11px] leading-loose">
-          A CERTIFICATE OF COMPLETION WAS SUBMITTED BY{' '}
-          <Blank value={cert.occ_submitted_by} className="min-w-[9rem] indent-0 uppercase" />{' '}
-          <span className="text-[9px]">(Name)</span> A DULY LICENSED{' '}
-          <Blank value={cert.occ_professional} className="min-w-[9rem] indent-0 uppercase" />{' '}
-          <span className="text-[9px]">(Professional)</span> HIRED BY THE OWNER WHO UNDERTOOK THE FULL-TIME INSPECTION
-          AND SUPERVISION OF CONSTRUCTION WORKS IN ACCORDANCE WITH SECTION 308, CHAPTER 3 OF THE NATIONAL BUILDING CODE,
-          (PD 1096).
+        <p className="mt-4 indent-6 text-[11px] leading-loose">A CERTIFICATE OF COMPLETION WAS SUBMITTED BY</p>
+        <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-end gap-x-2 text-[11px]">
+          <p className="min-h-[1.2rem] border-b border-ink text-center font-bold uppercase">
+            {cert.occ_submitted_by || ' '}
+          </p>
+          <span className="pb-0.5">A DULY LICENSED</span>
+          <p className="min-h-[1.2rem] border-b border-ink text-center font-bold uppercase">
+            {cert.occ_professional || ' '}
+          </p>
+          <p className="text-center text-[9px] font-bold">(Name)</p>
+          <span />
+          <p className="text-center text-[9px] font-bold">(Professional)</p>
+        </div>
+        <p className="mt-2 text-[11px] leading-loose">
+          HIRED BY THE OWNER WHO UNDERTOOK THE FULL-TIME INSPECTION AND SUPERVISION OF CONSTRUCTION WORKS IN ACCORDANCE
+          WITH SECTION 308, CHAPTER 3 OF THE NATIONAL BUILDING CODE, (PD 1096).
         </p>
 
         <p className="mt-5 text-balance text-center text-[13px] font-bold">
@@ -152,7 +164,9 @@ export function OccupancySheet({
             </div>
           ))}
           <div className="text-center sm:col-start-2">
-            <p className="min-h-[1.2rem] border-b border-ink" />
+            <p className="min-h-[1.2rem] border-b border-ink text-[11px] font-bold">
+              {cert.occ_other_requirement || ' '}
+            </p>
             <p className="mt-0.5 text-[10px] font-bold">OTHERS (SPECIFY)</p>
           </div>
         </div>

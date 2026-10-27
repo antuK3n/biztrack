@@ -19,18 +19,19 @@
     $official = $signatories[0] ?? ['name' => null, 'role' => 'Building Official'];
     $docs = $occ_documents ?? [];
     $tick = fn (string $doc) => in_array($doc, $docs, true) ? '<span class="occ-box occ-box-on">&#10003;</span>' : '<span class="occ-box"></span>';
+    $ev = $occ_evaluators ?? [];
     $requirements = [
         ['Locational/Zoning<br>of Land Use', $occ_zoning_no ?? null],
-        ['Line and Grade<br>(Geodetic)', null],
-        ['Architectural', null],
-        ['Civil/Structural', null],
-        ['Electrical', null],
-        ['Mechanical', null],
-        ['Sanitary', null],
-        ['Plumbing', null],
-        ['Electronics', null],
-        ['Interior Design', null],
-        ['Accessibility', null],
+        ['Line and Grade<br>(Geodetic)', $ev['Line and Grade (Geodetic)'] ?? null],
+        ['Architectural', $ev['Architectural'] ?? null],
+        ['Civil/Structural', $ev['Civil/Structural'] ?? null],
+        ['Electrical', $ev['Electrical'] ?? null],
+        ['Mechanical', $ev['Mechanical'] ?? null],
+        ['Sanitary', $ev['Sanitary'] ?? null],
+        ['Plumbing', $ev['Plumbing'] ?? null],
+        ['Electronics', $ev['Electronics'] ?? null],
+        ['Interior Design', $ev['Interior Design'] ?? null],
+        ['Accessibility', $ev['Accessibility'] ?? null],
         ['Fire Safety', $occ_fire_no ?? null],
     ];
 @endphp
@@ -53,13 +54,26 @@
             </tr>
             <tr>
                 <td>{!! $tick('Daily Construction Works Logbook') !!} DAILY CONSTRUCTION WORKS LOGBOOK</td>
-                <td>{!! $tick('Others') !!} (SPECIFY) <span class="occ-blank" style="width: 110px">{{ $occ_other_document ?? '' }}</span></td>
+                <td>{!! $tick('Others') !!} (SPECIFY) <span class="occ-specify">{{ $occ_other_document ?? '' }}&nbsp;</span></td>
             </tr>
         </table>
 
-        <div class="occ-para occ-indent occ-left-align">
-            A CERTIFICATE OF COMPLETION WAS SUBMITTED BY <span class="occ-blank occ-captioned" style="width: 150px">{{ strtoupper($v($occ_submitted_by ?? null)) }}<span>(Name)</span></span>
-            A DULY LICENSED <span class="occ-blank occ-captioned" style="width: 150px">{{ strtoupper($v($occ_professional ?? null)) }}<span>(Professional)</span></span>
+        {{-- The name and the profession each on a ruled line of their own, captioned
+             beneath, so neither breaks across lines inside a fixed-width blank. --}}
+        <div class="occ-para occ-indent occ-left-align">A CERTIFICATE OF COMPLETION WAS SUBMITTED BY</div>
+        <table class="occ-signed-by">
+            <tr>
+                <td class="occ-sb-value">{{ strtoupper($v($occ_submitted_by ?? null)) }}</td>
+                <td class="occ-sb-gap">A DULY LICENSED</td>
+                <td class="occ-sb-value">{{ strtoupper($v($occ_professional ?? null)) }}</td>
+            </tr>
+            <tr>
+                <td class="occ-sb-caption">(Name)</td>
+                <td></td>
+                <td class="occ-sb-caption">(Professional)</td>
+            </tr>
+        </table>
+        <div class="occ-para occ-left-align" style="margin-top: 6px">
             HIRED BY THE OWNER WHO UNDERTOOK THE FULL-TIME INSPECTION AND SUPERVISION OF CONSTRUCTION WORKS IN
             ACCORDANCE WITH SECTION 308, CHAPTER 3 OF THE NATIONAL BUILDING CODE, (PD 1096).
         </div>
@@ -79,7 +93,7 @@
             <tr>
                 <td></td>
                 <td>
-                    <div class="occ-req-line">&nbsp;</div>
+                    <div class="occ-req-line">{{ $v($occ_other_requirement ?? null) }}</div>
                     <div class="occ-req-label">OTHERS (SPECIFY)</div>
                 </td>
                 <td></td>
