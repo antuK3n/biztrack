@@ -17,6 +17,8 @@
     $cityName = str_contains(strtoupper($city ?: ''), 'CITY') ? $city : trim(($city ?: 'Malabon').' City');
     $located = collect([$address, $barangay, $cityName])->filter()->implode(', ');
     $official = $signatories[0] ?? ['name' => null, 'role' => 'Building Official'];
+    $docs = $occ_documents ?? [];
+    $tick = fn (string $doc) => in_array($doc, $docs, true) ? '<span class="occ-box occ-box-on">&#10003;</span>' : '<span class="occ-box"></span>';
     $requirements = [
         ['Locational/Zoning<br>of Land Use', $occ_zoning_no ?? null],
         ['Line and Grade<br>(Geodetic)', null],
@@ -46,18 +48,18 @@
 
         <table class="occ-checks">
             <tr>
-                <td><span class="occ-box"></span> CERTIFICATE OF COMPLETION</td>
-                <td><span class="occ-box"></span> AS-BUILT PLANS/SPECIFICATIONS</td>
+                <td>{!! $tick('Certificate of Completion') !!} CERTIFICATE OF COMPLETION</td>
+                <td>{!! $tick('As-built Plans/Specifications') !!} AS-BUILT PLANS/SPECIFICATIONS</td>
             </tr>
             <tr>
-                <td><span class="occ-box"></span> DAILY CONSTRUCTION WORKS LOGBOOK</td>
-                <td><span class="occ-box"></span> (SPECIFY) <span class="occ-blank" style="width: 110px"></span></td>
+                <td>{!! $tick('Daily Construction Works Logbook') !!} DAILY CONSTRUCTION WORKS LOGBOOK</td>
+                <td>{!! $tick('Others') !!} (SPECIFY) <span class="occ-blank" style="width: 110px">{{ $occ_other_document ?? '' }}</span></td>
             </tr>
         </table>
 
         <div class="occ-para occ-indent occ-left-align">
-            A CERTIFICATE OF COMPLETION WAS SUBMITTED BY <span class="occ-blank occ-captioned" style="width: 150px"><span>(Name)</span></span>
-            A DULY LICENSED <span class="occ-blank occ-captioned" style="width: 150px"><span>(Professional)</span></span>
+            A CERTIFICATE OF COMPLETION WAS SUBMITTED BY <span class="occ-blank occ-captioned" style="width: 150px">{{ strtoupper($v($occ_submitted_by ?? null)) }}<span>(Name)</span></span>
+            A DULY LICENSED <span class="occ-blank occ-captioned" style="width: 150px">{{ strtoupper($v($occ_professional ?? null)) }}<span>(Professional)</span></span>
             HIRED BY THE OWNER WHO UNDERTOOK THE FULL-TIME INSPECTION AND SUPERVISION OF CONSTRUCTION WORKS IN
             ACCORDANCE WITH SECTION 308, CHAPTER 3 OF THE NATIONAL BUILDING CODE, (PD 1096).
         </div>

@@ -359,6 +359,7 @@
         .occ-caption { text-align: center; font-size: 8px; letter-spacing: 0.4px; margin-top: 1px; }
         table.occ-checks { width: 100%; border-collapse: collapse; margin-top: 12px; }
         table.occ-checks td { font-size: 9px; padding: 3px 0; }
+        .occ-box-on { font-size: 9px; line-height: 9px; text-align: center; }
         .occ-box { display: inline-block; width: 8px; height: 8px; border: 1px solid #1a1a1a; margin-right: 5px; }
         .occ-blank { display: inline-block; border-bottom: 1px solid #2b2b2b; height: 9px; }
         .occ-para { font-size: 9.2px; line-height: 1.8; text-align: justify; margin-top: 14px; }

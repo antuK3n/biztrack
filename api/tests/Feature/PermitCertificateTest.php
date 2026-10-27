@@ -6,6 +6,7 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Business;
+use App\Models\Inspection;
 use App\Models\OfficeSignatory;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -475,6 +476,22 @@ it('draws the Sanitary Permit to Operate as the CHO issues it', function () {
         ->and($cert['signatories'][1]['name'])->toBe('Maria L. Reyes, MD')
         ->and($cert['signatories'][0]['name'])->toBeNull();
 
+    /*
+     * The Sanitary Inspector is whoever the office assigned to the visit that
+     * passed [client, 27 October 2026] — read off the visit, not a post.
+     */
+    Inspection::create([
+        'application_id' => $seed->application_id,
+        'department_id' => PermitType::where('code', 'SANITARY')->value('issuing_department_id'),
+        'inspector_name' => 'Ma. Teresa Lacsamana',
+        'status' => 'completed',
+        'result' => 'passed',
+        'scheduled_at' => now()->subDay(),
+        'conducted_at' => now()->subDay(),
+    ]);
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+    expect($cert['signatories'][0]['name'])->toBe('Ma. Teresa Lacsamana');
+
     authAs('owner@biztrack.local');
     $pdf = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent());
     $text = $pdf->getText();
@@ -523,7 +540,13 @@ it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function (
     ]);
     ApplicationOfficeForm::updateOrCreate(
         ['application_id' => $seed->application_id, 'permit_type_id' => $occupancy->id],
-        ['form_data' => ['building_permit_no' => 'BP-MLB-2024-0318', 'building_permit_date' => '2024-03-18', 'project_name' => 'Two-storey Commercial Building']],
+        ['form_data' => [
+            'building_permit_no' => 'BP-MLB-2024-0318', 'building_permit_date' => '2024-03-18', 'project_name' => 'Two-storey Commercial Building',
+            // The left page's own lines [client, 27 October 2026].
+            'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+            'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
+            'completion_professional' => 'Civil Engineer',
+        ]],
     );
     OfficeSignatory::updateOrCreate(
         ['department_id' => $occupancy->issuing_department_id, 'role' => 'Building Official'],

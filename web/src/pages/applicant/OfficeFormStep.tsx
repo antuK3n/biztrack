@@ -258,6 +258,10 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'OCCUPANCY.building_storeys': 'No. of Storeys',
   'OCCUPANCY.building_units': 'No. of Units',
   'OCCUPANCY.completion_date': 'Date of Completion',
+  'OCCUPANCY.completion_documents': 'Documents Submitted',
+  'OCCUPANCY.completion_other_document': 'Other Document (specify)',
+  'OCCUPANCY.completion_submitted_by': 'Certificate of Completion — Submitted By',
+  'OCCUPANCY.completion_professional': 'Submitted By — Profession / Licence',
 
   /* CPDD · MCG-CPDD-FO-003 */
   'ZONING.application_type': 'Nature of Application',
@@ -380,8 +384,24 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'building_units',
     'total_floor_area_sqm',
     'completion_date',
+    'completion_documents',
+    'completion_other_document',
+    'completion_submitted_by',
+    'completion_professional',
   ],
 }
+
+/**
+ * What the Certificate of Occupancy's left page ticks as submitted (NBC Form
+ * B-13). Stored on the sheet as a comma-joined list in this spelling; the
+ * certificate ticks by the same words.
+ */
+export const COMPLETION_DOCUMENTS = [
+  'Certificate of Completion',
+  'As-built Plans/Specifications',
+  'Daily Construction Works Logbook',
+  'Others',
+] as const
 
 /**
  * Sort a sheet's answers into the order its paper asks them.
@@ -3288,6 +3308,84 @@ function OccupancyFields({
               return raw === '' ? '' : formatDate(raw)
             })()}
           />
+        </div>
+      </section>
+
+      {/*
+        ── D. Certificate of Completion ──────────────────────────────────
+        What NBC Form B-13's left page asks before it recommends issuance
+        [client, 27 October 2026]: which documents were handed in, and the
+        licensed professional who signed the Certificate of Completion. The
+        certificate prints these; a blank here is a blank there.
+      */}
+      <section className="space-y-3">
+        <SectionMarker letter="D" label="Certificate of Completion" />
+        <div>
+          <FieldLabel>Documents Submitted</FieldLabel>
+          <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1.5">
+            {COMPLETION_DOCUMENTS.map((doc) => {
+              const chosen = get(data, 'completion_documents')
+                .split(',')
+                .map((d) => d.trim())
+                .filter(Boolean)
+              const on = chosen.includes(doc)
+              return (
+                <label key={doc} className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    readOnly={ro}
+                    onChange={() =>
+                      ro ||
+                      set(
+                        'completion_documents',
+                        (on ? chosen.filter((d) => d !== doc) : [...chosen, doc])
+                          .filter((d) => COMPLETION_DOCUMENTS.includes(d as (typeof COMPLETION_DOCUMENTS)[number]))
+                          .join(', '),
+                      )
+                    }
+                    className="h-4 w-4 accent-royal"
+                  />
+                  {doc}
+                </label>
+              )
+            })}
+          </div>
+          <CarriedTag field="completion_documents" />
+        </div>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div>
+            <FieldLabel>Other Document (specify)</FieldLabel>
+            <input
+              value={get(data, 'completion_other_document')}
+              onChange={(e) => set('completion_other_document', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="completion_other_document" />
+          </div>
+          <div>
+            <FieldLabel>Certificate of Completion — Submitted By</FieldLabel>
+            <input
+              value={get(data, 'completion_submitted_by')}
+              onChange={(e) => set('completion_submitted_by', e.target.value)}
+              readOnly={ro}
+              placeholder="Full name"
+              className={inputCls}
+            />
+            <CarriedTag field="completion_submitted_by" />
+          </div>
+          <div>
+            <FieldLabel>Profession / Licence</FieldLabel>
+            <input
+              value={get(data, 'completion_professional')}
+              onChange={(e) => set('completion_professional', e.target.value)}
+              readOnly={ro}
+              placeholder="Civil Engineer, Architect…"
+              className={inputCls}
+            />
+            <CarriedTag field="completion_professional" />
+          </div>
         </div>
       </section>
     </div>
