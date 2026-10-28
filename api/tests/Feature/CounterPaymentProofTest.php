@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\DownloadLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -236,6 +237,27 @@ it('lets the owner, BPLO and the super admin read the proof and its photo, and n
     authAs('sanitary@biztrack.local');
     test()->getJson("/api/v1/payment-proofs/{$id}/file")->assertForbidden();
     test()->getJson("/api/v1/applications/{$filing->id}/payment-proof")->assertForbidden();
+});
+
+it('logs the photo of the receipt once when it is served, and not when it is refused', function () {
+    $filing = otcProofFiling();
+    $id = otcSendProof($filing, ['photo' => UploadedFile::fake()->createWithContent('receipt.pdf', OTC_PROOF_PDF)])
+        ->assertCreated()
+        ->json('data.id');
+
+    authAs('sanitary@biztrack.local');
+    test()->getJson("/api/v1/payment-proofs/{$id}/file")->assertForbidden();
+    expect(AuditLog::where('action', DownloadLog::ACTION)->count())->toBe(0);
+
+    authAs('bplo@biztrack.local');
+    test()->get("/api/v1/payment-proofs/{$id}/file")->assertOk();
+
+    $rows = AuditLog::where('action', DownloadLog::ACTION)->get();
+    expect($rows)->toHaveCount(1)
+        ->and($rows->first()->user_id)->toBe(User::where('email', 'bplo@biztrack.local')->value('id'))
+        ->and($rows->first()->changes)->toBe(['kind' => 'payment_proof', 'file' => 'receipt.pdf'])
+        ->and($rows->first()->auditable_type)->toBe(PaymentProof::class)
+        ->and($rows->first()->auditable_id)->toBe($id);
 });
 
 it('answers no pending proof once nothing has been sent', function () {

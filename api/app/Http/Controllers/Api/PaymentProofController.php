@@ -9,6 +9,7 @@ use App\Models\Application;
 use App\Models\PaymentProof;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use App\Support\PermitFees;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -151,7 +152,12 @@ class PaymentProofController extends Controller
             'File not found.'
         );
 
-        return Storage::disk('local')->download($paymentProof->file_path, $paymentProof->original_filename);
+        // On the audit trail like every other file served (matrix item 2).
+        return DownloadLog::record(
+            Storage::disk('local')->download($paymentProof->file_path, $paymentProof->original_filename),
+            'payment_proof',
+            $paymentProof,
+        );
     }
 
     /**
