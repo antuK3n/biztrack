@@ -83,6 +83,18 @@ class Payment extends Model
         return $this->status === PaymentStatus::Pending;
     }
 
+    /**
+     * Payments carrying this Official Receipt number, compared the way a clerk
+     * reads one: spaces around it and letter case do not make it another OR.
+     * Mark as paid refuses an OR one of these already carries, and the defense
+     * generators (`Playbook::nextOrNumber`) skip one, so the two agree on
+     * what "taken" means.
+     */
+    public function scopeWithOrNumber(Builder $query, string $orNumber): Builder
+    {
+        return $query->whereRaw('LOWER(TRIM(or_number)) = ?', [mb_strtolower(trim($orNumber))]);
+    }
+
     /** KwikPay payments nobody has confirmed either way yet. */
     public function scopeAwaitingKwikPay(Builder $query): Builder
     {

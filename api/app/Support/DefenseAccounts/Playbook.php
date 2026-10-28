@@ -666,12 +666,14 @@ final class Playbook
     /**
      * Seven digits, like the serial printed on an Official Receipt, and on no
      * payment yet — the register's own and every earlier run's included, so
-     * two runs never hand out one number.
+     * two runs never hand out one number, and Mark as paid, which refuses an
+     * OR already recorded, never refuses one of these. "On a payment" is
+     * `Payment::withOrNumber`, the same test Mark as paid applies.
      */
     public static function nextOrNumber(): string
     {
         $n = 4_200_001 + Payment::whereNotNull('or_number')->count();
-        while (Payment::where('or_number', (string) $n)->exists()) {
+        while (Payment::withOrNumber((string) $n)->exists()) {
             $n++;
         }
 

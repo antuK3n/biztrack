@@ -391,7 +391,17 @@ class PaymentController extends Controller
         $this->workflow->refuseWhileOnHold($application->business);
 
         $data = $request->validate([
-            'or_number' => ['required', 'string', 'max:30'],
+            /*
+             * One OR, one payment: an OR number already on another payment is
+             * refused, whatever its case or the spaces around it. Not a unique
+             * index — older payments carry no OR at all — and not asked of the
+             * owner's proof, which only offers an OR; the officer decides here.
+             */
+            'or_number' => ['bail', 'required', 'string', 'max:30', function (string $attribute, string $value, Closure $fail) {
+                if (Payment::withOrNumber($value)->exists()) {
+                    $fail('This OR number is already recorded.');
+                }
+            }],
             'or_date' => ['required', 'date', 'before_or_equal:today'],
             // The officer's own photo of the receipt, optional; the files a requirement takes.
             'photo' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],

@@ -240,6 +240,36 @@ it('links the owner’s pending proof and the officer’s own photo to the payme
     expect($audit->changes['proof_ids'])->toBe([$owners, $officers->id]);
 });
 
+it('refuses an OR number already recorded on another payment, whatever its case or spaces', function () {
+    $filing = filingAwaitingCounterPayment();
+
+    // Another filing's payment already carries this OR.
+    Payment::where('application_id', '!=', $filing->id)->firstOrFail()
+        ->update(['or_number' => 'ab-7012350', 'or_date' => now()->subWeek()->toDateString()]);
+
+    // The owner's proof is not refused for it: the officer decides at Mark as paid.
+    authAs('owner@biztrack.local');
+    test()->post("/api/v1/applications/{$filing->id}/payment-proofs", [
+        'or_number' => 'AB-7012350',
+        'or_date' => now()->subDay()->toDateString(),
+    ], ['Accept' => 'application/json'])->assertCreated();
+
+    authAs('bplo@biztrack.local');
+    foreach (['ab-7012350', '  AB-7012350 '] as $typed) {
+        test()->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr(['or_number' => $typed]))
+            ->assertStatus(422)
+            ->assertJsonPath('errors.or_number.0', 'This OR number is already recorded.');
+    }
+
+    expect(Payment::where('application_id', $filing->id)->count())->toBe(0)
+        ->and($filing->fresh()->status)->toBe(ApplicationStatus::PendingPayment);
+
+    // An OR on no other payment is taken.
+    test()->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr(['or_number' => 'AB-7012351']))
+        ->assertCreated()
+        ->assertJsonPath('data.or_number', 'AB-7012351');
+});
+
 it('refuses another BPLO officer — the filing is with a colleague', function () {
     $filing = filingAwaitingCounterPayment();
     $other = counterSecondBploOfficer();
@@ -344,8 +374,9 @@ it('refuses a filing with nothing outstanding, with a plain sentence', function 
         ->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr())
         ->assertCreated();
 
+    // A new OR, so the refusal is the empty bill's and not the repeated OR's.
     $res = test()->withHeaders($bplo)
-        ->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr())
+        ->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr(['or_number' => '4200124']))
         ->assertStatus(422);
 
     expect($res->json('errors.status.0'))->toContain('nothing outstanding');
