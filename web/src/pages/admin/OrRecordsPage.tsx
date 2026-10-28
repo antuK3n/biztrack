@@ -107,7 +107,14 @@ export function OrRecordsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={ClipboardIcon} title="No OR records yet." />
+        /*
+         * `query`, not `search`: the list on screen is the answer to what was
+         * sent. A search that finds nothing is not a register with no ORs.
+         */
+        <EmptyState
+          icon={ClipboardIcon}
+          title={query ? 'No OR records match your search.' : 'No OR records yet.'}
+        />
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">

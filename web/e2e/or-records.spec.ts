@@ -64,8 +64,30 @@ test('BPLO finds a counter payment on OR Records by its OR number', async ({ pag
   await expect(table.getByRole('row').filter({ hasText: orNumber })).toHaveCount(1, { timeout: 15_000 })
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/oc-or-records.png`, fullPage: true })
 
-  // Nothing matches: the page says there are no records rather than drawing an empty table.
+  // Nothing matches: the page says the search found nothing, not that there are no records.
   await search.fill('no such receipt anywhere')
+  await expect(page.getByText('No OR records match your search.')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('No OR records yet.')).toHaveCount(0)
+})
+
+test('says "No OR records yet." only when nothing is searched for', async ({ page }) => {
+  // The copied register holds ORs, so an empty one is answered here.
+  await page.route(
+    (url) => url.pathname === '/api/v1/or-records',
+    (route) => route.fulfill({ json: { data: [], meta: { current_page: 1, last_page: 1, per_page: 25, total: 0 } } }),
+  )
+
+  await page.goto('/staff/admin/or-records')
+  await expect(page.getByText('No OR records yet.')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('No OR records match your search.')).toHaveCount(0)
+
+  const search = page.getByRole('searchbox', { name: 'Search OR no., tracking ID or business' })
+  await search.fill('4200001')
+  await expect(page.getByText('No OR records match your search.')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('No OR records yet.')).toHaveCount(0)
+
+  // Cleared, it is the empty register again.
+  await search.fill('')
   await expect(page.getByText('No OR records yet.')).toBeVisible({ timeout: 15_000 })
 })
 
