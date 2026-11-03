@@ -1359,19 +1359,14 @@ class PermitController extends Controller
                     ->value('permit_number')
                 : null;
 
-            $profile = $application?->fee_profile ?? [];
             /*
-             * The building's floor area and storeys, best source first: the
-             * OBO sheet's own answers, then the business record and the fee
-             * profile, then the BFP sheet's storeys. One figure for the AREA
-             * box and for deciding which lines the building needs.
+             * The building's floor area and storeys (OccupancyChecklist::
+             * buildingOf): one figure for the AREA box and for deciding which
+             * lines the building needs.
              */
-            $floorArea = collect([$sheet['total_floor_area_sqm'] ?? null, $permit->business?->business_area_sqm, $profile['floor_area_sqm'] ?? null])
-                ->first(fn ($v) => is_numeric($v) && (float) $v > 0);
-            $fsicSheet = $application?->officeForms
-                ?->first(fn ($f) => $f->permit_type_id === PermitType::where('code', 'FSIC')->value('id'))?->form_data ?? [];
-            $storeys = collect([$sheet['building_storeys'] ?? null, $fsicSheet['building_storeys'] ?? null])
-                ->first(fn ($v) => is_numeric($v) && (int) $v > 0);
+            $building = OccupancyChecklist::buildingOf($application, $permit->business);
+            $floorArea = $building['area'];
+            $storeys = $building['storeys'];
             $area = $floorArea !== null
                 ? rtrim(rtrim(number_format((float) $floorArea, 2), '0'), '.').' sq m'
                 : null;
@@ -1383,8 +1378,8 @@ class PermitController extends Controller
              * 2026] — see OccupancyChecklist for the reading.
              */
             $checks = OccupancyChecklist::for(
-                $floorArea !== null ? (float) $floorArea : null,
-                $storeys !== null ? (int) $storeys : null,
+                $floorArea,
+                $storeys,
                 $face['line_of_business'] ?? null,
                 $answer('occupancy_type'),
                 collect($office)

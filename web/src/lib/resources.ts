@@ -1366,8 +1366,18 @@ export const inspections = {
     unwrap<InspectorSuggestion>(
       api.get(`/inspections/${id}/suggestion`, { params: { date, moving: moving ? 1 : undefined } }),
     ),
-  conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
-    unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
+  conduct: (
+    id: number,
+    body: { result: InspectionResult; findings?: string; signatories?: { role: string; name: string }[] },
+  ) => unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
+  /** The names the OBO confirms before a pass releases the Certificate of Occupancy. */
+  certificateNames: (id: number) =>
+    unwrap<{
+      required: boolean
+      certificate?: string
+      rows: { role: string; name: string | null }[]
+      not_needed: string[]
+    }>(api.get(`/inspections/${id}/certificate-names`)),
   reschedule: (id: number, scheduled_at: string, inspector_id?: number | null) =>
     unwrap<Inspection>(
       api.post(`/inspections/${id}/reschedule`, {

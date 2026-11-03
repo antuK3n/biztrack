@@ -425,6 +425,8 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::get('inspections/inspector-names', [InspectionController::class, 'inspectorNames']);
         Route::get('inspections/{inspection}', [InspectionController::class, 'show']);
         Route::post('inspections/{inspection}/conduct', [InspectionController::class, 'conduct']);
+        // The OBO confirms the Certificate of Occupancy's names before a pass releases it.
+        Route::get('inspections/{inspection}/certificate-names', [InspectionController::class, 'certificateNames']);
         Route::post('inspections/{inspection}/reschedule', [InspectionController::class, 'reschedule']);
         /*
          * The inspector's name, typed for the record (client, 5 October 2026).

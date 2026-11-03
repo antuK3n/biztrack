@@ -13,11 +13,16 @@ use App\Models\Inspector;
 use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use App\Support\CertificateSignatories;
+use App\Support\OccupancyChecklist;
+use App\Support\PermitFace;
 use App\Support\InspectorSuggestion;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * Inspection scheduling + results, scoped to the caller's department (or own
@@ -116,6 +121,12 @@ class InspectionController extends Controller
             'findings' => ['nullable', 'string', 'max:2000'],
             'photos' => ['nullable', 'array'],
             'photos.*' => ['string'],
+            // The names the OBO confirmed for the certificate (certificateNames).
+            'signatories' => ['nullable', 'array', 'max:20'],
+            'signatories.*.role' => ['required', 'string', Rule::in(CertificateSignatories::CATALOGUE['OBO'])],
+            'signatories.*.name' => ['required', 'string', 'max:120'],
+        ], [
+            'signatories.*.name.required' => 'Every name on the certificate is needed. Fill in each one before approving.',
         ]);
 
         /*
@@ -127,15 +138,124 @@ class InspectionController extends Controller
             $this->workflow->refuseWhileOnHold($inspection->application?->business);
         }
 
-        $this->workflow->recordInspection(
-            $inspection,
-            InspectionResult::from($data['result']),
-            $data['findings'] ?? null,
-            $data['photos'] ?? [],
-        );
+        $confirmed = $data['signatories'] ?? null;
+        $occupancy = $this->occupancyTypeFor($inspection);
+        if ($confirmed !== null) {
+            abort_if($occupancy === null, 422, 'Only the Certificate of Occupancy has its names confirmed at the visit.');
+            abort_unless(InspectionResult::from($data['result'])->progresses(), 422, 'Names are confirmed only on a passed visit.');
+        }
+
+        // One act: the confirmed names stand only if the pass is recorded.
+        DB::transaction(function () use ($inspection, $data, $confirmed, $occupancy, $request) {
+            if ($confirmed !== null) {
+                $this->keepConfirmedNames($inspection, $occupancy, $confirmed, $request);
+            }
+
+            $this->workflow->recordInspection(
+                $inspection,
+                InspectionResult::from($data['result']),
+                $data['findings'] ?? null,
+                $data['photos'] ?? [],
+            );
+        });
 
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
+        ]);
+    }
+
+    /**
+     * The names to confirm before an OBO pass releases the Certificate of
+     * Occupancy [client, 3 November 2026: "ilagay sa after inspection … bago
+     * irelease the admin has to confirm the names"].
+     *
+     * The Building Official, and an evaluator for each "Verified & complied"
+     * line THIS building needs (OccupancyChecklist) — the lines it marks N/A
+     * are listed apart, not asked. Each name is the office's own, or what was
+     * confirmed for this filing already. Any other office: nothing to confirm.
+     */
+    public function certificateNames(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+
+        $type = $this->occupancyTypeFor($inspection);
+        if ($type === null) {
+            return response()->json(['data' => ['required' => false, 'rows' => [], 'not_needed' => []]]);
+        }
+
+        $application = $inspection->application()->with(['officeForms', 'business'])->first();
+        $business = $application?->business?->loadMissing(['address.barangay', 'owner', 'owners', 'lines.psicCode']);
+        $current = collect(CertificateSignatories::currentFor($inspection->department))->pluck('name', 'role');
+        $kept = collect(ApplicationPermitType::where('application_id', $inspection->application_id)
+            ->where('permit_type_id', $type->id)->first()?->confirmed_signatories ?? [])
+            ->filter(fn ($r) => is_array($r) && isset($r['role']))->pluck('name', 'role');
+        $nameOf = fn (string $role) => $kept[$role] ?? $current[$role] ?? null;
+
+        $building = OccupancyChecklist::buildingOf($application, $business);
+        $checks = OccupancyChecklist::for(
+            $building['area'],
+            $building['storeys'],
+            PermitFace::capture($business)['line_of_business'] ?? null,
+            $building['sheet']['occupancy_type'] ?? null,
+            [],
+        );
+
+        $rows = [['role' => 'Building Official', 'name' => $nameOf('Building Official')]];
+        $notNeeded = [];
+        foreach ($checks['lines'] as $line => $verdict) {
+            if ($verdict === 'N/A') {
+                $notNeeded[] = $line;
+
+                continue;
+            }
+            $role = "Evaluator — {$line}";
+            $rows[] = ['role' => $role, 'name' => $nameOf($role)];
+        }
+
+        return response()->json(['data' => [
+            'required' => true,
+            'certificate' => CertificateSignatories::CERTIFICATE['OBO'],
+            'rows' => $rows,
+            'not_needed' => $notNeeded,
+        ]]);
+    }
+
+    /** The Certificate of Occupancy, if this visit is the OBO's. */
+    private function occupancyTypeFor(Inspection $inspection): ?PermitType
+    {
+        return PermitType::where('code', 'OCCUPANCY')
+            ->where('issuing_department_id', $inspection->department_id)
+            ->first();
+    }
+
+    /**
+     * Keep the confirmed names on the filing's Occupancy row, for issue to
+     * freeze on this permit alone — the office's own names do not change —
+     * and log who confirmed which, with every name that differs from the
+     * office's own.
+     *
+     * @param  list<array{role: string, name: string}>  $confirmed
+     */
+    private function keepConfirmedNames(Inspection $inspection, PermitType $type, array $confirmed, Request $request): void
+    {
+        $row = ApplicationPermitType::where('application_id', $inspection->application_id)
+            ->where('permit_type_id', $type->id)
+            ->firstOrFail();
+        $rows = array_values(array_map(fn (array $r) => ['role' => $r['role'], 'name' => trim($r['name'])], $confirmed));
+
+        $own = collect(CertificateSignatories::currentFor($inspection->department))->pluck('name', 'role');
+        $changed = collect($rows)
+            ->filter(fn (array $r) => ($own[$r['role']] ?? null) !== $r['name'])
+            ->map(fn (array $r) => ['role' => $r['role'], 'from' => $own[$r['role']] ?? null, 'to' => $r['name']])
+            ->values()->all();
+
+        $row->update(['confirmed_signatories' => $rows]);
+        Audit::log('permit.signatories_confirmed', $row, [
+            'application_id' => $inspection->application_id,
+            'inspection_id' => $inspection->id,
+            'office' => $inspection->department?->code,
+            'names' => $rows,
+            'changed_for_this_permit' => $changed,
         ]);
     }
 

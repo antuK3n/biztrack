@@ -282,6 +282,129 @@ export function InspectionRemarksModal({
   )
 }
 
+/**
+ * ── The OBO confirms the certificate's names before the release ────────────
+ *
+ * [Client, 3 November 2026: "ilagay sa after inspection … bago irelease the
+ * admin has to confirm the names".] Passing the OBO's visit issues the
+ * Certificate of Occupancy, so the Approve on it asks first who signs: the
+ * Building Official, and an evaluator for each line this building needs —
+ * the lines it marks N/A are named apart, not asked. Each name starts as the
+ * office's own (Permits → Certificate names); a change here prints on this
+ * permit only and is written to the audit log. Every name must be there:
+ * the button stays reachable and says what is missing (aria-describedby).
+ */
+function CertificateNamesConfirm({
+  item,
+  submitting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  item: Inspection
+  submitting: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: (signatories: { role: string; name: string }[]) => void
+}) {
+  const [rows, setRows] = useState<{ role: string; name: string; was: string }[] | null>(null)
+  const [notNeeded, setNotNeeded] = useState<string[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const hintId = useId()
+
+  useEffect(() => {
+    let live = true
+    inspectionsApi
+      .certificateNames(item.id)
+      .then((data) => {
+        if (!live) return
+        setRows(data.rows.map((r) => ({ role: r.role, name: r.name ?? '', was: r.name ?? '' })))
+        setNotNeeded(data.not_needed)
+      })
+      .catch((err) => live && setLoadError(toApiError(err).message))
+    return () => {
+      live = false
+    }
+  }, [item.id])
+
+  const missing = (rows ?? []).filter((r) => r.name.trim() === '')
+  const changed = (rows ?? []).filter((r) => r.was !== '' && r.name.trim() !== '' && r.name.trim() !== r.was)
+
+  return (
+    <ProtoModal
+      title="Confirm the certificate names"
+      tone="green"
+      wide
+      onCancel={onCancel}
+      confirmLabel={submitting ? 'Approving…' : 'Confirm names and approve'}
+      confirmDisabled={submitting || rows === null}
+      confirmDescribedBy={missing.length > 0 ? hintId : undefined}
+      onConfirm={() =>
+        rows !== null &&
+        missing.length === 0 &&
+        onConfirm(rows.map((r) => ({ role: r.role, name: r.name.trim() })))
+      }
+    >
+      <p className="text-sm text-ink-secondary">
+        The inspection passes and the Certificate of Occupancy is issued with these names. Check each one. A change here
+        prints on this permit only; your office&rsquo;s names stay as they are.
+      </p>
+
+      {loadError ? (
+        <p role="alert" className="mt-4 text-sm font-medium text-s-red">
+          {loadError}
+        </p>
+      ) : rows === null ? (
+        <p className="mt-4 text-sm text-ink-muted">Loading the names…</p>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {rows.map((r, i) => (
+            <label key={r.role} className={`block ${i === 0 ? 'sm:col-span-2' : ''}`}>
+              <span className="text-xs font-semibold text-ink-secondary">
+                {r.role.replace(/^Evaluator — /, 'Evaluator · ')}
+                <span className="text-s-red"> *</span>
+              </span>
+              <input
+                value={r.name}
+                onChange={(e) =>
+                  setRows((prev) => prev && prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
+                }
+                maxLength={120}
+                aria-invalid={r.name.trim() === '' || undefined}
+                className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm text-ink outline-none focus:border-royal ${
+                  r.name.trim() === '' ? 'border-s-red' : 'border-line'
+                }`}
+              />
+              {r.was !== '' && r.name.trim() !== '' && r.name.trim() !== r.was && (
+                <span className="mt-0.5 block text-xs text-amber-800">For this permit only. Office name: {r.was}</span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {notNeeded.length > 0 && (
+        <p className="mt-4 text-xs text-ink-muted">
+          Marked N/A for this building, so no evaluator signs: {notNeeded.join(', ')}.
+        </p>
+      )}
+      {changed.length > 0 && (
+        <p className="mt-2 text-xs text-ink-secondary">
+          {changed.length} name{changed.length === 1 ? '' : 's'} changed for this permit. The change is recorded in the
+          audit log.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <p id={hintId} aria-live="polite" className="mt-3 text-sm font-medium text-s-red">
+          Fill in {missing.length === 1 ? 'the name' : `all ${missing.length} names`} to approve. A certificate is not
+          issued with a blank signatory.
+        </p>
+      )}
+      {error && <p className="mt-3 text-sm font-medium text-s-red">{error}</p>}
+    </ProtoModal>
+  )
+}
+
 /** Has this visit happened? Mirrors the inspection detail screen's own test. */
 export function inspectionDone(item: Inspection): boolean {
   return Boolean(item.conducted_at) || ['completed', 'passed', 'failed'].includes(item.status.toLowerCase())
@@ -1297,15 +1420,22 @@ export function InspectionDecisionPanel({
     )
   }
 
-  async function conduct(item: Inspection, result: 'passed' | 'failed', findings?: string) {
+  async function conduct(
+    item: Inspection,
+    result: 'passed' | 'failed',
+    findings?: string,
+    signatories?: { role: string; name: string }[],
+  ): Promise<boolean> {
     setBusyId(item.id)
     setError(null)
     try {
-      await inspectionsApi.conduct(item.id, { result, findings })
+      await inspectionsApi.conduct(item.id, { result, findings, signatories })
       setRejecting(null)
       onChanged()
+      return true
     } catch (err) {
       setError(toApiError(err).message)
+      return false
     } finally {
       setBusyId(null)
     }
@@ -1632,7 +1762,23 @@ export function InspectionDecisionPanel({
         (ReviewPage). It was one click with no way back: passing the visit
         issues the office's permit at once.
       */}
-      {approving && (
+      {approving && approving.department?.code === 'OBO' && (
+        <CertificateNamesConfirm
+          item={approving}
+          submitting={busyId === approving.id}
+          error={error}
+          onCancel={() => {
+            setError(null)
+            setApproving(null)
+          }}
+          onConfirm={async (signatories) => {
+            const item = approving
+            if (await conduct(item, 'passed', undefined, signatories)) setApproving(null)
+          }}
+        />
+      )}
+
+      {approving && approving.department?.code !== 'OBO' && (
         <ProtoModal
           title="Approve this inspection?"
           tone="green"
