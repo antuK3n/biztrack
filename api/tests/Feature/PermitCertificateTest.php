@@ -685,3 +685,12 @@ it('names the officer who approved the sanitary visit as the one who approved th
     $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
     expect($cert['signatories'][1])->toMatchArray(['role' => 'City Health Officer', 'name' => $officer->fullName(), 'action' => 'Approved']);
 });
+
+it('lets the fire office save a caption that carries a comma', function () {
+    test()->withHeaders(authAs('fire@biztrack.local'))->putJson('/api/v1/certificate-signatories', [
+        'rows' => [
+            ['role' => 'Chief, Fire Safety Enforcement Section', 'name' => 'FSINSP New Chief'],
+            ['role' => 'City Fire Marshal', 'name' => 'FCINSP New Marshal'],
+        ],
+    ])->assertOk()->assertJsonPath('data.changed', 2);
+});
