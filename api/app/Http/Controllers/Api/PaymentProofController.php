@@ -8,6 +8,7 @@ use App\Http\Resources\PaymentProofResource;
 use App\Models\Application;
 use App\Models\PaymentProof;
 use App\Models\User;
+use App\Services\WorkflowService;
 use App\Support\Audit;
 use App\Support\DownloadLog;
 use App\Support\PermitFees;
@@ -31,6 +32,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * that (PaymentController::counterPayment), reads this proof, and links it to
  * the payment it records.
  *
+ * BPLO hears of each proof in the bell, "Proof of payment received" (revision
+ * matrix item 4, follow-up): before that the officer found it only on opening
+ * Mark as paid. See WorkflowService::tellBploOfPaymentProof.
+ *
  * Who reads it: the filing's owner, and the two readers who hold
  * `application.view_any_office` — BPLO, who marks the bill paid, and the super
  * admin, who audits. No clearance office: a receipt is BPLO's business, and
@@ -48,9 +53,12 @@ class PaymentProofController extends Controller
         'photo' => 'photo of the receipt',
     ];
 
+    public function __construct(private WorkflowService $workflow) {}
+
     /**
      * The owner sends proof. A second send before BPLO confirms REPLACES the
      * pending one — the old row is stamped superseded and kept, file and all.
+     * Each send that is kept, a replacement included, tells BPLO.
      */
     public function store(Request $request, Application $application): JsonResponse
     {
@@ -114,6 +122,14 @@ class PaymentProofController extends Controller
                 'file' => $proof->original_filename,
                 'replaces_proof_id' => $replaced?->id,
             ]);
+
+            /*
+             * BPLO is told once this commits, never on a send refused above.
+             * Asked here, inside the transaction, as WorkflowService's own
+             * notices are: the notice waits for the commit (DB::afterCommit)
+             * and a failed one cannot undo or 500 the proof.
+             */
+            $this->workflow->tellBploOfPaymentProof($application);
 
             return $proof;
         });

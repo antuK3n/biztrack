@@ -1,15 +1,20 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Jobs\SendOwnerUpdateEmail;
+use App\Jobs\SendSms;
 use App\Models\Application;
+use App\Models\AppNotification;
 use App\Models\AuditLog;
 use App\Models\Business;
+use App\Models\Department;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Support\DownloadLog;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -22,6 +27,10 @@ use Illuminate\Support\Facades\Storage;
  * requirement takes (PDF, JPG or PNG, up to 10 MB); sending it does NOT mark
  * the bill paid; sending again before BPLO confirms replaces the pending proof
  * and keeps the old one; every submission is audited.
+ *
+ * And BPLO hears of it in the bell, "Proof of payment received" (the tests at
+ * the end): the officer holding the filing at BPLO, or every BPLO officer when
+ * nobody does. Never the owner, a clearance office or the super admin.
  */
 
 /** A real one-page PDF, so a stored file holds bytes a test can compare. */
@@ -267,4 +276,154 @@ it('answers no pending proof once nothing has been sent', function () {
     test()->getJson("/api/v1/applications/{$filing->id}/payment-proof")
         ->assertOk()
         ->assertJsonPath('data', null);
+});
+
+/*
+ * ── BPLO hears of it ─────────────────────────────────────────────────────────
+ *
+ * Revision matrix item 4, follow-up: until now nobody was told, and the officer
+ * found the proof only by opening Mark as paid. Ken's rule is the one "New
+ * application" uses for BPLO (WorkflowService::tellOffice): the officer holding
+ * the filing at BPLO, or every active BPLO officer when nobody holds it. The
+ * words are his: the title as given, the body built like "New application"'s.
+ */
+
+/** Every "Proof of payment received" notice written, oldest first. */
+function otcProofNotices(?User $reader = null)
+{
+    return AppNotification::where('title', 'Proof of payment received')
+        ->when($reader !== null, fn ($q) => $q->where('user_id', $reader->id))
+        ->orderBy('id')
+        ->get();
+}
+
+/** A second account at BPLO, with the seeded officer's roles. */
+function otcBploSeat(string $email, bool $active = true): User
+{
+    $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+
+    $seat = User::create([
+        'name' => "Seat {$email}", 'first_name' => 'Seat', 'last_name' => 'Account', 'gender' => 'F',
+        'email' => $email, 'password' => 'biztrack1',
+        'department_id' => Department::where('code', 'BPLO')->value('id'),
+        'is_active' => $active,
+    ]);
+    $seat->roles()->sync($bplo->roles()->pluck('roles.id'));
+
+    return $seat;
+}
+
+/** Put BPLO's case on this filing in an officer's hands, or in nobody's. */
+function otcHeldBy(Application $filing, ?User $officer): void
+{
+    $review = $filing->bploAssignment()->firstOrFail();
+    $review->update(['officer_user_id' => $officer?->id]);
+}
+
+it('tells the BPLO officer holding the filing, and nobody else, that proof of payment came in', function () {
+    $filing = otcProofFiling();
+    $holder = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    $colleague = otcBploSeat('bplo-colleague@biztrack.local');
+    otcHeldBy($filing, $holder);
+
+    Bus::fake([SendOwnerUpdateEmail::class, SendSms::class]);
+    otcSendProof($filing, ['or_number' => '7654330', 'or_date' => now()->toDateString()])->assertCreated();
+
+    // One notice, to the holder, in Ken's words.
+    $notices = otcProofNotices();
+    expect($notices)->toHaveCount(1);
+    $notice = $notices->first();
+    expect($notice->user_id)->toBe($holder->id)
+        ->and($notice->title)->toBe('Proof of payment received')
+        ->and($notice->body)->toBe("{$filing->tracking_id} · Nena's Sari-Sari Store sent proof of payment.")
+        ->and($notice->link)->toBe('/staff/queue')
+        ->and($notice->type)->toBe('status_change')
+        ->and($notice->read_at)->toBeNull();
+
+    // Not a colleague at BPLO while it is held, not the owner, not a clearance
+    // office, not the super admin.
+    foreach ([$colleague, ...User::whereIn('email', [
+        'owner@biztrack.local', 'sanitary@biztrack.local', 'admin@biztrack.local',
+    ])->get()] as $other) {
+        expect(otcProofNotices($other))->toHaveCount(0);
+    }
+
+    // In the bell only, like "New application": no e-mail, no text.
+    Bus::assertNotDispatched(SendOwnerUpdateEmail::class);
+    Bus::assertNotDispatched(SendSms::class);
+});
+
+it('tells every active BPLO officer when nobody holds the filing', function () {
+    $filing = otcProofFiling();
+    $colleague = otcBploSeat('bplo-colleague@biztrack.local');
+    $away = otcBploSeat('bplo-away@biztrack.local', active: false);
+    otcHeldBy($filing, null);
+
+    otcSendProof($filing, ['photo' => UploadedFile::fake()->createWithContent('receipt.pdf', OTC_PROOF_PDF)])
+        ->assertCreated();
+
+    // The same people "New application" reaches at BPLO: its active accounts
+    // that can open the queue.
+    $bploOfficers = User::where('department_id', Department::where('code', 'BPLO')->value('id'))
+        ->where('is_active', true)
+        ->get()
+        ->filter(fn (User $u) => $u->hasPermission('application.review'))
+        ->pluck('id')
+        ->sort()
+        ->values()
+        ->all();
+    expect($bploOfficers)->toContain(User::where('email', 'bplo@biztrack.local')->value('id'))
+        ->toContain($colleague->id);
+
+    $told = otcProofNotices();
+    expect($told->pluck('user_id')->sort()->values()->all())->toBe($bploOfficers);
+    foreach ($told as $notice) {
+        expect($notice->body)->toBe("{$filing->tracking_id} · Nena's Sari-Sari Store sent proof of payment.")
+            ->and($notice->link)->toBe('/staff/queue');
+    }
+
+    // Not an inactive BPLO account, the owner, a clearance office or the super admin.
+    foreach ([$away, ...User::whereIn('email', [
+        'owner@biztrack.local', 'sanitary@biztrack.local', 'admin@biztrack.local',
+    ])->get()] as $other) {
+        expect(otcProofNotices($other))->toHaveCount(0);
+    }
+});
+
+it('tells the holder again when the owner replaces the proof before BPLO confirms', function () {
+    $filing = otcProofFiling();
+    $holder = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    otcHeldBy($filing, $holder);
+
+    otcSendProof($filing, ['or_number' => '1111112', 'or_date' => now()->subDay()->toDateString()])->assertCreated();
+    otcSendProof($filing, ['or_number' => '2222223', 'or_date' => now()->toDateString()])->assertCreated();
+
+    expect(otcProofNotices($holder))->toHaveCount(2)
+        ->and(otcProofNotices())->toHaveCount(2);
+});
+
+it('tells nobody when the proof is refused', function () {
+    $filing = otcProofFiling();
+    otcHeldBy($filing, null);
+
+    // Refused on what was sent: neither the OR nor a photo, and half the OR.
+    otcSendProof($filing, [])->assertStatus(422);
+    otcSendProof($filing, ['or_number' => '7654331'])->assertStatus(422);
+    otcSendProof($filing, ['or_number' => '7654332', 'or_date' => now()->addDay()->toDateString()])->assertStatus(422);
+
+    // Refused because nothing is owed: a filing BPLO has not billed.
+    $owner = authAs('owner@biztrack.local');
+    $draft = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => Business::where('name', "Nena's Sari-Sari Store")->value('id'),
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
+    ])->assertCreated()->json('data');
+    attachRequiredDocuments($draft['id']);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$draft['id']}/submit")->assertOk();
+    otcSendProof(Application::findOrFail($draft['id']), ['or_number' => '7654333', 'or_date' => now()->toDateString()])
+        ->assertStatus(422);
+
+    expect(PaymentProof::count())->toBe(0)
+        ->and(otcProofNotices())->toHaveCount(0);
 });

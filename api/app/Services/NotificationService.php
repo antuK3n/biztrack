@@ -662,6 +662,44 @@ class NotificationService
         );
     }
 
+    /**
+     * The owner has sent proof of a payment made at the counter.
+     *
+     * Revision matrix item 4, follow-up: the proof was kept, and BPLO found it
+     * only by opening Mark as paid. Who at BPLO is told is
+     * `WorkflowService::tellBploOfPaymentProof`; this is the notice they read,
+     * in the words Ken approved — the title as he gave it, and the body built
+     * the way `filingSubmitted` builds BPLO's "New application" one, so the two
+     * read alike in the bell. Staff only, so push() mails nobody and nothing
+     * texts.
+     *
+     * ── The queue, not the office's review ──────────────────────────────────
+     *
+     * An officer's other notices about a filing open the office's own review
+     * of it (`filingLink`, `filingSubmitted`). This one is about Mark as paid, and
+     * that is not on the review: it is on the filing's row in Manage
+     * Applications (QueuePage, Pending Payment and All stages), and that row
+     * deliberately does not open, because BPLO's review was finished when it
+     * approved the form. `/staff/queue/{review}` would land the officer on a
+     * completed review with no Mark as paid on it. The queue has no address
+     * for a tab or a single row, so the link is the queue itself, and the
+     * tracking ID in the body is what the officer looks for there. If the
+     * queue ever takes a filter in its address, point this at the filing.
+     */
+    public function paymentProofReceived(Application $app, User $recipient): void
+    {
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'Proof of payment received',
+            "{$app->tracking_id} · {$business} sent proof of payment.",
+            '/staff/queue',
+            $app,
+        );
+    }
+
     public function requestClosed(OfficerRequest $request, User $recipient): void
     {
         $app = $request->application;

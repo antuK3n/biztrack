@@ -6691,6 +6691,34 @@ class WorkflowService
     }
 
     /**
+     * Tell BPLO that the owner has sent proof of a counter payment.
+     *
+     * Revision matrix item 4, follow-up. The owner's proof was kept and
+     * audited, and nobody was told: the officer found it only on opening Mark
+     * as paid. Ken: "Proof of payment received", to the same people as BPLO's
+     * "New application" (`tellOffice`) — the officer holding the filing at
+     * BPLO, who is the only one Mark as paid lets settle it
+     * (PaymentController::authorizeCaseHolder), or every active BPLO officer
+     * when nobody holds it, so one of them takes it with Assign to Me.
+     *
+     * On every proof the owner sends, a replacement included: the replacement
+     * is what Mark as paid will show, so the officer should hear of it. Called
+     * inside the transaction that keeps the proof (PaymentProofController::store),
+     * so a refused or rolled-back send tells nobody.
+     *
+     * A filing with no BPLO review tells nobody either, as with "New
+     * application": nobody could hold it, so nobody could mark it paid.
+     */
+    public function tellBploOfPaymentProof(Application $app): void
+    {
+        $this->tellOffice(
+            $app,
+            $this->bploDepartmentId(),
+            fn (User $officer) => $this->notify->paymentProofReceived($app, $officer),
+        );
+    }
+
+    /**
      * Hand a notice about this filing to the office, once the change commits.
      *
      * ── Who hears it ────────────────────────────────────────────────────────
@@ -6705,9 +6733,10 @@ class WorkflowService
      *
      * ── After the commit ────────────────────────────────────────────────────
      *
-     * Every caller is inside the transaction that routes the office, and a
-     * submission that rolls back — a clearance-only renewal whose second sheet
-     * is refused — must leave nobody told about it. Inside a try, for the
+     * Every caller is inside the transaction that records the owner's act —
+     * routing the office, or keeping a proof of payment — and an act that
+     * rolls back (a clearance-only renewal whose second sheet is refused) must
+     * leave nobody told about it. Inside a try, for the
      * reason push()'s e-mail is: by then the owner's act is recorded, and it
      * must not answer 500 over a notice that was not written.
      *
