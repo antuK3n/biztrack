@@ -659,9 +659,25 @@ final class Playbook
 
     private function officeApproves(int $id, string $code): void
     {
+        if ($code === 'OCCUPANCY') {
+            $this->oboRecordsPermitDate($id);
+        }
         $assignment = $this->take($this->issuer[$code], $id);
         $this->api->post("{$code} approves the papers", "assignments/{$assignment}/approve", [
             'remarks' => $this->pick(['Requirements complete. For inspection.', 'Complete. Schedule inspection.', 'Papers ok, for site visit.', 'Checked. For ocular inspection.', 'Complete po. Inspection next.']),
+        ]);
+    }
+
+    /**
+     * The OBO writes the Building Permit Date Issued on the sheet: an
+     * issuance date is the office's to record, never the owner's
+     * (OfficeFormController OFFICER_KEYS), and a passed visit is refused
+     * without it, since the Certificate of Occupancy prints it.
+     */
+    private function oboRecordsPermitDate(int $id): void
+    {
+        $this->asOffice('OCCUPANCY')->put('OBO records the building permit date', "applications/{$id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_date' => CarbonImmutable::now()->subMonths(8)->toDateString()],
         ]);
     }
 
@@ -791,9 +807,28 @@ final class Playbook
                 'zoning_project_description' => $b['name'],
                 'project_location' => $this->addressLines()[0],
             ],
-            'OCCUPANCY', 'FSIC' => [
+            'FSIC' => [
                 'building_storeys' => 1,
                 'total_floor_area_sqm' => $b['floor_area'],
+            ],
+            /*
+             * Every answer the wizard requires of the OBO sheet, and so every
+             * blank NBC Form B-13 prints: a trial filing that skipped them
+             * issued OP-2026-000007 with no building permit and no
+             * Certificate of Completion on its face [client, 3 November 2026].
+             */
+            'OCCUPANCY' => [
+                'application_type' => 'Full',
+                'project_name' => $b['name'],
+                'project_location' => $this->addressLines()[0],
+                'occupancy_type' => 'Commercial',
+                'building_storeys' => 1,
+                'building_units' => 1,
+                'total_floor_area_sqm' => $b['floor_area'],
+                'building_permit_no' => sprintf('BP-MLB-%s-%04d', CarbonImmutable::now()->subYear()->year, crc32($b['name']) % 10000),
+                'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+                'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
+                'completion_professional' => 'Civil Engineer',
             ],
             default => [],
         };

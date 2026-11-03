@@ -1225,7 +1225,8 @@ test('paying opens the clearance stage, and applying routes each office', async 
      * they are filled honestly rather than stubbed: the API trusts the `submit`
      * flag and has no PHP counterpart to re-check it, so a fixture that lied
      * here would hand in sheets a real applicant could not have handed in.
-     * SANITARY wants a classification, OCCUPANCY an application type, and CEC
+     * SANITARY wants a classification, OCCUPANCY what NBC Form B-13 prints (the
+     * project, the building permit, the Certificate of Completion), and CEC
      * both an owner's address — the one field on MCG-CENRO-FO-001 the register
      * does not hold anywhere — and the certification, which is an act rather
      * than a fact. FSIC and ZONING require nothing: FSIC derives every answer,
@@ -1234,7 +1235,19 @@ test('paying opens the clearance stage, and applying routes each office', async 
      */
     const sheets: Record<string, Record<string, string>> = {
       SANITARY: { sanitary_classification: 'Food Establishment' },
-      OCCUPANCY: { application_type: 'Full' },
+      OCCUPANCY: {
+        application_type: 'Full',
+        project_name: 'Playwright Store',
+        project_location: '3 Playwright St., Longos, Malabon City',
+        occupancy_type: 'Mercantile',
+        building_storeys: '1',
+        building_units: '1',
+        total_floor_area_sqm: '24',
+        building_permit_no: 'BP-MLB-2026-0101',
+        completion_documents: 'Certificate of Completion, As-built Plans/Specifications',
+        completion_submitted_by: 'Engr. Paolo R. Mendiola',
+        completion_professional: 'Civil Engineer',
+      },
       CEC: { owner_address: '3 Playwright St., Longos, Malabon City', certified: 'yes' },
       FSIC: {},
       ZONING: {},
