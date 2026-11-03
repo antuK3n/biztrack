@@ -8,6 +8,7 @@ use App\Support\Audit;
 use App\Support\CertificateSignatories;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * The names an office prints on its certificate [client, 3 November 2026]:
@@ -41,7 +42,10 @@ class OfficeSignatoryController extends Controller
 
         $data = $request->validate([
             'rows' => ['required', 'array'],
-            'rows.*.role' => ['required', 'string', 'in:'.implode(',', array_map(fn ($r) => str_replace(',', '\\,', $r), $catalogue))],
+            // Rule::in, not an "in:" string: a caption such as "Chief, Fire
+            // Safety Enforcement Section" carries a comma, which the string
+            // form splits into two values and so refused the BFP's own row.
+            'rows.*.role' => ['required', 'string', Rule::in($catalogue)],
             'rows.*.name' => ['present', 'nullable', 'string', 'max:120'],
         ], [
             'rows.*.name.max' => 'Keep each name under 120 characters.',
