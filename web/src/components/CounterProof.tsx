@@ -5,7 +5,6 @@ import { toApiError } from '../lib/api'
 import { refusalSentences, todayIso } from '../lib/counterProof'
 import { formatCalendarDate } from '../lib/format'
 import { paymentProofs } from '../lib/resources'
-import { useAsync } from '../lib/useAsync'
 import type { PaymentProof } from '../lib/types'
 
 /*
@@ -14,7 +13,8 @@ import type { PaymentProof } from '../lib/types'
  *
  *   the owner's Pay page   sends the OR number, the date paid and a photo of
  *                          the receipt after paying at City Hall, and shows
- *                          back what was sent;
+ *                          back what was sent — or, since 3 November 2026,
+ *                          that BPLO rejected it and why;
  *   BPLO's Mark as paid    shows the owner's proof and asks the officer for
  *                          the same three things, the OR pre-filled from it.
  *
@@ -98,24 +98,22 @@ export function OrFields({
 }
 
 /**
- * A proof as it was sent: the OR number, the date paid and the photo, with a
- * View that opens the photo. A dash where a part was not sent.
+ * Opening a proof's photo in a tab: the View beside it, in either form below.
+ *
+ * Opened inside the click, before any await, or the popup blocker takes the
+ * tab silently — the rule PaymentsPage works to.
  */
-export function ProofDetails({ proof, heading }: { proof: PaymentProof; heading?: string }) {
+function useViewPhoto(proofId: number) {
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /*
-   * Opened inside the click, before any await, or the popup blocker takes the
-   * tab silently — the rule PaymentsPage works to.
-   */
   async function view() {
     if (opening) return
     const tab = window.open('', '_blank')
     setOpening(true)
     setError(null)
     try {
-      await paymentProofs.view(proof.id, tab)
+      await paymentProofs.view(proofId, tab)
     } catch (err) {
       tab?.close()
       setError(toApiError(err).message)
@@ -123,6 +121,19 @@ export function ProofDetails({ proof, heading }: { proof: PaymentProof; heading?
       setOpening(false)
     }
   }
+
+  return { view, opening, error }
+}
+
+const VIEW_BUTTON =
+  'font-semibold text-royal underline underline-offset-2 hover:no-underline aria-disabled:opacity-60'
+
+/**
+ * A proof as it was sent: the OR number, the date paid and the photo, with a
+ * View that opens the photo. A dash where a part was not sent.
+ */
+export function ProofDetails({ proof, heading }: { proof: PaymentProof; heading?: string }) {
+  const { view, opening, error } = useViewPhoto(proof.id)
 
   return (
     <div className="space-y-2">
@@ -141,7 +152,7 @@ export function ProofDetails({ proof, heading }: { proof: PaymentProof; heading?
                 type="button"
                 onClick={() => void view()}
                 aria-disabled={opening || undefined}
-                className="font-semibold text-royal underline underline-offset-2 hover:no-underline aria-disabled:opacity-60"
+                className={VIEW_BUTTON}
               >
                 View
               </button>
@@ -153,6 +164,49 @@ export function ProofDetails({ proof, heading }: { proof: PaymentProof; heading?
       </dl>
       {error && (
         <p role="alert" className="text-xs font-medium text-s-red">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The same proof on one line, "Sent: OR 1234567 · October 20, 2026 · View",
+ * under the owner's notice that BPLO rejected it (Ken, 3 November 2026): the
+ * owner sees which receipt was turned down without a second table of it.
+ *
+ * Only the parts that were sent. A photo sent without an OR has no number to
+ * name it by, so it is named by its file instead.
+ */
+export function ProofSentLine({ proof }: { proof: PaymentProof }) {
+  const { view, opening, error } = useViewPhoto(proof.id)
+  const parts = [
+    proof.or_number ? `OR ${proof.or_number}` : null,
+    proof.or_date ? formatCalendarDate(proof.or_date) : null,
+    !proof.or_number && proof.has_photo ? proof.photo_name : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return (
+    <div>
+      <p className="text-sm text-ink-secondary">
+        Sent: <span className="tnum">{parts.join(' · ')}</span>
+        {proof.has_photo && (
+          <>
+            {' · '}
+            <button
+              type="button"
+              onClick={() => void view()}
+              aria-disabled={opening || undefined}
+              className={VIEW_BUTTON}
+            >
+              View
+            </button>
+          </>
+        )}
+      </p>
+      {error && (
+        <p role="alert" className="mt-1 text-xs font-medium text-s-red">
           {error}
         </p>
       )}
@@ -172,12 +226,23 @@ const EMPTY: OrFieldValues = { orNumber: '', orDate: '', photo: null }
  * comes back is the sentence that says who acts next, and what was sent. The
  * form stays below it: until BPLO confirms, the owner may send again and the
  * newest proof replaces the pending one.
+ *
+ * BPLO may reject the receipt instead, with a reason (Ken, 3 November 2026).
+ * Then the box above the form is red and says so, with the reason, and what
+ * was sent; a new send replaces it with the green one. Which of the two is
+ * drawn is `latest`, the owner's newest proof (`paymentProofs.latest`), read
+ * by the Pay page — which also opens on Over the Counter when there is one,
+ * so a rejected receipt is not hidden behind an unchosen method.
  */
-export function SendProofForm({ applicationId }: { applicationId: number }) {
-  const { data: pending, setData: setPending } = useAsync(
-    () => paymentProofs.pending(applicationId),
-    [applicationId],
-  )
+export function SendProofForm({
+  applicationId,
+  latest,
+  onSent,
+}: {
+  applicationId: number
+  latest: PaymentProof | null
+  onSent: (proof: PaymentProof) => void
+}) {
   const [values, setValues] = useState<OrFieldValues>(EMPTY)
   const [resetKey, setResetKey] = useState(0)
   const [sending, setSending] = useState(false)
@@ -193,7 +258,7 @@ export function SendProofForm({ applicationId }: { applicationId: number }) {
         or_date: values.orDate || undefined,
         photo: values.photo,
       })
-      setPending(proof)
+      onSent(proof)
       setValues(EMPTY)
       setResetKey((k) => k + 1)
     } catch (err) {
@@ -205,12 +270,21 @@ export function SendProofForm({ applicationId }: { applicationId: number }) {
 
   return (
     <div className="mt-6 space-y-4">
-      {pending && (
-        <ProtoCard className="space-y-3 px-7 py-5">
-          <Alert variant="success">Proof sent. BPLO will confirm your payment.</Alert>
-          <ProofDetails proof={pending} />
-        </ProtoCard>
-      )}
+      {latest &&
+        (latest.rejected_at ? (
+          <ProtoCard className="space-y-3 px-7 py-5">
+            <Alert variant="error">
+              <span className="block">BPLO did not accept your receipt: {latest.rejection_reason}</span>
+              <span className="block">Send a new one below.</span>
+            </Alert>
+            <ProofSentLine proof={latest} />
+          </ProtoCard>
+        ) : (
+          <ProtoCard className="space-y-3 px-7 py-5">
+            <Alert variant="success">Proof sent. BPLO will confirm your payment.</Alert>
+            <ProofDetails proof={latest} />
+          </ProtoCard>
+        ))}
 
       <ProtoCard className="space-y-5 px-7 py-6">
         <OrFields values={values} onChange={setValues} resetKey={resetKey} />

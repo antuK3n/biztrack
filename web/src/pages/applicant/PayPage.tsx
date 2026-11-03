@@ -8,7 +8,7 @@ import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoCard, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDateTime, formatMoney, paymentMethodLabel } from '../../lib/format'
 import { toApiError } from '../../lib/api'
-import { applications, payments } from '../../lib/resources'
+import { applications, paymentProofs, payments } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { FeeAssessment, Payment, PaymentMethod, PaymentOptions } from '../../lib/types'
 
@@ -82,6 +82,25 @@ export function PayPage() {
    * confirms it.
    */
   const [overCounter, setOverCounter] = useState(false)
+  /*
+   * The owner's newest counter proof, waiting or rejected (Ken, 3 November
+   * 2026), for SendProofForm to show back. Read here rather than in the form
+   * because it also decides which method the page opens on: an owner who has
+   * already sent proof is past choosing, and one whose receipt BPLO rejected
+   * has to see why. So Over the Counter is chosen for them on arrival — once,
+   * and only if they have not picked a method themselves — instead of leaving
+   * a red notice behind a chip they have no reason to press.
+   */
+  const { data: latestProof, setData: setLatestProof } = useAsync(
+    () => paymentProofs.latest(appId),
+    [appId],
+  )
+  const openedOnCounter = useRef(false)
+  useEffect(() => {
+    if (openedOnCounter.current || !latestProof) return
+    openedOnCounter.current = true
+    if (method === null) setOverCounter(true)
+  }, [latestProof, method])
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState<string | null>(null)
   /** The payment this screen is showing: none yet, waiting, paid or failed. */
@@ -473,7 +492,7 @@ export function PayPage() {
             receipt (thesis panel, matrix item 4). It marks nothing paid; BPLO's
             Mark as paid reads it.
           */}
-          <SendProofForm applicationId={appId} />
+          <SendProofForm applicationId={appId} latest={latestProof} onSent={setLatestProof} />
         </>
       ) : (
         <div className="mt-7">
