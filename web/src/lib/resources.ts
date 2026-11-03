@@ -1082,6 +1082,15 @@ export const paymentProofs = {
       }),
     )
   },
+  /**
+   * The owner's newest proof on this bill, waiting or rejected with BPLO's
+   * reason, or null. The Pay page reads this; Mark as paid reads `pending`.
+   */
+  latest: (applicationId: number) =>
+    unwrap<PaymentProof | null>(api.get(`/applications/${applicationId}/payment-proof/latest`)),
+  /** BPLO's officer holding the filing rejects the waiting proof, with a reason. */
+  reject: (id: number, reason: string) =>
+    unwrap<PaymentProof>(api.post(`/payment-proofs/${id}/reject`, { reason })),
   /** The photo of the receipt, opened in a tab (pass one opened inside the click). */
   view: (id: number, target?: Window | null) => viewBlob(`/payment-proofs/${id}/file`, target),
 }

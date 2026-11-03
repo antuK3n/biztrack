@@ -636,6 +636,13 @@ export interface ApplicationListItem {
    */
   bplo_assignment?: Assignment | null
   /**
+   * The owner's counter receipt waiting on BPLO, or null when none is (Ken, 3
+   * November 2026): the Pending Payment card names it and offers Mark as paid
+   * only once it is in. `or_number` is null for a photo sent without one.
+   * Sent to BPLO and the super admin only, like `bplo_assignment`.
+   */
+  pending_proof?: { id: number; or_number: string | null } | null
+  /**
    * Each permit on the filing with its own status — the second state machine,
    * carried on the list so a row never has to infer it.
    *
@@ -884,6 +891,12 @@ export interface PaymentProof {
   has_photo: boolean
   photo_name: string | null
   submitted_at: string | null
+  /**
+   * When BPLO rejected it, and why (Ken, 3 November 2026). Null on a proof
+   * that is waiting; only `paymentProofs.latest` ever returns a rejected one.
+   */
+  rejected_at: string | null
+  rejection_reason: string | null
 }
 
 /** One row of OR Records: a payment with an Official Receipt (OrRecordController). */

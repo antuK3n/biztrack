@@ -16,6 +16,7 @@ import {
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import { MarkPaidDialog } from './MarkPaidDialog'
+import { RejectReceiptDialog } from './RejectReceiptDialog'
 import type {
   ApplicationListItem,
   ApplicationStatus,
@@ -728,6 +729,13 @@ interface QueueItem {
   canAct: boolean
   /** Does this reader hold it? What "My assigned" means, on one row. */
   mine: boolean
+  /**
+   * The owner's counter receipt waiting on BPLO, null when none is (Ken, 3
+   * November 2026). Undefined where the server sent nothing — every
+   * assignment row, and any reader but BPLO and the super admin — so the
+   * card says nothing about a receipt rather than claim one is missing.
+   */
+  pendingProof?: { id: number; or_number: string | null } | null
 }
 
 /**
@@ -816,6 +824,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     canClaim: bplo?.can_claim === true,
     canAct: bplo?.can_act === true,
     mine: bplo !== null && bplo.officer !== null && bplo.can_act === true,
+    pendingProof: app.pending_proof,
     trackingId: app.tracking_id,
     ...nameOf(app.business, app.tracking_id),
     /*
@@ -1114,6 +1123,7 @@ function QueueRow({
   onRelease,
   claiming,
   onMarkPaid,
+  onRejectReceipt,
 }: {
   item: QueueItem
   /**
@@ -1134,9 +1144,12 @@ function QueueRow({
    * Opens the "mark as paid" confirmation for this row. Undefined for every
    * reader but BPLO staff — the list decides who gets it, the same way it
    * decides `ownPermit`, because only it knows the signed-in reader's seat.
-   * The row then draws it only for the officer holding the filing.
+   * The row then draws it only for the officer holding the filing, and only
+   * once the owner's receipt is in.
    */
   onMarkPaid?: (item: QueueItem) => void
+  /** Opens "Reject receipt" for this row; handed out and drawn exactly as `onMarkPaid` is. */
+  onRejectReceipt?: (item: QueueItem) => void
 }) {
   /*
    * ── Whose name goes under the row ───────────────────────────────────────
@@ -1422,7 +1435,7 @@ function QueueRow({
         </div>
       )}
       {/*
-        * "Mark as paid", on a Pending Payment row.
+        * The owner's receipt, and "Mark as paid", on a Pending Payment row.
         *
         * Outside the Link, same reasoning as Claim above — a button inside an
         * anchor is invalid markup and would navigate on a keyboard press. Only
@@ -1430,16 +1443,45 @@ function QueueRow({
         * (matrix item 1) only the officer HOLDING the filing sees the button:
         * a colleague's filing, or one nobody has taken, draws none — taking it
         * is the strip above. The server refuses everyone else regardless.
+        *
+        * Since 3 November 2026 (Ken) Mark as paid also waits for the owner's
+        * receipt, here and on the server. Every reader the list tells about
+        * receipts sees which it is — none yet, or the one sent, by its OR —
+        * and the holder alone judges it: Mark as paid, or Reject receipt,
+        * which asks why (RejectReceiptDialog). A row the server said nothing
+        * about (`pendingProof` undefined) draws nothing.
         */}
-      {item.status === 'pending_payment' && item.mine && onMarkPaid && (
-        <div className="flex items-center justify-end border-t border-line px-5 py-3">
-          <button
-            type="button"
-            onClick={() => onMarkPaid(item)}
-            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-          >
-            Mark as paid
-          </button>
+      {item.status === 'pending_payment' && item.pendingProof !== undefined && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-line px-5 py-3">
+          <p className="text-sm text-ink-secondary">
+            {item.pendingProof === null ? (
+              'Waiting for the owner’s receipt.'
+            ) : item.pendingProof.or_number ? (
+              <>
+                Receipt sent: OR <span className="tnum font-semibold text-ink">{item.pendingProof.or_number}</span>
+              </>
+            ) : (
+              'Receipt sent.'
+            )}
+          </p>
+          {item.pendingProof && item.mine && onMarkPaid && onRejectReceipt && (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onRejectReceipt(item)}
+                className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+              >
+                Reject receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => onMarkPaid(item)}
+                className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+              >
+                Mark as paid
+              </button>
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -1534,6 +1576,8 @@ export function QueuePage() {
 
   /** The row waiting on the "mark as paid" confirmation, or none. */
   const [confirmPayItem, setConfirmPayItem] = useState<QueueItem | null>(null)
+  /** The row whose receipt is being rejected, while RejectReceiptDialog is open. */
+  const [rejectReceiptItem, setRejectReceiptItem] = useState<QueueItem | null>(null)
 
   /*
    * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
@@ -1855,6 +1899,20 @@ export function QueuePage() {
     setConfirmPayItem(null)
     setClaimError(null)
     setClaimMessage(`${item.name} is marked paid at the counter.`)
+    restart()
+    reload()
+  }
+
+  /*
+   * BPLO has rejected the owner's receipt, in RejectReceiptDialog, which stays
+   * open on a refusal. Re-read, as above: the card then says it is waiting for
+   * the owner's receipt again, and that line is the confirmation — no second
+   * sentence saying the same thing above the list.
+   */
+  function rejectedReceipt() {
+    setRejectReceiptItem(null)
+    setClaimError(null)
+    setClaimMessage(null)
     restart()
     reload()
   }
@@ -2371,6 +2429,16 @@ export function QueuePage() {
           onPaid={() => markedPaid(confirmPayItem)}
         />
       )}
+      {rejectReceiptItem?.pendingProof && (
+        <RejectReceiptDialog
+          applicationId={rejectReceiptItem.applicationId}
+          proofId={rejectReceiptItem.pendingProof.id}
+          trackingId={rejectReceiptItem.trackingId}
+          name={rejectReceiptItem.name}
+          onCancel={() => setRejectReceiptItem(null)}
+          onRejected={rejectedReceipt}
+        />
+      )}
 
       {/*
         * Mounted unconditionally, not tucked inside the list branch: an
@@ -2511,6 +2579,7 @@ export function QueuePage() {
                 onRelease={release}
                 claiming={claimingId === item.assignmentId}
                 onMarkPaid={isBplo ? setConfirmPayItem : undefined}
+                onRejectReceipt={isBplo ? setRejectReceiptItem : undefined}
               />
             ))}
           </ul>
