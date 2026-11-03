@@ -95,6 +95,14 @@ it('builds the nine businesses, each in the state the spec names', function () {
         ->and($a->payments()->where('method', 'counter')->exists())->toBeTrue()
         ->and(OfficerRequest::where('application_id', $a->id)->where('status', '!=', OfficerRequestStatus::Fulfilled->value)->exists())->toBeFalse();
 
+    // A's Certificate of Occupancy has no blank the owner should have filled:
+    // the building permit and the Certificate of Completion are on its face.
+    $op = Permit::where('application_id', $a->id)->whereHas('permitType', fn ($t) => $t->where('code', 'OCCUPANCY'))->sole();
+    $cert = test()->withHeaders(authAs('admin@biztrack.local'))->getJson("/api/v1/permits/{$op->id}")->json('data.certificate');
+    foreach (['occ_project', 'occ_building_permit_no', 'occ_building_permit_date', 'occ_submitted_by', 'occ_professional', 'occ_documents'] as $key) {
+        expect($cert[$key] ?? null)->not->toBeEmpty("{$key} is blank on {$op->permit_number}");
+    }
+
     // B: paid; FSIC issued, Sanitary visit booked ahead, three offices untouched.
     [$b] = portfolioFilings($owner, 'KM Lutong Bahay Carinderia');
     $rows = $b->permitTypes->mapWithKeys(fn ($t) => [$t->code => $t->pivot->status]);

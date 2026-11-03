@@ -806,7 +806,9 @@ export function todayISO(): string {
 /**
  * Required-field check per office form. Returns the labels still missing (or
  * invalid) so the wizard can disable Next and list what is left. Counts and
- * reference numbers stay optional; only the core decisions are required.
+ * reference numbers stay optional — save those a certificate prints and
+ * nothing else can fill, such as the OBO's Building Permit No. — and only
+ * the core decisions are required.
  */
 export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): string[] {
   const has = (key: string) => typeof data[key] === 'string' && (data[key] as string).trim() !== ''
@@ -872,6 +874,26 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('building_units')) missing.push('No. of Units')
     if (!has('total_floor_area_sqm')) missing.push('Total Floor Area')
     // Date of Completion is not asked: the API sets it (see the field).
+    /*
+     * What NBC Form B-13 prints and nothing else answers [client, 3 November
+     * 2026: "kulang ang info … sa OP-2026-000007"]: the building permit the
+     * construction was done under, and the Certificate of Completion handed
+     * in. Left blank, the issued certificate carries the blanks. The FSEC No.
+     * stays optional: the FSIC on the same filing fills that line. The Date
+     * Issued is not the owner's: the OBO records it on its review sheet, and
+     * the API refuses a passed OBO visit until it has.
+     */
+    if (!has('building_permit_no')) missing.push('Building Permit No.')
+    const documents = has('completion_documents')
+      ? (data.completion_documents as string)
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      : []
+    if (documents.length === 0) missing.push('Documents Submitted')
+    if (documents.includes('Others') && !has('completion_other_document')) missing.push('Other Document (specify)')
+    if (!has('completion_submitted_by')) missing.push('Certificate of Completion — Submitted By')
+    if (!has('completion_professional')) missing.push('Profession / Licence')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
@@ -3049,7 +3071,7 @@ function OccupancyFields({
           </div>
           <ApplicationDateField data={data} />
           <div>
-            <FieldLabel>Building Permit No.</FieldLabel>
+            <FieldLabel required>Building Permit No.</FieldLabel>
             <input
               value={get(data, 'building_permit_no')}
               onChange={(e) => set('building_permit_no', e.target.value)}
@@ -3319,9 +3341,9 @@ function OccupancyFields({
         certificate prints these; a blank here is a blank there.
       */}
       <section className="space-y-3">
-        <SectionMarker letter="D" label="Certificate of Completion" />
+        <SectionMarker letter="D" label="Certificate of Completion" required />
         <div>
-          <FieldLabel>Documents Submitted</FieldLabel>
+          <FieldLabel required>Documents Submitted</FieldLabel>
           <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1.5">
             {COMPLETION_DOCUMENTS.map((doc) => {
               const chosen = get(data, 'completion_documents')
@@ -3355,7 +3377,9 @@ function OccupancyFields({
         </div>
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div>
-            <FieldLabel>Other Document (specify)</FieldLabel>
+            <FieldLabel required={get(data, 'completion_documents').includes('Others')}>
+              Other Document (specify)
+            </FieldLabel>
             <input
               value={get(data, 'completion_other_document')}
               onChange={(e) => set('completion_other_document', e.target.value)}
@@ -3365,7 +3389,7 @@ function OccupancyFields({
             <CarriedTag field="completion_other_document" />
           </div>
           <div>
-            <FieldLabel>Certificate of Completion — Submitted By</FieldLabel>
+            <FieldLabel required>Certificate of Completion — Submitted By</FieldLabel>
             <input
               value={get(data, 'completion_submitted_by')}
               onChange={(e) => set('completion_submitted_by', e.target.value)}
@@ -3376,7 +3400,7 @@ function OccupancyFields({
             <CarriedTag field="completion_submitted_by" />
           </div>
           <div>
-            <FieldLabel>Profession / Licence</FieldLabel>
+            <FieldLabel required>Profession / Licence</FieldLabel>
             <input
               value={get(data, 'completion_professional')}
               onChange={(e) => set('completion_professional', e.target.value)}
