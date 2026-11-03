@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { targetsInclude } from '../../lib/returnTargets'
 import { CorrectionModal } from '../../components/CorrectionModal'
 import { DocumentActions } from '../../components/DocumentActions'
@@ -1193,6 +1193,50 @@ function CarriedTag({ field }: { field: string }) {
 
 const AutoTag = () => <span className="font-normal text-ink-muted"> (auto-generated)</span>
 
+/**
+ * An answer the Business Permit application already settled, shown read-only
+ * (client, 3 November 2026: "the user won't be able to change anything that is
+ * answered/finished already in the business permit application … for safe
+ * keeping of data"). The server derives the same value and ignores a posted
+ * one (OfficeFormAnswers::fromBusinessPermit).
+ *
+ * Locked when the sheet arrived with the answer, or when it holds the
+ * business's own value (an amendment's requested one). Left as `children`,
+ * the editable box, only where the business never gave an answer, so a
+ * required box can still be filled.
+ */
+function PermitAnswer({
+  field,
+  label,
+  data,
+  className,
+  children,
+}: {
+  field: string
+  label: string
+  data: OfficeFormData
+  className?: string
+  children: ReactNode
+}) {
+  const value = get(data, field)
+  const [arrived] = useState(() => value.trim() !== '')
+  const carried = useContext(CarriedContext)[field] === 'business'
+  if (!(value.trim() !== '' && (arrived || carried))) return <>{children}</>
+
+  return (
+    <DerivedField
+      className={className}
+      label={
+        <>
+          {label}
+          <FromApplicationTag />
+        </>
+      }
+      value={value}
+    />
+  )
+}
+
 const FromApplicationTag = () => (
   <span className="font-normal text-ink-muted"> (from your application)</span>
 )
@@ -1869,15 +1913,17 @@ function SanitaryFields({
       <section className="space-y-3">
         <SectionMarker letter="B" label="Establishment Profile" />
         <div className={formGridCls}>
-        <div className={formCell.full}>
-          <FieldLabel required>Sanitary Classification</FieldLabel>
-          <ChipRow
-            options={SANITARY_CLASSIFICATIONS}
-            value={get(data, 'sanitary_classification')}
-            onChange={(v) => set('sanitary_classification', v)}
-          />
-          <CarriedTag field="sanitary_classification" />
-        </div>
+        <PermitAnswer field="sanitary_classification" label="Sanitary Classification" data={data} className={formCell.half}>
+          <div className={formCell.full}>
+            <FieldLabel required>Sanitary Classification</FieldLabel>
+            <ChipRow
+              options={SANITARY_CLASSIFICATIONS}
+              value={get(data, 'sanitary_classification')}
+              onChange={(v) => set('sanitary_classification', v)}
+            />
+            <CarriedTag field="sanitary_classification" />
+          </div>
+        </PermitAnswer>
           {/*
             The headcount and the floor area are the Business & Tax Profile's —
             the figures the sanitary inspection fee is bracketed on — so they
@@ -3104,17 +3150,19 @@ function FsicFields({
             separate now — client: "Make them separate" — and each paper asks
             its own boxes.
           */}
-          <label className={formCell.half}>
-            <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
-            <input
-              value={get(data, 'occupancy_type')}
-              onChange={(e) => set('occupancy_type', e.target.value)}
-              readOnly={ro}
-              placeholder="e.g. Mercantile, Assembly, Business"
-              className={inputCls}
-            />
-            <CarriedTag field="occupancy_type" />
-          </label>
+          <PermitAnswer field="occupancy_type" label="Type of Occupancy / Business Nature" data={data} className={formCell.half}>
+            <label className={formCell.half}>
+              <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
+              <input
+                value={get(data, 'occupancy_type')}
+                onChange={(e) => set('occupancy_type', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. Mercantile, Assembly, Business"
+                className={inputCls}
+              />
+              <CarriedTag field="occupancy_type" />
+            </label>
+          </PermitAnswer>
           <label className={formCell.short}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
@@ -3375,43 +3423,49 @@ function OccupancyFields({
             Building Official's books is often named for the structure rather
             than the trade in it, and only the applicant knows which it is.
           */}
-          <label className={formCell.quarter}>
-            <FieldLabel required>Name of Project</FieldLabel>
-            <input
-              value={get(data, 'project_name')}
-              onChange={(e) => set('project_name', e.target.value)}
-              readOnly={ro}
-              className={inputCls}
-            />
-            <CarriedTag field="project_name" />
-          </label>
-          <label className={formCell.half}>
-            <FieldLabel required>Location of Project</FieldLabel>
-            <input
-              value={get(data, 'project_location')}
-              onChange={(e) => set('project_location', e.target.value)}
-              readOnly={ro}
-              placeholder="Lot / Block / Street / Barangay"
-              className={inputCls}
-            />
-            <CarriedTag field="project_location" />
-          </label>
+          <PermitAnswer field="project_name" label="Name of Project" data={data} className={formCell.quarter}>
+            <label className={formCell.quarter}>
+              <FieldLabel required>Name of Project</FieldLabel>
+              <input
+                value={get(data, 'project_name')}
+                onChange={(e) => set('project_name', e.target.value)}
+                readOnly={ro}
+                className={inputCls}
+              />
+              <CarriedTag field="project_name" />
+            </label>
+          </PermitAnswer>
+          <PermitAnswer field="project_location" label="Location of Project" data={data} className={formCell.half}>
+            <label className={formCell.half}>
+              <FieldLabel required>Location of Project</FieldLabel>
+              <input
+                value={get(data, 'project_location')}
+                onChange={(e) => set('project_location', e.target.value)}
+                readOnly={ro}
+                placeholder="Lot / Block / Street / Barangay"
+                className={inputCls}
+              />
+              <CarriedTag field="project_location" />
+            </label>
+          </PermitAnswer>
           {/*
             This sheet OWNS the occupancy type and the storey count — BFP's
             paper prints them too and carries these answers read-only. See the
             note above the component.
           */}
-          <label className={formCell.quarter}>
-            <FieldLabel required>Use / Character of Occupancy</FieldLabel>
-            <input
-              value={get(data, 'occupancy_type')}
-              onChange={(e) => set('occupancy_type', e.target.value)}
-              readOnly={ro}
-              placeholder="e.g. Mercantile, Assembly, Business"
-              className={inputCls}
-            />
-            <CarriedTag field="occupancy_type" />
-          </label>
+          <PermitAnswer field="occupancy_type" label="Use / Character of Occupancy" data={data} className={formCell.quarter}>
+            <label className={formCell.quarter}>
+              <FieldLabel required>Use / Character of Occupancy</FieldLabel>
+              <input
+                value={get(data, 'occupancy_type')}
+                onChange={(e) => set('occupancy_type', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. Mercantile, Assembly, Business"
+                className={inputCls}
+              />
+              <CarriedTag field="occupancy_type" />
+            </label>
+          </PermitAnswer>
           <label className={formCell.short}>
             <FieldLabel required>No. of Storeys</FieldLabel>
             <input
@@ -3445,17 +3499,19 @@ function OccupancyFields({
             so a long note wraps; keep that in mind before giving a cell a
             fixed width again.
           */}
-          <label className={formCell.short}>
-            <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
-            <input
-              inputMode="decimal"
-              value={get(data, 'total_floor_area_sqm')}
-              onChange={(e) => set('total_floor_area_sqm', e.target.value)}
-              readOnly={ro}
-              className={`${inputCls} tnum`}
-            />
-            <CarriedTag field="total_floor_area_sqm" />
-          </label>
+          <PermitAnswer field="total_floor_area_sqm" label="Total Floor Area (sq. m.)" data={data} className={formCell.short}>
+            <label className={formCell.short}>
+              <FieldLabel required>Total Floor Area (sq. m.)</FieldLabel>
+              <input
+                inputMode="decimal"
+                value={get(data, 'total_floor_area_sqm')}
+                onChange={(e) => set('total_floor_area_sqm', e.target.value)}
+                readOnly={ro}
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="total_floor_area_sqm" />
+            </label>
+          </PermitAnswer>
           {/*
             Set by the system, never typed: the day this sheet is submitted,
             and today while it is being filled in (OfficeFormAnswers::derive).

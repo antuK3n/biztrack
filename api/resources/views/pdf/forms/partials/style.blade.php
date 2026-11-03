@@ -31,7 +31,7 @@
     .small { font-size: 7.4px; }
     .tiny { font-size: 6.6px; }
     .big { font-size: 10.5px; }
-    .v { font-family: DejaVu Sans Mono, monospace; font-weight: bold; font-size: 9px; color: #0b1f6b; }
+    .v { font-family: DejaVu Sans Mono, monospace; font-weight: bold; font-size: 9px; color: #000; }
     .line { border-bottom: 1px solid #000; display: inline-block; min-width: 60px; padding: 0 3px; }
     .fill { border-bottom: 1px solid #000; }
     .ck { font-family: DejaVu Sans, sans-serif; font-size: 10.5px; line-height: 1; }

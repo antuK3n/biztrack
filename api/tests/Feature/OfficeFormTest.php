@@ -101,7 +101,9 @@ it('stays the Business Permit certificate even with an Occupancy Permit on the s
         ])
         ->assertOk()
         ->assertJsonPath('data.form_data.certificate_applied_for', 'FSIC for Business Permit (New Business)')
-        ->assertJsonPath('data.form_data.occupancy_type', 'Mercantile')
+        // The Business Permit's line of business, not what was posted: an
+        // answer that application settled is locked (3 November 2026).
+        ->assertJsonPath('data.form_data.occupancy_type', 'Retail sale in non-specialized stores (sari-sari store)')
         ->assertJsonMissingPath('data.form_data.occupancy_shared_source');
 
     $codes = collect(SheetRequirements::for($app->fresh(), 'FSIC'))->pluck('code')->all();

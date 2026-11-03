@@ -143,7 +143,9 @@ it('upserts and reads a per-office application form', function () {
             'form_data' => ['floor_area' => 45, 'occupancy_type' => 'commercial'],
         ])
         ->assertOk()
-        ->assertJsonPath('data.form_data.occupancy_type', 'commercial');
+        // Locked to the line of business (3 November 2026); the rest is kept.
+        ->assertJsonPath('data.form_data.occupancy_type', PsicCode::first()->title)
+        ->assertJsonPath('data.form_data.floor_area', 45);
 
     $this->withHeaders($owner)
         ->getJson("/api/v1/applications/{$appId}/office-forms")

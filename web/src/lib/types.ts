@@ -623,7 +623,7 @@ export interface ApplicationListItem {
    * are clean, so nothing shows until a list runs deep enough to reach one.
    */
   /** `ban`: the Business Account Number (BP-YYYY-NNNN), when loaded. */
-  business: { id: number; name: string; ban?: string | null } | null
+  business: { id: number; name: string; ban?: string | null; queue_facts?: QueueSummary } | null
   /**
    * Who filed it. Null when the account has been removed — `User` soft-deletes
    * and its filings stay, the same way `business` above outlives its register
@@ -988,7 +988,7 @@ export interface Assignment {
      * page rather than the row. It hid because the newest 200 rows are clean;
      * the nulls start around page 5.
      */
-    business: { name: string; ban?: string | null } | null
+    business: { name: string; ban?: string | null; queue_facts?: QueueSummary } | null
     application_type: ApplicationType
     /** See `ApplicationListItem.decided`. */
     decided?: boolean
@@ -2327,6 +2327,17 @@ export interface SuspendedPermits {
   oldest: SuspendedPermit[]
 }
 
+/**
+ * The form's key facts a Manage Applications row shows (QueueSummary.php):
+ * the owner as the form names them, the barangay, the first line of business.
+ */
+export interface QueueSummary {
+  owner: string | null
+  barangay: string | null
+  line: string | null
+  more_lines: number
+}
+
 export interface MapPoint {
   business_id: number
   business: string
@@ -2575,6 +2586,8 @@ export interface CaseloadCase {
   id: number
   application_id: number | null
   tracking_id: string | null
+  /** The Business Account No. the row shows, null until one is issued. */
+  ban?: string | null
   /** Null when the business has been removed and the filing outlived it. */
   business: string | null
   office: { code: string; name: string } | null

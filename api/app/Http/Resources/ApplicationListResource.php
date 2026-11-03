@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\QueueSummary;
 use App\Enums\PermitStatus;
 use App\Models\Permit;
 use Illuminate\Http\Request;
@@ -40,6 +41,8 @@ class ApplicationListResource extends JsonResource
                 'name' => $this->business->name,
                 // The Business Account Number, when the list loaded it.
                 'ban' => $this->business->ban,
+                // Owner, barangay, line of business: the Manage Applications row's summary.
+                'queue_facts' => QueueSummary::summary($this->business),
             ] : null,
             /*
              * Who filed it. The officer request composer has to name the person

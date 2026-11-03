@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\QueueSummary;
 use App\Enums\ClearanceStatus;
 use App\Models\ApplicationReturnNote;
 use App\Support\ApplicationVisibility;
@@ -139,6 +140,8 @@ class AssignmentResource extends JsonResource
                     'name' => $this->application->business->name,
                     // Manage Applications names a row by this, not the tracking ID (20 October 2026).
                     'ban' => $this->application->business->ban,
+                    // Owner, barangay, line of business: the row's summary.
+                    'queue_facts' => QueueSummary::summary($this->application->business),
                 ] : null,
                 'application_type' => $this->application->application_type?->value,
                 'status' => $this->application->status?->value,

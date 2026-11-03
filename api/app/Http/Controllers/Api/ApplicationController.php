@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\QueueSummary;
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
@@ -122,7 +123,9 @@ class ApplicationController extends Controller
         // composer cannot name who it is writing to (item 89).
         $query = Application::with([
             // `ban` for the register's Business Account No. column.
-            'business:id,name,ban', 'applicant:id,name', 'permitTypes:id,code,name',
+            'business:id,name,ban,president_officer_name', 'applicant:id,name', 'permitTypes:id,code,name',
+            // The Manage Applications row's summary from the form (QueueSummary).
+            ...QueueSummary::EAGER,
             // The issued certificates, for the Track row to say "Suspended" on
             // a Mayor's Permit whose pivot still reads approved (5 October 2026).
             'permits:id,application_id,permit_type_id,status,suspended_for_permit_type_id',

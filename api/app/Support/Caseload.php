@@ -163,7 +163,7 @@ class Caseload
                 // column the model reads it as null and every finished filing
                 // comes back as one still gathering.
                 'application:id,tracking_id,business_id,status,decided_at',
-                'application.business:id,name',
+                'application.business:id,name,ban',
                 'application.permitTypes:id,code,name,issuing_department_id',
             ])
             ->orderBy('assigned_at')
@@ -175,6 +175,8 @@ class Caseload
                 'id' => $a->id,
                 'application_id' => $a->application_id,
                 'tracking_id' => $a->application?->tracking_id,
+                // The Business Account No. the screens lead with (3 November 2026).
+                'ban' => $a->application?->business?->ban,
                 // Null when the business has been removed from the register;
                 // the filing stays and the row still has to render.
                 'business' => $a->application?->business?->name,
@@ -277,7 +279,7 @@ class Caseload
                 // column the model reads it as null and every finished filing
                 // comes back as one still gathering.
                 'application:id,tracking_id,business_id,status,decided_at',
-                'application.business:id,name',
+                'application.business:id,name,ban',
             ])
             ->get()
             ->map(fn (Inspection $i) => [
@@ -285,6 +287,7 @@ class Caseload
                 'id' => $i->id,
                 'application_id' => $i->application_id,
                 'tracking_id' => $i->application?->tracking_id,
+                'ban' => $i->application?->business?->ban,
                 'business' => $i->application?->business?->name,
                 'office' => $i->department ? ['code' => $i->department->code, 'name' => $i->department->name] : null,
                 // A site visit is about the premises rather than one permit.
