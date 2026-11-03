@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
+use App\Support\PaymentAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Paginated audit trail (audit.view). Read-only.
@@ -33,6 +35,8 @@ class AuditLogController extends Controller
             'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
             // Only the rows that kept a removed record (Audit Log 1).
             'removed' => ['sometimes', 'boolean'],
+            // A named family of actions; `payments` is the only one so far.
+            'group' => ['sometimes', 'nullable', Rule::in(['payments'])],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -87,8 +91,18 @@ class AuditLogController extends Controller
         if ($request->boolean('removed')) {
             $query->whereNotNull('snapshot');
         }
+        /*
+         * "Payments": every row about a payment, a receipt or the payment
+         * switches, by its exact action key (PaymentAudit::ACTIONS says which
+         * and why). Asked of the server, like the other filters, so it pages
+         * and sorts as they do instead of sifting one page in the browser.
+         */
+        if ($request->query('group') === 'payments') {
+            $query->whereIn('action', PaymentAudit::ACTIONS);
+        }
 
         $logs = $query->paginate($this->perPage($request, default: 25));
+        $receipts = PaymentAudit::receipts($logs->getCollection());
 
         $logs->getCollection()->transform(fn (AuditLog $log) => [
             'id' => $log->id,
@@ -98,6 +112,13 @@ class AuditLogController extends Controller
             'auditable_id' => $log->auditable_id,
             'changes' => $log->changes,
             'snapshot' => $log->snapshot,
+            /*
+             * The receipt photos a payment row is about, for Details to show:
+             * id, type and name, never the stored path. Empty on every other
+             * row. The screen fetches each picture only once Details is open,
+             * because every fetch writes a `file.downloaded` row of its own.
+             */
+            'receipts' => $receipts[$log->id] ?? [],
             'created_at' => optional($log->created_at)->toISOString(),
         ]);
 

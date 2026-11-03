@@ -2711,7 +2711,23 @@ export interface AuditLog {
    * every row that removed nothing.
    */
   snapshot: Record<string, unknown> | null
+  /**
+   * The receipt files a payment row is about (App\Support\PaymentAudit):
+   * a counter payment's proofs, or the proof a submitted or rejected row
+   * names. Empty on every other row, and on a receipt whose file has gone.
+   * Never the file itself: Details fetches it through `paymentProofs.file`.
+   * Optional because a row stubbed in a browser test may leave it out.
+   */
+  receipts?: AuditReceipt[]
   created_at: string
+}
+
+/** One receipt file behind an audit row. */
+export interface AuditReceipt {
+  /** The PaymentProof's id; `GET /payment-proofs/{id}/file` serves it. */
+  id: number
+  mime_type: string | null
+  file_name: string | null
 }
 
 /* ── Importing the old register (Ken's checklist, 27 Sept 2026) ───────── */

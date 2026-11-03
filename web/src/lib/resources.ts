@@ -207,8 +207,22 @@ async function downloadBlob(url: string, filename: string): Promise<void> {
  * opened synchronously from the click handler so popup blockers stay quiet.
  */
 async function viewBlob(url: string, target?: Window | null): Promise<void> {
+  showBlob(await fetchBlob(url), target)
+}
+
+/** An authenticated file as a Blob, for a screen that draws it itself. */
+async function fetchBlob(url: string): Promise<Blob> {
   const res = await api.get(url, { responseType: 'blob' }).catch(rethrowBlobError)
-  const objectUrl = URL.createObjectURL(res.data as Blob)
+  return res.data as Blob
+}
+
+/**
+ * A file already in hand, opened in a tab as `viewBlob` opens one. For a
+ * screen that has fetched it once and must not fetch it again: every fetch of
+ * a file is a `file.downloaded` row on the audit trail (App\Support\DownloadLog).
+ */
+export function showBlob(blob: Blob, target?: Window | null): void {
+  const objectUrl = URL.createObjectURL(blob)
   if (target && !target.closed) target.location.replace(objectUrl)
   else window.open(objectUrl, '_blank', 'noopener')
   // The tab needs the URL to survive the handoff; reclaim it a minute later.
@@ -1093,6 +1107,8 @@ export const paymentProofs = {
     unwrap<PaymentProof>(api.post(`/payment-proofs/${id}/reject`, { reason })),
   /** The photo of the receipt, opened in a tab (pass one opened inside the click). */
   view: (id: number, target?: Window | null) => viewBlob(`/payment-proofs/${id}/file`, target),
+  /** The same photo as a Blob, for Audit Logs to draw inline; open it with `showBlob`. */
+  file: (id: number) => fetchBlob(`/payment-proofs/${id}/file`),
 }
 
 /* ── OR Records (thesis panel, matrix item 5) ─────────────────────────────── */
@@ -1823,6 +1839,8 @@ export interface AuditLogFilters extends PageParams {
    * Laravel's `boolean` rule refuses.
    */
   removed?: 1
+  /** A named family of actions: every payment, receipt and payment-switch row. */
+  group?: 'payments'
 }
 
 /**

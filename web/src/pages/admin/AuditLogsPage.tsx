@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { admin } from '../../lib/resources'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { admin, paymentProofs, showBlob } from '../../lib/resources'
 import type { AuditLogFilters } from '../../lib/resources'
+import { toApiError } from '../../lib/api'
 import { useAsync } from '../../lib/useAsync'
 import { formatDateTime } from '../../lib/format'
-import type { AuditLog } from '../../lib/types'
+import type { AuditLog, AuditReceipt } from '../../lib/types'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
@@ -95,10 +96,123 @@ function SnapshotView({ snapshot }: { snapshot: Record<string, unknown> }) {
   )
 }
 
+/** JPG and PNG are drawn; anything else (a PDF) is named, with View. */
+function isPicture(receipt: AuditReceipt): boolean {
+  return receipt.mime_type?.startsWith('image/') ?? false
+}
+
+/*
+ * One receipt under a payment row's Details: the picture, or a PDF's name,
+ * and View to open it full size in a tab, as OR Records does.
+ *
+ * Fetched here and nowhere else, and this mounts only while Details is open.
+ * Every fetch of a receipt writes a `file.downloaded` row (App\Support\
+ * DownloadLog), so a thumbnail in the collapsed list would write one row per
+ * payment every time the page loaded and bury the trail in its own reads.
+ * One fetch per opening, kept while it stays open: View opens the copy in
+ * hand rather than fetching again. A PDF has no preview, so it is fetched on
+ * its first View and kept the same way.
+ *
+ * The request lives in a ref so React's development StrictMode, which runs
+ * the effect twice, reuses it instead of fetching — and logging — twice.
+ *
+ * A file that cannot be had (gone from the disk, or refused) shows nothing:
+ * the row's details above still say what happened.
+ */
+function Receipt({ receipt }: { receipt: AuditReceipt }) {
+  const picture = isPicture(receipt)
+  const file = useRef<Promise<Blob> | null>(null)
+  const [src, setSrc] = useState<string | null>(null)
+  const [missing, setMissing] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    file.current ??= paymentProofs.file(receipt.id).catch((err: unknown) => {
+      // Not kept: a View pressed again asks again.
+      file.current = null
+      throw err
+    })
+    return file.current
+  }, [receipt.id])
+
+  useEffect(() => {
+    if (!picture) return
+    let live = true
+    let url: string | null = null
+    load().then(
+      (blob) => {
+        if (!live) return
+        url = URL.createObjectURL(blob)
+        setSrc(url)
+      },
+      () => {
+        if (live) setMissing(true)
+      },
+    )
+    return () => {
+      live = false
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [picture, load])
+
+  // The tab is opened inside the click, before any await, or the popup blocker takes it.
+  async function view() {
+    if (opening) return
+    const tab = window.open('', '_blank')
+    setOpening(true)
+    setError(null)
+    try {
+      showBlob(await load(), tab)
+    } catch (err) {
+      tab?.close()
+      setError(toApiError(err).message)
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  if (missing) return null
+
+  return (
+    <li className="min-w-0 space-y-1.5">
+      {picture &&
+        (src ? (
+          <img
+            src={src}
+            alt="Photo of the receipt"
+            className="h-60 max-w-full rounded-md border border-line bg-white object-contain"
+          />
+        ) : (
+          <div aria-hidden="true" className="h-60 w-44 animate-pulse rounded-md border border-line bg-canvas" />
+        ))}
+      <p className="flex min-w-0 flex-wrap items-center gap-x-3 text-sm">
+        {receipt.file_name && <span className="truncate text-ink-secondary">{receipt.file_name}</span>}
+        <button
+          type="button"
+          onClick={() => void view()}
+          aria-disabled={opening || undefined}
+          // Two receipts can be open at once; each View is named by its file (AGENTS.md §6.2).
+          aria-label={receipt.file_name ? `View ${receipt.file_name}` : undefined}
+          className="font-semibold text-royal underline underline-offset-2 hover:no-underline aria-disabled:opacity-60"
+        >
+          View
+        </button>
+      </p>
+      {error && (
+        <p role="alert" className="text-xs font-medium text-s-red">
+          {error}
+        </p>
+      )}
+    </li>
+  )
+}
+
 function LogRow({ log }: { log: AuditLog }) {
   const [open, setOpen] = useState(false)
   const removed = log.snapshot !== null && typeof log.snapshot === 'object'
-  const canExpand = hasChanges(log.changes) || removed
+  const receipts = log.receipts ?? []
+  const canExpand = hasChanges(log.changes) || removed || receipts.length > 0
   /*
    * Some rows are about nothing in the register — a KwikPay callback refused
    * for its signature, a gateway switched — and carry no subject. They read
@@ -154,6 +268,14 @@ function LogRow({ log }: { log: AuditLog }) {
                 {JSON.stringify(log.changes, null, 2)}
               </pre>
             )}
+            {/* Mounted only while open, so the pictures are fetched only then (see Receipt). */}
+            {receipts.length > 0 && (
+              <ul className="flex flex-wrap items-start gap-4">
+                {receipts.map((receipt) => (
+                  <Receipt key={receipt.id} receipt={receipt} />
+                ))}
+              </ul>
+            )}
             {removed && <SnapshotView snapshot={log.snapshot as Record<string, unknown>} />}
           </td>
         </tr>
@@ -162,11 +284,18 @@ function LogRow({ log }: { log: AuditLog }) {
   )
 }
 
-type Scope = 'all' | 'removed' | 'downloads'
+type Scope = 'all' | 'payments' | 'removed' | 'downloads'
 
-/** What each filter asks the API for. */
+/*
+ * What each filter asks the API for.
+ *
+ * Payments is a named group the server holds (App\Support\PaymentAudit::
+ * ACTIONS) rather than a list kept here, so it pages and sorts like the rest
+ * and a payment action added later joins it without a change to this screen.
+ */
 const SCOPE_FILTERS: Record<Scope, AuditLogFilters> = {
   all: {},
+  payments: { group: 'payments' },
   removed: { removed: 1 },
   downloads: { action: DOWNLOADED },
 }
@@ -190,6 +319,7 @@ export function AuditLogsPage() {
         <FilterPills<Scope>
           options={[
             { value: 'all', label: 'All actions' },
+            { value: 'payments', label: 'Payments' },
             { value: 'removed', label: 'Removed' },
             { value: 'downloads', label: actionLabel(DOWNLOADED) },
           ]}
