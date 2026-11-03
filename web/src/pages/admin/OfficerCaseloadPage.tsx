@@ -59,7 +59,7 @@ const SORTS = [
   { value: 'oldest', label: 'Longest held first' },
   { value: 'newest', label: 'Most recently assigned' },
   { value: 'business', label: 'Business (A–Z)' },
-  { value: 'tracking', label: 'Tracking ID (A–Z)' },
+  { value: 'tracking', label: 'Business Account No. (A–Z)' },
 ] as const
 
 type SortKey = (typeof SORTS)[number]['value']
@@ -216,7 +216,7 @@ export function OfficerCaseloadPage() {
 
     return (rows: CaseloadCase[]) => {
       const kept = rows.filter((row) => {
-        if (term && !`${row.business ?? ''} ${row.tracking_id ?? ''}`.toLowerCase().includes(term)) {
+        if (term && !`${row.business ?? ''} ${row.ban ?? ''} ${row.tracking_id ?? ''}`.toLowerCase().includes(term)) {
           return false
         }
         if (status && !(row.status_label ?? '').toLowerCase().includes(status)) return false
@@ -232,7 +232,7 @@ export function OfficerCaseloadPage() {
        */
       return [...kept].sort((a, b) => {
         if (sort === 'business') return (a.business ?? '').localeCompare(b.business ?? '')
-        if (sort === 'tracking') return (a.tracking_id ?? '').localeCompare(b.tracking_id ?? '')
+        if (sort === 'tracking') return (a.ban ?? a.tracking_id ?? '').localeCompare(b.ban ?? b.tracking_id ?? '')
 
         /*
          * By date, with the undated last WHICHEVER way the list points. A row
@@ -420,7 +420,7 @@ export function OfficerCaseloadPage() {
                   </label>
                 </th>
                 <th scope="col" className="px-5 py-3">Business</th>
-                <th scope="col" className="px-5 py-3">Tracking ID</th>
+                <th scope="col" className="px-5 py-3">Business Account No.</th>
                 <th scope="col" className="px-5 py-3">Office</th>
                 <th scope="col" className="px-5 py-3">Permit</th>
                 <th scope="col" className="px-5 py-3">{side === 'held' ? 'Assigned' : 'Waiting since'}</th>
@@ -464,7 +464,8 @@ export function OfficerCaseloadPage() {
                       </label>
                     </td>
                     <td className="px-5 py-3.5 font-semibold text-ink">{nameOf(row)}</td>
-                    <td className="tnum px-5 py-3.5 text-ink-secondary">{row.tracking_id ?? '—'}</td>
+                    {/* The BAN, as everywhere else an office reads a filing (3 November 2026). */}
+                    <td className="tnum px-5 py-3.5 text-ink-secondary">{row.ban ?? row.tracking_id ?? '—'}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">{officeOf(row)}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">{row.permit ?? '—'}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">
@@ -961,7 +962,7 @@ export function OfficerCaseloadPage() {
                     .map((row) => (
                       <li key={key(row)} className="text-sm text-ink">
                         <span className="font-semibold">{nameOf(row)}</span>
-                        <span className="tnum text-ink-muted"> · {row.tracking_id ?? '—'}</span>
+                        <span className="tnum text-ink-muted"> · {row.ban ?? row.tracking_id ?? '—'}</span>
                       </li>
                     ))}
                   {picked[confirming].size > 8 && (

@@ -45,6 +45,9 @@ class PermitController extends Controller
         'suspendedFor.department:id,name',
     ];
 
+    /** The most rows the staff register returns in one page: its "All". */
+    private const REGISTER_MAX_PER_PAGE = 5000;
+
     public function __construct(private WorkflowService $workflow) {}
 
     /**
@@ -442,7 +445,14 @@ class PermitController extends Controller
             $query->orderByRaw('issued_at desc nulls last');
         }
 
-        $permits = $query->orderByDesc('id')->paginate($this->perPage($request));
+        /*
+         * The staff register may ask for everything at once: its page-size
+         * picker has an "All" (3 November 2026: "Put an 'All' too because this
+         * may reach 1000+"). Other lists keep the usual 200 cap.
+         */
+        $permits = $query->orderByDesc('id')->paginate(
+            $this->perPage($request, max: $detail ? self::REGISTER_MAX_PER_PAGE : null)
+        );
 
         $resource = $detail ? PermitRegisterResource::class : PermitResource::class;
 

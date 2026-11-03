@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
@@ -9,7 +10,7 @@ import { ChangeStatusDialog, StatusHistoryDialog } from './PermitStatusDialogs'
 import { STATUS_TONES } from './permitStatusTones'
 import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, ProtoCard, SectionTitle, SortFilter, StatusChip } from '../../components/ui/Proto'
+import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
 import { DocumentActions } from '../../components/DocumentActions'
 import { useAuth } from '../../stores/auth'
@@ -102,8 +103,30 @@ import {
  *                   Permit (checklist item 16) — BPLO and the super admin.
  */
 
-/** Rows per request. Matches Records and Owner Status. */
-const PAGE_SIZE = 25
+/**
+ * Rows per page, the reader's choice (3 November 2026: "by default … only X
+ * businesses shown then put a button … to select how many"). Ten by default:
+ * ten rows fit one laptop screen, so the table's foot and its pager are in view
+ * without a long scroll. The choice is kept in this browser. 0 is "All"
+ * ("this may reach 1000+"): the server's register cap, ALL_ROWS.
+ */
+const PAGE_SIZES = [10, 25, 50, 100, 0] as const
+const ALL_ROWS = 5000
+const DEFAULT_PAGE_SIZE = 10
+
+/** The pinned Actions column's width, and the BAN's offset beside it. */
+const ACTIONS_CELL = 'w-[8.5rem] min-w-[8.5rem] max-w-[8.5rem]'
+const AFTER_ACTIONS = 'left-[8.5rem]'
+const PAGE_SIZE_KEY = 'biztrack.permits.pageSize'
+
+function storedPageSize(): number {
+  try {
+    const n = Number(window.localStorage.getItem(PAGE_SIZE_KEY))
+    return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE
+  } catch {
+    return DEFAULT_PAGE_SIZE
+  }
+}
 
 /** How long to wait before a keystroke becomes a request. Same as Records. */
 const SEARCH_DEBOUNCE_MS = 300
@@ -424,6 +447,56 @@ function OfficeTabs({
   )
 }
 
+/**
+ * The table's sideways scrollbar, pinned to the bottom of the window while the
+ * table is on screen (3 November 2026: "I don't have to scroll to the very
+ * bottom before I am able to access the scroll bar for the table"). It is a
+ * second scroller as wide as the table, kept in step with it both ways; once
+ * the table's own bottom comes into view it settles there, under the last
+ * row. Nothing is drawn when the table fits.
+ */
+function FloatingScrollbar({ target }: { target: RefObject<HTMLDivElement | null> }) {
+  const bar = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ scroll: 0, client: 0 })
+
+  useEffect(() => {
+    const el = target.current
+    const b = bar.current
+    if (!el || !b) return
+    const measure = () => setSize({ scroll: el.scrollWidth, client: el.clientWidth })
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    if (el.firstElementChild) observer.observe(el.firstElementChild)
+    // Each side copies the other only when they differ, so the echo stops.
+    const fromTable = () => {
+      if (b.scrollLeft !== el.scrollLeft) b.scrollLeft = el.scrollLeft
+    }
+    const fromBar = () => {
+      if (el.scrollLeft !== b.scrollLeft) el.scrollLeft = b.scrollLeft
+    }
+    el.addEventListener('scroll', fromTable, { passive: true })
+    b.addEventListener('scroll', fromBar, { passive: true })
+    return () => {
+      observer.disconnect()
+      el.removeEventListener('scroll', fromTable)
+      b.removeEventListener('scroll', fromBar)
+    }
+  }, [target])
+
+  return (
+    <div
+      ref={bar}
+      aria-hidden="true"
+      className={`sticky bottom-0 z-30 overflow-x-auto overflow-y-hidden border-t border-line bg-white ${
+        size.scroll > size.client + 1 ? '' : 'hidden'
+      }`}
+    >
+      <div style={{ width: size.scroll, height: 1 }} />
+    </div>
+  )
+}
+
 export function PermitsPage({
   embedded = false,
 }: {
@@ -576,6 +649,17 @@ export function PermitsPage({
   const [changing, setChanging] = useState<PermitRegisterRow | null>(null)
   const [historyOf, setHistoryOf] = useState<PermitRegisterRow | null>(null)
 
+  const [pageSize, setPageSize] = useState(storedPageSize)
+  function selectPageSize(next: number) {
+    setPageSize(next)
+    setPage(1)
+    try {
+      window.localStorage.setItem(PAGE_SIZE_KEY, String(next))
+    } catch {
+      // Private window or blocked storage: the choice lasts this visit only.
+    }
+  }
+
   const { data, loading, error, reload } = useAsync(
     () =>
       permits.register({
@@ -589,9 +673,9 @@ export function PermitsPage({
         sort: sort?.key,
         dir: sort?.dir,
         page,
-        per_page: PAGE_SIZE,
+        per_page: pageSize === 0 ? ALL_ROWS : pageSize,
       }),
-    [query, status, choice, retired, sort?.key, sort?.dir, page],
+    [query, status, choice, retired, sort?.key, sort?.dir, page, pageSize],
   )
 
   // Let the admin finish typing before asking the server.
@@ -769,7 +853,7 @@ export function PermitsPage({
     setPage(1)
   }
 
-  const sortedColumn = sort ? columns.find((c) => c.sort === sort.key)?.label : null
+  const tableScroller = useRef<HTMLDivElement>(null)
 
   /* The table's controls; the map carries its own, so none of these would act on it. */
   const controls =
@@ -985,7 +1069,10 @@ export function PermitsPage({
           }
         />
       ) : (
-        <ProtoCard className="overflow-hidden rounded-xl">
+        // overflow-clip, not -hidden: a hidden overflow is a scroll box of
+        // its own, and the pinned scrollbar below would stick to the card
+        // instead of to the window.
+        <ProtoCard className="overflow-clip rounded-xl">
           {/*
             The table is wider than the screen by design, so the scroller is
             focusable and labelled: a region that scrolls but cannot be reached
@@ -993,21 +1080,31 @@ export function PermitsPage({
             not use a mouse. `tabIndex={0}` on a scroll container is the one
             case where that is correct rather than a stray tab stop.
 
-            Held to the window's height (21 October 2026: "I have to scroll all
-            the way to the bottom just to access the scroll bar for the
-            table"). The rows scroll inside it, so the sideways scrollbar sits
-            on screen, and the headings and the first column stay put while
-            either way is scrolled.
+            Its own scrollbar is hidden: FloatingScrollbar below stands in
+            for it, pinned to the bottom of the window. The first column stays
+            put while the rest scrolls sideways.
           */}
           <div
-            className="max-h-[calc(100dvh-7rem)] overflow-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
+            ref={tableScroller}
+            style={{ scrollbarWidth: 'none' }}
+            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
             tabIndex={0}
             role="region"
             aria-label={`Issued permits for ${officeLabel}, scrolls sideways`}
           >
             <table className={`${permitOnly ? "w-full" : "w-max"} text-left text-sm`}>
-              <thead className="sticky top-0 z-20">
+              <thead>
                 <tr className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                  {/*
+                    Actions first, and pinned with the BAN beside it, so both
+                    stay put while the rest scrolls sideways (3 November 2026:
+                    "put the actions column in the first column … where it does
+                    not move when the scroll bar is being moved"). A fixed width,
+                    because the BAN's pinned offset is that width.
+                  */}
+                  <th scope="col" className={`${ACTIONS_CELL} sticky left-0 z-10 whitespace-nowrap bg-[#e8edf5] px-2.5 py-2`}>
+                    Actions
+                  </th>
                   {columns.map((column) => {
                     const active = sort !== null && column.sort === sort.key
                     return (
@@ -1032,8 +1129,8 @@ export function PermitsPage({
                         className={[
                           // Solid, not the canvas at half strength: rows scroll under it.
                           'bg-[#e8edf5]',
-                          column.key === columns[0]?.key ? 'sticky left-0 z-10' : '',
-                          permitOnly ? 'px-4 py-3 align-bottom' : 'whitespace-nowrap px-4 py-3',
+                          column.key === columns[0]?.key ? `sticky ${AFTER_ACTIONS} z-10 border-r border-line` : '',
+                          permitOnly ? 'px-3 py-2 align-bottom' : 'whitespace-nowrap px-3 py-2',
                         ].join(' ')}
                       >
                         {column.sort === undefined ? (
@@ -1090,22 +1187,48 @@ export function PermitsPage({
                     which named the buttons rather than the thing they open.
                   */}
                   {!permitOnly && (
-                    <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3">
+                    <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-3 py-2">
                       Requirements Submitted
                     </th>
                   )}
-                  <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3 text-right">
+                  <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-3 py-2 text-right">
                     Permit
-                  </th>
-                  {/* Last, after the certificate itself [client, 5 October 2026]. */}
-                  <th scope="col" className="whitespace-nowrap bg-[#e8edf5] px-4 py-3 text-right">
-                    Actions
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((permit) => (
                   <tr key={permit.id} className="border-t border-line align-top">
+                    {/*
+                      ── Actions: Change status and Status history ──────────
+
+                      Change status for the office that issued this permit, and
+                      nobody else; Status history for every reader of the row.
+                      The permit number rides in each accessible name, as on View.
+                      Stacked, to keep the pinned column narrow.
+                    */}
+                    <td className={`${ACTIONS_CELL} sticky left-0 z-[1] bg-white px-2.5 py-2`}>
+                      <div className="flex flex-col gap-1.5">
+                        {mayChangeStatus(permit, canChange, ownOffice, isSuperAdmin) && (
+                          <button
+                            type="button"
+                            onClick={() => setChanging(permit)}
+                            aria-label={`Change status of ${permit.permit_number}`}
+                            className="whitespace-nowrap rounded-full bg-royal px-3 py-1 text-xs font-semibold text-white hover:bg-royal/90"
+                          >
+                            Change status
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setHistoryOf(permit)}
+                          aria-label={`Status history of ${permit.permit_number}`}
+                          className="whitespace-nowrap rounded-full border border-line px-3 py-1 text-xs font-semibold text-ink-secondary hover:border-ink hover:text-ink"
+                        >
+                          Status history
+                        </button>
+                      </div>
+                    </td>
                     {columns.map((column) => {
                       const text = cellFor(permit, column)
                       return (
@@ -1114,11 +1237,11 @@ export function PermitsPage({
                           className={[
                             // The permit-only view fits the card: names may wrap there rather than
                             // push the certificate column off the edge.
-                            permitOnly && (column.key === 'business' || column.key === 'owner_name') ? 'px-4 py-3.5' : 'whitespace-nowrap px-4 py-3.5',
+                            permitOnly && (column.key === 'business' || column.key === 'owner_name') ? 'px-3 py-2' : 'whitespace-nowrap px-3 py-2',
                             column.tnum ? 'tnum' : '',
                             // The lead identifier carries the row, so it is
                             // the one drawn in full ink.
-                            column.key === columns[0]?.key ? 'sticky left-0 z-[1] bg-white font-bold text-ink' : 'text-ink-secondary',
+                            column.key === columns[0]?.key ? `sticky ${AFTER_ACTIONS} z-[1] border-r border-line bg-white font-bold text-ink` : 'text-ink-secondary',
                           ]
                             .filter(Boolean)
                             .join(' ')}
@@ -1156,11 +1279,11 @@ export function PermitsPage({
                       shows it.
                     */}
                     {!permitOnly && (
-                      <td className="px-4 py-3.5">
+                      <td className="px-3 py-2">
                         <UploadsCell permit={permit} />
                       </td>
                     )}
-                    <td className="whitespace-nowrap px-4 py-3.5 text-right">
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
                       <button
                         type="button"
                         onClick={() => view(permit)}
@@ -1172,45 +1295,17 @@ export function PermitsPage({
                          */
                         aria-label={`View certificate ${permit.permit_number}`}
                         aria-disabled={viewing === permit.id || undefined}
-                        className="rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
+                        className="rounded-full border border-royal px-3 py-1 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
                       >
                         {viewing === permit.id ? 'Opening…' : 'View'}
                       </button>
-                    </td>
-                    {/*
-                      ── Actions: Change status and Status history ──────────
-
-                      Change status for the office that issued this permit, and
-                      nobody else; Status history for every reader of the row.
-                      The permit number rides in each accessible name, as on View.
-                    */}
-                    <td className="whitespace-nowrap px-4 py-3.5 text-right">
-                      <div className="inline-flex gap-2">
-                        {mayChangeStatus(permit, canChange, ownOffice, isSuperAdmin) && (
-                          <button
-                            type="button"
-                            onClick={() => setChanging(permit)}
-                            aria-label={`Change status of ${permit.permit_number}`}
-                            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal/90"
-                          >
-                            Change status
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setHistoryOf(permit)}
-                          aria-label={`Status history of ${permit.permit_number}`}
-                          className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:border-ink hover:text-ink"
-                        >
-                          Status history
-                        </button>
-                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <FloatingScrollbar target={tableScroller} />
 
           {changing !== null && (
             <ChangeStatusDialog permit={changing} onClose={() => setChanging(null)} onChanged={reload} />
@@ -1233,25 +1328,24 @@ export function PermitsPage({
                 {retired === 'only' && ' held by retired businesses'}
                 {query && ' matching your search'}
               </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                {/*
-                  The sort's REACH, said plainly. It used to run in the browser
-                  over the page in hand and the footer had to admit it; the
-                  server orders the whole register now, and saying so is what
-                  tells a reader that page 2 continues the order rather than
-                  restarting it.
-                */}
-                {sortedColumn
-                  ? `Sorted by ${sortedColumn}, ${sort?.dir === 'asc' ? 'ascending' : 'descending'}, across the whole register.`
-                  : 'Ordered by issue date, newest first.'}
-                {office === '' &&
-                  ' Every office’s form is shown; pick an office above to see only its own columns.'}
-                {retired === 'hide' && ' Retired businesses are hidden.'}
-                {locked !== null &&
-                  ` These are ${officeOf(locked)}’s certificates — the ones filed with this office.`}
-              </p>
+              {/* The line under the count (order, retired hidden) went on 3 November 2026 at the client's word. */}
             </div>
             <div className="flex items-center gap-1.5">
+              <label htmlFor="permits-page-size" className="text-xs text-ink-muted">
+                Show
+              </label>
+              <select
+                id="permits-page-size"
+                value={pageSize}
+                onChange={(e) => selectPageSize(Number(e.target.value))}
+                className="mr-3 rounded-md border border-line bg-white px-2 py-1 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+              >
+                {PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n === 0 ? 'All' : n}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 aria-label="Previous page"

@@ -225,6 +225,20 @@ final class OfficeFormAnswers
             };
             $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
             $derived['total_floor_area_sqm'] = is_numeric($floorArea) ? (string) (0 + $floorArea) : '';
+
+            /*
+             * The classification, from the line of business, locked like the
+             * rest (client, 3 November 2026: nothing the Business Permit
+             * application settled may be changed on an office's sheet). It was
+             * a suggestion the applicant could overwrite (SanitaryPrefill).
+             */
+            $categories = array_values(array_filter(array_map(
+                fn ($line) => is_array($line) ? (string) ($line['category'] ?? '') : '',
+                (array) ($application->fee_profile['lines'] ?? []),
+            )));
+            if ($categories !== []) {
+                $derived['sanitary_classification'] = SanitaryPrefill::classify($categories);
+            }
         }
         if ($permitTypeCode === 'CEC') {
             $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';
@@ -321,6 +335,8 @@ final class OfficeFormAnswers
             $derived['certificate_applied_for'] = $existingBusiness
                 ? 'FSIC for Business Permit (Renewal of Business)'
                 : 'FSIC for Business Permit (New Business)';
+
+            $derived += self::fromBusinessPermit($application, ['occupancy_type']);
         }
         // The MARKET branch was here. Market Clearance and the CMO Market Office
         // were removed from the system on 6 September 2026 — see the note in
@@ -350,9 +366,62 @@ final class OfficeFormAnswers
             $derived['completion_date'] = ($submitted !== null
                 ? Carbon::parse($submitted)
                 : now())->toDateString();
+
+            $derived += self::fromBusinessPermit(
+                $application,
+                ['project_name', 'occupancy_type', 'project_location', 'total_floor_area_sqm'],
+            );
         }
 
         return $derived + $formData;
+    }
+
+    /**
+     * ── Answers the Business Permit application already settled ──────────
+     *
+     * Client, 3 November 2026: "the user won't be able to change anything that
+     * is answered/finished already in the business permit application … for
+     * safe keeping of data". These boxes were seeded from the business and
+     * left editable, so BFP's "Type of Occupancy / Business Nature" could
+     * read differently from the line of business BPLO approved. They are
+     * derived now, and derived answers always win over what is posted.
+     *
+     * An amendment is left alone: its new name, address or line is still
+     * under review and not on the business record yet, so the record would
+     * put the OLD answer back. The sheet shows those read-only from the
+     * requested values instead (OfficeFormStep).
+     *
+     * @param  list<string>  $keys
+     * @return array<string, string>
+     */
+    private static function fromBusinessPermit(Application $application, array $keys): array
+    {
+        if ($application->application_type === ApplicationType::Amendment) {
+            return [];
+        }
+        $application->loadMissing(['business.lines.psicCode', 'business.address.barangay']);
+        $business = $application->business;
+        if ($business === null) {
+            return [];
+        }
+
+        $line = $business->lines->first();
+        $trade = trim((string) ($line?->line_of_business ?: $line?->psicCode?->title ?? ''));
+        $address = $business->address;
+        $street = trim(trim((string) ($address?->house_bldg_no ?? '')).' '.trim((string) ($address?->street ?: $address?->line1 ?? '')));
+        $location = implode(', ', array_filter([$street, (string) ($address?->barangay?->name ?? '')]));
+        $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
+
+        $values = [
+            'project_name' => (string) $business->name,
+            'occupancy_type' => $trade,
+            'project_location' => $location,
+            'total_floor_area_sqm' => is_numeric($floorArea) ? (string) (0 + $floorArea) : '',
+        ];
+
+        // Blank stays out, so a box the business never answered is not
+        // locked empty: the applicant can still fill it.
+        return array_filter(array_intersect_key($values, array_flip($keys)), fn (string $v) => $v !== '');
     }
 
     /**

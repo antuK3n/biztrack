@@ -78,7 +78,7 @@ class OicAssignmentController extends Controller
                 'officer:id,name,email,department_id',
                 // `decided_at` for `Application::statusLabel()` in row().
                 'application:id,tracking_id,business_id,application_type,status,decided_at',
-                'application.business:id,name',
+                'application.business:id,name,ban',
             ])
             // A filing removed from the register takes its assignments with it;
             // without this the list carries rows whose business column is blank
@@ -111,7 +111,7 @@ class OicAssignmentController extends Controller
         if ($needle = trim($data['q'] ?? '')) {
             $query->whereHas('application', function ($a) use ($needle) {
                 $a->whereLike('tracking_id', "%{$needle}%")
-                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$needle}%"));
+                    ->orWhereHas('business', fn ($b) => $b->whereLike('name', "%{$needle}%")->orWhereLike('ban', "%{$needle}%"));
             });
         }
 
@@ -219,6 +219,8 @@ class OicAssignmentController extends Controller
             'business' => $application?->business ? [
                 'id' => $application->business->id,
                 'name' => $application->business->name,
+                // The Business Account No. the screen leads with (3 November 2026).
+                'ban' => $application->business->ban,
             ] : null,
             'office' => $assignment->department ? [
                 'id' => $assignment->department->id,

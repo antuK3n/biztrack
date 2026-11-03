@@ -2060,7 +2060,8 @@ export interface OicAssignment {
   application_id: number | null
   tracking_id: string | null
   application_type: string | null
-  business: { id: number; name: string } | null
+  /** `ban`: the Business Account No. (BP-YYYY-NNNN), null until one is issued. */
+  business: { id: number; name: string; ban?: string | null } | null
   office: { id: number; code: string; name: string } | null
   /** Null means nobody has taken it — on this screen, never a withheld value. */
   officer: { id: number; name: string; email: string } | null

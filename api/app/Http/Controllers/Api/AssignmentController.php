@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\QueueSummary;
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Enums\AssignmentStatus;
@@ -148,7 +149,13 @@ class AssignmentController extends Controller
              * and its Business column names who filed under the business.
              */
             'application:id,tracking_id,business_id,applicant_user_id,application_type,status,decided_at,deadline_at',
-            'application.business:id,name',
+            /*
+             * `ban` was missing here, so every row fell back to the tracking
+             * ID (3 November 2026). The rest is the row's summary from the
+             * form: owner, barangay, line of business (QueueSummary).
+             */
+            'application.business:id,name,ban,president_officer_name',
+            ...array_map(static fn (string $r) => 'application.'.$r, QueueSummary::EAGER),
             'application.applicant:id,name',
             /*
              * For `AssignmentResource::clearanceRow()`, which reports the state

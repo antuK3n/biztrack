@@ -197,7 +197,7 @@ function ReassignModal({
       <div className="space-y-5">
         <div>
           <p className="text-base font-bold text-ink">{nameOf(row)}</p>
-          <p className="tnum text-sm text-ink-muted">{row.tracking_id ?? '—'}</p>
+          <p className="tnum text-sm text-ink-muted">{row.business?.ban ?? row.tracking_id ?? '—'}</p>
           <p className="mt-1 text-sm text-ink-secondary">
             {row.office?.name ?? 'Office removed'}
             {' · '}
@@ -520,7 +520,8 @@ export function OicPage() {
                 {rows.map((row) => (
                   <tr key={row.id} className="border-t border-line align-top">
                     <td className="px-5 py-3.5 font-semibold text-ink">{nameOf(row)}</td>
-                    <td className="tnum px-5 py-3.5 text-ink-secondary">{row.tracking_id ?? '—'}</td>
+                    {/* The BAN, as everywhere else an office reads a filing (3 November 2026). */}
+                    <td className="tnum px-5 py-3.5 text-ink-secondary">{row.business?.ban ?? row.tracking_id ?? '—'}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">{row.office?.name ?? '—'}</td>
                     <td className="px-5 py-3.5">
                       {row.officer ? (

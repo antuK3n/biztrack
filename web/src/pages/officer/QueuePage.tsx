@@ -17,6 +17,7 @@ import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import type {
   ApplicationListItem,
+  QueueSummary,
   ApplicationStatus,
   ApplicationType,
   Assignment,
@@ -741,8 +742,39 @@ interface QueueItem {
    * has none yet or the payload predates the field.
    */
   deadline: string | null
-  /** Who filed it, printed small under the business name. */
+  /**
+   * The owner as the application form names them, printed small under the
+   * business name; the account that filed when the form names nobody.
+   */
   owner: string | null
+  /**
+   * What the business does and where, from the form (3 November 2026: "only
+   * the most important ones according to the application form"): its first
+   * line of business, how many more, and its barangay.
+   */
+  line: string | null
+  moreLines: number
+  barangay: string | null
+}
+
+/** The row's facts from the form, shared by both feeds. */
+function formFacts(
+  business: { queue_facts?: QueueSummary } | null | undefined,
+  filer: string | null | undefined,
+): Pick<QueueItem, 'owner' | 'line' | 'moreLines' | 'barangay'> {
+  const facts = business?.queue_facts
+  return {
+    owner: facts?.owner ?? filer ?? null,
+    line: facts?.line ?? null,
+    moreLines: facts?.more_lines ?? 0,
+    barangay: facts?.barangay ?? null,
+  }
+}
+
+/** "Sari-sari store +1 · Tonsuya", or null when the form gave neither. */
+function whatWhere(item: QueueItem): string | null {
+  const what = item.line ? `${item.line}${item.moreLines > 0 ? ` +${item.moreLines}` : ''}` : null
+  return [what, item.barangay].filter(Boolean).join(' · ') || null
 }
 
 /**
@@ -808,7 +840,7 @@ function fromAssignment(item: Assignment): QueueItem {
      */
     mine: item.officer !== null && item.can_act === true,
     deadline: app.deadline_at ?? null,
-    owner: app.applicant?.name ?? null,
+    ...formFacts(app.business, app.applicant?.name),
   }
 }
 
@@ -850,7 +882,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     // No office holds this filing yet, so there is no "your permit" to report.
     clearance: null,
     deadline: app.deadline_at,
-    owner: app.applicant?.name ?? null,
+    ...formFacts(app.business, app.applicant?.name),
   }
 }
 
@@ -1065,7 +1097,9 @@ function isDeep(query: string, sort: SortKey, serverSort: SortKey): boolean {
  */
 function matchesSearch(item: QueueItem, needle: string): boolean {
   if (!needle) return true
-  return `${item.trackingId} ${item.ban ?? ''} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
+  return `${item.trackingId} ${item.ban ?? ''} ${item.nameIsFallback ? '' : item.name} ${item.owner ?? ''} ${item.line ?? ''} ${item.barangay ?? ''}`
+    .toLowerCase()
+    .includes(needle)
 }
 
 /**
@@ -1328,6 +1362,7 @@ function QueueRow({
           )}
         </p>
         {item.owner && <p className="mt-0.5 text-sm text-ink-secondary">{item.owner}</p>}
+        {whatWhere(item) && <p className="mt-0.5 text-xs text-ink-muted">{whatWhere(item)}</p>}
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
         </p>
@@ -1663,6 +1698,11 @@ function QueueTable({
                     {item.owner && (
                       <span className="mt-0.5 block truncate text-xs text-ink-secondary" title={item.owner}>
                         {item.owner}
+                      </span>
+                    )}
+                    {whatWhere(item) && (
+                      <span className="mt-0.5 block truncate text-xs text-ink-muted" title={whatWhere(item) ?? undefined}>
+                        {whatWhere(item)}
                       </span>
                     )}
                     <span

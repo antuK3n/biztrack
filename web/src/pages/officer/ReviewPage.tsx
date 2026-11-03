@@ -1197,8 +1197,9 @@ function RequirementsRead({
               <li key={row.key} className="py-1.5">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <FileGlyph className="shrink-0 text-ink-muted" />
-                  <p className="min-w-0 flex-1 truncate text-sm">
-                    <span className="font-semibold text-ink">{row.label}</span>{' '}
+                  {/* The requirement's name in full, as on a row with a file. */}
+                  <p className="min-w-0 flex-1 text-sm">
+                    <span className="break-words font-semibold leading-snug text-ink">{row.label}</span>{' '}
                     <span className="text-xs text-ink-muted">
                       {row.reference
                         ? row.reference
@@ -1354,8 +1355,14 @@ function DocumentRow({
     <li className="py-1.5">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
         <FileGlyph className="shrink-0 text-royal" />
-        <p className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="min-w-0 shrink truncate text-sm font-semibold text-ink">
+        {/*
+          The requirement's name in full, wrapping if it must; the file name
+          under it on one line, cut short, whole on hover (3 November 2026:
+          "The full title/name of the document … should be seen").
+        */}
+        <div className="min-w-0 flex-1">
+        <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className="min-w-0 break-words text-sm font-semibold leading-snug text-ink">
             {current.document_type.name}
           </span>
           {/*
@@ -1371,12 +1378,12 @@ function DocumentRow({
               Re-uploaded
             </span>
           )}
-          {/* The file shrinks first, so the requirement's name stays readable. */}
-          <span className="hidden min-w-0 shrink-[4] truncate text-xs text-ink-muted sm:inline">
-            {current.original_filename} · {formatBytes(current.size_bytes)}
-            {(earlier.length > 0 || resubmitted) && <> · {formatVersionDate(current.created_at)}</>}
-          </span>
         </p>
+        <p className="truncate text-xs text-ink-muted" title={current.original_filename}>
+          {current.original_filename} · {formatBytes(current.size_bytes)}
+          {(earlier.length > 0 || resubmitted) && <> · {formatVersionDate(current.created_at)}</>}
+        </p>
+        </div>
         {earlier.length > 0 && (
           <button
             type="button"
@@ -1420,7 +1427,7 @@ function DocumentRow({
               key={doc.id}
               className="flex items-center justify-between gap-3 rounded-md bg-canvas px-2.5 py-1"
             >
-              <p className="min-w-0 truncate text-xs text-ink-secondary">
+              <p className="min-w-0 truncate text-xs text-ink-secondary" title={doc.original_filename}>
                 {doc.original_filename} · {formatBytes(doc.size_bytes)} ·{' '}
                 {formatVersionDate(doc.created_at)}
               </p>
@@ -2349,6 +2356,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const editRules = useAsync(() => fetchOfficerEditRules(), [])
   /*
+   * Try again reloads the filing only. If the checklist or the edit rules
+   * failed with it (3 November 2026: the API was down when the page opened),
+   * they stayed failed after the filing came back, and Section C showed no
+   * documents on a filing with six. Each successful load retries them.
+   */
+  useEffect(() => {
+    if (!data) return
+    if (permitTypesRef.error) permitTypesRef.reload()
+    if (editRules.error) editRules.reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+  /*
    * Every return round on the filing, fetched once for the page and shared
    * by the Return history panel and each answer's one-line note. Keyed on
    * the status so a return or a resubmission refetches it. Up here because
@@ -3253,8 +3272,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * `id` breaks a tie on `created_at`, which two uploads in the same second
    * will give. Ids ascend, so the higher one is the later.
    */
+  /*
+   * Without the checklist (its request failed) nothing can be told apart as
+   * retired, so every upload is listed rather than none.
+   */
+  const rankKnown = requirementRank.size > 0
   const askedFor = app.documents
-    .filter((d) => requirementRank.has(d.document_type.code))
+    .filter((d) => !rankKnown || requirementRank.has(d.document_type.code))
     .sort((a, b) => {
       const byRequirement =
         (requirementRank.get(a.document_type.code) ?? 0) -
