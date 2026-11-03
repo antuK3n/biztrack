@@ -38,6 +38,7 @@ import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { OfficerCaseloadPage } from './pages/admin/OfficerCaseloadPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
+import { OrRecordsPage } from './pages/admin/OrRecordsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { OwnerDirectoryPage } from './pages/admin/OwnerDirectoryPage'
@@ -769,6 +770,20 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/*
+            OR Records (thesis panel, matrix item 5): BPLO's copy. The same
+            claim as the endpoint and the rail entry, so none of the three can
+            admit a reader the others refuse; the super admin's copy is in the
+            admin tree below.
+          */}
+          <Route
+            path="/staff/admin/or-records"
+            element={
+              <RequirePermission permission="application.view_any_office">
+                <OrRecordsPage />
+              </RequirePermission>
+            }
+          />
           <Route
             path="/staff/admin/import"
             element={
@@ -987,6 +1002,15 @@ export default function App() {
             element={
               <RequirePermission permission="audit.view">
                 <AuditLogsPage />
+              </RequirePermission>
+            }
+          />
+          {/* OR Records, the super admin's copy; see the staff tree's. */}
+          <Route
+            path="/admin/or-records"
+            element={
+              <RequirePermission permission="application.view_any_office">
+                <OrRecordsPage />
               </RequirePermission>
             }
           />

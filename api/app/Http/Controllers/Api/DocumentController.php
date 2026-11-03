@@ -10,6 +10,7 @@ use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use App\Support\OcrLite;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -204,6 +205,10 @@ class DocumentController extends Controller
 
         abort_unless(Storage::disk('local')->exists($document->stored_path), 404, 'File not found.');
 
-        return Storage::disk('local')->download($document->stored_path, $document->original_filename);
+        return DownloadLog::record(
+            Storage::disk('local')->download($document->stored_path, $document->original_filename),
+            'document',
+            $document,
+        );
     }
 }

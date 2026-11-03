@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { InboxIcon } from '../../components/icons'
 import { InspectorNameField } from '../../components/InspectorNameField'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, ProtoModal, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
+import { PageTitle, SortFilter, type SortFilterOption } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { applications, assignments, payments } from '../../lib/resources'
+import { applications, assignments } from '../../lib/resources'
 import { formatDate, formatDateTime } from '../../lib/format'
 import {
   TONE_CLASSES,
@@ -15,6 +15,8 @@ import {
 } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
+import { MarkPaidDialog } from './MarkPaidDialog'
+import { RejectReceiptDialog } from './RejectReceiptDialog'
 import type {
   ApplicationListItem,
   QueueSummary,
@@ -639,14 +641,14 @@ interface QueueItem {
   /**
    * The filing itself, on every row regardless of which feed it came from.
    * `assignmentId` addresses the office's own review of it; this is what
-   * "Mark as paid" needs, since a Pending Payment row has no assignment to
-   * address.
+   * "Mark as paid" needs, since it settles the filing's bill rather than any
+   * office's review.
    */
   applicationId: number
   /**
-   * The review sheet, or null when there is nothing yet to open. A filing that
-   * has not been paid has not been routed, so no assignment exists and
-   * `/staff/queue/:id` has no id to be given. See PaymentQueueRow.
+   * The review sheet, or null when there is nothing to open. A filing that has
+   * not been paid has not been routed to the clearance offices, and BPLO's own
+   * review of it is finished, so a Pending Payment row opens nothing.
    */
   href: string | null
   trackingId: string
@@ -725,9 +727,10 @@ interface QueueItem {
    */
   clearance: Assignment['clearance']
   /**
-   * The assignment id, when this row came from the assignment feed. Claiming
-   * addresses the assignment, not the filing: one filing is several offices'
-   * work and each office holds its own row.
+   * The assignment id: the row's own on the assignment feed, BPLO's on a
+   * Pending Payment row (see `fromApplication`). Claiming addresses the
+   * assignment, not the filing: one filing is several offices' work and each
+   * office holds its own row.
    */
   assignmentId: number | null
   /** Who holds this case, or null when nobody has taken it (client §2). */
@@ -755,6 +758,13 @@ interface QueueItem {
   line: string | null
   moreLines: number
   barangay: string | null
+  /**
+   * The owner's counter receipt waiting on BPLO, null when none is (Ken, 3
+   * November 2026). Undefined where the server sent nothing — every
+   * assignment row, and any reader but BPLO and the super admin — so the
+   * card says nothing about a receipt rather than claim one is missing.
+   */
+  pendingProof?: { id: number; or_number: string | null } | null
 }
 
 /** The row's facts from the form, shared by both feeds. */
@@ -845,17 +855,28 @@ function fromAssignment(item: Assignment): QueueItem {
 }
 
 function fromApplication(app: ApplicationListItem): QueueItem {
+  /*
+   * Who holds the filing at BPLO.
+   *
+   * A filing at Pending Payment HAS an assignment — BPLO's, completed when it
+   * approved the form — and since the thesis panel's revisions it matters:
+   * only the officer holding it may mark the bill paid (matrix item 1), and an
+   * unheld filing is taken with Assign to Me first. So the row carries it, as
+   * the list sends it to BPLO, and draws the same holder strip as every other
+   * row. Read from the payload, never worked out here; see `fromAssignment`.
+   * The row still does not open: there is no review left to read.
+   */
+  const bplo = app.bplo_assignment ?? null
   return {
     key: `application:${app.id}`,
     applicationId: app.id,
     href: null,
-    // No assignment exists yet on this tab, so there is nothing to hold and
-    // nobody to hold it — the filing has not been routed to an office.
-    assignmentId: null,
-    officer: null,
-    canClaim: false,
-    canAct: false,
-    mine: false,
+    assignmentId: bplo?.id ?? null,
+    officer: bplo?.officer ?? null,
+    canClaim: bplo?.can_claim === true,
+    canAct: bplo?.can_act === true,
+    mine: bplo !== null && bplo.officer !== null && bplo.can_act === true,
+    pendingProof: app.pending_proof,
     trackingId: app.tracking_id,
     ban: app.business?.ban ?? null,
     ...nameOf(app.business, app.tracking_id),
@@ -869,7 +890,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     unpaid: UNPAID_STATUSES.includes(app.status),
     status: app.status,
     decided: app.decided,
-    // An unpaid filing has not been routed, so no office holds it and no
+    // An unpaid filing has not been routed to the clearance offices, so no
     // visit has been booked against it.
     inspection: null,
     /*
@@ -879,7 +900,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
      * something else reads it.
      */
     type: app.application_type,
-    // No office holds this filing yet, so there is no "your permit" to report.
+    // No clearance office has this filing yet, so there is no "your permit" to report.
     clearance: null,
     deadline: app.deadline_at,
     ...formFacts(app.business, app.applicant?.name),
@@ -952,10 +973,10 @@ async function loadEveryStage(
     stages.map((stage) => {
       /*
        * Pending Payment drops out entirely when the officer is narrowing by
-       * who holds the case. Nothing holds an unpaid filing — it has not been
-       * routed, so there is no assignment and no officer in charge — and
-       * including its rows under "My assigned" would answer a question about
-       * ownership with filings nobody owns.
+       * who holds the case. Its rows carry BPLO's holder since the thesis
+       * panel's revisions, but `/applications` cannot narrow by it, and
+       * narrowing one fetched page in the browser is the miscount this
+       * screen's class comment warns against.
        */
       if (stage === 'payment' && args.oic) return null
 
@@ -1236,7 +1257,7 @@ function QueueRow({
   onRelease,
   claiming,
   onMarkPaid,
-  markingPaid,
+  onRejectReceipt,
 }: {
   item: QueueItem
   /**
@@ -1257,9 +1278,12 @@ function QueueRow({
    * Opens the "mark as paid" confirmation for this row. Undefined for every
    * reader but BPLO staff — the list decides who gets it, the same way it
    * decides `ownPermit`, because only it knows the signed-in reader's seat.
+   * The row then draws it only for the officer holding the filing, and only
+   * once the owner's receipt is in.
    */
   onMarkPaid?: (item: QueueItem) => void
-  markingPaid?: boolean
+  /** Opens "Reject receipt" for this row; handed out and drawn exactly as `onMarkPaid` is. */
+  onRejectReceipt?: (item: QueueItem) => void
 }) {
   /*
    * ── Whose name goes under the row ───────────────────────────────────────
@@ -1301,8 +1325,8 @@ function QueueRow({
    * clearance object. Without it the badge would read "Available", which is
    * the label status.ts gives an absent status, on a row an office holds.
    * The fallback is deliberate rather than incidental: a Pending Payment row
-   * is an application and belongs to no office yet, and showing the filing's
-   * status there is better than showing none.
+   * is an application that no clearance office has yet, and showing the
+   * filing's status there is better than showing none.
    */
   const { badge } = badgeOf(item, ownPermit)
   const body = (
@@ -1436,9 +1460,10 @@ function QueueRow({
         * anchor, and a button inside an anchor is both invalid markup and a
         * control that navigates when pressed by a keyboard.
         *
-        * A row from the Pending Payment tab has no assignment, so it says
-        * nothing here — there is no office holding it yet, and "Unassigned"
-        * would read as work waiting to be taken.
+        * A Pending Payment row has one too since the thesis panel's revisions:
+        * BPLO's assignment, because only its holder may mark the bill paid and
+        * an unheld filing is taken here first. A row with no assignment at all
+        * says nothing.
         */}
       {item.assignmentId !== null && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-line px-5 py-3">
@@ -1505,25 +1530,59 @@ function QueueRow({
         </div>
       )}
       {/*
-        * "Mark as paid", for the one kind of row that has no assignment to
-        * hold open a footer of its own: Pending Payment.
+        * The owner's receipt, and "Mark as paid", on a Pending Payment row.
         *
         * Outside the Link, same reasoning as Claim above — a button inside an
         * anchor is invalid markup and would navigate on a keyboard press. Only
-        * BPLO sees it: `onMarkPaid` is undefined for every other reader, so
-        * nothing renders here for them even though the row itself is the same
-        * one the super admin and BPLO both see on this tab.
+        * BPLO is handed `onMarkPaid`, and since the thesis panel's revisions
+        * (matrix item 1) only the officer HOLDING the filing sees the button:
+        * a colleague's filing, or one nobody has taken, draws none — taking it
+        * is the strip above. The server refuses everyone else regardless.
+        *
+        * Since 3 November 2026 (Ken) Mark as paid also waits for the owner's
+        * receipt, here and on the server. Every reader the list tells about
+        * receipts sees which it is — none yet, or the one sent, by its OR —
+        * and the holder alone judges it: Mark as paid, or Reject receipt,
+        * which asks why (RejectReceiptDialog). A row the server said nothing
+        * about (`pendingProof` undefined) draws nothing.
         */}
-      {item.assignmentId === null && onMarkPaid && (
-        <div className="flex items-center justify-end border-t border-line px-5 py-3">
-          <button
-            type="button"
-            onClick={() => onMarkPaid(item)}
-            aria-disabled={markingPaid || undefined}
-            className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-          >
-            {markingPaid ? 'Marking…' : 'Mark as paid'}
-          </button>
+      {item.status === 'pending_payment' && item.pendingProof !== undefined && (
+        <div className="space-y-2.5 border-t border-line px-5 py-3">
+          <p className="text-sm text-ink-secondary">
+            {item.pendingProof === null ? (
+              'Waiting for the owner’s receipt.'
+            ) : item.pendingProof.or_number ? (
+              <>
+                Receipt sent: OR <span className="tnum font-semibold text-ink">{item.pendingProof.or_number}</span>
+              </>
+            ) : (
+              'Receipt sent.'
+            )}
+          </p>
+          {/*
+            * Side by side, the undo-styled one first, in two equal columns —
+            * which a three-across card at 1440px only just holds, so each
+            * column has a floor and the pair stacks on a card too narrow for
+            * both rather than squeezing a label.
+            */}
+          {item.pendingProof && item.mine && onMarkPaid && onRejectReceipt && (
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-2">
+              <button
+                type="button"
+                onClick={() => onRejectReceipt(item)}
+                className="whitespace-nowrap rounded-full border border-line px-2 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+              >
+                Reject receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => onMarkPaid(item)}
+                className="whitespace-nowrap rounded-full bg-royal px-2 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+              >
+                Mark as paid
+              </button>
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -1565,7 +1624,7 @@ function QueueTable({
   onRelease,
   claimingId,
   onMarkPaid,
-  markingPaidId,
+  onRejectReceipt,
 }: {
   items: QueueItem[]
   ownPermit: boolean
@@ -1573,7 +1632,8 @@ function QueueTable({
   onRelease: (item: QueueItem) => void
   claimingId: number | null
   onMarkPaid?: (item: QueueItem) => void
-  markingPaidId: number | null
+  /** Opens "Reject receipt" for a row; handed out exactly as `onMarkPaid` is. */
+  onRejectReceipt?: (item: QueueItem) => void
 }) {
   const navigate = useNavigate()
 
@@ -1658,11 +1718,17 @@ function QueueTable({
               const { badge } = badgeOf(item, ownPermit)
               const visit = visitOf(item)
               const claiming = claimingId !== null && claimingId === item.assignmentId
-              const markingPaid = markingPaidId === item.applicationId
               const who = `${item.trackingId}, ${item.name}`
               const canClaim = item.canClaim
               const canRelease = item.mine
-              const canMarkPaid = item.assignmentId === null && onMarkPaid !== undefined
+              /*
+               * The counter receipt, as the card has it (release/matrix-
+               * revisions, 3 November 2026): Mark as paid waits for the
+               * owner's receipt, and the holder alone judges it — Mark as paid
+               * or Reject receipt.
+               */
+              const canMarkPaid =
+                item.pendingProof != null && item.mine && onMarkPaid !== undefined && onRejectReceipt !== undefined
 
               return (
                 <tr
@@ -1714,13 +1780,26 @@ function QueueTable({
                     </span>
                   </th>
 
-                  {/* The status. */}
+                  {/* The status, and on Pending Payment whether the owner's receipt is in. */}
                   <td className={td}>
                     <span
                       className={`inline-block rounded-md border px-2.5 py-1 text-xs font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
                     >
                       {badge.label}
                     </span>
+                    {item.status === 'pending_payment' && item.pendingProof !== undefined && (
+                      <span className="mt-1 block text-xs text-ink-secondary">
+                        {item.pendingProof === null ? (
+                          'Waiting for the owner’s receipt.'
+                        ) : item.pendingProof.or_number ? (
+                          <>
+                            Receipt sent: OR <span className="tnum font-semibold text-ink">{item.pendingProof.or_number}</span>
+                          </>
+                        ) : (
+                          'Receipt sent.'
+                        )}
+                      </span>
+                    )}
                   </td>
 
                   {/* When the row arrived. */}
@@ -1810,15 +1889,24 @@ function QueueTable({
                         </button>
                       )}
                       {canMarkPaid && (
-                        <button
-                          type="button"
-                          onClick={() => onMarkPaid!(item)}
-                          aria-disabled={markingPaid || undefined}
-                          aria-label={`Mark as paid: ${who}`}
-                          className={primary}
-                        >
-                          {markingPaid ? 'Marking…' : 'Mark as paid'}
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onMarkPaid!(item)}
+                            aria-label={`Mark as paid: ${who}`}
+                            className={primary}
+                          >
+                            Mark as paid
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onRejectReceipt!(item)}
+                            aria-label={`Reject receipt: ${who}`}
+                            className={quiet}
+                          >
+                            Reject receipt
+                          </button>
+                        </>
                       )}
                       {!item.href && !canClaim && !canRelease && !canMarkPaid && (
                         <span className="px-2 text-ink-muted">—</span>
@@ -1849,8 +1937,8 @@ function QueueTable({
 export function QueuePage() {
   const canReadEveryOffice = useAuth((s) => Boolean(s.user?.permissions.includes(ANY_OFFICE)))
   /*
-   * "Mark as paid" is BPLO staff's alone — not the super admin's, even though
-   * the super admin shares `canReadEveryOffice` and sees this same tab. A
+   * "Mark as paid" is BPLO staff's alone, and since the thesis panel's
+   * revisions only the one holding the filing (`QueueRow` asks `mine`). A
    * department check rather than a permission, because Ken's decision names
    * the office, and `application.review`/`application.view_any_office` both
    * describe something wider than "is this reader BPLO".
@@ -1923,10 +2011,10 @@ export function QueuePage() {
    */
   const [claimMessage, setClaimMessage] = useState<string | null>(null)
 
-  /** The application id being marked paid, so one press cannot be double-fired. */
-  const [markingPaidId, setMarkingPaidId] = useState<number | null>(null)
   /** The row waiting on the "mark as paid" confirmation, or none. */
   const [confirmPayItem, setConfirmPayItem] = useState<QueueItem | null>(null)
+  /** The row whose receipt is being rejected, while RejectReceiptDialog is open. */
+  const [rejectReceiptItem, setRejectReceiptItem] = useState<QueueItem | null>(null)
 
   /*
    * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
@@ -2073,9 +2161,9 @@ export function QueuePage() {
         clearanceStatuses,
         query: serverQuery,
         type: serverType,
-        // Pending Payment reads `/applications`, which has no assignment to
-        // hold; sending the narrowing there would be a parameter that endpoint
-        // does not know and a filter the tab cannot honour.
+        // Pending Payment reads `/applications`, which cannot narrow by holder;
+        // sending the narrowing there would be a parameter that endpoint does
+        // not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
         page,
         perPage,
@@ -2236,27 +2324,34 @@ export function QueuePage() {
   }
 
   /*
-   * BPLO marks a filing paid at the counter, after the confirmation dialog.
+   * BPLO has marked a filing paid at the counter, in MarkPaidDialog — which
+   * holds the OR fields and stays open on a refusal, so only success lands here.
    *
    * Re-read rather than patched, for the reason claim() gives: the row holds
    * the balance due only implicitly (it is what the Pending Payment tab is),
    * and once paid it belongs on a different stage entirely — so it has to
    * LEAVE this list, which only a re-read can show reliably.
    */
-  async function markPaid(item: QueueItem) {
-    setMarkingPaidId(item.applicationId)
+  function markedPaid(item: QueueItem) {
+    setConfirmPayItem(null)
+    setClaimError(null)
+    setClaimMessage(`${item.name} is marked paid at the counter.`)
+    restart()
+    reload()
+  }
+
+  /*
+   * BPLO has rejected the owner's receipt, in RejectReceiptDialog, which stays
+   * open on a refusal. Re-read, as above: the card then says it is waiting for
+   * the owner's receipt again, and that line is the confirmation — no second
+   * sentence saying the same thing above the list.
+   */
+  function rejectedReceipt() {
+    setRejectReceiptItem(null)
     setClaimError(null)
     setClaimMessage(null)
-    try {
-      await payments.markPaidAtCounter(item.applicationId)
-      setClaimMessage(`${item.name} is marked paid at the counter.`)
-      restart()
-      reload()
-    } catch (err) {
-      setClaimError(toApiError(err).message)
-    } finally {
-      setMarkingPaidId(null)
-    }
+    restart()
+    reload()
   }
 
   function selectStatus(next: string) {
@@ -2590,7 +2685,7 @@ export function QueuePage() {
         * Offered on EVERY tab, unlike the sections below: the type is a fact
         * about the filing and is meaningful wherever a filing appears,
         * including Pending Payment, where "which of these unpaid ones are
-        * renewals" is a real question and there is no holder to ask about.
+        * renewals" is a real question and the holder cannot be asked about.
         *
         * Amendment is dropped for the five clearance offices — see
         * BPLO_ONLY_TYPES.
@@ -2709,9 +2804,9 @@ export function QueuePage() {
           </fieldset>
 
           {/*
-            Pending Payment has no holder to ask about — nobody is assigned a
-            filing waiting on the applicant's money — so the group goes
-            rather than offering a narrowing that can only empty the list.
+            Pending Payment reads `/applications`, which cannot narrow by who
+            holds the filing (each row says so in its own strip), so the group
+            goes rather than offering a narrowing the tab cannot honour.
           */}
           {tab !== 'payment' && (
             <fieldset>
@@ -2759,24 +2854,27 @@ export function QueuePage() {
       {/*
         * "Mark as paid" is an owner's permit releasing, not a one-tap undo
         * like Claim — so it asks first, the same way Approve asks on
-        * ReviewPage. One sentence of consequence, matching Ken's own wording.
+        * ReviewPage, and since the thesis panel's revisions it takes the OR
+        * there too. See MarkPaidDialog.
         */}
       {confirmPayItem && (
-        <ProtoModal
-          title={`Mark ${confirmPayItem.trackingId} (${confirmPayItem.name}) as paid at the counter?`}
-          confirmLabel="Mark as paid"
+        <MarkPaidDialog
+          applicationId={confirmPayItem.applicationId}
+          trackingId={confirmPayItem.trackingId}
+          name={confirmPayItem.name}
           onCancel={() => setConfirmPayItem(null)}
-          onConfirm={() => {
-            const item = confirmPayItem
-            setConfirmPayItem(null)
-            void markPaid(item)
-          }}
-        >
-          <p className="text-sm text-ink-secondary">
-            The owner’s Business Permit is released and their clearances open, the same as an
-            online payment.
-          </p>
-        </ProtoModal>
+          onPaid={() => markedPaid(confirmPayItem)}
+        />
+      )}
+      {rejectReceiptItem?.pendingProof && (
+        <RejectReceiptDialog
+          applicationId={rejectReceiptItem.applicationId}
+          proofId={rejectReceiptItem.pendingProof.id}
+          trackingId={rejectReceiptItem.trackingId}
+          name={rejectReceiptItem.name}
+          onCancel={() => setRejectReceiptItem(null)}
+          onRejected={rejectedReceipt}
+        />
       )}
 
       {/*
@@ -2911,7 +3009,7 @@ export function QueuePage() {
               onRelease={release}
               claimingId={claimingId}
               onMarkPaid={isBplo ? setConfirmPayItem : undefined}
-              markingPaidId={markingPaidId}
+              onRejectReceipt={isBplo ? setRejectReceiptItem : undefined}
             />
           ) : (
             <ul className="grid grid-cols-1 gap-3">
@@ -2926,7 +3024,7 @@ export function QueuePage() {
                   onRelease={release}
                   claiming={claimingId === item.assignmentId}
                   onMarkPaid={isBplo ? setConfirmPayItem : undefined}
-                  markingPaid={markingPaidId === item.applicationId}
+                  onRejectReceipt={isBplo ? setRejectReceiptItem : undefined}
                 />
               ))}
             </ul>

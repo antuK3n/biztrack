@@ -323,6 +323,22 @@ class Application extends Model
         return $this->hasMany(ApplicationAssignment::class);
     }
 
+    /**
+     * BPLO's own assignment on this filing — whose officer in charge alone
+     * may mark its bill paid at the counter (thesis panel, matrix item 1).
+     *
+     * BPLO is the office that issues the Business Permit, matched the way
+     * `WorkflowService::bploDepartmentId()` matches it, as a subquery so an
+     * eager load over a page of filings stays one query.
+     */
+    public function bploAssignment(): HasOne
+    {
+        return $this->hasOne(ApplicationAssignment::class)->whereIn(
+            'department_id',
+            PermitType::where('code', PermitType::OUTCOME_CODE)->select('issuing_department_id'),
+        );
+    }
+
     public function feeAssessment(): HasOne
     {
         return $this->hasOne(FeeAssessment::class);
@@ -507,6 +523,12 @@ class Application extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /** Proof of a counter payment, every row ever sent; see PaymentProof. */
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
     }
 
     public function inspections(): HasMany

@@ -13,6 +13,7 @@ use App\Models\Application;
 use App\Models\ApplicationCorrection;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
+use App\Models\PaymentProof;
 use App\Models\Permit;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
@@ -140,6 +141,16 @@ class ApplicationController extends Controller
         ApplicationVisibility::scope($query, $request->user());
 
         /*
+         * Who holds each filing at BPLO, for the two readers of the register:
+         * the Pending Payment tab shows it, and offers Mark as paid only to the
+         * holder (thesis panel, matrix item 1). Not loaded for owners or the
+         * clearance offices, whose screens have no use for it.
+         */
+        if ($request->user()->hasPermission('application.view_any_office')) {
+            $query->with(['bploAssignment.officer:id,name', 'bploAssignment.department:id,code,name']);
+        }
+
+        /*
          * `status` takes a list, not just one value: ?status=submitted,pending_payment
          *
          * The officer queue's Pending Payment tab asks for a whole *stage* of the
@@ -177,6 +188,19 @@ class ApplicationController extends Controller
         $apps = $query->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
+
+        /*
+         * Whether the owner's counter receipt is in, for the same two readers:
+         * a Pending Payment card says "Waiting for the owner's receipt." or
+         * names the receipt, and offers Mark as paid only once it is there
+         * (Ken, 3 November 2026). Two queries for the page, never one a row.
+         */
+        if ($request->user()->hasPermission('application.view_any_office')) {
+            $pending = PaymentProof::pendingForEach(array_map(fn (Application $a) => $a->id, $apps->items()));
+            foreach ($apps->items() as $app) {
+                $app->setRelation('pendingProof', $pending[$app->id] ?? null);
+            }
+        }
 
         return response()->json([
             'data' => ApplicationListResource::collection($apps->items()),

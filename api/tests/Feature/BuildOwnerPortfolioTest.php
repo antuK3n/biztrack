@@ -9,6 +9,7 @@ use App\Models\Application;
 use App\Models\Business;
 use App\Models\Inspection;
 use App\Models\OfficerRequest;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\Role;
@@ -101,6 +102,24 @@ it('builds the nine businesses, each in the state the spec names', function () {
     $cert = test()->withHeaders(authAs('admin@biztrack.local'))->getJson("/api/v1/permits/{$op->id}")->json('data.certificate');
     foreach (['occ_project', 'occ_building_permit_no', 'occ_building_permit_date', 'occ_submitted_by', 'occ_professional', 'occ_documents'] as $key) {
         expect($cert[$key] ?? null)->not->toBeEmpty("{$key} is blank on {$op->permit_number}");
+    }
+
+    /*
+     * Every counter payment was marked by the officer holding the filing at
+     * BPLO, with an OR of seven digits, its own, dated the day of the step
+     * (thesis panel revisions: holder only, OR required), against the owner's
+     * receipt carrying the same OR (Ken, 3 November 2026: receipt first).
+     */
+    $counter = Payment::where('method', 'counter')
+        ->whereIn('application_id', Application::whereIn('business_id', Business::where('owner_user_id', $owner->id)->pluck('id'))->pluck('id'))
+        ->get();
+    expect($counter)->not->toBeEmpty()
+        ->and($counter->pluck('or_number')->every(fn ($or) => preg_match('/^\d{7}$/', (string) $or) === 1))->toBeTrue()
+        ->and($counter->pluck('or_number')->unique()->count())->toBe($counter->count());
+    foreach ($counter as $payment) {
+        expect($payment->recorded_by_user_id)->toBe($payment->application->bploAssignment->officer_user_id)
+            ->and($payment->or_date->toDateString())->toBe($payment->paid_at->toDateString())
+            ->and($payment->proofs()->where('submitted_by_user_id', $owner->id)->value('or_number'))->toBe($payment->or_number);
     }
 
     // B: paid; FSIC issued, Sanitary visit booked ahead, three offices untouched.

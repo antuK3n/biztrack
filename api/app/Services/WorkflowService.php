@@ -50,12 +50,15 @@ use App\Support\SheetRequirements;
 use App\Support\ZoningRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * The permit-lifecycle state machine (docs/application-flow-2026-09.md).
@@ -1082,7 +1085,9 @@ class WorkflowService
 
             if ($bploReads) {
                 $this->routeTo($app, $this->bploDepartmentId());
+                $this->tellOfficeOfSubmission($app, $this->bploDepartmentId());
             } else {
+                // Each office is told by submitClearanceForm, which routes it.
                 $this->handCarriedClearancesToTheirOffices($app);
             }
 
@@ -2713,6 +2718,8 @@ class WorkflowService
              */
             if ($type->issuing_department_id !== null) {
                 $this->routeTo($app, $type->issuing_department_id);
+                // A permit with no sheet is handed over by Apply itself.
+                $this->tellOfficeOfSubmission($app, $type->issuing_department_id, $type);
             }
 
             $this->refreshReadiness($app);
@@ -2873,6 +2880,8 @@ class WorkflowService
             [ClearanceStatus::Returned, ClearanceStatus::Rejected],
             true,
         );
+        // A correction the office asked for: told as one, not as a new application.
+        $answeringReturn = $row->status === ClearanceStatus::Returned;
         if (! in_array($row->status, [
             ClearanceStatus::NotStarted,
             ClearanceStatus::Returned,
@@ -2888,7 +2897,7 @@ class WorkflowService
          */
         $this->refuseBeforePayment($app);
 
-        DB::transaction(function () use ($app, $type, $row, $resubmitting) {
+        DB::transaction(function () use ($app, $type, $row, $resubmitting, $answeringReturn) {
             /*
              * The return note and its pointer are cleared HERE, and only here:
              * the applicant has answered what the office asked for, so the
@@ -3004,6 +3013,19 @@ class WorkflowService
                         'assigned_at' => now(),
                         'completed_at' => null,
                     ]);
+
+                /*
+                 * And the office is told it has the permit — a first
+                 * application, or one made again after a refusal, which goes
+                 * to the officer still holding the case. A sheet answering a
+                 * RETURN is the correction the office asked for, and is told
+                 * as that rather than as a new application.
+                 */
+                if ($answeringReturn) {
+                    $this->tellOfficeOfCorrections($app, $type->issuing_department_id);
+                } else {
+                    $this->tellOfficeOfSubmission($app, $type->issuing_department_id, $type);
+                }
             }
 
             $this->refreshReadiness($app);
@@ -3832,7 +3854,7 @@ class WorkflowService
                         $this->onPaymentCompleted($paid);
                     }
                 });
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 report($e);
             }
         }
@@ -6696,6 +6718,171 @@ class WorkflowService
             ['application_id' => $app->id, 'department_id' => $departmentId],
             ['status' => AssignmentStatus::Pending->value, 'assigned_at' => now()],
         );
+    }
+
+    /**
+     * Tell the office whose turn it now is that an applicant has handed it work.
+     *
+     * Thesis panel revision (Tool Defense matrix, item 8). Ken's rule: when an
+     * applicant submits, the office whose turn it is hears of it in the bell —
+     * BPLO for a new application, a Business Permit renewal or an amendment
+     * (`submit`), and the issuing office when its permit's sheet is handed in
+     * (`submitClearanceForm`, which a clearance-only renewal goes through too)
+     * or, for a permit with no sheet, applied for (`startClearance`). Not
+     * `routeTo` itself: routing is not always an applicant's act.
+     *
+     * Not on a resubmission after a RETURN either: that answers the office's
+     * own question rather than applying for anything. For the main form,
+     * `resubmit` already tells the officer who sent it back ("Corrections
+     * received"), and a second notice for one act would be noise. A corrected
+     * office SHEET is told the same way, by `tellOfficeOfCorrections`.
+     */
+    private function tellOfficeOfSubmission(Application $app, ?int $departmentId, ?PermitType $permit = null): void
+    {
+        $this->tellOffice(
+            $app,
+            $departmentId,
+            fn (User $officer, ApplicationAssignment $review) => $this->notify->filingSubmitted($app, $officer, $review, $permit),
+        );
+    }
+
+    /**
+     * Tell the office that a sheet it RETURNED has come back answered.
+     *
+     * `resubmit` has always said "Corrections received" to the officer who
+     * returned BPLO's main form; an office that returned its own sheet heard
+     * nothing when the owner sent it back, and found it only by reopening its
+     * queue. Ken, 21 October 2026: the same notice, to the same people as a
+     * submission — the officer holding the case, or the office's active
+     * officers when nobody does (`tellOffice`).
+     *
+     * Without a count. `recordClearanceCorrections` records every row the
+     * office asked about, changed or not, so "N fields corrected" would claim
+     * corrections that were not made; `filingResubmitted` drops the number
+     * when given none.
+     */
+    private function tellOfficeOfCorrections(Application $app, int $departmentId): void
+    {
+        $this->tellOffice(
+            $app,
+            $departmentId,
+            fn (User $officer) => $this->notify->filingResubmitted($app, $officer),
+        );
+    }
+
+    /**
+     * Tell BPLO that the owner has sent proof of a counter payment.
+     *
+     * Revision matrix item 4, follow-up. The owner's proof was kept and
+     * audited, and nobody was told: the officer found it only on opening Mark
+     * as paid. Ken: "Proof of payment received", to the same people as BPLO's
+     * "New application" (`tellOffice`) — the officer holding the filing at
+     * BPLO, who is the only one Mark as paid lets settle it
+     * (PaymentController::authorizeCaseHolder), or every active BPLO officer
+     * when nobody holds it, so one of them takes it with Assign to Me.
+     *
+     * On every proof the owner sends, a replacement included: the replacement
+     * is what Mark as paid will show, so the officer should hear of it. Called
+     * inside the transaction that keeps the proof (PaymentProofController::store),
+     * so a refused or rolled-back send tells nobody.
+     *
+     * A filing with no BPLO review tells nobody either, as with "New
+     * application": nobody could hold it, so nobody could mark it paid.
+     */
+    public function tellBploOfPaymentProof(Application $app): void
+    {
+        $this->tellOffice(
+            $app,
+            $this->bploDepartmentId(),
+            fn (User $officer) => $this->notify->paymentProofReceived($app, $officer),
+        );
+    }
+
+    /**
+     * Tell the owner BPLO did not accept their counter receipt, and why.
+     *
+     * Ken, 3 November 2026: "Receipt not accepted", in the bell and by e-mail,
+     * the way every owner notice goes out (NotificationService::push mails a
+     * business owner's copy). Called inside the transaction that records the
+     * rejection (PaymentProofController::reject), and written once it commits,
+     * inside a try — the reason `tellOffice` gives: a rolled-back rejection
+     * tells nobody, and a notice that fails must not answer 500 over a
+     * rejection that is already recorded.
+     */
+    public function tellOwnerOfRejectedProof(Application $app, string $reason): void
+    {
+        DB::afterCommit(function () use ($app, $reason) {
+            try {
+                $this->notify->paymentProofRejected($app, $reason);
+            } catch (Throwable $e) {
+                Log::warning('The owner was not told their receipt was rejected', [
+                    'application_id' => $app->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
+    }
+
+    /**
+     * Hand a notice about this filing to the office, once the change commits.
+     *
+     * ── Who hears it ────────────────────────────────────────────────────────
+     *
+     * The officer holding the case, when one does and can still act on it;
+     * otherwise every active account of the office. That is the answer
+     * `MessageController::recipients` gives for an applicant's message, and
+     * the people the office's queue shows the filing to. Only accounts that
+     * can open that queue (`application.review`, what the link needs) — which
+     * is also what keeps the super admin out even if seated in an office.
+     * Never another office, and never the applicant.
+     *
+     * ── After the commit ────────────────────────────────────────────────────
+     *
+     * Every caller is inside the transaction that records the owner's act —
+     * routing the office, or keeping a proof of payment — and an act that
+     * rolls back (a clearance-only renewal whose second sheet is refused) must
+     * leave nobody told about it. Inside a try, for the
+     * reason push()'s e-mail is: by then the owner's act is recorded, and it
+     * must not answer 500 over a notice that was not written.
+     *
+     * @param  Closure(User, ApplicationAssignment): void  $notice
+     */
+    private function tellOffice(Application $app, ?int $departmentId, Closure $notice): void
+    {
+        if ($departmentId === null) {
+            return;
+        }
+
+        DB::afterCommit(function () use ($app, $departmentId, $notice) {
+            try {
+                $review = ApplicationAssignment::where('application_id', $app->id)
+                    ->where('department_id', $departmentId)
+                    ->with('officer')
+                    ->first();
+                if ($review === null) {
+                    return;
+                }
+
+                $canAct = fn (User $user) => $user->is_active
+                    && $user->id !== $app->applicant_user_id
+                    && $user->hasPermission('application.review');
+
+                $holder = $review->officer;
+                $officers = $holder !== null && $holder->department_id === $review->department_id && $canAct($holder)
+                    ? collect([$holder])
+                    : User::where('department_id', $departmentId)->where('is_active', true)->get()->filter($canAct);
+
+                foreach ($officers as $officer) {
+                    $notice($officer, $review);
+                }
+            } catch (Throwable $e) {
+                Log::warning('An office was not told about a filing', [
+                    'application_id' => $app->id,
+                    'department_id' => $departmentId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
     }
 
     /** Mark an office's queue item done. Silent when it holds none. */

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\User;
 use App\Services\NotificationService;
@@ -79,18 +80,8 @@ it('does not emit the retired /track and /review prefixes', function () {
  * the staff session is untouched. `/applications/{id}` was going to officers on
  * every message an applicant sent.
  */
-function linkFor(User $reader): string
+function linkFor(User $reader, Application $app): string
 {
-    /*
-     * An unsaved Application on purpose. Nothing under test reads anything but
-     * the id and the tracking id, and the alternative is filing and paying for a
-     * permit to find out which of two strings a notification stores.
-     */
-    $app = Application::make();
-    $app->id = 4242;
-    $app->tracking_id = 'BT-2026-004242';
-    $app->setRelation('applicant', $reader);
-
     app(NotificationService::class)->newMessage($app, $reader);
 
     return AppNotification::where('user_id', $reader->id)->latest('id')->value('link');
@@ -100,13 +91,24 @@ it('addresses a filing on the site the reader is signed into', function () {
     $officer = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
 
-    expect(linkFor($officer))->toBe('/staff/queue/4242')
-        ->and(linkFor($owner))->toBe('/applications/4242');
+    /*
+     * A seeded filing, where this used an unsaved one numbered 4242: the
+     * officer's address is their office's REVIEW of the filing since 21
+     * October 2026, so the filing has to have one. Picked so the review's
+     * number is not the filing's, which is the case the old address got wrong.
+     */
+    $review = ApplicationAssignment::where('department_id', $officer->department_id)
+        ->whereColumn('id', '!=', 'application_id')
+        ->firstOrFail();
+    $app = $review->application;
+
+    expect(linkFor($officer, $app))->toBe("/staff/queue/{$review->id}")
+        ->and(linkFor($owner, $app))->toBe("/applications/{$app->id}");
 
     // And both are addresses the router serves, not just correctly prefixed.
     $paths = routerPaths();
-    expect(linkIsRoutable('/staff/queue/4242', $paths))->toBeTrue()
-        ->and(linkIsRoutable('/applications/4242', $paths))->toBeTrue();
+    expect(linkIsRoutable("/staff/queue/{$review->id}", $paths))->toBeTrue()
+        ->and(linkIsRoutable("/applications/{$app->id}", $paths))->toBeTrue();
 });
 
 it('sends a fee adjustment to the pay screen that exists', function () {

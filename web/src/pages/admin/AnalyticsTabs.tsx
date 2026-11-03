@@ -64,25 +64,6 @@ const TABS = [
    * second part of the Reports screen ("Build your own report", see
    * ReportsPage), and /analytics/custom-report redirects there (App.tsx).
    */
-  /*
-   * The super admin's two screens, in the order the question is asked.
-   *
-   * Office Performance comes first because it answers "which office" and
-   * Processing Time answers "what has that office been doing" — a reader who
-   * has not yet picked an office has nothing to do on a control chart.
-   *
-   * Note what this pair does to the strip: until issue #102 the super admin
-   * held exactly one analytics screen, so `tabs.length < 2` below hid the strip
-   * from them entirely. It now appears for the first time, which is why the
-   * two-tab guard is load-bearing rather than defensive.
-   */
-  /*
-   * There was a second copy of this entry, merged in twice with its comment,
-   * whose path read '/staff/analytics/offices'. `portalPath()` prefixes it
-   * again, so the super admin saw two "Office Performance" tabs and one of
-   * them led to /staff/staff/… or /admin/staff/…, a 404. Removed 19 October
-   * 2026.
-   */
   {
     to: '/analytics/offices',
     // The dataset's own label, and the h1 on the screen it leads to. All three

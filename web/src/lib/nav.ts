@@ -3,6 +3,7 @@ import {
   AuditIcon,
   BuildingIcon,
   ChartIcon,
+  ClipboardIcon,
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
@@ -302,6 +303,18 @@ const NAV_ITEMS: NavItem[] = [
     icon: FileTextIcon,
     to: '/admin/permits',
     visibleWhen: (user) => user.permissions.includes('permit.view_all') && !landsOnOfficeHome(user),
+  },
+  /*
+   * OR Records (thesis panel, matrix item 5): every payment carrying an
+   * Official Receipt, searchable. BPLO and the super admin alone — the two
+   * holders of `application.view_any_office`, which is also what the endpoint
+   * and both routes in App.tsx ask for. Beside Permits: both are registers.
+   */
+  {
+    label: 'OR Records',
+    icon: ClipboardIcon,
+    to: '/admin/or-records',
+    permission: 'application.view_any_office',
   },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the

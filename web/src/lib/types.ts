@@ -633,6 +633,21 @@ export interface ApplicationListItem {
   submitted_at: string | null
   deadline_at: string | null
   /**
+   * BPLO's own assignment on the filing: who holds it there, and whether this
+   * reader may take it or act on it. Sent to BPLO and the super admin only, so
+   * the Pending Payment tab can offer Mark as paid to the officer holding the
+   * filing and no one else (thesis panel, matrix item 1). Absent for every
+   * other reader; null where BPLO holds no assignment on it.
+   */
+  bplo_assignment?: Assignment | null
+  /**
+   * The owner's counter receipt waiting on BPLO, or null when none is (Ken, 3
+   * November 2026): the Pending Payment card names it and offers Mark as paid
+   * only once it is in. `or_number` is null for a photo sent without one.
+   * Sent to BPLO and the super admin only, like `bplo_assignment`.
+   */
+  pending_proof?: { id: number; or_number: string | null } | null
+  /**
    * Each permit on the filing with its own status — the second state machine,
    * carried on the list so a row never has to infer it.
    *
@@ -856,8 +871,58 @@ export interface Payment {
   set_aside?: boolean
   /** Marked for a refund (paid twice, or paid after the filing closed); staff are reviewing it. */
   refund_review?: boolean
+  /**
+   * A counter payment's Official Receipt, as BPLO recorded it (thesis panel,
+   * matrix item 5): its number and the day it was paid, a bare "2026-10-20".
+   * Null on a payment made online, and on a counter payment recorded before
+   * the OR was asked for.
+   */
+  or_number?: string | null
+  or_date?: string | null
   /** Present in the owner's cross-application payment history. */
   application?: { id: number; tracking_id: string }
+}
+
+/**
+ * Proof of a payment made at the counter (PaymentProofController): the OR
+ * number and date paid, a photo of the receipt, or both. The photo itself is
+ * fetched through `paymentProofs.view`, never carried here.
+ */
+export interface PaymentProof {
+  id: number
+  or_number: string | null
+  /** A bare calendar date, "2026-10-20". */
+  or_date: string | null
+  has_photo: boolean
+  photo_name: string | null
+  submitted_at: string | null
+  /**
+   * When BPLO rejected it, and why (Ken, 3 November 2026). Null on a proof
+   * that is waiting; only `paymentProofs.latest` ever returns a rejected one.
+   */
+  rejected_at: string | null
+  rejection_reason: string | null
+}
+
+/** One row of OR Records: a payment with an Official Receipt (OrRecordController). */
+export interface OrRecord {
+  id: number
+  or_number: string
+  /** A bare calendar date, "2026-10-20". */
+  or_date: string | null
+  amount: string
+  /** When BPLO recorded it. */
+  recorded_at: string | null
+  /**
+   * `review_id` is BPLO's review of the filing, which the tracking ID opens on
+   * the staff site; null for a reader who cannot open it (the super admin).
+   */
+  application: { id: number; tracking_id: string; review_id: number | null } | null
+  /** Null when the business has been removed from the register. */
+  business: { id: number; name: string } | null
+  recorded_by: { id: number; name: string } | null
+  /** The photo the row's View opens: the officer's, else the owner's. */
+  proof: { id: number; name: string | null } | null
 }
 
 export interface PaymentOptions {
@@ -2714,7 +2779,23 @@ export interface AuditLog {
    * every row that removed nothing.
    */
   snapshot: Record<string, unknown> | null
+  /**
+   * The receipt files a payment row is about (App\Support\PaymentAudit):
+   * a counter payment's proofs, or the proof a submitted or rejected row
+   * names. Empty on every other row, and on a receipt whose file has gone.
+   * Never the file itself: Details fetches it through `paymentProofs.file`.
+   * Optional because a row stubbed in a browser test may leave it out.
+   */
+  receipts?: AuditReceipt[]
   created_at: string
+}
+
+/** One receipt file behind an audit row. */
+export interface AuditReceipt {
+  /** The PaymentProof's id; `GET /payment-proofs/{id}/file` serves it. */
+  id: number
+  mime_type: string | null
+  file_name: string | null
 }
 
 /* ── Importing the old register (Ken's checklist, 27 Sept 2026) ───────── */

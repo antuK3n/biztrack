@@ -34,6 +34,7 @@ use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\NotificationService;
 use App\Services\Sms\SmsChannel;
 use App\Services\WorkflowService;
 use App\Support\Numbering;
@@ -791,7 +792,8 @@ class AnalyticsHistorySeeder extends Seeder
      * Mail and SMS both run on the `log` driver in development. The workflow
      * fans out on every transition, so a run of this size would append tens of
      * thousands of lines to laravel.log for no one's benefit. The in-app
-     * notification rows are still written — those are register history.
+     * notification rows are still written — those are register history —
+     * except the one telling an office a filing has reached it (below).
      *
      * The queue is made `sync` as well, because texts and owner e-mails are
      * queued jobs: on a database queue the worker would send them later with
@@ -805,6 +807,25 @@ class AnalyticsHistorySeeder extends Seeder
         app()->bind(SmsChannel::class, fn () => new class implements SmsChannel
         {
             public function send(string $to, string $message): void {}
+        });
+
+        /*
+         * No office is told of these filings. Since the thesis panel's
+         * revision (matrix item 8) a submission tells the office whose turn
+         * it is: every active account in it, the real office logins as well
+         * as the reviewers made here. Invented history would bury their bells
+         * (318 notices in the test's four-month window), and `purge()` clears
+         * only this seeder's own accounts, so the register would not come
+         * back as it was found.
+         */
+        app()->bind(NotificationService::class, fn () => new class extends NotificationService
+        {
+            public function filingSubmitted(
+                Application $app,
+                User $recipient,
+                ApplicationAssignment $review,
+                ?PermitType $permit = null,
+            ): void {}
         });
     }
 

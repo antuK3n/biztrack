@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -2698,7 +2699,11 @@ class MessageController extends Controller
 
             abort_unless(Storage::disk('local')->exists($attachment->stored_path), 404, 'File not found.');
 
-            return Storage::disk('local')->download($attachment->stored_path, $attachment->original_filename);
+            return DownloadLog::record(
+                Storage::disk('local')->download($attachment->stored_path, $attachment->original_filename),
+                'message_attachment',
+                $attachment,
+            );
         }
 
         $app = $thread->application;
@@ -2722,7 +2727,11 @@ class MessageController extends Controller
 
         abort_unless(Storage::disk('local')->exists($attachment->stored_path), 404, 'File not found.');
 
-        return Storage::disk('local')->download($attachment->stored_path, $attachment->original_filename);
+        return DownloadLog::record(
+            Storage::disk('local')->download($attachment->stored_path, $attachment->original_filename),
+            'message_attachment',
+            $attachment,
+        );
     }
 
     // --- helpers -------------------------------------------------------------

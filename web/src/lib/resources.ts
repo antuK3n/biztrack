@@ -59,6 +59,8 @@ import type {
   Payment,
   PaymentMethod,
   PaymentOptions,
+  PaymentProof,
+  OrRecord,
   Permit,
   AdminOwner,
   CertificateSignatories,
@@ -211,8 +213,22 @@ async function downloadBlob(url: string, filename: string): Promise<void> {
  * opened synchronously from the click handler so popup blockers stay quiet.
  */
 async function viewBlob(url: string, target?: Window | null): Promise<void> {
+  showBlob(await fetchBlob(url), target)
+}
+
+/** An authenticated file as a Blob, for a screen that draws it itself. */
+async function fetchBlob(url: string): Promise<Blob> {
   const res = await api.get(url, { responseType: 'blob' }).catch(rethrowBlobError)
-  const objectUrl = URL.createObjectURL(res.data as Blob)
+  return res.data as Blob
+}
+
+/**
+ * A file already in hand, opened in a tab as `viewBlob` opens one. For a
+ * screen that has fetched it once and must not fetch it again: every fetch of
+ * a file is a `file.downloaded` row on the audit trail (App\Support\DownloadLog).
+ */
+export function showBlob(blob: Blob, target?: Window | null): void {
+  const objectUrl = URL.createObjectURL(blob)
   if (target && !target.closed) target.location.replace(objectUrl)
   else window.open(objectUrl, '_blank', 'noopener')
   // The tab needs the URL to survive the handoff; reclaim it a minute later.
@@ -1010,13 +1026,26 @@ export const payments = {
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
   /**
-   * BPLO marks this filing paid over the counter at City Hall. Nothing to
-   * send — the amount is the balance due, same as `pay` above, and the
-   * server refuses with a plain sentence if the filing is not actually
-   * waiting on payment. BPLO staff only.
+   * BPLO marks this filing paid over the counter at City Hall. The amount is
+   * the balance due, same as `pay` above. Since the thesis panel's revisions
+   * the officer sends the OR number and the date paid (both required) and may
+   * attach a photo of the receipt, and only the officer holding the filing at
+   * BPLO may — anyone else is refused with a plain sentence.
    */
-  markPaidAtCounter: (applicationId: number) =>
-    unwrap<Payment>(api.post(`/applications/${applicationId}/counter-payment`)),
+  markPaidAtCounter: (
+    applicationId: number,
+    body: { or_number: string; or_date: string; photo?: File | null },
+  ) => {
+    const form = new FormData()
+    form.append('or_number', body.or_number)
+    form.append('or_date', body.or_date)
+    if (body.photo) form.append('photo', body.photo)
+    return unwrap<Payment>(
+      api.post(`/applications/${applicationId}/counter-payment`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    )
+  },
   /**
    * The mode, the methods it offers and any online payment already in flight.
    * The pay screen lists what this returns rather than its own list, because
@@ -1049,6 +1078,51 @@ export const payments = {
    * synchronously inside the click handler; see `viewBlob`.
    */
   viewReceipt: (id: number, target?: Window | null) => viewBlob(`/payments/${id}/receipt`, target),
+}
+
+/* ── Proof of a counter payment (thesis panel, matrix item 4) ────────────── */
+
+export const paymentProofs = {
+  /** The proof waiting on BPLO for this filing, or null. The owner, BPLO and the super admin. */
+  pending: (applicationId: number) =>
+    unwrap<PaymentProof | null>(api.get(`/applications/${applicationId}/payment-proof`)),
+  /**
+   * The owner sends proof after paying at the counter: the OR number with the
+   * date paid, a photo of the receipt, or both. Marks nothing paid; a second
+   * send before BPLO confirms replaces the pending one.
+   */
+  send: (applicationId: number, body: { or_number?: string; or_date?: string; photo?: File | null }) => {
+    const form = new FormData()
+    if (body.or_number) form.append('or_number', body.or_number)
+    if (body.or_date) form.append('or_date', body.or_date)
+    if (body.photo) form.append('photo', body.photo)
+    return unwrap<PaymentProof>(
+      api.post(`/applications/${applicationId}/payment-proofs`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    )
+  },
+  /**
+   * The owner's newest proof on this bill, waiting or rejected with BPLO's
+   * reason, or null. The Pay page reads this; Mark as paid reads `pending`.
+   */
+  latest: (applicationId: number) =>
+    unwrap<PaymentProof | null>(api.get(`/applications/${applicationId}/payment-proof/latest`)),
+  /** BPLO's officer holding the filing rejects the waiting proof, with a reason. */
+  reject: (id: number, reason: string) =>
+    unwrap<PaymentProof>(api.post(`/payment-proofs/${id}/reject`, { reason })),
+  /** The photo of the receipt, opened in a tab (pass one opened inside the click). */
+  view: (id: number, target?: Window | null) => viewBlob(`/payment-proofs/${id}/file`, target),
+  /** The same photo as a Blob, for Audit Logs to draw inline; open it with `showBlob`. */
+  file: (id: number) => fetchBlob(`/payment-proofs/${id}/file`),
+}
+
+/* ── OR Records (thesis panel, matrix item 5) ─────────────────────────────── */
+
+export const orRecords = {
+  /** Payments carrying an OR, newest date paid first. BPLO and the super admin. */
+  page: (params: PageParams & { q?: string } = {}) =>
+    unwrapPaged<OrRecord>(api.get('/or-records', { params })),
 }
 
 /* ── Officer queues + review ──────────────────────────────────────────── */
@@ -1848,6 +1922,8 @@ export interface AuditLogFilters extends PageParams {
    * Laravel's `boolean` rule refuses.
    */
   removed?: 1
+  /** A named family of actions: every payment, receipt and payment-switch row. */
+  group?: 'payments'
 }
 
 /**

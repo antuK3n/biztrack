@@ -24,9 +24,11 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
+use App\Http\Controllers\Api\OrRecordController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\OfficeSignatoryController;
 use App\Http\Controllers\Api\OwnerProfileController;
+use App\Http\Controllers\Api\PaymentProofController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
@@ -330,9 +332,39 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::post('payments/{payment}/abandon', [PaymentController::class, 'abandon'])
             ->whereNumber('payment')
             ->middleware('throttle:10,1');
+        /*
+         * Proof of a payment made at the counter: the OR number and date paid,
+         * a photo of the receipt, or both (thesis panel, matrix item 4). It
+         * marks nothing paid; BPLO's Mark as paid reads it.
+         */
+        Route::post('applications/{application}/payment-proofs', [PaymentProofController::class, 'store']);
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
+    /*
+     * The proof waiting on BPLO, and its photo. Read by the owner AND by BPLO
+     * and the super admin, who hold no `payment.make`, so outside that group;
+     * PaymentProofController::mayRead is the gate.
+     */
+    Route::get('applications/{application}/payment-proof', [PaymentProofController::class, 'pending']);
+    // The owner's newest proof, waiting or rejected with its reason, for the Pay page.
+    Route::get('applications/{application}/payment-proof/latest', [PaymentProofController::class, 'latest']);
+    Route::get('payment-proofs/{paymentProof}/file', [PaymentProofController::class, 'file']);
+    /*
+     * BPLO rejects the owner's receipt, with a reason (Ken, 3 November 2026).
+     * Outside every permission group for the reason Mark as paid is: only the
+     * officer holding the filing may, and everyone else — the super admin
+     * included — hears that one sentence (PaymentController::authorizeCaseHolder).
+     */
+    Route::post('payment-proofs/{paymentProof}/reject', [PaymentProofController::class, 'reject']);
+    /*
+     * OR Records (thesis panel, matrix item 5): every payment carrying an
+     * Official Receipt, searchable. BPLO and the super admin — the two
+     * holders of `application.view_any_office` — and nobody else; the rail
+     * entry and the web route carry the same claim.
+     */
+    Route::middleware('permission:application.view_any_office')
+        ->get('or-records', [OrRecordController::class, 'index']);
     /*
      * Fee adjustment is GONE [client, 2026-09-06]: the fee is system-computed
      * and BPLO cannot change it.
@@ -411,17 +443,19 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          * decision, the same as approve and return above.
          */
         Route::post('assignments/{assignment}/classification', [AssignmentController::class, 'classify']);
-        /*
-         * BPLO marks a bill paid over the counter at City Hall [Ken, 4 Oct
-         * 2026]. In this group because `application.review` is what every one
-         * of the seven offices holds, the same reason `classification` above
-         * is here — but unlike classification, which office may act is not a
-         * per-filing question (AssignmentController::authorizeDepartment): it
-         * is always BPLO, who raises and chases the Tax Order of Payment.
-         * `PaymentController::authorizeBploStaff` enforces that.
-         */
-        Route::post('applications/{application}/counter-payment', [PaymentController::class, 'counterPayment']);
     });
+    /*
+     * BPLO marks a bill paid over the counter at City Hall [Ken, 4 Oct 2026],
+     * and since the thesis panel's revisions only the officer holding BPLO's
+     * assignment on the filing may (matrix item 1).
+     *
+     * Outside the review group on purpose. Inside it, the super admin — who
+     * holds no `application.review` — was refused by the middleware with a
+     * bare "no permission", while Ken's rule is one sentence for everyone who
+     * is not the holder. `PaymentController::authorizeCaseHolder` asks for
+     * `application.review` itself, so nothing is wider than it was.
+     */
+    Route::post('applications/{application}/counter-payment', [PaymentController::class, 'counterPayment']);
     /*
      * Rejecting the whole application is not a per-office power. Each office
      * reviews its own clearance and returns its own assignment; ending the

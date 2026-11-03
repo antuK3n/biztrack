@@ -7,6 +7,7 @@ use App\Enums\PermitStatus;
 use App\Jobs\SendOwnerUpdateEmail;
 use App\Jobs\SendSms;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\Business;
 use App\Models\OfficerRequest;
@@ -48,8 +49,9 @@ use Throwable;
  * from the screen, which is how this reads as "clicking a notification logs me
  * out" (issue #98).
  *
- * Hence filingLink(): the one filing has two addresses, and which one is right
- * depends on who is being told about it, never on which method is telling them.
+ * Hence filingLink(): the one filing has an address on each site — on the LGU
+ * one, its review by the reader's own office — and which one is right depends on
+ * who is being told about it, never on which method is telling them.
  */
 class NotificationService
 {
@@ -650,6 +652,116 @@ class NotificationService
         );
     }
 
+    /**
+     * An applicant has handed an office a filing, so it is that office's turn.
+     *
+     * Thesis panel revision (Tool Defense matrix, item 8): "The office
+     * handling an application is notified when an applicant submits it." Who
+     * in the office is told is `WorkflowService::tellOfficeOfSubmission`;
+     * this is the notice they read, in the words Ken approved.
+     *
+     * Two sentences for the two hand-overs. BPLO is handed the filing itself
+     * — a new application, a Business Permit renewal, an amendment — and
+     * `$permit` is null. Any other office is handed one permit: its sheet
+     * handed in after payment, or a clearance-only renewal.
+     *
+     * Staff only, so push() mails nobody and there is no fanOut(): texts are
+     * for an owner's key moments (see the note above fanOut).
+     *
+     * Addressed to the office's own review, as `filingLink()` addresses every
+     * officer notice (see the note there for why never the filing's number).
+     * The review is passed in rather than looked up because the caller has
+     * just routed it.
+     */
+    public function filingSubmitted(
+        Application $app,
+        User $recipient,
+        ApplicationAssignment $review,
+        ?PermitType $permit = null,
+    ): void {
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'New application',
+            $permit === null
+                ? "{$app->tracking_id} · {$business} was submitted."
+                : "{$app->tracking_id} · {$business} applied for the {$permit->name}.",
+            "/staff/queue/{$review->id}",
+            $app,
+        );
+    }
+
+    /**
+     * The owner has sent proof of a payment made at the counter.
+     *
+     * Revision matrix item 4, follow-up: the proof was kept, and BPLO found it
+     * only by opening Mark as paid. Who at BPLO is told is
+     * `WorkflowService::tellBploOfPaymentProof`; this is the notice they read,
+     * in the words Ken approved — the title as he gave it, and the body built
+     * the way `filingSubmitted` builds BPLO's "New application" one, so the two
+     * read alike in the bell. Staff only, so push() mails nobody and nothing
+     * texts.
+     *
+     * ── The queue, not the office's review ──────────────────────────────────
+     *
+     * An officer's other notices about a filing open the office's own review
+     * of it (`filingLink`, `filingSubmitted`). This one is about Mark as paid, and
+     * that is not on the review: it is on the filing's row in Manage
+     * Applications (QueuePage, Pending Payment and All stages), and that row
+     * deliberately does not open, because BPLO's review was finished when it
+     * approved the form. `/staff/queue/{review}` would land the officer on a
+     * completed review with no Mark as paid on it. The queue has no address
+     * for a tab or a single row, so the link is the queue itself, and the
+     * tracking ID in the body is what the officer looks for there. If the
+     * queue ever takes a filter in its address, point this at the filing.
+     */
+    public function paymentProofReceived(Application $app, User $recipient): void
+    {
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $recipient,
+            'status_change',
+            'Proof of payment received',
+            "{$app->tracking_id} · {$business} sent proof of payment.",
+            '/staff/queue',
+            $app,
+        );
+    }
+
+    /**
+     * BPLO did not accept the owner's counter receipt (Ken, 3 November 2026).
+     *
+     * Who and when is `WorkflowService::tellOwnerOfRejectedProof`; this is
+     * the notice the owner reads, in Ken's words — the title as given, and the
+     * body built the way BPLO's "Proof of payment received" is, with the
+     * officer's reason where that one says what happened. The owner's, so
+     * push() mails it too; no text, which is for the key moments only (see
+     * the note above fanOut).
+     *
+     * The link is the filing's Pay page, where the reason is shown again and
+     * the owner sends a new receipt — the address `feeAdjusted` uses.
+     */
+    public function paymentProofRejected(Application $app, string $reason): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $app->applicant,
+            'payment',
+            'Receipt not accepted',
+            "{$app->tracking_id} · {$business}: {$reason}",
+            "/applications/{$app->id}/pay",
+            $app,
+        );
+    }
+
     public function requestClosed(OfficerRequest $request, User $recipient): void
     {
         $app = $request->application;
@@ -999,27 +1111,43 @@ class NotificationService
      * The address of a filing ON THE SITE THIS READER IS SIGNED INTO.
      *
      * A filing has two screens, not one: the applicant reads it at
-     * `/applications/{id}` on the citizen site, a reviewer reads it at
-     * `/staff/queue/{id}` on the LGU one. They are not interchangeable — see the
-     * note at the top of this file for what handing over the wrong one does.
+     * `/applications/{id}` on the citizen site, a reviewer reads its office's
+     * review at `/staff/queue/{review}` on the LGU one. They are not
+     * interchangeable — see the note at the top of this file for what handing
+     * over the wrong one does.
      *
      * `application.review` is the discriminator because it is what App.tsx gates
      * the queue route on; asking the same question the router asks is what keeps
      * the answer true when roles change. Anyone without it is a business owner,
      * and the citizen path is the only one they could open anyway.
      *
-     * The officer link carries an APPLICATION id into a route that binds an
-     * ASSIGNMENT. That is deliberate and long-standing (commit c922a8a):
-     * ReviewPage resolves a stray id against the office's own queue and replaces
-     * the URL, so the link self-corrects. An assignment id is not available here
-     * — a filing routed to six offices has six of them, and which one is meant
-     * depends on the reader, not on the filing.
+     * ── The reader's own review, not the filing's number ────────────────────
+     *
+     * The officer link carried the APPLICATION id into that route, which binds
+     * an ASSIGNMENT (commit c922a8a), on the reasoning that ReviewPage resolves
+     * a stray id against the office's queue and that an assignment id was not
+     * available here. Both halves were wrong. ReviewPage re-resolves only after
+     * a 404, so a number that is another filing's review opens that filing:
+     * on the seeded register `/staff/queue/1`, meant for BIZ-2026-00001, is
+     * BPLO's review of BIZ-2026-00002. And the review IS available: a filing
+     * has one per office, and the reader's office says which. Ken, 21 October
+     * 2026: every officer notice opens the office's own case.
+     *
+     * An officer whose office has no review of the filing has no screen for it,
+     * so they are sent to the queue rather than to a number that names someone
+     * else's filing.
      */
     private function filingLink(User $reader, Application $app): string
     {
-        return $reader->hasPermission('application.review')
-            ? "/staff/queue/{$app->id}"
-            : "/applications/{$app->id}";
+        if (! $reader->hasPermission('application.review')) {
+            return "/applications/{$app->id}";
+        }
+
+        $review = $reader->department_id === null ? null : ApplicationAssignment::where('application_id', $app->id)
+            ->where('department_id', $reader->department_id)
+            ->value('id');
+
+        return $review !== null ? "/staff/queue/{$review}" : '/staff/queue';
     }
 
     private function permitOwner(Permit $permit): ?User

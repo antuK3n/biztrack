@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Support\AnalyticsOffice;
+use App\Support\DownloadLog;
 use App\Support\LguReports;
 use App\Support\ManilaCalendar;
 use Carbon\CarbonImmutable;
@@ -72,7 +73,7 @@ class ReportController extends Controller
             $compiled['period']['to'],
         );
 
-        return response()->streamDownload(function () use ($compiled) {
+        return DownloadLog::record(response()->streamDownload(function () use ($compiled) {
             $out = fopen('php://output', 'w');
             // A byte-order mark, so a spreadsheet opens "Mayor’s" and "—" as
             // written rather than as mojibake.
@@ -108,7 +109,7 @@ class ReportController extends Controller
             }
 
             fclose($out);
-        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']), 'lgu_report');
     }
 
     /** @return array<string, mixed> */

@@ -1,6 +1,8 @@
 # keep the image build context lean + never ship host artifacts
 api/vendor
 api/node_modules
+# A developer's pyHanko venv; the image builds its own (app.Dockerfile).
+api/.venv
 api/storage/logs/*
 api/storage/framework/cache/*
 api/storage/framework/sessions/*

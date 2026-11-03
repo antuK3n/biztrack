@@ -7,6 +7,7 @@ use App\Enums\PaymentStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One attempt to pay a Tax Order of Payment.
@@ -28,6 +29,8 @@ class Payment extends Model
         'method', 'status', 'receipt_path', 'paid_at',
         'gateway', 'gateway_order_id', 'pay_url', 'pay_url_kind', 'next_check_at', 'check_attempts',
         'flagged_at', 'gateway_note', 'abandoned_at', 'refund_review_at',
+        // A counter payment's Official Receipt and who recorded it (matrix items 1, 5, 6).
+        'or_number', 'or_date', 'recorded_by_user_id',
     ];
 
     protected $casts = [
@@ -41,6 +44,7 @@ class Payment extends Model
         'abandoned_at' => 'datetime',
         'refund_review_at' => 'datetime',
         'check_attempts' => 'integer',
+        'or_date' => 'date',
     ];
 
     /*
@@ -57,6 +61,18 @@ class Payment extends Model
         return $this->belongsTo(Application::class);
     }
 
+    /** The officer who marked it paid at the counter; null on every other payment. */
+    public function recordedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recorded_by_user_id');
+    }
+
+    /** The proof behind a counter payment: the owner's, the officer's photo, or both. */
+    public function proofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
+    }
+
     public function isKwikPay(): bool
     {
         return $this->gateway === self::GATEWAY_KWIKPAY;
@@ -65,6 +81,18 @@ class Payment extends Model
     public function isPending(): bool
     {
         return $this->status === PaymentStatus::Pending;
+    }
+
+    /**
+     * Payments carrying this Official Receipt number, compared the way a clerk
+     * reads one: spaces around it and letter case do not make it another OR.
+     * Mark as paid refuses an OR one of these already carries, and the defense
+     * generators (`Playbook::nextOrNumber`) skip one, so the two agree on
+     * what "taken" means.
+     */
+    public function scopeWithOrNumber(Builder $query, string $orNumber): Builder
+    {
+        return $query->whereRaw('LOWER(TRIM(or_number)) = ?', [mb_strtolower(trim($orNumber))]);
     }
 
     /** KwikPay payments nobody has confirmed either way yet. */

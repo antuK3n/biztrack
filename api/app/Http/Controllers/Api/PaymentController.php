@@ -9,7 +9,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PaymentResource;
 use App\Models\Application;
 use App\Models\Payment;
+use App\Models\PaymentProof;
 use App\Models\PermitType;
+use App\Models\User;
 use App\Services\FeeCalculator;
 use App\Services\KwikPay\KwikPayGateway;
 use App\Services\PaymentGateway;
@@ -17,6 +19,7 @@ use App\Services\WorkflowService;
 use App\Support\AnnualInspection;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use App\Support\Numbering;
 use App\Support\OtherRequirementRules;
 use App\Support\PaymentMode;
@@ -26,7 +29,9 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -342,16 +347,36 @@ class PaymentController extends Controller
 
     /**
      * BPLO marks a bill paid over the counter at City Hall, for an owner who
-     * paid in person instead of online [Ken, 4 Oct 2026]: "they should just be
-     * able to find a user whose filing is pending to be paid and mark it, no
-     * need to enter anything". Nothing is taken from the request — the amount
-     * is the balance due, same as the owner's own `pay()`.
+     * paid in person instead of online. The amount is the balance due, same as
+     * the owner's own `pay()`.
      *
-     * Only BPLO. `application.review`, which the route sits behind, is held by
-     * all seven offices (RbacSeeder) — BPLO is who raises and chases the Tax
-     * Order of Payment, so `authorizeBploStaff` narrows it the same way
-     * `AssignmentController::authorizeDepartment` narrows an office's other
-     * review actions to its own cases, except the office here is always BPLO.
+     * ── What the officer enters, since the thesis panel ─────────────────────
+     *
+     * It took nothing from the request until the panel's revisions [Ken, 4 Oct
+     * 2026: "mark it, no need to enter anything"]. The matrix now promises an
+     * OTC payment record (item 6) and OR records (item 5), so the officer
+     * enters the Official Receipt's number and the date it was paid — both
+     * required, pre-filled on screen from the owner's proof when there is one
+     * (PaymentProofController) — and may attach a photo of the receipt. The
+     * payment records them and who recorded it; the owner's pending proof is
+     * linked to it, and so is the officer's photo.
+     *
+     * ── Who may, since the thesis panel ─────────────────────────────────────
+     *
+     * It was any BPLO officer. Matrix item 1: "Restricted 'Mark as paid' to the
+     * staff member assigned to the application", so only the officer holding
+     * BPLO's assignment on this filing may — see `authorizeCaseHolder`. Every
+     * use is audited with the officer, the time, the filing and the OR.
+     *
+     * ── Not before the owner's receipt ──────────────────────────────────────
+     *
+     * Ken, 3 November 2026: Mark as paid needs the owner's receipt first, on
+     * screen and here. A filing with no pending proof — none sent, or only a
+     * superseded or rejected one — is refused with "The owner has not sent
+     * their receipt yet." The officer either marks it paid against the
+     * receipt or rejects the receipt (PaymentProofController::reject), and
+     * the owner sends another. Asked after the bill's own refusals, so a
+     * filing with nothing to pay still says that.
      *
      * The guards are `FilingMover::pay()`'s — the Debug page's own simulated
      * "pay the bill" step, which already has to answer the same two questions
@@ -362,13 +387,16 @@ class PaymentController extends Controller
      */
     public function counterPayment(Request $request, Application $application): JsonResponse
     {
+        // Asked before the lock too, so nobody who may not mark it paid waits on the bill's lock.
+        self::authorizeCaseHolder($request->user(), $application);
+
         return $this->onePaymentAtATime($application, fn (Application $fresh) => $this->counterPaymentNow($request, $fresh));
     }
 
     /** `counterPayment()`, once it holds the bill's lock. */
     private function counterPaymentNow(Request $request, Application $application): JsonResponse
     {
-        $this->authorizeBploStaff($request);
+        self::authorizeCaseHolder($request->user(), $application);
 
         /*
          * Not for a business the super admin has suspended or blacklisted:
@@ -377,6 +405,29 @@ class PaymentController extends Controller
          * anything is assessed or recorded.
          */
         $this->workflow->refuseWhileOnHold($application->business);
+
+        $data = $request->validate([
+            /*
+             * One OR, one payment: an OR number already on another payment is
+             * refused, whatever its case or the spaces around it. Not a unique
+             * index — older payments carry no OR at all — and not asked of the
+             * owner's proof, which only offers an OR; the officer decides here.
+             */
+            'or_number' => ['bail', 'required', 'string', 'max:30', function (string $attribute, string $value, Closure $fail) {
+                if (Payment::withOrNumber($value)->exists()) {
+                    $fail('This OR number is already recorded.');
+                }
+            }],
+            'or_date' => ['required', 'date', 'before_or_equal:today'],
+            // The officer's own photo of the receipt, optional; the files a requirement takes.
+            'photo' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+        ], [
+            'or_number.required' => 'Enter the OR number.',
+            'or_date.required' => 'Enter the date paid.',
+            'or_date.before_or_equal' => 'The date paid cannot be in the future.',
+            'photo.max' => 'The file may not be larger than 10MB.',
+            'photo.mimes' => 'Upload a PDF, JPG, or PNG file.',
+        ], PaymentProofController::ATTRIBUTES);
 
         $closed = in_array(
             $application->status,
@@ -404,6 +455,11 @@ class PaymentController extends Controller
             throw ValidationException::withMessages([
                 'status' => ['This application has nothing outstanding.'],
             ]);
+        }
+
+        // The owner's receipt first (Ken, 3 November 2026); see the note above.
+        if (PaymentProof::pendingFor($application) === null) {
+            throw self::noReceiptYet();
         }
 
         /*
@@ -439,8 +495,67 @@ class PaymentController extends Controller
             ]);
         }
 
-        $payment = $this->gateway->charge($fee, PaymentMethod::Counter, $balanceDue);
-        Audit::log('payment.completed', $payment, ['amount' => (string) $payment->amount, 'via' => 'counter']);
+        /*
+         * The officer's photo is kept before the transaction — a file is not
+         * rolled back — and the payment, the proof it settles and its audit
+         * row are written as one, so no payment exists without its record.
+         */
+        $photo = $request->file('photo');
+        $stored = $photo instanceof UploadedFile ? PaymentProofController::storePhoto($photo, $application) : null;
+        $officer = $request->user();
+
+        $payment = DB::transaction(function () use ($application, $fee, $balanceDue, $data, $stored, $officer) {
+            /*
+             * The owner's proof, if they sent one, is the proof of THIS payment.
+             * Read before the charge: a completed payment is the cut-off
+             * `pendingFor` measures from, so afterwards it would find nothing.
+             */
+            $owners = PaymentProof::pendingFor($application);
+
+            /*
+             * Asked again inside the transaction: rejected between the check
+             * above and here, there is no receipt to mark it paid against, and
+             * nothing is recorded.
+             */
+            if ($owners === null) {
+                throw self::noReceiptYet();
+            }
+
+            $payment = $this->gateway->charge($fee, PaymentMethod::Counter, $balanceDue, [
+                'or_number' => trim((string) $data['or_number']),
+                'or_date' => $data['or_date'],
+                'recorded_by_user_id' => $officer->id,
+            ]);
+
+            $owners->update(['payment_id' => $payment->id]);
+
+            $officers = $stored === null ? null : PaymentProof::create([
+                'application_id' => $application->id,
+                'fee_assessment_id' => $fee->id,
+                'payment_id' => $payment->id,
+                'submitted_by_user_id' => $officer->id,
+                'or_number' => $payment->or_number,
+                'or_date' => $payment->or_date,
+                ...$stored,
+                'submitted_at' => now(),
+            ]);
+
+            /*
+             * One row per Mark as paid: the officer (the row's actor), when
+             * (the row's own time), the filing and the OR (matrix item 1).
+             */
+            Audit::log('payment.completed', $payment, [
+                'amount' => (string) $payment->amount,
+                'via' => 'counter',
+                'application_id' => $application->id,
+                'tracking_id' => $application->tracking_id,
+                'or_number' => $payment->or_number,
+                'or_date' => $payment->or_date->toDateString(),
+                'proof_ids' => array_values(array_filter([$owners->id, $officers?->id])),
+            ]);
+
+            return $payment;
+        });
 
         $this->workflow->onPaymentCompleted($payment);
 
@@ -617,7 +732,7 @@ class PaymentController extends Controller
             $payment->update(['receipt_path' => $path]);
         }
 
-        return $file->download("invoice-{$payment->reference_number}.pdf");
+        return DownloadLog::record($file->download("invoice-{$payment->reference_number}.pdf"), 'invoice', $payment);
     }
 
     /**
@@ -694,23 +809,47 @@ class PaymentController extends Controller
         );
     }
 
-    /**
-     * BPLO alone, among the seven offices `application.review` is shared with.
-     *
-     * A department check rather than a permission, because no permission says
-     * "BPLO specifically" — every office holds the same `application.review`
-     * this route sits behind. `department_id === null` (the super admin) is
-     * refused too: Ken's decision names BPLO staff, not every reader who can
-     * see every office's queue.
-     */
-    private function authorizeBploStaff(Request $request): void
+    /** Mark as paid's refusal when no receipt is waiting (Ken, 3 November 2026). */
+    private static function noReceiptYet(): ValidationException
     {
-        $departmentId = $request->user()->department_id;
+        return ValidationException::withMessages([
+            'proof' => ['The owner has not sent their receipt yet.'],
+        ]);
+    }
+
+    /**
+     * The BPLO officer holding this filing, and nobody else (thesis panel,
+     * matrix item 1: "Restricted 'Mark as paid' to the staff member assigned
+     * to the application").
+     *
+     * It was BPLO as an office until then — a department check, because every
+     * office holds the `application.review` the route sat behind. Holding is
+     * the officer in charge of BPLO's own assignment on the filing, the same
+     * row "Assign to Me" claims. So another BPLO officer is refused, and so is
+     * an UNHELD filing — it is taken first, which is where this parts company
+     * with `AssignmentController::authorizeHolder`, whose acting on an unheld
+     * case claims it: a payment has to be traceable to a person who chose to
+     * hold the case before money was recorded against it. The super admin, the
+     * clearance offices and the owner hold no BPLO assignment and get the same
+     * one sentence; the route is outside the review group so the super admin
+     * hears it too rather than a bare "no permission".
+     *
+     * Public and static since BPLO can reject the owner's receipt (Ken, 3
+     * November 2026): the same officer judges the receipt as marks the bill
+     * paid, so PaymentProofController::reject asks this same question and
+     * refuses with this same sentence.
+     */
+    public static function authorizeCaseHolder(User $user, Application $application): void
+    {
+        $bplo = app(WorkflowService::class)->bploDepartmentId();
 
         abort_unless(
-            $departmentId !== null && $departmentId === $this->workflow->bploDepartmentId(),
+            $bplo !== null
+                && $user->department_id === $bplo
+                && $user->hasPermission('application.review')
+                && $application->bploAssignment()->where('officer_user_id', $user->id)->exists(),
             403,
-            'Only BPLO can mark a payment made at the counter.'
+            'Only the officer handling this application can mark it as paid.'
         );
     }
 }

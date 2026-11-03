@@ -9,6 +9,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\OfficerRequest;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -28,13 +29,14 @@ use Illuminate\Support\Str;
  *
  * Every state change below is a request through AppClient, made by the
  * account a person would make it as: the owner files, BPLO approves and ticks
- * the other permits (client, 5 October 2026), BPLO marks the bill paid at the
- * counter (never KwikPay), each office takes its own clearance, approves it,
- * books its visit and records the result, the super admin blacklists. The
- * only direct reads of the database are to find what a screen would have
- * shown the person — the id of BPLO's queue item, the requirement list the
- * Documents step draws, the permit row the Revoke button sits on. Nothing is
- * written except through the API.
+ * the other permits (client, 5 October 2026), the BPLO officer holding the
+ * filing marks the bill paid at the counter with its OR (never KwikPay), each
+ * office takes its own clearance, approves it, books its visit and records the
+ * result, the super admin blacklists. The only direct reads of the database
+ * are to find what a screen would have shown the person — the id of BPLO's
+ * queue item and who holds it, the requirement list the Documents step draws,
+ * the permit row the Revoke button sits on. Nothing is written except through
+ * the API.
  *
  * If the app refuses a step, StepRefused propagates and the command rolls the
  * whole owner back and reports the refusal. A scenario the rules will not
@@ -67,6 +69,14 @@ final class Playbook
         'OCCUPANCY' => 'Engr. Victor Malonzo',
         'ZONING' => 'Engr. Lorna Bautista',
     ];
+
+    /**
+     * Where the generators' Official Receipt numbers start (nextOrNumber).
+     * biztrack:backfill-counter-ors puts the receipts of the counter payments
+     * made before the OR was asked for BELOW this, so the ones recorded from
+     * here on read as later in the booklet.
+     */
+    public const FIRST_OR_NUMBER = 4_200_001;
 
     private CarbonImmutable $start;
 
@@ -629,12 +639,64 @@ final class Playbook
         $this->bploApproves($id);
 
         $this->day(2, '09:30');
-        $this->asOffice(PermitType::OUTCOME_CODE)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment");
+        self::payAtCounter($this->api, $id, $this->clock->now());
         foreach ($this->ticks() as $code) {
             $this->handIn($id, $code);
         }
 
         return $id;
+    }
+
+    /**
+     * The owner sends their receipt from the Pay page, then BPLO marks the
+     * bill paid at the counter against it, as the officer holding the filing
+     * and with the Official Receipt the owner paid against.
+     *
+     * All three are the app's rules: since the thesis panel's revisions only
+     * the officer in charge of BPLO's assignment may mark a bill paid, and the
+     * OR number and the date paid are required; since 3 November 2026 (Ken)
+     * Mark as paid waits for the owner's receipt. So the owner sends the OR
+     * and the date first, and the officer records the same pair, as the
+     * dialog pre-fills it. The holder is read the way the queue shows it
+     * ("Officer in charge"), never assumed. Shared with Portfolio, whose
+     * clicks are these.
+     */
+    public static function payAtCounter(AppClient $api, int $id, CarbonImmutable $paidOn): void
+    {
+        $holder = ApplicationAssignment::where('application_id', $id)
+            ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
+            ->with('officer')
+            ->first()?->officer;
+        if ($holder === null) {
+            throw new StepRefused('find who holds the filing at BPLO', 404, "application {$id} has no officer in charge at BPLO");
+        }
+
+        $receipt = [
+            'or_number' => self::nextOrNumber(),
+            'or_date' => $paidOn->toDateString(),
+        ];
+
+        $api->as(Application::findOrFail($id)->applicant)
+            ->post('the owner sends the receipt', "applications/{$id}/payment-proofs", $receipt);
+
+        $api->as($holder)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment", $receipt);
+    }
+
+    /**
+     * Seven digits, like the serial printed on an Official Receipt, and on no
+     * payment yet — the register's own and every earlier run's included, so
+     * two runs never hand out one number, and Mark as paid, which refuses an
+     * OR already recorded, never refuses one of these. "On a payment" is
+     * `Payment::withOrNumber`, the same test Mark as paid applies.
+     */
+    public static function nextOrNumber(): string
+    {
+        $n = self::FIRST_OR_NUMBER + Payment::whereNotNull('or_number')->count();
+        while (Payment::withOrNumber((string) $n)->exists()) {
+            $n++;
+        }
+
+        return (string) $n;
     }
 
     /** Apply for a clearance, upload its checklist, hand in its sheet. */

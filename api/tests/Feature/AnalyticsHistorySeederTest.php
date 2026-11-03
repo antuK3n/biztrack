@@ -1,12 +1,16 @@
 <?php
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
 use App\Models\Department;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Support\Spc;
 use Database\Seeders\AnalyticsHistorySeeder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
@@ -71,10 +75,32 @@ function shortHistorySeeder(): AnalyticsHistorySeeder
  * old number had simply never been reliable enough to notice.
  *
  * Volume rather than months is what fixes it, because volume is what puts rows
- * inside the window: ~50 before and ~70 during, at which point the ratio lands
- * between x1.32 and x1.69 across anchor dates spread over a year, against a
- * ramp that predicts x1.35..x1.95. The control office stays between x0.89 and
- * x0.98. Both hold with a wide margin around the x1.25 the test asserts.
+ * inside the window: around fifty completed CHO reviews on each side.
+ *
+ * ── Why the slowdown test pins the clock ─────────────────────────────────
+ *
+ * Volume makes the ratio a measurement, but it is still a measurement of one
+ * history, and the seeder builds that history from `Carbon::now()`: the filing
+ * calendar, the anomaly window, the review cutoff, and through them every
+ * `mt_rand` draw after. On the real clock the test measured a different history
+ * every day it ran. It failed on 3 November 2026 at x1.24 against the x1.25 it
+ * asserts, with nothing in the seeder changed.
+ *
+ * Run at 25 anchors from January 2026 to March 2027, it failed at 11. Reading
+ * the seeder's own window (see the test) clears six of them. The other five
+ * stay: CHO under x1.25 twice, CPDO edging past CHO twice, and too few CENRO
+ * rows once. CHO ranged from x1.18 to x1.69. This comment used to promise
+ * x1.32 to x1.69 on any anchor; the seeder as it stands does not do that.
+ *
+ * So the day is fixed, on one near the median of those 25 (CHO x1.41), not on
+ * the best of them. A change to the seeder can still move the result. When it
+ * does, look at what moved; do not pick another day.
+ *
+ * BPLO is not the quiet control it was meant to be. It reads under x0.5 at
+ * every anchor, because its long rows end when the filing is decided (all 53
+ * over ten days did, in the 3 November history): the row times the whole
+ * filing, not BPLO reading the form. The ordering against the five other
+ * offices is what rules out a slowdown on every office.
  */
 function denseHistorySeeder(): AnalyticsHistorySeeder
 {
@@ -163,6 +189,7 @@ it('writes timestamps that agree with each other', function () {
 
     expect($applications)->not->toBeEmpty();
 
+    $gathering = 0;
     foreach ($applications as $app) {
         // Filed after the business was registered, never before it existed.
         expect($app->submitted_at)->not->toBeNull();
@@ -174,11 +201,60 @@ it('writes timestamps that agree with each other', function () {
             expect($app->decided_at->greaterThanOrEqualTo($app->submitted_at))->toBeTrue();
         }
 
-        // A decided application has a terminal transition in its history, and
-        // an undecided one does not — the two are never out of step.
-        $terminal = $app->statusHistory()->whereIn('to_status', ['approved', 'rejected'])->exists();
-        expect($terminal)->toBe($app->decided_at !== null);
+        /*
+         * ── The history, the status and `decided_at` are never out of step ──
+         *
+         * This asserted that a filing has an approved or rejected step in its
+         * history exactly when `decided_at` is set. That stopped being the
+         * rule on 4 October 2026, when Awaiting Other Permits was retired
+         * (3b4a3e65): a paid filing reaches Approved at payment, and
+         * `decided_at` stays null until its last other permit is granted.
+         * Every seeded filing caught between the two failed the old
+         * assertion on data the product writes on purpose. See
+         * `Application::isDecided()`.
+         *
+         * What holds now, for a status that means two things:
+         *
+         *   - the history ends on the status the filing holds;
+         *   - `decided_at` set means decided: a terminal step is in the
+         *     history and `isDecided()` agrees. A rejection is always
+         *     decided, as it was before;
+         *   - a terminal step with no `decided_at` is an Approved filing
+         *     still gathering, and on an Approved filing `decided_at` is null
+         *     exactly when one of its other permits is not granted yet.
+         *     `refreshReadiness()` closes it the moment the last one is.
+         *
+         * The count below is so the last rule is never checked against a
+         * history with no gathering filing in it, where it would pass on
+         * nothing.
+         */
+        $steps = $app->statusHistory()->orderBy('id')->pluck('to_status');
+        $terminal = $steps->intersect(['approved', 'rejected'])->isNotEmpty();
+
+        expect($steps->last())->toBe($app->status->value);
+
+        if ($app->decided_at !== null) {
+            expect($terminal)->toBeTrue();
+            expect($app->isDecided())->toBeTrue();
+        }
+
+        if ($app->status === ApplicationStatus::Rejected) {
+            expect($app->decided_at)->not->toBeNull();
+        }
+
+        if ($terminal && $app->decided_at === null) {
+            expect($app->status)->toBe(ApplicationStatus::Approved);
+        }
+
+        if ($app->status === ApplicationStatus::Approved) {
+            $notGranted = $app->permitTypes
+                ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
+                ->reject(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Approved);
+            expect($notGranted->isNotEmpty())->toBe($app->decided_at === null);
+            $gathering += (int) ($app->decided_at === null);
+        }
     }
+    expect($gathering)->toBeGreaterThan(0);
 
     foreach (ApplicationAssignment::whereIn('application_id', $applications->pluck('id'))->get() as $assignment) {
         expect($assignment->assigned_at)->not->toBeNull();
@@ -201,12 +277,22 @@ it('writes timestamps that agree with each other', function () {
 /* ── the injected signal ──────────────────────────────────────────────────── */
 
 it('actually slows the one office it says it slows', function () {
-    // Dense rather than short: see denseHistorySeeder() for why this one test
-    // needs the anomaly window populated instead of the history lengthened.
+    // Dense rather than short, and on a fixed day: see denseHistorySeeder() for
+    // why this one test needs the anomaly window populated, and why its anchor
+    // must not be the day the suite happens to run.
+    $anchor = Carbon::parse('2026-09-09 10:00:00');
+    $this->travelTo($anchor);
     denseHistorySeeder()->run();
 
-    // The anomaly window is the eight ISO weeks before the current one.
-    $anomalyStart = now()->startOfWeek()->subWeeks(8);
+    /*
+     * The anomaly window as the seeder draws it: the current ISO week and the
+     * seven before it, so it opens seven Mondays back (`ANOMALY_WEEKS - 1`).
+     * This read eight Mondays back, which put a week of CHO reviews the seeder
+     * never slowed on the slowed side and pulled CHO's ratio down.
+     *
+     * From `$anchor`, not `now()`: run() hands back the real clock as it ends.
+     */
+    $anomalyStart = $anchor->copy()->startOfWeek()->subWeeks(7);
 
     $seededApplicationIds = Application::withTrashed()
         ->whereIn('business_id', Business::withTrashed()
@@ -256,9 +342,10 @@ it('actually slows the one office it says it slows', function () {
      * reviews and their ratios are noisier; a fixed bound on each would be the
      * same coin flip this test was already fooled by once. "CHO moved further
      * than any other office" is the claim the seeder actually makes, it is
-     * robust to that noise, and it is what the control chart has to show. The
-     * margin is wide: CHO reads x1.37-x1.63 across anchor dates spread over a
-     * year, and the next highest office never clears x1.17.
+     * robust to that noise, and it is what the control chart has to show. At
+     * the pinned anchor CHO reads x1.41 and the next office, CENRO, x1.14. On
+     * the real clock a minor office did outrun CHO at two anchors of 25; see
+     * denseHistorySeeder().
      */
     $ratios = [];
     foreach (['BPLO', 'BFP', 'CPDO', 'OBO', 'CENRO'] as $code) {

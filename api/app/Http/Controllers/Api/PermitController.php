@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\AuditLog;
 use App\Models\Inspection;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
@@ -18,9 +20,11 @@ use App\Support\ApplicationVisibility;
 use App\Support\BusinessDate;
 use App\Support\CertificateSignatories;
 use App\Support\OccupancyChecklist;
+use App\Support\DownloadLog;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
+use App\Support\PermitSignature;
 use App\Support\QrCode;
 use App\Support\RenewablePermit;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -900,7 +904,9 @@ class PermitController extends Controller
         }
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
-        $file = PdfFile::render($pdf);
+        // Signed before it is archived, so the archive and the download stay
+        // the same bytes (revision matrix item 7; see PermitSignature).
+        $file = PermitSignature::sign(PdfFile::render($pdf));
 
         $path = "private/permits/{$permit->id}.pdf";
         Storage::disk('local')->put($path, $file->content);
@@ -908,7 +914,7 @@ class PermitController extends Controller
             $permit->update(['pdf_path' => $path]);
         }
 
-        return $file->download("permit-{$permit->permit_number}.pdf");
+        return DownloadLog::record($file->download("permit-{$permit->permit_number}.pdf"), 'permit', $permit);
     }
 
     /**
@@ -1164,15 +1170,64 @@ class PermitController extends Controller
         }
 
         /*
-         * The settled payment, not the latest. A filing can carry an
-         * abandoned online order beside the one that actually paid, and the
-         * OR number on a certificate has to be the one the money arrived
-         * under. Both office sheets print it, so it is found once.
+         * ── The payment that paid for this permit, and its Official Receipt ──
+         *
+         * Four sheets print a receipt line: the Mayor's Permit, CENRO's
+         * certificate, the FSIC and the Certificate of Occupancy. Its OR,
+         * amount and date must all be one payment's, the one that paid this
+         * permit's fee, so it is found once, here.
+         *
+         * WHICH PAYMENT: the filing's first completed payment, oldest paid
+         * first, leaving out any held for a refund review.
+         *
+         *   - One Tax Order of Payment, raised before anything is paid, covers
+         *     the business permit and every clearance BPLO ticked
+         *     (docs/application-flow-2026-09.md rule 4; nothing re-assesses a
+         *     paid bill since `ClearanceService::reassess()` went). The payment
+         *     that settles it is the one that releases the Mayor's Permit
+         *     (`WorkflowService::onPaymentCompleted`), so every certificate on
+         *     the filing was paid by it.
+         *   - A completed payment after that one paid for nothing the bill
+         *     owed. Today it is a duplicate: the online order Mark as paid set
+         *     aside and the owner paid anyway, or money landing on a closed
+         *     filing. `KwikPayGateway` books both and sets `refund_review_at`,
+         *     which is why flagged payments are left out, not just outranked.
+         *   - Only the superseded two-payment design
+         *     (docs/clearances-after-payment.md) settled a real balance later,
+         *     for clearances applied for after the first payment. There the
+         *     Mayor's Permit was still paid by the first; a clearance would
+         *     print the first payment's OR rather than the balance's. No such
+         *     filing has an OR to print: counter payments, the only kind that
+         *     carries one, began on 4 October 2026, under the one-bill flow.
+         *     If a second payment ever comes back, this is where the sheet has
+         *     to learn which payment paid which office's lines.
+         *
+         * So when several counter payments sit on one bill, the first OR
+         * prints alone, never a list: the later receipts did not pay for this
+         * permit. Pending, failed and refunded payments are money the LGU does
+         * not hold. This used to take the LATEST paid, which put a duplicate's
+         * date on the sheet whenever one came in after the bill was settled.
+         *
+         * THE OR prints for a counter payment (Ken, 3 November 2026): it is the
+         * receipt the City Treasurer issued, which BPLO types in at Mark as paid
+         * (`PaymentController::counterPayment`). On 6 October 2026 the line had
+         * been made always blank ("The system should not be able to generate an
+         * OR") because the only number BizTrack then held was its own payment
+         * reference, and that still never prints here. An online payment has no
+         * Official Receipt, so its line stays blank.
+         *
+         * THE DATE beside it is the date on that receipt, as BPLO typed it, so
+         * the pair reads as the receipt does; Mark as paid can come days after
+         * the owner paid at the window. An online payment prints `paid_at`, the
+         * moment the money landed.
          */
         $paid = $permit->application?->payments
-            ?->whereNotNull('paid_at')
-            ->sortBy('paid_at')
-            ->last();
+            ?->filter(fn (Payment $p) => $p->status === PaymentStatus::Completed && $p->refund_review_at === null)
+            ->sortBy([['paid_at', 'asc'], ['id', 'asc']])
+            ->first();
+
+        $orNumber = $paid?->or_number;
+        $datePaid = optional($paid?->or_date ?? $paid?->paid_at)->format('F j, Y');
 
         $sheetFields = [];
 
@@ -1188,10 +1243,8 @@ class PermitController extends Controller
                     ? (string) (int) $profile['employees']
                     : null,
                 'amount_paid' => $paid ? '₱'.number_format((float) $paid->amount, 2) : null,
-                // Blank: the Official Receipt is the City Treasurer's to issue and write
-                // in; BizTrack's payment reference is not one (6 October 2026).
-                'or_number' => null,
-                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'or_number' => $orNumber,
+                'date_paid' => $datePaid,
             ];
         }
 
@@ -1224,10 +1277,8 @@ class PermitController extends Controller
 
             $sheetFields = [
                 'office_amount_paid' => $paid ? '₱'.number_format($cenroShare, 2) : null,
-                // Blank: the Official Receipt is the City Treasurer's to issue and write
-                // in; BizTrack's payment reference is not one (6 October 2026).
-                'or_number' => null,
-                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'or_number' => $orNumber,
+                'date_paid' => $datePaid,
                 'letterhead' => config('biztrack.letterheads.CENRO'),
             ];
         }
@@ -1289,10 +1340,8 @@ class PermitController extends Controller
                 'fsic_valid_for' => 'Issuance of FSIC for Business Permit only',
                 'fsic_description' => $description !== '' ? $description : null,
                 'office_amount_paid' => $paid ? '₱'.number_format($bfpShare, 2) : null,
-                // Blank: the Official Receipt is the City Treasurer's to issue and write
-                // in; BizTrack's payment reference is not one (6 October 2026).
-                'or_number' => null,
-                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'or_number' => $orNumber,
+                'date_paid' => $datePaid,
                 'letterhead' => config('biztrack.letterheads.BFP'),
             ];
         }
@@ -1430,10 +1479,8 @@ class PermitController extends Controller
                 'occ_zoning_no' => $sibling('ZONING'),
                 'occ_fire_no' => $sibling('FSIC') ?? $answer('fsec_no'),
                 'office_amount_paid' => $paid ? '₱'.number_format($oboShare, 2) : null,
-                // Blank: the Official Receipt is the City Treasurer's to issue and write
-                // in; BizTrack's payment reference is not one (6 October 2026).
-                'or_number' => null,
-                'date_paid' => optional($paid?->paid_at)->format('F j, Y'),
+                'or_number' => $orNumber,
+                'date_paid' => $datePaid,
             ];
         }
 

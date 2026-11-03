@@ -14,6 +14,7 @@ use App\Services\WorkflowService;
 use App\Support\AccountPrefill;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\DownloadLog;
 use App\Support\OfficeFormAnswers;
 use App\Support\OfficerEditRules;
 use App\Support\PdfFile;
@@ -330,7 +331,11 @@ class OfficeFormController extends Controller
             'business_name' => $application->business?->name ?? '',
         ]);
 
-        return PdfFile::render($pdf)->download("{$template[1]}-{$application->tracking_id}.pdf");
+        return DownloadLog::record(
+            PdfFile::render($pdf)->download("{$template[1]}-{$application->tracking_id}.pdf"),
+            'declaration',
+            $application,
+        );
     }
 
     /** DELETE — take one checklist file back off. */

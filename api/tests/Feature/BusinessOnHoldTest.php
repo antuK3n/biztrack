@@ -214,10 +214,23 @@ it('moves on a held filing of the owner\'s other business when the owner is rein
 
 it('refuses BPLO marking a held filing paid at the counter, with the sentence for each sanction', function (string $status, string $sentence) {
     $app = holdFiling();
+
+    // The owner's receipt, sent before the hold: Mark as paid waits for one (Ken, 3 November 2026).
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/payment-proofs", ['or_number' => '4200888', 'or_date' => now()->toDateString()])
+        ->assertCreated();
+
     holdSetStatus($app->business_id, $status)->assertOk();
 
+    /*
+     * The officer holding the filing, with its OR and the owner's receipt in:
+     * since the thesis panel's revisions anyone else is refused before the
+     * hold is reached, the OR is required, and so is the receipt. The hold is
+     * still what refuses it here.
+     */
+    takeFiling($app->id, 'BPLO');
     test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson("/api/v1/applications/{$app->id}/counter-payment")
+        ->postJson("/api/v1/applications/{$app->id}/counter-payment", ['or_number' => '4200888', 'or_date' => now()->toDateString()])
         ->assertStatus(422)
         ->assertJsonPath('message', $sentence);
 

@@ -32,10 +32,16 @@ class PaymentGateway
      *                              the unpaid part is owed — charging the total
      *                              again would bill the applicant a second time
      *                              for what they had already settled.
+     * @param  array<string, mixed>  $record  What the payment carries beyond the
+     *                                        charge itself — a counter payment's
+     *                                        OR number, date paid and the officer
+     *                                        who recorded it — so the row is born
+     *                                        whole rather than patched after.
      */
-    public function charge(FeeAssessment $fee, PaymentMethod $method, ?float $amount = null): Payment
+    public function charge(FeeAssessment $fee, PaymentMethod $method, ?float $amount = null, array $record = []): Payment
     {
         return Payment::create([
+            ...$record,
             'application_id' => $fee->application_id,
             'fee_assessment_id' => $fee->id,
             'reference_number' => Numbering::paymentReference(),
