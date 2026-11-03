@@ -32,6 +32,7 @@ use App\Models\UnbilledPermitFee;
 use App\Models\User;
 use App\Support\AmendableFields;
 use App\Support\Audit;
+use App\Support\CertificateSignatories;
 use App\Support\BusinessDate;
 use App\Support\ClearanceSnapshot;
 use App\Support\DenrRequirements;
@@ -5359,7 +5360,10 @@ class WorkflowService
             'issued_by_user_id' => Auth::id(),
             'issued_details' => PermitFace::capture(
                 $app->business?->fresh()?->load(['address.barangay', 'owner', 'owners', 'lines.psicCode'])
-            ),
+            ) + [
+                // The office's names as they stand now; see CertificateSignatories.
+                CertificateSignatories::FROZEN_KEY => CertificateSignatories::liveRowsFor($type),
+            ],
         ]);
 
         $prior->update(['status' => PermitStatus::Superseded]);
@@ -6531,7 +6535,14 @@ class WorkflowService
                  */
                 'issued_details' => PermitFace::capture(
                     $app->business?->loadMissing(['address.barangay', 'owner', 'lines.psicCode'])
-                ) + PermitFace::captureSignatories($officer),
+                ) + PermitFace::captureSignatories($officer) + [
+                    /*
+                     * The issuing office's own names, frozen with the face
+                     * [client, 3 November 2026]: an office editing them later
+                     * changes only the permits issued after the edit.
+                     */
+                    CertificateSignatories::FROZEN_KEY => CertificateSignatories::liveRowsFor($type),
+                ],
             ],
         );
 

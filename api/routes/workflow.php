@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\OfficeSignatoryController;
 use App\Http\Controllers\Api\OwnerProfileController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
@@ -488,6 +489,13 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      * owners on its own caseload (ApplicationVisibility).
      */
     Route::middleware('permission:permit.view_all')->group(function () {
+        /*
+         * The names an office prints on its own certificate [client, 3
+         * November 2026], read and set from its Permits page. Pinned to the
+         * caller's own department in the controller.
+         */
+        Route::get('certificate-signatories', [OfficeSignatoryController::class, 'show']);
+        Route::put('certificate-signatories', [OfficeSignatoryController::class, 'update']);
         Route::get('owner-profiles', [OwnerProfileController::class, 'index']);
         Route::get('owner-profiles/{owner}', [OwnerProfileController::class, 'show']);
     });

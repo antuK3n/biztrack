@@ -596,3 +596,92 @@ it('leaves the OR number blank, because only the City Treasurer issues an Offici
     expect($cert)->toHaveKey('or_number')
         ->and($cert['or_number'])->toBeNull();
 });
+
+/*
+ * ── Each office sets the names on its own certificate ───────────────────────
+ *
+ * [Client, 3 November 2026.] From its Permits page, audited row by row, and
+ * reaching only the permits issued after the change: a certificate keeps the
+ * names it was signed with.
+ */
+it('lets an office set its certificate names, audits each change, and freezes them on issued permits', function () {
+    $cpdo = authAs('zoning@biztrack.local');
+
+    $before = test()->withHeaders($cpdo)->getJson('/api/v1/certificate-signatories')->assertOk()->json('data');
+    expect($before['certificate'])->toBe('Zoning Clearance')
+        ->and(array_column($before['rows'], 'role'))->toBe(["City Planning & Dev't Coordinator / Zoning Administrator"]);
+
+    // A permit issued BEFORE the change carries the names of its day.
+    $seed = ownersPermit();
+    $zoningType = PermitType::where('code', 'ZONING')->firstOrFail();
+    OfficeSignatory::updateOrCreate(
+        ['department_id' => $zoningType->issuing_department_id, 'role' => "City Planning & Dev't Coordinator / Zoning Administrator"],
+        ['name' => 'Engr. Old Holder', 'sort_order' => 0, 'is_active' => true],
+    );
+    $earlier = Permit::create([
+        'permit_number' => 'LC-OLD-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $zoningType->id,
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+        'issued_details' => ['office_signatories' => \App\Support\CertificateSignatories::liveRowsFor($zoningType)],
+    ]);
+
+    $saved = test()->withHeaders($cpdo)->putJson('/api/v1/certificate-signatories', [
+        'rows' => [['role' => "City Planning & Dev't Coordinator / Zoning Administrator", 'name' => 'Engr. New Holder']],
+    ])->assertOk()->json('data');
+    expect($saved['changed'])->toBe(1)
+        ->and($saved['rows'][0]['name'])->toBe('Engr. New Holder');
+
+    $audit = AuditLog::where('action', 'office_signatory.updated')->latest('id')->first();
+    expect($audit)->not->toBeNull()
+        ->and($audit->changes['from'])->toBe('Engr. Old Holder')
+        ->and($audit->changes['to'])->toBe('Engr. New Holder')
+        ->and($audit->changes['office'])->toBe('CPDO');
+
+    // The earlier permit keeps its name; one issued now carries the new one.
+    $later = Permit::create([
+        'permit_number' => 'LC-NEW-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $zoningType->id,
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+        'issued_details' => ['office_signatories' => \App\Support\CertificateSignatories::liveRowsFor($zoningType)],
+    ]);
+    authAs('owner@biztrack.local');
+    expect($this->getJson("/api/v1/permits/{$earlier->id}")->assertOk()->json('data.certificate.signatories.0.name'))->toBe('Engr. Old Holder')
+        ->and($this->getJson("/api/v1/permits/{$later->id}")->assertOk()->json('data.certificate.signatories.0.name'))->toBe('Engr. New Holder');
+
+    // Another office's caption is refused, and the health office has nothing to set.
+    test()->withHeaders(authAs('zoning@biztrack.local'))->putJson('/api/v1/certificate-signatories', [
+        'rows' => [['role' => 'City Fire Marshal', 'name' => 'X']],
+    ])->assertStatus(422);
+    test()->withHeaders(authAs('sanitary@biztrack.local'))->getJson('/api/v1/certificate-signatories')
+        ->assertOk()->assertJsonCount(0, 'data.rows');
+});
+
+it('names the officer who approved the sanitary visit as the one who approved the permit', function () {
+    $seed = ownersPermit();
+    $officer = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
+    $permit = Permit::create([
+        'permit_number' => 'HC-APPROVED-'.random_int(100000, 999999),
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => PermitType::where('code', 'SANITARY')->value('id'),
+        'status' => $seed->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+        'issued_by_user_id' => $officer->id,
+    ]);
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+    expect($cert['signatories'][1])->toMatchArray(['role' => 'City Health Officer', 'name' => $officer->fullName(), 'action' => 'Approved']);
+});

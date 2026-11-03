@@ -61,6 +61,7 @@ import type {
   PaymentOptions,
   Permit,
   AdminOwner,
+  CertificateSignatories,
   OwnerDirectoryRow,
   OwnerProfile,
   OwnerHistoryEntry,
@@ -1918,6 +1919,11 @@ export const admin = {
     ),
   ownerHistory: (ownerId: number) =>
     unwrap<OwnerHistoryEntry[]>(api.get(`/admin/owners/${ownerId}/history`)),
+
+  /** The names this office prints on its certificate, and setting them [client, 3 November 2026]. */
+  certificateSignatories: () => unwrap<CertificateSignatories>(api.get('/certificate-signatories')),
+  saveCertificateSignatories: (rows: { role: string; name: string | null }[]) =>
+    unwrap<CertificateSignatories>(api.put('/certificate-signatories', { rows })),
 
   /*
    * Business Owners, as every office reads them [client, 20 October 2026]:
