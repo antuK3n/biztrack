@@ -3,10 +3,10 @@ import { CalendarIcon, CheckCircleFilledIcon, XCircleIcon, XIcon } from './icons
 import { InspectorNameField } from './InspectorNameField'
 import { ProtoModal } from './ui/Proto'
 import { toApiError } from '../lib/api'
-import { formatDate } from '../lib/format'
+import { formatCalendarDate, formatDate, formatDateTime } from '../lib/format'
 import { inspections as inspectionsApi } from '../lib/resources'
 import { useAuth } from '../stores/auth'
-import type { Inspection } from '../lib/types'
+import type { Inspection, InspectorSuggestion } from '../lib/types'
 
 /*
  * The site visit, decided from wherever the officer opened the filing.
@@ -132,6 +132,25 @@ function localTodayMin(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`
 }
 
+/**
+ * What is wrong with a visit's date and time, in the API's own words
+ * (InspectionController::visitRules), or null. Asked as the officer types
+ * [client, 3 November 2026: "kung sa manually may validations … day and
+ * time"], so the refusal comes before the press, not after it.
+ */
+function visitTimeProblem(value: string): string | null {
+  if (!value) return 'Choose a date and time.'
+  const when = new Date(value)
+  if (Number.isNaN(when.getTime())) return 'Choose a date and time.'
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  if (when < startOfToday) return 'Pick today or a later day.'
+  if (when.getDay() === 0 || when.getDay() === 6) return 'Pick a weekday.'
+  const minutes = when.getHours() * 60 + when.getMinutes()
+  if (minutes < 8 * 60 || minutes > 17 * 60) return 'Pick a time between 8:00 AM and 5:00 PM.'
+  return null
+}
+
 function InspectionDateInput({
   label,
   value,
@@ -141,15 +160,29 @@ function InspectionDateInput({
   value: string
   onChange: (value: string) => void
 }) {
+  const problemId = useId()
+  // Only once something is typed: an empty field is a question, not a mistake.
+  const problem = value ? visitTimeProblem(value) : null
   return (
-    <input
-      type="datetime-local"
-      min={localTodayMin()}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={label}
-      className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-    />
+    <span className="inline-flex flex-col">
+      <input
+        type="datetime-local"
+        min={localTodayMin()}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? problemId : undefined}
+        className={`rounded-lg border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal ${
+          problem ? 'border-s-red' : 'border-input-border'
+        }`}
+      />
+      {problem && (
+        <span id={problemId} className="mt-1 text-xs font-medium text-s-red">
+          {problem}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -282,11 +315,132 @@ export function InspectionRemarksModal({
   )
 }
 
+/**
+ * ── The OBO confirms the certificate's names before the release ────────────
+ *
+ * [Client, 3 November 2026: "ilagay sa after inspection … bago irelease the
+ * admin has to confirm the names".] Passing the OBO's visit issues the
+ * Certificate of Occupancy, so the Approve on it asks first who signs: the
+ * Building Official, and an evaluator for each line this building needs —
+ * the lines it marks N/A are named apart, not asked. Each name starts as the
+ * office's own (Permits → Certificate names); a change here prints on this
+ * permit only and is written to the audit log. Every name must be there:
+ * the button stays reachable and says what is missing (aria-describedby).
+ */
+function CertificateNamesConfirm({
+  item,
+  submitting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  item: Inspection
+  submitting: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: (signatories: { role: string; name: string }[]) => void
+}) {
+  const [rows, setRows] = useState<{ role: string; name: string; was: string }[] | null>(null)
+  const [notNeeded, setNotNeeded] = useState<string[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const hintId = useId()
+
+  useEffect(() => {
+    let live = true
+    inspectionsApi
+      .certificateNames(item.id)
+      .then((data) => {
+        if (!live) return
+        setRows(data.rows.map((r) => ({ role: r.role, name: r.name ?? '', was: r.name ?? '' })))
+        setNotNeeded(data.not_needed)
+      })
+      .catch((err) => live && setLoadError(toApiError(err).message))
+    return () => {
+      live = false
+    }
+  }, [item.id])
+
+  const missing = (rows ?? []).filter((r) => r.name.trim() === '')
+  const changed = (rows ?? []).filter((r) => r.was !== '' && r.name.trim() !== '' && r.name.trim() !== r.was)
+
+  return (
+    <ProtoModal
+      title="Confirm the certificate names"
+      tone="green"
+      wide
+      onCancel={onCancel}
+      confirmLabel={submitting ? 'Approving…' : 'Confirm names and approve'}
+      confirmDisabled={submitting || rows === null}
+      confirmDescribedBy={missing.length > 0 ? hintId : undefined}
+      onConfirm={() =>
+        rows !== null &&
+        missing.length === 0 &&
+        onConfirm(rows.map((r) => ({ role: r.role, name: r.name.trim() })))
+      }
+    >
+      <p className="text-sm text-ink-secondary">
+        The inspection passes and the Certificate of Occupancy is issued with these names. Check each one. A change here
+        prints on this permit only; your office&rsquo;s names stay as they are.
+      </p>
+
+      {loadError ? (
+        <p role="alert" className="mt-4 text-sm font-medium text-s-red">
+          {loadError}
+        </p>
+      ) : rows === null ? (
+        <p className="mt-4 text-sm text-ink-muted">Loading the names…</p>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {rows.map((r, i) => (
+            <label key={r.role} className={`block ${i === 0 ? 'sm:col-span-2' : ''}`}>
+              <span className="text-xs font-semibold text-ink-secondary">
+                {r.role.replace(/^Evaluator — /, 'Evaluator · ')}
+                <span className="text-s-red"> *</span>
+              </span>
+              <input
+                value={r.name}
+                onChange={(e) =>
+                  setRows((prev) => prev && prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
+                }
+                maxLength={120}
+                aria-invalid={r.name.trim() === '' || undefined}
+                className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm text-ink outline-none focus:border-royal ${
+                  r.name.trim() === '' ? 'border-s-red' : 'border-line'
+                }`}
+              />
+              {r.was !== '' && r.name.trim() !== '' && r.name.trim() !== r.was && (
+                <span className="mt-0.5 block text-xs text-amber-800">For this permit only. Office name: {r.was}</span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {notNeeded.length > 0 && (
+        <p className="mt-4 text-xs text-ink-muted">
+          Marked N/A for this building, so no evaluator signs: {notNeeded.join(', ')}.
+        </p>
+      )}
+      {changed.length > 0 && (
+        <p className="mt-2 text-xs text-ink-secondary">
+          {changed.length} name{changed.length === 1 ? '' : 's'} changed for this permit. The change is recorded in the
+          audit log.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <p id={hintId} aria-live="polite" className="mt-3 text-sm font-medium text-s-red">
+          Fill in {missing.length === 1 ? 'the name' : `all ${missing.length} names`} to approve. A certificate is not
+          issued with a blank signatory.
+        </p>
+      )}
+      {error && <p className="mt-3 text-sm font-medium text-s-red">{error}</p>}
+    </ProtoModal>
+  )
+}
+
 /** Has this visit happened? Mirrors the inspection detail screen's own test. */
 export function inspectionDone(item: Inspection): boolean {
-  return (
-    Boolean(item.conducted_at) || ['completed', 'passed', 'failed'].includes(item.status.toLowerCase())
-  )
+  return Boolean(item.conducted_at) || ['completed', 'passed', 'failed'].includes(item.status.toLowerCase())
 }
 
 /** The office that owns a visit, for headings and accessible names. */
@@ -380,6 +534,11 @@ export function InspectionDecisionCard({
     onClose: () => void
     onChange: (value: string) => void
     onBook: () => void
+    /** The pool inspector for the new visit, suggested for the day picked. */
+    inspectorId: number | null
+    onInspectorIdChange: (id: number | null) => void
+    typed: string
+    onTypedChange: (name: string) => void
   }
   /**
    * Moving a visit that has not happened yet. Absent when it is not on offer —
@@ -399,6 +558,9 @@ export function InspectionDecisionCard({
     onClose: () => void
     onChange: (value: string) => void
     onSave: () => void
+    /** Who takes the moved visit: a pool inspector, or null to keep whoever holds it. */
+    inspectorId: number | null
+    onInspectorIdChange: (id: number | null) => void
   }
 }) {
   const done = inspectionDone(item)
@@ -472,11 +634,11 @@ export function InspectionDecisionCard({
         </p>
 
         {/*
-          * Who inspected, typed for the record (client, 5 October 2026). Only
-          * where the server sent it — the visit's own office, BPLO and the
-          * super admin; the officer in charge still decides the visit. Falls
-          * back to the account an older visit was booked to.
-          */}
+         * Who inspected, typed for the record (client, 5 October 2026). Only
+         * where the server sent it — the visit's own office, BPLO and the
+         * super admin; the officer in charge still decides the visit. Falls
+         * back to the account an older visit was booked to.
+         */}
         {(mine || item.inspector_name || item.inspector) && (
           <div className="mt-2">
             <InspectorNameField
@@ -570,6 +732,17 @@ export function InspectionDecisionCard({
                     value={reinspect.value}
                     onChange={reinspect.onChange}
                   />
+                  <div className="-mt-2 basis-full">
+                    <InspectorPicker
+                      source={{ kind: 'visit', inspectionId: item.id, moving: false }}
+                      day={dayOf(reinspect.value)}
+                      inspectorId={reinspect.inspectorId}
+                      onInspectorIdChange={reinspect.onInspectorIdChange}
+                      typed={reinspect.typed}
+                      onTypedChange={reinspect.onTypedChange}
+                      onPickDay={(ymd) => reinspect.onChange(nineOn(ymd))}
+                    />
+                  </div>
                   <button
                     type="button"
                     aria-label={`Book the new ${office} visit`}
@@ -605,26 +778,24 @@ export function InspectionDecisionCard({
                 </button>
               )}
             </div>
-          ) : (
-            /*
-             * A conducted visit with nothing left to do on it.
-             *
-             * This used to be a link reading "Open the inspection record",
-             * pointing at /staff/inspections/{id} — the escape hatch for a
-             * failure whose re-inspection flag this payload could not work out.
-             * That page is gone (see the note at the top of this file), and the
-             * flag is worked out here now, so the hatch has nothing left to
-             * escape to and nothing left to escape from. The card already shows
-             * every field that page did: the result, the date, the findings and
-             * the inspector.
-             *
-             * The inspector's name chip that sat to the right of this row
-             * went on 5 October 2026: the name is the typed field under the
-             * date now, and saying it twice on one card is the restatement
-             * the client keeps asking to cut.
-             */
-            null
-          )}
+          ) : /*
+           * A conducted visit with nothing left to do on it.
+           *
+           * This used to be a link reading "Open the inspection record",
+           * pointing at /staff/inspections/{id} — the escape hatch for a
+           * failure whose re-inspection flag this payload could not work out.
+           * That page is gone (see the note at the top of this file), and the
+           * flag is worked out here now, so the hatch has nothing left to
+           * escape to and nothing left to escape from. The card already shows
+           * every field that page did: the result, the date, the findings and
+           * the inspector.
+           *
+           * The inspector's name chip that sat to the right of this row
+           * went on 5 October 2026: the name is the typed field under the
+           * date now, and saying it twice on one card is the restatement
+           * the client keeps asking to cut.
+           */
+          null}
         </div>
 
         {reinspect && !reinspect.open && (
@@ -634,9 +805,8 @@ export function InspectionDecisionCard({
            * the failure" or "let it through this time", and it is neither.
            */
           <p className="mt-3 max-w-xl text-sm text-ink-secondary">
-            This visit stays on the record as a failure. Scheduling a re-inspection books a fresh
-            visit for {office} once the owner has put the finding right — nothing is approved on its
-            own.
+            This visit stays on the record as a failure. Scheduling a re-inspection books a fresh visit for {office}{' '}
+            once the owner has put the finding right — nothing is approved on its own.
           </p>
         )}
 
@@ -657,6 +827,16 @@ export function InspectionDecisionCard({
                   value={reschedule.value}
                   onChange={reschedule.onChange}
                 />
+                <div className="-mt-2 basis-full">
+                  <InspectorPicker
+                    source={{ kind: 'visit', inspectionId: item.id, moving: true }}
+                    day={dayOf(reschedule.value)}
+                    inspectorId={reschedule.inspectorId}
+                    onInspectorIdChange={reschedule.onInspectorIdChange}
+                    onPickDay={(ymd) => reschedule.onChange(nineOn(ymd))}
+                    otherLabel={`Keep ${item.inspector_name ? item.inspector_name : 'as is'}`}
+                  />
+                </div>
                 <button
                   type="button"
                   aria-label={`Save the new ${office} inspection date`}
@@ -730,6 +910,285 @@ export function InspectionDecisionCard({
  * Presentational, like InspectionDecisionCard: the caller owns the request, so
  * the same markup can be driven by a test that never reaches the network.
  */
+/*
+ * ── Who should go, for the date picked [client, 27 October 2026] ───────────
+ *
+ * Once the officer picks a date the office's pool is asked who covers the
+ * business's barangay, works that day, is not away and still has room; the
+ * answer is filled in with its reason, and the rest of the pool is one press
+ * away in the same control. A typed name stays possible ("Someone else") —
+ * the pool is a convenience, not a gate. When nobody is free, the next day
+ * somebody is appears as a button that moves the date.
+ *
+ * One control for the three places a visit gets a date: the first booking
+ * (keyed by filing and permit), a re-inspection and a move (keyed by the
+ * visit). A move leaves the visit's own slot out of the count, or the
+ * inspector holding it would look one visit busier than they are.
+ */
+type PickerSource =
+  { kind: 'first'; applicationId: number; code: string } | { kind: 'visit'; inspectionId: number; moving: boolean }
+
+function InspectorPicker({
+  source,
+  day,
+  inspectorId,
+  onInspectorIdChange,
+  typed,
+  onTypedChange,
+  onPickDay,
+  otherLabel = 'Someone else (type a name)',
+  onProblemChange,
+  onChosenNameChange,
+}: {
+  source: PickerSource
+  /** YYYY-MM-DD of the date picked, or '' before one is. */
+  day: string
+  inspectorId: number | null
+  onInspectorIdChange: (id: number | null) => void
+  /** The typed name, where one is offered; absent on a move (the card's own field edits it). */
+  typed?: string
+  onTypedChange?: (name: string) => void
+  /** Pressed on "Next free day": the caller moves its date to this day. */
+  onPickDay: (ymd: string) => void
+  otherLabel?: string
+  /** What stops this inspector going that day, or null — for the caller's button. */
+  onProblemChange?: (problem: string | null) => void
+  /** The chosen pool inspector's name, for a caller that shows the choice. */
+  onChosenNameChange?: (name: string | null) => void
+}) {
+  const pickId = useId()
+  const nameId = useId()
+  const listId = useId()
+  const [names, setNames] = useState<string[]>([])
+  const [suggestion, setSuggestion] = useState<InspectorSuggestion | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
+  const sourceKey =
+    source.kind === 'first'
+      ? `first:${source.applicationId}:${source.code}`
+      : `visit:${source.inspectionId}:${source.moving}`
+
+  // The office's past inspectors, as InspectorNameField offers them.
+  useEffect(() => {
+    if (onTypedChange === undefined) return
+    let live = true
+    inspectionsApi
+      .inspectorNames()
+      .then((list) => live && setNames(list))
+      .catch(() => {
+        // An autocomplete that fails is a plain text box, not an error.
+      })
+    return () => {
+      live = false
+    }
+  }, [onTypedChange])
+
+  useEffect(() => {
+    if (!day) {
+      setSuggestion(null)
+      return
+    }
+    let live = true
+    setSuggesting(true)
+    const ask =
+      source.kind === 'first'
+        ? inspectionsApi.suggest(source.applicationId, source.code, day)
+        : inspectionsApi.suggestFor(source.inspectionId, day, source.moving)
+    ask
+      .then((next) => {
+        if (!live) return
+        setSuggestion(next)
+        // Follow the suggestion unless the officer has already chosen by hand.
+        const handPicked = inspectorId !== null && next.candidates.some((c) => c.id === inspectorId && c.available)
+        const typing = inspectorId === null && (typed ?? '').trim() !== ''
+        if (next.suggested && !handPicked && !typing) onInspectorIdChange(next.suggested.id)
+      })
+      .catch(() => {
+        if (live) setSuggestion(null)
+      })
+      .finally(() => live && setSuggesting(false))
+    return () => {
+      live = false
+    }
+    // Re-asked on the day, not the minute: the pool's day is what changes who is free.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day, sourceKey])
+
+  /*
+   * ── Before a date is picked: the earliest day somebody can go, taken ─────
+   *
+   * [Client, 28 October 2026: "make sure yung automation sa mga bagong
+   * applications"; 3 November 2026: "wag na ilagay suggestion matic na ayon
+   * na mapipili".] The pool is asked straight away for the next working day
+   * and the answer is simply TAKEN — the date at 9:00 AM and its inspector —
+   * rather than offered in a "Suggested" box to be accepted. The officer
+   * still presses "Book this visit", so nothing reaches the applicant until
+   * somebody at the office has looked at it, and "Change" opens the date and
+   * the pool for a different choice.
+   */
+  const [autoState, setAutoState] = useState<'asking' | 'taken' | 'none'>('asking')
+  useEffect(() => {
+    if (day) return
+    let live = true
+    setAutoState('asking')
+    const first = nextWorkingDay()
+    const ask =
+      source.kind === 'first'
+        ? inspectionsApi.suggest(source.applicationId, source.code, first)
+        : inspectionsApi.suggestFor(source.inspectionId, first, source.moving)
+    ask
+      .then((next) => {
+        if (!live) return
+        const pick = next.suggested
+          ? { date: first, id: next.suggested.id }
+          : next.next_available
+            ? { date: next.next_available.date, id: next.next_available.inspector.id }
+            : null
+        if (pick) {
+          onInspectorIdChange(pick.id)
+          onPickDay(pick.date)
+          setAutoState('taken')
+        } else setAutoState('none')
+      })
+      .catch(() => live && setAutoState('none'))
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day, sourceKey])
+
+  const chosen = suggestion?.candidates.find((c) => c.id === inspectorId) ?? null
+  const hasPool = (suggestion?.pool_size ?? 0) > 0
+
+  /*
+   * What stops the visit going ahead with this inspector on this day, said
+   * here and handed up so the caller's button can refuse with the reason
+   * [client, 3 November 2026: "validation sa … availability"]. A typed name
+   * cannot be checked against a pool it is not in, so it is taken as given.
+   */
+  const problem =
+    !day || suggesting || !suggestion || !hasPool
+      ? null
+      : chosen
+        ? chosen.available
+          ? null
+          : `${chosen.name} cannot go on ${formatCalendarDate(day)}: ${chosen.reasons.join('; ') || chosen.why}.`
+        : inspectorId === null && !(typed ?? '').trim()
+          ? 'Choose who goes, or type a name.'
+          : null
+  useEffect(() => {
+    onProblemChange?.(problem)
+  }, [problem, onProblemChange])
+  const chosenName = chosen?.name ?? null
+  useEffect(() => {
+    onChosenNameChange?.(chosenName)
+  }, [chosenName, onChosenNameChange])
+  const typedField =
+    onTypedChange !== undefined ? (
+      <>
+        <label htmlFor={nameId} className="mt-3 block text-sm text-ink-muted">
+          Inspector (for the record)
+        </label>
+        <input
+          id={nameId}
+          type="text"
+          value={typed ?? ''}
+          maxLength={120}
+          list={listId}
+          placeholder="Full name"
+          onChange={(e) => onTypedChange(e.target.value)}
+          className="mt-1 w-64 max-w-full rounded-lg border border-input-border bg-input px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+        />
+        <datalist id={listId}>
+          {names.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+      </>
+    ) : null
+
+  if (!day && autoState === 'asking') {
+    return <p className="mt-3 text-sm text-ink-muted">Finding the earliest day an inspector is free…</p>
+  }
+
+  if (!day || !hasPool) return typedField
+
+  return (
+    <div className="mt-3">
+      <label htmlFor={pickId} className="block text-sm text-ink-muted">
+        Inspector
+        {suggestion?.barangay && <span> · business is in {suggestion.barangay.name}</span>}
+      </label>
+      <select
+        id={pickId}
+        value={inspectorId ?? ''}
+        onChange={(e) => onInspectorIdChange(e.target.value ? Number(e.target.value) : null)}
+        className="mt-1 w-full max-w-md rounded-lg border border-input-border bg-input px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+      >
+        {suggestion?.candidates.map((c) => (
+          <option key={c.id} value={c.id} disabled={!c.available}>
+            {c.name}
+            {suggestion.suggested?.id === c.id ? ' — best fit' : ''}
+            {c.available ? '' : ` — ${c.reasons[0] ?? 'not available'}`}
+          </option>
+        ))}
+        <option value="">{otherLabel}</option>
+      </select>
+      {suggesting ? (
+        <p className="mt-1 text-xs text-ink-muted">Checking who is free…</p>
+      ) : chosen ? (
+        <p className="mt-1 text-xs text-ink-secondary">
+          {chosen.why}
+          {chosen.barangays.length > 0 && (
+            <span className="text-ink-muted"> · covers {chosen.barangays.join(', ')}</span>
+          )}
+        </p>
+      ) : suggestion && !suggestion.suggested ? (
+        <p className="mt-1 text-xs text-s-red">
+          Nobody in your pool is free on {formatCalendarDate(day)}.
+          {suggestion.next_available && (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={() => onPickDay(suggestion.next_available!.date)}
+                className="font-semibold text-royal underline-offset-2 hover:underline"
+              >
+                Next free day: {formatCalendarDate(suggestion.next_available.date)} —{' '}
+                {suggestion.next_available.inspector.name}
+              </button>
+            </>
+          )}
+        </p>
+      ) : null}
+      {problem && (
+        <p role="alert" className="mt-1 text-xs font-medium text-s-red">
+          {problem}
+        </p>
+      )}
+      {inspectorId === null && typedField}
+    </div>
+  )
+}
+
+/** Tomorrow, or Monday when tomorrow is a weekend, as YYYY-MM-DD in local time. */
+function nextWorkingDay(): string {
+  const d = new Date()
+  do {
+    d.setDate(d.getDate() + 1)
+  } while (d.getDay() === 0 || d.getDay() === 6)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** The YYYY-MM-DD of a datetime-local value, or '' before one is picked. */
+function dayOf(value: string): string {
+  return value ? value.slice(0, 10) : ''
+}
+
+/** A datetime-local value for 9:00 AM on that day — where "Next free day" lands. */
+function nineOn(ymd: string): string {
+  return `${ymd}T09:00`
+}
+
 function FirstInspectionCard({
   permit,
   value,
@@ -738,6 +1197,10 @@ function FirstInspectionCard({
   onChange,
   inspector,
   onInspectorChange,
+  inspectorId,
+  onInspectorIdChange,
+  applicationId,
+  code,
   onBook,
 }: {
   permit: string
@@ -749,31 +1212,22 @@ function FirstInspectionCard({
   /** The inspector's name, typed with the booking — optional, see below. */
   inspector: string
   onInspectorChange: (value: string) => void
+  /** The pool inspector picked, or null when a name is typed instead. */
+  inspectorId: number | null
+  onInspectorIdChange: (id: number | null) => void
+  applicationId: number
+  code: string
   onBook: () => void
 }) {
-  const nameId = useId()
-  const listId = useId()
-  const [names, setNames] = useState<string[]>([])
-
-  // The office's past inspectors, as InspectorNameField offers them.
-  useEffect(() => {
-    let live = true
-    inspectionsApi
-      .inspectorNames()
-      .then((list) => live && setNames(list))
-      .catch(() => {
-        // An autocomplete that fails is a plain text box, not an error.
-      })
-    return () => {
-      live = false
-    }
-  }, [])
+  const [changing, setChanging] = useState(false)
+  const [inspectorProblem, setInspectorProblem] = useState<string | null>(null)
+  const [chosenName, setChosenName] = useState<string | null>(null)
+  const timeProblem = visitTimeProblem(value)
+  const problem = timeProblem ?? inspectorProblem
+  const who = inspectorId !== null ? chosenName : inspector.trim() || null
 
   return (
-    <li
-      className="overflow-hidden rounded-2xl bg-white shadow-card"
-      aria-label={`${permit} inspection booking`}
-    >
+    <li className="overflow-hidden rounded-2xl bg-white shadow-card" aria-label={`${permit} inspection booking`}>
       {/*
         Royal, not the yellow the outstanding visits wear. This is the office's
         own next action rather than a state the premises are in, and the bar is
@@ -787,42 +1241,68 @@ function FirstInspectionCard({
           <span className="text-2xl font-medium text-ink">No inspection booked</span>
         </div>
         <p className="mt-1.5 max-w-xl text-sm text-ink-secondary">
-          Your office has accepted the paperwork for this permit. Say when an inspector will visit
-          the premises — the permit cannot be issued until a visit passes.
+          Your office has accepted the paperwork for this permit. Say when an inspector will visit the premises — the
+          permit cannot be issued until a visit passes.
         </p>
 
         {/*
-          The inspector's name, with the booking (request of 6 October 2026).
-          It could only be typed once a visit existed, so a permit waiting to
-          be booked had nowhere to put it. Optional, as it is on the card — the
-          officer in charge still decides the visit, and the name stays
-          editable there afterwards (InspectorNameField). Same label.
+          The visit as chosen for the office — the earliest day somebody in its
+          pool is free, and who — with "Change" to choose another date or
+          inspector from the pool, or by hand. The picker stays mounted while
+          folded, so it keeps the choice checked against who is free.
         */}
-        <label htmlFor={nameId} className="mt-4 block text-sm text-ink-muted">
-          Inspector (for the record)
-        </label>
-        <input
-          id={nameId}
-          type="text"
-          value={inspector}
-          maxLength={120}
-          list={listId}
-          placeholder="Full name"
-          onChange={(e) => onInspectorChange(e.target.value)}
-          className="mt-1 w-64 max-w-full rounded-lg border border-input-border bg-input px-2.5 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-        />
-        <datalist id={listId}>
-          {names.map((n) => (
-            <option key={n} value={n} />
-          ))}
-        </datalist>
+        {!changing && value && (
+          <div className="mt-4 rounded-lg border border-line bg-canvas px-4 py-3">
+            <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+              <dt className="text-ink-muted">Date and time</dt>
+              <dd className="font-semibold text-ink">{formatDateTime(new Date(value).toISOString())}</dd>
+              <dt className="text-ink-muted">Inspector</dt>
+              <dd className="font-semibold text-ink">{who ?? 'Not named yet'}</dd>
+            </dl>
+            <button
+              type="button"
+              onClick={() => setChanging(true)}
+              aria-label={`Change the date or inspector of the ${permit} visit`}
+              className="mt-2 text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
+            >
+              Change date or inspector
+            </button>
+          </div>
+        )}
+
+        <div className={changing || !value ? '' : 'hidden'}>
+          <div className="mt-4 flex flex-wrap items-end gap-2.5">
+            <InspectionDateInput label={`Date and time of the ${permit} inspection`} value={value} onChange={onChange} />
+          </div>
+          <InspectorPicker
+            source={{ kind: 'first', applicationId, code }}
+            day={dayOf(value)}
+            inspectorId={inspectorId}
+            onInspectorIdChange={onInspectorIdChange}
+            typed={inspector}
+            onTypedChange={onInspectorChange}
+            onPickDay={(ymd) => onChange(nineOn(ymd))}
+            onProblemChange={setInspectorProblem}
+            onChosenNameChange={setChosenName}
+          />
+        </div>
+
+        {/*
+          Said once on screen: folded, here; open, under the field it is about
+          (kept here for the button's aria-describedby, out of sight).
+        */}
+        {problem && value && (
+          <p
+            id={`${hintId}-problem`}
+            role={changing ? undefined : 'alert'}
+            className={changing ? 'sr-only' : 'mt-3 text-sm font-medium text-s-red'}
+          >
+            {problem}
+            {!changing && ' Press "Change date or inspector" to fix it.'}
+          </p>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
-          <InspectionDateInput
-            label={`Date and time of the ${permit} inspection`}
-            value={value}
-            onChange={onChange}
-          />
           {/*
             `aria-disabled`, never `disabled`. The button is shut only while
             there is no date or a request is already on its way, and both are
@@ -834,9 +1314,9 @@ function FirstInspectionCard({
           <button
             type="button"
             aria-label={`Book the ${permit} visit`}
-            aria-disabled={busy || !value}
-            aria-describedby={value ? undefined : hintId}
-            onClick={() => busy || !value || onBook()}
+            aria-disabled={busy || !value || problem !== null}
+            aria-describedby={!value ? hintId : problem ? `${hintId}-problem` : undefined}
+            onClick={() => busy || !value || problem !== null || onBook()}
             className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover aria-disabled:opacity-60"
           >
             {busy ? 'Booking…' : 'Book this visit'}
@@ -916,10 +1396,15 @@ export function InspectionDecisionPanel({
   const [approving, setApproving] = useState<Inspection | null>(null)
   const [reinspectId, setReinspectId] = useState<number | null>(null)
   const [reinspectValue, setReinspectValue] = useState('')
+  const [reinspectInspectorId, setReinspectInspectorId] = useState<number | null>(null)
+  const [reinspectTyped, setReinspectTyped] = useState('')
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedValue, setReschedValue] = useState('')
+  const [reschedInspectorId, setReschedInspectorId] = useState<number | null>(null)
   const [bookValue, setBookValue] = useState('')
   const [bookInspector, setBookInspector] = useState('')
+  /** The pool inspector chosen for the first visit, or null for a typed name. */
+  const [bookInspectorId, setBookInspectorId] = useState<number | null>(null)
   const [booking, setBooking] = useState(false)
   const [bookNote, setBookNote] = useState<string | null>(null)
   /** The visit this panel has just opened, before the caller has re-fetched. */
@@ -1031,15 +1516,22 @@ export function InspectionDecisionPanel({
     )
   }
 
-  async function conduct(item: Inspection, result: 'passed' | 'failed', findings?: string) {
+  async function conduct(
+    item: Inspection,
+    result: 'passed' | 'failed',
+    findings?: string,
+    signatories?: { role: string; name: string }[],
+  ): Promise<boolean> {
     setBusyId(item.id)
     setError(null)
     try {
-      await inspectionsApi.conduct(item.id, { result, findings })
+      await inspectionsApi.conduct(item.id, { result, findings, signatories })
       setRejecting(null)
       onChanged()
+      return true
     } catch (err) {
       setError(toApiError(err).message)
+      return false
     } finally {
       setBusyId(null)
     }
@@ -1056,9 +1548,11 @@ export function InspectionDecisionPanel({
     setBusyId(item.id)
     setError(null)
     try {
-      await inspectionsApi.reinspect(item.id, new Date(reinspectValue).toISOString())
+      await inspectionsApi.reinspect(item.id, new Date(reinspectValue).toISOString(), reinspectInspectorId)
       setReinspectId(null)
       setReinspectValue('')
+      setReinspectInspectorId(null)
+      setReinspectTyped('')
       onChanged()
     } catch (err) {
       setError(toApiError(err).message)
@@ -1084,9 +1578,11 @@ export function InspectionDecisionPanel({
     setBusyId(item.id)
     setError(null)
     try {
-      await inspectionsApi.reschedule(item.id, new Date(reschedValue).toISOString())
+      // A chosen pool inspector moves with the visit; "keep" sends nothing.
+      await inspectionsApi.reschedule(item.id, new Date(reschedValue).toISOString(), reschedInspectorId ?? undefined)
       setReschedId(null)
       setReschedValue('')
+      setReschedInspectorId(null)
       onChanged()
     } catch (err) {
       setError(toApiError(err).message)
@@ -1129,10 +1625,12 @@ export function InspectionDecisionPanel({
         book.applicationId,
         book.code,
         new Date(bookValue).toISOString(),
-        bookInspector.trim() || null,
+        bookInspectorId ? null : bookInspector.trim() || null,
+        bookInspectorId,
       )
       setBookValue('')
       setBookInspector('')
+      setBookInspectorId(null)
       setBooked(visit)
       setBookNote(
         `${book.permit} inspection booked for ${formatDate(visit.scheduled_at)}. The applicant has been told the date.`,
@@ -1154,9 +1652,7 @@ export function InspectionDecisionPanel({
    * appointment is a worse bug than the stale card this fixes.
    */
   const allVisits =
-    booked && !inspections.some((item) => item.id === booked.id)
-      ? [...inspections, booked]
-      : inspections
+    booked && !inspections.some((item) => item.id === booked.id) ? [...inspections, booked] : inspections
 
   /*
    * ── An office sees its OWN visits, and no one else's (INS-6) ──────────────
@@ -1207,21 +1703,26 @@ export function InspectionDecisionPanel({
    * first booking, because an office that has just accepted its paperwork is
    * usually the only one on the filing with anything to schedule.
    */
-  const booker = book && !booked ? (
-    <FirstInspectionCard
-      permit={book.permit}
-      value={bookValue}
-      busy={booking}
-      hintId={bookHintId}
-      onChange={(next) => {
-        setError(null)
-        setBookValue(next)
-      }}
-      inspector={bookInspector}
-      onInspectorChange={setBookInspector}
-      onBook={bookFirstVisit}
-    />
-  ) : null
+  const booker =
+    book && !booked ? (
+      <FirstInspectionCard
+        permit={book.permit}
+        value={bookValue}
+        busy={booking}
+        hintId={bookHintId}
+        onChange={(next) => {
+          setError(null)
+          setBookValue(next)
+        }}
+        inspector={bookInspector}
+        onInspectorChange={setBookInspector}
+        inspectorId={bookInspectorId}
+        onInspectorIdChange={setBookInspectorId}
+        applicationId={book.applicationId}
+        code={book.code}
+        onBook={bookFirstVisit}
+      />
+    ) : null
 
   /*
    * `role="status"` on a node that is in the tree from the first render.
@@ -1250,10 +1751,7 @@ export function InspectionDecisionPanel({
     return (
       <section className={className} aria-label="Application status">
         {error && (
-          <p
-            role="alert"
-            className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red"
-          >
+          <p role="alert" className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
             {error}
           </p>
         )}
@@ -1272,10 +1770,7 @@ export function InspectionDecisionPanel({
   return (
     <section className={className} aria-label="Application status">
       {error && (
-        <p
-          role="alert"
-          className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red"
-        >
+        <p role="alert" className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
           {error}
         </p>
       )}
@@ -1311,11 +1806,17 @@ export function InspectionDecisionPanel({
                     onOpen: () => {
                       setError(null)
                       setReinspectValue('')
+                      setReinspectInspectorId(null)
+                      setReinspectTyped('')
                       setReinspectId(item.id)
                     },
                     onClose: () => setReinspectId(null),
                     onChange: setReinspectValue,
                     onBook: () => bookReinspection(item),
+                    inspectorId: reinspectInspectorId,
+                    onInspectorIdChange: setReinspectInspectorId,
+                    typed: reinspectTyped,
+                    onTypedChange: setReinspectTyped,
                   }
                 : undefined
             }
@@ -1335,11 +1836,14 @@ export function InspectionDecisionPanel({
                     onOpen: () => {
                       setError(null)
                       setReschedValue('')
+                      setReschedInspectorId(null)
                       setReschedId(item.id)
                     },
                     onClose: () => setReschedId(null),
                     onChange: setReschedValue,
                     onSave: () => saveReschedule(item),
+                    inspectorId: reschedInspectorId,
+                    onInspectorIdChange: setReschedInspectorId,
                   }
                 : undefined
             }
@@ -1354,7 +1858,23 @@ export function InspectionDecisionPanel({
         (ReviewPage). It was one click with no way back: passing the visit
         issues the office's permit at once.
       */}
-      {approving && (
+      {approving && approving.department?.code === 'OBO' && (
+        <CertificateNamesConfirm
+          item={approving}
+          submitting={busyId === approving.id}
+          error={error}
+          onCancel={() => {
+            setError(null)
+            setApproving(null)
+          }}
+          onConfirm={async (signatories) => {
+            const item = approving
+            if (await conduct(item, 'passed', undefined, signatories)) setApproving(null)
+          }}
+        />
+      )}
+
+      {approving && approving.department?.code !== 'OBO' && (
         <ProtoModal
           title="Approve this inspection?"
           tone="green"

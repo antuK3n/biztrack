@@ -18,12 +18,15 @@ use App\Http\Controllers\Api\CustomReportController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DraftController;
 use App\Http\Controllers\Api\InspectionController;
+use App\Http\Controllers\Api\InspectorController;
 use App\Http\Controllers\Api\LegacyClaimController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\OfficeSignatoryController;
+use App\Http\Controllers\Api\OwnerProfileController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
@@ -439,6 +442,8 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
         Route::get('inspections/inspector-names', [InspectionController::class, 'inspectorNames']);
         Route::get('inspections/{inspection}', [InspectionController::class, 'show']);
         Route::post('inspections/{inspection}/conduct', [InspectionController::class, 'conduct']);
+        // The OBO confirms the Certificate of Occupancy's names before a pass releases it.
+        Route::get('inspections/{inspection}/certificate-names', [InspectionController::class, 'certificateNames']);
         Route::post('inspections/{inspection}/reschedule', [InspectionController::class, 'reschedule']);
         /*
          * The inspector's name, typed for the record (client, 5 October 2026).
@@ -457,6 +462,8 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
          * inspection until somebody conducts the new visit.
          */
         Route::post('inspections/{inspection}/reinspect', [InspectionController::class, 'reinspect']);
+        // Who should take a re-inspection or a moved visit, for the date picked (27 October 2026).
+        Route::get('inspections/{inspection}/suggestion', [InspectionController::class, 'suggestFor']);
 
         /*
          * The office books its FIRST visit on one permit and picks the date.
@@ -471,6 +478,45 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
             'applications/{application}/permits/{code}/inspection',
             [InspectionController::class, 'schedule'],
         );
+        // Who should take it, for the date the officer picked (27 October 2026).
+        Route::get(
+            'applications/{application}/permits/{code}/inspection-suggestion',
+            [InspectionController::class, 'suggest'],
+        );
+
+        /*
+         * The office's pool of inspectors [client, 27 October 2026]: the
+         * people its visits are suggested to. Same permission, same people,
+         * and the controller pins every write to the caller's own office.
+         */
+        Route::get('inspectors', [InspectorController::class, 'index']);
+        Route::get('inspectors/accounts', [InspectorController::class, 'accounts']);
+        Route::post('inspectors', [InspectorController::class, 'store']);
+        Route::post('inspectors/suggest-areas', [InspectorController::class, 'suggestAreas']);
+        Route::post('inspectors/apply-areas', [InspectorController::class, 'applyAreas']);
+        Route::put('inspectors/{inspector}', [InspectorController::class, 'update']);
+        Route::delete('inspectors/{inspector}', [InspectorController::class, 'destroy']);
+        Route::post('inspectors/{inspector}/leaves', [InspectorController::class, 'storeLeave']);
+        Route::delete('inspectors/{inspector}/leaves/{leave}', [InspectorController::class, 'destroyLeave']);
+    });
+
+    /*
+     * Business owners as an office reads them, and one owner's profile
+     * [client, 20 October 2026]. `permit.view_all`, the permission the
+     * Permits table already runs on, so every office whose Owner column links
+     * here can follow the link. The controller narrows each office to the
+     * owners on its own caseload (ApplicationVisibility).
+     */
+    Route::middleware('permission:permit.view_all')->group(function () {
+        /*
+         * The names an office prints on its own certificate [client, 3
+         * November 2026], read and set from its Permits page. Pinned to the
+         * caller's own department in the controller.
+         */
+        Route::get('certificate-signatories', [OfficeSignatoryController::class, 'show']);
+        Route::put('certificate-signatories', [OfficeSignatoryController::class, 'update']);
+        Route::get('owner-profiles', [OwnerProfileController::class, 'index']);
+        Route::get('owner-profiles/{owner}', [OwnerProfileController::class, 'show']);
     });
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)

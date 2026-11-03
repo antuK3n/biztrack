@@ -1,0 +1,527 @@
+{
+  "about": "A second batch for trying the inspector pool (28 October 2026): eight filings in eight more barangays, each with only the permits its kind of business needs, every office's paperwork approved and no visit booked. Read by biztrack:build-owner-portfolio --spec=database/data/inspection-trial-2.json.",
+  "tin": "418-562-073-000",
+  "businesses": [
+    {
+      "key": "U1",
+      "name": "TRIAL Tugatog Laundry Hub",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "96200",
+      "barangay": "Tugatog",
+      "pin": [
+        14.6633,
+        120.9686
+      ],
+      "house_no": "5",
+      "street": "Gov. Pascual Ave.",
+      "dti": "6100201",
+      "capital": 60000,
+      "floor_area": 30,
+      "employees": 2,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:00",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 10:00",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 11:00",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 13:00",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:00",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:30",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:00",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U2",
+      "name": "TRIAL Maysilo Auto Repair",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "45201",
+      "barangay": "Maysilo",
+      "pin": [
+        14.677994,
+        120.960059
+      ],
+      "house_no": "61",
+      "street": "Maysilo Circle",
+      "dti": "6100202",
+      "capital": 80000,
+      "floor_area": 80,
+      "employees": 4,
+      "ticks": [
+        "ZONING",
+        "FSIC",
+        "OCCUPANCY",
+        "CEC"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:05",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 09:15",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 10:05",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 11:05",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:02",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:32",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:02",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:32",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U3",
+      "name": "TRIAL Catmon Fish Dealer",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "47214",
+      "barangay": "Catmon",
+      "pin": [
+        14.66974,
+        120.96025
+      ],
+      "house_no": "9",
+      "street": "Catmon Rd.",
+      "dti": "6100203",
+      "capital": 100000,
+      "floor_area": 25,
+      "employees": 2,
+      "ticks": [
+        "SANITARY",
+        "FSIC",
+        "CEC"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:10",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 10:10",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 11:10",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 13:10",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:06",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:36",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:06",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U4",
+      "name": "TRIAL Concepcion Food Kiosk",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "56103",
+      "barangay": "Concepcion",
+      "pin": [
+        14.669854,
+        120.950385
+      ],
+      "house_no": "2",
+      "street": "Rizal Ave.",
+      "dti": "6100204",
+      "capital": 120000,
+      "floor_area": 12,
+      "employees": 1,
+      "ticks": [
+        "SANITARY",
+        "FSIC"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:15",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 10:15",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 11:15",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 13:15",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:09",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:39",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U5",
+      "name": "TRIAL Hulong Duhat Water Refilling",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "36000",
+      "barangay": "Hulong Duhat",
+      "pin": [
+        14.680569,
+        120.940923
+      ],
+      "house_no": "17",
+      "street": "Dulong Duhat St.",
+      "dti": "6100205",
+      "capital": 140000,
+      "floor_area": 28,
+      "employees": 2,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:20",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 10:20",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 11:20",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 13:20",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:12",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:42",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:12",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:42",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U6",
+      "name": "TRIAL Ibaba Sari-Sari Store",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "47111",
+      "barangay": "Ibaba",
+      "pin": [
+        14.66304,
+        120.9497
+      ],
+      "house_no": "33",
+      "street": "P. Aquino Ave.",
+      "dti": "6100206",
+      "capital": 160000,
+      "floor_area": 16,
+      "employees": 1,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:25",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 09:35",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 10:25",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 11:25",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:10",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:40",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:10",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:40",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 16:10",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U7",
+      "name": "TRIAL San Agustin Carinderia",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "56101",
+      "barangay": "San Agustin",
+      "pin": [
+        14.659475,
+        120.950583
+      ],
+      "house_no": "4",
+      "street": "San Agustin St.",
+      "dti": "6100207",
+      "capital": 180000,
+      "floor_area": 38,
+      "employees": 3,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:30",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 09:40",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 10:30",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 11:30",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:12",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:42",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:12",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:42",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 16:12",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    },
+    {
+      "key": "U8",
+      "name": "TRIAL Baritan Hardware",
+      "state": "Paperwork approved by its offices; no visit booked",
+      "psic": "47521",
+      "barangay": "Baritan",
+      "pin": [
+        14.67055,
+        120.946167
+      ],
+      "house_no": "120",
+      "street": "Baritan Rd.",
+      "dti": "6100208",
+      "capital": 200000,
+      "floor_area": 150,
+      "employees": 5,
+      "ticks": [
+        "ZONING",
+        "SANITARY",
+        "FSIC",
+        "CEC",
+        "OCCUPANCY"
+      ],
+      "events": [
+        {
+          "at": "2026-10-27 08:35",
+          "do": "file"
+        },
+        {
+          "at": "2026-10-27 09:45",
+          "do": "bplo_approve",
+          "remarks": "Documents verified. Proceed to payment."
+        },
+        {
+          "at": "2026-10-27 10:35",
+          "do": "pay_at_counter"
+        },
+        {
+          "at": "2026-10-27 11:35",
+          "do": "apply"
+        },
+        {
+          "at": "2026-10-27 14:14",
+          "do": "office_approve",
+          "office": "ZONING",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 14:44",
+          "do": "office_approve",
+          "office": "SANITARY",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:14",
+          "do": "office_approve",
+          "office": "FSIC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 15:44",
+          "do": "office_approve",
+          "office": "CEC",
+          "remarks": "Complete. Schedule inspection."
+        },
+        {
+          "at": "2026-10-27 16:14",
+          "do": "office_approve",
+          "office": "OCCUPANCY",
+          "remarks": "Complete. Schedule inspection."
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeftIcon, MailIcon, SearchIcon } from '../components/icons'
 import { MessageThreadView } from '../components/MessagesPanel'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
@@ -515,7 +515,14 @@ export function MessagesPage() {
    * control and never leaves 'permits', which for them means "everything" -
    * their enquiry is one row among their filings and belongs with them.
    */
-  const [shelf, setShelf] = useState<Shelf>('permits')
+  /*
+   * A link that names an owner's enquiry (?application=general-<id>, from the
+   * owner profile's Message button) opens on the Enquiries shelf, so the row
+   * it selects is on the list beside it rather than behind another button.
+   */
+  const [shelf, setShelf] = useState<Shelf>(() =>
+    params.get('application')?.startsWith('general') ? 'enquiries' : 'permits',
+  )
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<MessageThreadSummary[]>([])
 
@@ -609,6 +616,18 @@ export function MessagesPage() {
   // An office named by the link (?office=<department id>) opens that conversation.
   const linkedOffice = Number(params.get('office')) || null
   const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
+  /*
+   * An owner's enquiry named by a link but not on the loaded page.
+   *
+   * The inbox is paged, and BPLO's Enquiries shelf lists every owner in the
+   * city, so the owner the profile's Message button names may simply not be
+   * among the first fifty. The conversation is still theirs to open — the
+   * server creates the office's thread on first read — so the pane opens on
+   * it anyway, titled with the name the profile passed along.
+   */
+  const location = useLocation()
+  const linkedOwnerId = !selected && readerIsOfficer && data ? Number(/^general-(\d+)$/.exec(selectedKey ?? '')?.[1]) || null : null
+  const linkedOwnerName = (location.state as { ownerName?: string } | null)?.ownerName ?? null
 
   /*
    * Changing shelf lets go of the conversation.
@@ -881,7 +900,7 @@ export function MessagesPage() {
      * and the page scrolls after all. It is the single thing most often
      * missing when a layout like this nearly works.
      */
-    <div className={`flex min-h-0 flex-col ${selected ? 'hidden lg:flex' : ''}`}>
+    <div className={`flex min-h-0 flex-col ${selected || linkedOwnerId ? 'hidden lg:flex' : ''}`}>
       <PageTitle
         right={
           <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -1229,7 +1248,38 @@ export function MessagesPage() {
         .join(' · ')
     : ''
 
-  const pane = selected ? (
+  const linkedPane = linkedOwnerId ? (
+    <section
+      aria-label={`General enquiry with ${linkedOwnerName ?? 'this owner'}`}
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-card"
+    >
+      <header className="flex items-center gap-3 bg-royal-tint px-5 py-3">
+        <Avatar size={38} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-bold text-ink">{linkedOwnerName ?? 'Business owner'}</p>
+          <p className="truncate text-xs italic text-ink-secondary">General enquiry</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setParams({})}
+          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-royal hover:bg-white/60 lg:hidden"
+        >
+          <ArrowLeftIcon size={18} aria-hidden="true" />
+          Back
+        </button>
+      </header>
+      <MessageThreadView
+        key={`general-${linkedOwnerId}`}
+        target={{ kind: 'general', userId: linkedOwnerId }}
+        className="flex-1 px-5 pb-5 pt-4"
+        scrollClassName="min-h-0"
+        onSent={reload}
+        onRead={reload}
+      />
+    </section>
+  ) : null
+
+  const pane = linkedPane ?? (selected ? (
     <section
       aria-label={`Messages about ${paneTitle}`}
       /*
@@ -1327,7 +1377,7 @@ export function MessagesPage() {
         Choose a conversation on the left to read and reply.
       </p>
     </div>
-  )
+  ))
 
   return (
     /*

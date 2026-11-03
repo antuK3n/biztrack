@@ -364,8 +364,24 @@ final class Portfolio
 
     private function officeApproves(string $code, string $remarks): void
     {
+        if ($code === 'OCCUPANCY') {
+            $this->oboRecordsPermitDate($this->current);
+        }
         $assignment = $this->take($this->issuer[$code]);
         $this->api->post("{$code} approves the papers", "assignments/{$assignment}/approve", ['remarks' => $remarks]);
+    }
+
+    /**
+     * The OBO writes the Building Permit Date Issued on the sheet: an
+     * issuance date is the office's to record, never the owner's
+     * (OfficeFormController OFFICER_KEYS), and a passed visit is refused
+     * without it, since the Certificate of Occupancy prints it.
+     */
+    private function oboRecordsPermitDate(int $id): void
+    {
+        $this->asOffice('OCCUPANCY')->put('OBO records the building permit date', "applications/{$id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_date' => CarbonImmutable::now()->subMonths(8)->toDateString()],
+        ]);
     }
 
     /** The office books its visit, typing the inspector's name (55e3c602). */
@@ -387,7 +403,28 @@ final class Portfolio
         $this->asOffice($code)->post("{$code} records the visit", "inspections/{$visit}/conduct", [
             'result' => $event['result'],
             'findings' => $event['findings'],
-        ]);
+        ] + ($event['result'] === 'passed' ? $this->confirmedNames($code, (int) $visit) : []));
+    }
+
+    /**
+     * What the OBO confirms before its pass releases the Certificate of
+     * Occupancy: the names its dialog offers (InspectionController::
+     * certificateNames), as they stand, and a stand-in for a caption the
+     * office has no name for yet. Nothing for any other office.
+     *
+     * @return array{signatories?: list<array{role: string, name: string}>}
+     */
+    private function confirmedNames(string $code, int $visit): array
+    {
+        if ($code !== 'OCCUPANCY') {
+            return [];
+        }
+        $rows = $this->asOffice('OCCUPANCY')->get('OBO reads the certificate names', "inspections/{$visit}/certificate-names")['data']['rows'];
+
+        return ['signatories' => array_map(
+            fn (array $r) => ['role' => $r['role'], 'name' => $r['name'] ?: Playbook::INSPECTORS['OCCUPANCY']],
+            $rows,
+        )];
     }
 
     /** The owner uploads each DENR paper the CEC raised (DenrRequirements). */
@@ -602,9 +639,28 @@ final class Portfolio
                 'zoning_project_description' => $b['name'],
                 'project_location' => $this->addressLines()[0],
             ],
-            'OCCUPANCY', 'FSIC' => [
+            'FSIC' => [
                 'building_storeys' => 1,
                 'total_floor_area_sqm' => $b['floor_area'],
+            ],
+            /*
+             * Every answer the wizard requires of the OBO sheet, and so every
+             * blank NBC Form B-13 prints: a trial filing that skipped them
+             * issued OP-2026-000007 with no building permit and no
+             * Certificate of Completion on its face [client, 3 November 2026].
+             */
+            'OCCUPANCY' => [
+                'application_type' => 'Full',
+                'project_name' => $b['name'],
+                'project_location' => $this->addressLines()[0],
+                'occupancy_type' => 'Commercial',
+                'building_storeys' => 1,
+                'building_units' => 1,
+                'total_floor_area_sqm' => $b['floor_area'],
+                'building_permit_no' => sprintf('BP-MLB-%s-%04d', CarbonImmutable::now()->subYear()->year, crc32($b['name']) % 10000),
+                'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+                'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
+                'completion_professional' => 'Civil Engineer',
             ],
             default => [],
         };

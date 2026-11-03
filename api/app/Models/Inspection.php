@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Inspection extends Model
 {
     protected $fillable = [
-        'application_id', 'department_id', 'inspector_user_id', 'inspector_name', 'status',
+        'application_id', 'department_id', 'inspector_user_id', 'inspector_id', 'inspector_name', 'status',
         'result', 'scheduled_at', 'conducted_at', 'findings', 'photo_paths',
     ];
 
@@ -50,6 +50,12 @@ class Inspection extends Model
     public function inspector(): BelongsTo
     {
         return $this->belongsTo(User::class, 'inspector_user_id');
+    }
+
+    /** The pool inspector who took this visit (27 October 2026); `inspector_name` is written beside it. */
+    public function poolInspector(): BelongsTo
+    {
+        return $this->belongsTo(Inspector::class, 'inspector_id');
     }
 
     /**

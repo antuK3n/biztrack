@@ -325,20 +325,19 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
         ->not->toContain('Office of the Local Building Official');
 });
 
-it('dates a permit the way it is issued: 31 December for the business permit, renewed free to 20 January, and 31 December or a year for the rest', function () {
+it('dates a permit the way it is issued: 31 December for the business permit, renewed free to 20 January, and a year from issue for the rest', function () {
     /*
      * WorkflowService::issuePermitFor: the business permit ends on 31 December
      * of the year it is issued (RenewalSeason::endOfTermFor; 20 January of the
      * year after until Ken's decision of 5 October 2026) and renews without
-     * penalty from 1 to 20 January, a clearance's
-     * first issue ends on 31 December of its year, and a renewed clearance
-     * runs one year from the day it is renewed. This test used to pin "365
+     * penalty from 1 to 20 January, and a clearance runs one year from the
+     * day it is issued or renewed [client, 20 October 2026]. This test used to pin "365
      * days" and "renew it with your business permit in January", read from
      * `validity_days`, which nothing dates a permit with any more.
      */
     $fsic = ask('kailan mag-expire ang fsic ko?');
     expect($fsic)->toContain('Fire Safety Inspection Certificate')
-        ->toContain('expires on 31 December of the year it is first issued')
+        ->toContain('runs one year from the day it is issued')
         ->toContain('a renewal runs one year from the day it is renewed')
         ->toContain('You can renew it from 30 days before it expires, on its own application.')
         ->not->toContain('365 days')

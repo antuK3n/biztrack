@@ -27,6 +27,13 @@ export interface OccupancyCertificate {
   city: string | null
   signatories: { role: string; name: string | null }[]
   date_submitted?: string | null
+  occ_submitted_by?: string | null
+  occ_professional?: string | null
+  occ_documents?: string[]
+  occ_other_document?: string | null
+  /** The OBO evaluator who signed off each "Verified & complied" line, keyed by the line. */
+  occ_evaluators?: Record<string, string | null>
+  occ_other_requirement?: string | null
   occ_project?: string | null
   occ_use?: string | null
   occ_area?: string | null
@@ -52,8 +59,16 @@ function Panel({ children }: { children: ReactNode }) {
   )
 }
 
-function Box() {
-  return <span aria-hidden="true" className="inline-block h-3 w-3 shrink-0 border border-ink" />
+/** A tick box on the left page; `on` draws the tick the OBO sheet recorded. */
+function Box({ on = false }: { on?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-3 w-3 shrink-0 items-center justify-center border border-ink text-[9px] font-bold leading-none"
+    >
+      {on ? '✓' : ''}
+    </span>
+  )
 }
 
 function Blank({ value, className = '' }: { value?: string | null; className?: string }) {
@@ -76,18 +91,21 @@ export function OccupancySheet({
   const city = /city/i.test(cert.city ?? '') ? cert.city! : `${cert.city || 'Malabon'} City`
   const located = [cert.address, cert.barangay, city].filter(Boolean).join(', ')
   const official = cert.signatories[0] ?? { role: 'Building Official', name: null }
+  const docs = cert.occ_documents ?? []
+  const ticked = (doc: string) => docs.includes(doc)
+  const ev = cert.occ_evaluators ?? {}
   const requirements: [string, string | null | undefined][] = [
     ['Locational/Zoning of Land Use', cert.occ_zoning_no],
-    ['Line and Grade (Geodetic)', null],
-    ['Architectural', null],
-    ['Civil/Structural', null],
-    ['Electrical', null],
-    ['Mechanical', null],
-    ['Sanitary', null],
-    ['Plumbing', null],
-    ['Electronics', null],
-    ['Interior Design', null],
-    ['Accessibility', null],
+    ['Line and Grade (Geodetic)', ev['Line and Grade (Geodetic)']],
+    ['Architectural', ev['Architectural']],
+    ['Civil/Structural', ev['Civil/Structural']],
+    ['Electrical', ev['Electrical']],
+    ['Mechanical', ev['Mechanical']],
+    ['Sanitary', ev['Sanitary']],
+    ['Plumbing', ev['Plumbing']],
+    ['Electronics', ev['Electronics']],
+    ['Interior Design', ev['Interior Design']],
+    ['Accessibility', ev['Accessibility']],
     ['Fire Safety', cert.occ_fire_no],
   ]
 
@@ -103,20 +121,41 @@ export function OccupancySheet({
         </div>
 
         <ul className="mt-4 grid gap-1.5 text-[10px] sm:grid-cols-[auto_auto] sm:justify-between">
-          <li className="flex items-center gap-1.5 whitespace-nowrap"><Box /> CERTIFICATE OF COMPLETION</li>
-          <li className="flex items-center gap-1.5 whitespace-nowrap"><Box /> AS-BUILT PLANS/SPECIFICATIONS</li>
-          <li className="flex items-center gap-1.5 whitespace-nowrap"><Box /> DAILY CONSTRUCTION WORKS LOGBOOK</li>
-          <li className="flex items-center gap-1.5 whitespace-nowrap"><Box /> (SPECIFY) <Blank className="w-28" /></li>
+          <li className="flex items-center gap-1.5 whitespace-nowrap">
+            <Box on={ticked('Certificate of Completion')} /> CERTIFICATE OF COMPLETION
+          </li>
+          <li className="flex items-center gap-1.5 whitespace-nowrap">
+            <Box on={ticked('As-built Plans/Specifications')} /> AS-BUILT PLANS/SPECIFICATIONS
+          </li>
+          <li className="flex items-center gap-1.5 whitespace-nowrap">
+            <Box on={ticked('Daily Construction Works Logbook')} /> DAILY CONSTRUCTION WORKS LOGBOOK
+          </li>
+          <li className="flex items-center gap-1.5 whitespace-nowrap">
+            <Box on={ticked('Others')} /> (SPECIFY) <Blank value={cert.occ_other_document} className="w-28" />
+          </li>
         </ul>
 
-        <p className="mt-4 indent-6 text-[11px] leading-loose">
-          A CERTIFICATE OF COMPLETION WAS SUBMITTED BY <Blank className="w-36" /> <span className="text-[9px]">(Name)</span>{' '}
-          A DULY LICENSED <Blank className="w-36" /> <span className="text-[9px]">(Professional)</span> HIRED BY THE OWNER
-          WHO UNDERTOOK THE FULL-TIME INSPECTION AND SUPERVISION OF CONSTRUCTION WORKS IN ACCORDANCE WITH SECTION 308,
-          CHAPTER 3 OF THE NATIONAL BUILDING CODE, (PD 1096).
+        <p className="mt-4 indent-6 text-[11px] leading-loose">A CERTIFICATE OF COMPLETION WAS SUBMITTED BY</p>
+        <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-end gap-x-2 text-[11px]">
+          <p className="min-h-[1.2rem] border-b border-ink text-center font-bold uppercase">
+            {cert.occ_submitted_by || ' '}
+          </p>
+          <span className="pb-0.5">A DULY LICENSED</span>
+          <p className="min-h-[1.2rem] border-b border-ink text-center font-bold uppercase">
+            {cert.occ_professional || ' '}
+          </p>
+          <p className="text-center text-[9px] font-bold">(Name)</p>
+          <span />
+          <p className="text-center text-[9px] font-bold">(Professional)</p>
+        </div>
+        <p className="mt-2 text-[11px] leading-loose">
+          HIRED BY THE OWNER WHO UNDERTOOK THE FULL-TIME INSPECTION AND SUPERVISION OF CONSTRUCTION WORKS IN ACCORDANCE
+          WITH SECTION 308, CHAPTER 3 OF THE NATIONAL BUILDING CODE, (PD 1096).
         </p>
 
-        <p className="mt-5 text-balance text-center text-[13px] font-bold">VERIFIED &amp; COMPLIED AS TO THE FOLLOWING REQUIREMENTS</p>
+        <p className="mt-5 text-balance text-center text-[13px] font-bold">
+          VERIFIED &amp; COMPLIED AS TO THE FOLLOWING REQUIREMENTS
+        </p>
         <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-3">
           {requirements.map(([label, value]) => (
             <div key={label} className="text-center">
@@ -125,7 +164,9 @@ export function OccupancySheet({
             </div>
           ))}
           <div className="text-center sm:col-start-2">
-            <p className="min-h-[1.2rem] border-b border-ink" />
+            <p className="min-h-[1.2rem] border-b border-ink text-[11px] font-bold">
+              {cert.occ_other_requirement || ' '}
+            </p>
             <p className="mt-0.5 text-[10px] font-bold">OTHERS (SPECIFY)</p>
           </div>
         </div>
@@ -142,7 +183,14 @@ export function OccupancySheet({
       {/* ── Right page: the certificate ─────────────────────────────── */}
       <Panel>
         <header className="grid grid-cols-[auto_1fr] items-center gap-3">
-          <img src="/malabon-seal.png" alt="" aria-hidden="true" width={64} height={65} className="h-14 w-auto sm:h-16" />
+          <img
+            src="/malabon-seal.png"
+            alt=""
+            aria-hidden="true"
+            width={64}
+            height={65}
+            className="h-14 w-auto sm:h-16"
+          />
           <div className="text-center sm:pr-10">
             <p className="text-[10px] tracking-wide">REPUBLIC OF THE PHILIPPINES</p>
             <p className="text-xl tracking-wide sm:text-2xl">CITY OF MALABON</p>
@@ -214,15 +262,15 @@ export function OccupancySheet({
           </p>
           <p className="indent-6">
             THE ARCHITECT OR ENGINEER WHO DREW UP THE PLANS AND SPECIFICATIONS FOR THE BUILDING/STRUCTURE IS AWARE THAT
-            UNDER ARTICLE 1723 OF THE CIVIL CODE OF THE PHILIPPINES, HE IS RESPONSIBLE FOR DAMAGES IF WITHIN FIFTEEN (15)
-            YEARS FROM THE COMPLETION OF THE BUILDING/STRUCTURE, THE SAME SHOULD COLLAPSE DUE TO DEFECT IN THE PLANS OR
-            SPECIFICATIONS OR DEFECTS IN THE GROUND. HE IS THEREFORE ENJOINED TO CONDUCT ANNUAL INSPECTIONS OF THE
-            STRUCTURE TO ENSURE THAT THE CONDITIONS UNDER WHICH THE STRUCTURE WAS DESIGNED ARE NOT BEING VIOLATED OR
+            UNDER ARTICLE 1723 OF THE CIVIL CODE OF THE PHILIPPINES, HE IS RESPONSIBLE FOR DAMAGES IF WITHIN FIFTEEN
+            (15) YEARS FROM THE COMPLETION OF THE BUILDING/STRUCTURE, THE SAME SHOULD COLLAPSE DUE TO DEFECT IN THE
+            PLANS OR SPECIFICATIONS OR DEFECTS IN THE GROUND. HE IS THEREFORE ENJOINED TO CONDUCT ANNUAL INSPECTIONS OF
+            THE STRUCTURE TO ENSURE THAT THE CONDITIONS UNDER WHICH THE STRUCTURE WAS DESIGNED ARE NOT BEING VIOLATED OR
             ABUSED.
           </p>
           <p className="indent-6">
-            THE BUILDING/STRUCTURE SHALL BE SUBJECT TO ANNUAL INSPECTION AND ISSUANCE OF A CERTIFICATE OF OCCUPANCY FOR A
-            PERIOD OF ONE (1) YEAR FROM THE DATE OF ISSUANCE OF CERTIFICATE AND YEARLY THEREAFTER.
+            THE BUILDING/STRUCTURE SHALL BE SUBJECT TO ANNUAL INSPECTION AND ISSUANCE OF A CERTIFICATE OF OCCUPANCY FOR
+            A PERIOD OF ONE (1) YEAR FROM THE DATE OF ISSUANCE OF CERTIFICATE AND YEARLY THEREAFTER.
           </p>
           <p className="indent-6">
             A CERTIFIED COPY HEREOF SHALL BE POSTED WITHIN THE PREMISES OF THE BUILDING AND SHALL NOT BE REMOVED WITHOUT

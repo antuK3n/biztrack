@@ -110,7 +110,7 @@ function rrsReapplyAndPass(Application $app): void
     $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", [
         'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
-    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 }
 
 it('suspends the live Business Permit when an office refuses a one-permit renewal', function () {
@@ -206,7 +206,7 @@ it('never lifts BPLO’s own suspension of a paper Business Permit when a renewa
     $visitId = test()->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
         'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
-    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     expect($app->fresh()->permitTypes->firstWhere('code', 'SANITARY')->pivot->status)->toBe(ClearanceStatus::Approved)
         ->and($businessPermit->fresh()->status)->toBe(PermitStatus::Suspended)

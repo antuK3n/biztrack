@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
 import { useAsync } from '../../lib/useAsync'
 import type { PermitRegisterRow } from '../../lib/types'
 import { BusinessMapPage } from './BusinessMapPage'
+import { ownerProfilePath } from './ownerProfilePath'
+import { CertificateNamesDialog } from './CertificateNamesDialog'
 import { ChangeStatusDialog, StatusHistoryDialog } from './PermitStatusDialogs'
 import { STATUS_TONES } from './permitStatusTones'
 import type { PermitSort } from '../../lib/resources'
@@ -223,7 +225,6 @@ function mayChangeStatus(
   return canChange && ownOffice !== null && permit.permit_type?.code === ownOffice
 }
 
-
 /*
  * ── The Expiring window is not on this screen ─────────────────────────────
  *
@@ -329,7 +330,9 @@ function UploadsCell({ permit }: { permit: PermitRegisterRow }) {
         aria-label={`${open ? 'Hide' : 'Show'} ${docs.length} uploaded requirement${docs.length === 1 ? '' : 's'} for ${permit.permit_number}`}
         className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink hover:border-royal hover:text-royal"
       >
-        <span aria-hidden="true" className="text-[10px] text-ink-muted">{open ? '▾' : '▸'}</span>
+        <span aria-hidden="true" className="text-[10px] text-ink-muted">
+          {open ? '▾' : '▸'}
+        </span>
         {docs.length} file{docs.length === 1 ? '' : 's'}
       </button>
       {open && (
@@ -401,7 +404,12 @@ function OfficeTabs({
     // view still exists behind the choice type — a link can open it — but it
     // is not one of the tabs.
     { value: '', short: 'ALL', sub: 'Every permit', full: 'All offices, every permit' },
-    ...OFFICES.map((o) => ({ value: o.code as OfficeChoice, short: OFFICE_TAB_CODES[o.code], sub: o.name, full: `${o.office} — ${o.name}` })),
+    ...OFFICES.map((o) => ({
+      value: o.code as OfficeChoice,
+      short: OFFICE_TAB_CODES[o.code],
+      sub: o.name,
+      full: `${o.office} — ${o.name}`,
+    })),
   ]
 
   const shown = includeAll ? tabs : tabs.filter((t) => t.value !== '')
@@ -418,7 +426,10 @@ function OfficeTabs({
         as one control. Below `md` it scrolls sideways instead of squeezing
         seven columns into a phone.
       */}
-      <div className="grid min-w-[44rem] gap-2" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
+      <div
+        className="grid min-w-[44rem] gap-2"
+        style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}
+      >
         {shown.map((t) => {
           const active = t.value === value
           return (
@@ -530,6 +541,7 @@ export function PermitsPage({
    */
   const permissions = useAuth((s) => s.user?.permissions)
   const department = useAuth((s) => s.user?.department?.code)
+  const [namesOpen, setNamesOpen] = useState(false)
 
   const readsEveryOffice = permissions?.includes('application.view_any_office') ?? false
   /*
@@ -716,12 +728,9 @@ export function PermitsPage({
    * read as a fact about the register rather than about what is set inside a
    * menu the reader has closed.
    */
-  const narrowed = [
-    status !== '',
-    query !== '',
-    locked === null && chosen !== '',
-    retired !== 'hide',
-  ].filter(Boolean).length
+  const narrowed = [status !== '', query !== '', locked === null && chosen !== '', retired !== 'hide'].filter(
+    Boolean,
+  ).length
 
   /*
    * What the Sort menu shows as chosen.
@@ -878,18 +887,18 @@ export function PermitsPage({
               moment a correct query looks like missing data and the only
               moment the full list changes what the reader does next.
             */}
-            <label htmlFor="permits-search" className="sr-only">
-              Search permits by permit number, BAN, business name, owner, tracking ID or permit type
-            </label>
-            <input
-              id="permits-search"
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search permits…"
-              className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
-            />
-            {/*
+              <label htmlFor="permits-search" className="sr-only">
+                Search permits by permit number, BAN, business name, owner, tracking ID or permit type
+              </label>
+              <input
+                id="permits-search"
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search permits…"
+                className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              />
+              {/*
               Sort and Filter, as the two menus the rest of the app already
               carries (Proto's SortFilter, p14). They were five controls laid
               out across the header — status pills, an office select, expiry
@@ -902,50 +911,65 @@ export function PermitsPage({
               only for a reader who can see more than one office, which is the
               same rule that governed it in the row.
             */}
-            <SortFilter
-              sort={{
-                value: sortValue,
-                options: sortOptions.map(({ value, label }) => ({ value, label })),
-                onChange: selectSort,
-              }}
-              filter={{
-                value: status,
-                // The not-renewed list is of Business Permits, so only for a
-                // reader who sees them: BPLO and the super admin.
-                options: STATUS_FILTERS.filter(
-                  (f) => f.value !== 'not_renewed_30' || locked === null || locked === 'BUSINESS',
-                ).map(({ value, label }) => ({ value, label })),
-                onChange: (v: string) => selectStatus(v as StatusFilter),
-              }}
-              filterFields={[
-                // Office moved OUT of this menu to the OfficeTabs strip above the
-                // table [client, 4 October 2026: "paki labas na lang sa filter"]:
-                // it decides which columns exist, so it is the first choice made.
-                {
-                  label: 'Retired businesses',
-                  value: retired,
-                  options: RETIRED_FILTERS,
-                  onChange: (v: string) => {
-                    setRetired(v as RetiredFilter)
-                    setPage(1)
+              <SortFilter
+                sort={{
+                  value: sortValue,
+                  options: sortOptions.map(({ value, label }) => ({ value, label })),
+                  onChange: selectSort,
+                }}
+                filter={{
+                  value: status,
+                  // The not-renewed list is of Business Permits, so only for a
+                  // reader who sees them: BPLO and the super admin.
+                  options: STATUS_FILTERS.filter(
+                    (f) => f.value !== 'not_renewed_30' || locked === null || locked === 'BUSINESS',
+                  ).map(({ value, label }) => ({ value, label })),
+                  onChange: (v: string) => selectStatus(v as StatusFilter),
+                }}
+                filterFields={[
+                  // Office moved OUT of this menu to the OfficeTabs strip above the
+                  // table [client, 4 October 2026: "paki labas na lang sa filter"]:
+                  // it decides which columns exist, so it is the first choice made.
+                  {
+                    label: 'Retired businesses',
+                    value: retired,
+                    options: RETIRED_FILTERS,
+                    onChange: (v: string) => {
+                      setRetired(v as RetiredFilter)
+                      setPage(1)
+                    },
                   },
-                },
-              ]}
-            />
-            <button
-              type="button"
-              onClick={reload}
-              // aria-disabled, never the native attribute (AGENTS.md §6.2): a
-              // disabled control leaves the tab order, so a keyboard reader
-              // loses Refresh while the thing it refreshes is loading. The
-              // handler needs no guard — `reload` bumps a nonce and useAsync
-              // cancels the in-flight request.
-              aria-disabled={loading || undefined}
-              className="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-            >
-              Refresh
-            </button>
-          </span>
+                ]}
+              />
+              {/*
+              The names this office prints on its certificate [client, 3
+              November 2026]. Offices only — the super admin holds no
+              certificate of its own. The health office's dialog explains
+              that its two names are filled from the visit.
+            */}
+              {department && (
+                <button
+                  type="button"
+                  onClick={() => setNamesOpen(true)}
+                  className="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas"
+                >
+                  Certificate names
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={reload}
+                // aria-disabled, never the native attribute (AGENTS.md §6.2): a
+                // disabled control leaves the tab order, so a keyboard reader
+                // loses Refresh while the thing it refreshes is loading. The
+                // handler needs no guard — `reload` bumps a nonce and useAsync
+                // cancels the in-flight request.
+                aria-disabled={loading || undefined}
+                className="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              >
+                Refresh
+              </button>
+            </span>
           )
 
   /*
@@ -986,6 +1010,7 @@ export function PermitsPage({
    */
   return (
     <section aria-labelledby="permits-title">
+      {namesOpen && <CertificateNamesDialog onClose={() => setNamesOpen(false)} />}
       {embedded ? (
         /*
          * On the Home the heading is hidden, so Table/Map and the table's
@@ -1011,28 +1036,30 @@ export function PermitsPage({
       {mode === 'map' ? (
         <BusinessMapPage embedded onFindInRegister={findInRegister} />
       ) : (
-      <>
-      {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} includeAll={!bploView} />}
+        <>
+          {locked === null && <OfficeTabs value={chosen} onChange={selectOffice} includeAll={!bploView} />}
 
-
-      {/*
+          {/*
         The failure of one row's View, said once above the table rather than
         inside the row. A 403 here is almost always the office boundary
         answering — PermitController::authorizeView refuses a certificate
         issued by another office — and that sentence is worth reading in full,
         which it cannot be in a table cell.
       */}
-      {viewError && (
-        <p role="alert" className="mb-4 rounded-lg border border-s-red/30 bg-s-red-tint px-4 py-3 text-sm text-s-red">
-          {viewError}
-        </p>
-      )}
+          {viewError && (
+            <p
+              role="alert"
+              className="mb-4 rounded-lg border border-s-red/30 bg-s-red-tint px-4 py-3 text-sm text-s-red"
+            >
+              {viewError}
+            </p>
+          )}
 
-      {loading ? (
-        <SkeletonList rows={8} />
-      ) : error ? (
-        <ErrorState error={error} onRetry={reload} />
-      ) : rows.length === 0 ? (
+          {loading ? (
+            <SkeletonList rows={8} />
+          ) : error ? (
+            <ErrorState error={error} onRetry={reload} />
+          ) : rows.length === 0 ? (
         <EmptyState
           icon={FileTextIcon}
           /*
@@ -1140,40 +1167,40 @@ export function PermitsPage({
                             answer lives in a JSON blob no index reaches, so a
                             pressable header here would do nothing.
                           */
-                          <span>{column.label}</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(column.sort as PermitSort)}
-                            className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-                          >
-                            {column.label}
-                            <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
-                              {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
-                            </span>
-                          </button>
-                        )}
-                        {/*
+                              <span>{column.label}</span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => toggleSort(column.sort as PermitSort)}
+                                className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                              >
+                                {column.label}
+                                <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
+                                  {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                                </span>
+                              </button>
+                            )}
+                            {/*
                           Which office's form this column comes from. Only
                           drawn with every office in view: once an office is
                           chosen, repeating its name on nine headings is noise,
                           and the table already says whose it is above.
                         */}
-                        {column.office && office === '' && (
-                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-royal">
-                            {officeOf(column.office)} form
-                          </span>
-                        )}
-                      </th>
-                    )
-                  })}
-                  {/*
+                            {column.office && office === '' && (
+                              <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-royal">
+                                {officeOf(column.office)} form
+                              </span>
+                            )}
+                          </th>
+                        )
+                      })}
+                      {/*
                     The actions column has no heading text a reader needs, but
                     it cannot be an empty `<th>`: a column header with no
                     accessible name is announced as blank. The word is there and
                     hidden.
                   */}
-                  {/*
+                      {/*
                     ── The office's uploads, then the permit itself, last ──────
 
                     [Client, 4 October 2026: "lahat ng requirements na pinasa,
@@ -1254,23 +1281,36 @@ export function PermitsPage({
                               it has not been taught, which is how a `revoked`
                               row would otherwise render as a blank pill.
                             */
-                            <StatusChip tone={STATUS_TONES[permit.status] ?? 'tint-gray'}>
-                              {permit.status_label}
-                            </StatusChip>
-                          ) : (
-                            text
-                          )}
-                        </td>
-                      )
-                    })}
-                    {/*
+                                <StatusChip tone={STATUS_TONES[permit.status] ?? 'tint-gray'}>
+                                  {permit.status_label}
+                                </StatusChip>
+                              ) : column.key === 'owner_name' && permit.business?.owner_user_id && text ? (
+                                /*
+                              The owner opens onto their profile [client, 20
+                              October 2026]. The name printed on the permit,
+                              linked to the account that holds the business.
+                            */
+                                <Link
+                                  to={ownerProfilePath(permit.business.owner_user_id)}
+                                  aria-label={`${text}, view owner profile`}
+                                  className="font-semibold text-royal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+                                >
+                                  {text}
+                                </Link>
+                              ) : (
+                                text
+                              )}
+                            </td>
+                          )
+                        })}
+                        {/*
                       Each upload with its own View and Download, through
                       DocumentActions — the endpoint is authenticated, so a bare
                       link would fetch the login page. Named by what the document
                       IS, not its filename, so a screen reader hears "Barangay
                       Business Clearance" rather than "scan_003.pdf".
                     */}
-                    {/*
+                        {/*
                       Collapsed to a count until asked. Listed in full, three
                       uploads with their View/Download buttons made one row
                       ~250px tall and pushed the rest of the register down a
@@ -1307,14 +1347,14 @@ export function PermitsPage({
           </div>
           <FloatingScrollbar target={tableScroller} />
 
-          {changing !== null && (
-            <ChangeStatusDialog permit={changing} onClose={() => setChanging(null)} onChanged={reload} />
-          )}
-          {historyOf !== null && <StatusHistoryDialog permit={historyOf} onClose={() => setHistoryOf(null)} />}
+              {changing !== null && (
+                <ChangeStatusDialog permit={changing} onClose={() => setChanging(null)} onChanged={reload} />
+              )}
+              {historyOf !== null && <StatusHistoryDialog permit={historyOf} onClose={() => setHistoryOf(null)} />}
 
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
-            <div>
-              {/*
+              <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
+                <div>
+                  {/*
                 Both numbers named (AGENTS.md §6.4). "Showing 25" says nothing;
                 "25 of 2,182 active permits" says what the pager is moving
                 through.

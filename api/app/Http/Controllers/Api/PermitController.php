@@ -9,12 +9,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\AuditLog;
+use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\BusinessDate;
+use App\Support\CertificateSignatories;
+use App\Support\OccupancyChecklist;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
@@ -779,35 +782,7 @@ class PermitController extends Controller
             ->with('user.department')
             ->orderByDesc('id')
             ->get()
-            ->map(function (AuditLog $log) {
-                $c = $log->changes ?? [];
-                [$to, $label] = match ($log->action) {
-                    'permit.status_changed' => [$c['to'] ?? null, 'Status changed'],
-                    'permit.revoked' => ['revoked', 'Revoked'],
-                    'permit.suspended' => ['suspended', isset($c['because_permit_type'])
-                        ? "Suspended automatically — {$c['because_permit_type']} was rejected"
-                        : (($c['cause'] ?? null) === 'business_status' ? 'Suspended — the business was sanctioned' : 'Suspended')],
-                    'permit.suspended_on_rejection' => ['suspended', 'Suspended — the application was rejected'],
-                    'permit.reinstated' => ['active', 'Restored automatically — nothing is rejected any more'],
-                    'permit.suspension_lifted' => ['active', 'Suspension lifted'],
-                    'permit.expired' => ['expired', 'Expired — its term ran out'],
-                    'permit.superseded' => ['superseded', 'Superseded by a renewal'],
-                    'permit.revocation_undone' => ['active', 'Revocation undone'],
-                    default => [null, $log->action],
-                };
-
-                return [
-                    'at' => $log->created_at?->toIso8601String(),
-                    'action' => $log->action,
-                    'label' => $label,
-                    'from' => $c['from'] ?? null,
-                    'to' => $to,
-                    'to_label' => $to ? PermitStatus::tryFrom($to)?->label() : null,
-                    'reason' => $c['reason'] ?? $c['note'] ?? null,
-                    'by' => $log->user?->fullName(),
-                    'by_office' => $log->user?->department?->name,
-                ];
-            });
+            ->map(fn (AuditLog $log) => self::describeHistory($log));
 
         $entries->push([
             'at' => $permit->issued_at?->toIso8601String(),
@@ -822,6 +797,51 @@ class PermitController extends Controller
         ]);
 
         return response()->json(['data' => $entries->values()->all()]);
+    }
+
+    /**
+     * One permit status event, worded for a reader. Public and static so the
+     * owner profile (OwnerProfileController) tells a permit's history in the
+     * same words as the Status history dialog on the Permits page.
+     *
+     * @return array<string, mixed>
+     */
+    public static function describeHistory(AuditLog $log): array
+    {
+        $c = $log->changes ?? [];
+        /*
+         * A term running out is the nightly scan's doing, not a person's. The
+         * audit row carries whichever session happened to trigger the scan —
+         * once, the owner's own — so naming it read as the owner expiring
+         * their own permit.
+         */
+        $automatic = $log->action === 'permit.expired';
+        [$to, $label] = match ($log->action) {
+            'permit.status_changed' => [$c['to'] ?? null, 'Status changed'],
+            'permit.revoked' => ['revoked', 'Revoked'],
+            'permit.suspended' => ['suspended', isset($c['because_permit_type'])
+                ? "Suspended automatically — {$c['because_permit_type']} was rejected"
+                : (($c['cause'] ?? null) === 'business_status' ? 'Suspended — the business was sanctioned' : 'Suspended')],
+            'permit.suspended_on_rejection' => ['suspended', 'Suspended — the application was rejected'],
+            'permit.reinstated' => ['active', 'Restored automatically — nothing is rejected any more'],
+            'permit.suspension_lifted' => ['active', 'Suspension lifted'],
+            'permit.expired' => ['expired', 'Expired — its term ran out'],
+            'permit.superseded' => ['superseded', 'Superseded by a renewal'],
+            'permit.revocation_undone' => ['active', 'Revocation undone'],
+            default => [null, $log->action],
+        };
+
+        return [
+            'at' => $log->created_at?->toIso8601String(),
+            'action' => $log->action,
+            'label' => $label,
+            'from' => $c['from'] ?? null,
+            'to' => $to,
+            'to_label' => $to ? PermitStatus::tryFrom($to)?->label() : null,
+            'reason' => $c['reason'] ?? $c['note'] ?? null,
+            'by' => $automatic ? null : $log->user?->fullName(),
+            'by_office' => $automatic ? null : $log->user?->department?->name,
+        ];
     }
 
     /**
@@ -967,13 +987,15 @@ class PermitController extends Controller
         $block = PermitFace::signatureBlock($face);
         $taken = array_map('strtolower', array_column($block, 'role'));
 
-        $office = $permit->permitType?->department?->signatories
-            ?->where('is_active', true)
-            ->sortBy([['sort_order', 'asc'], ['role', 'asc']])
-            ->map(fn ($s) => ['role' => $s->role, 'name' => $s->name])
-            ->reject(fn (array $s) => in_array(strtolower($s['role']), $taken, true))
-            ->values()
-            ->all() ?? [];
+        /*
+         * The office's names as frozen on THIS permit at issue, else live for
+         * a permit issued before freezing existed [client, 3 November 2026:
+         * an office's edit reaches only permits issued after it].
+         */
+        $office = array_values(array_filter(
+            CertificateSignatories::rowsFor($permit),
+            fn (array $s) => ! in_array(strtolower($s['role']), $taken, true),
+        ));
 
         $signatories = [...$block, ...$office];
 
@@ -1081,9 +1103,25 @@ class PermitController extends Controller
             $named = fn (string $needle) => collect($office)
                 ->first(fn (array $s) => str_contains(strtolower($s['role']), $needle))['name'] ?? null;
 
+            /*
+             * The Sanitary Inspector is WHO WENT: the inspector the office
+             * assigned to the visit that passed on this filing [client, 27
+             * October 2026: "magrereflect kung sinong inspector ang assigned
+             * at officer"], read off the visit itself (the inspector pool
+             * writes the name there). An office row naming an inspector is
+             * the fallback for a permit issued without a visit on record.
+             */
+            /*
+             * And "Approved" is WHO APPROVED: the officer who passed the visit
+             * and so issued this permit (`issued_by_user_id`), not a name the
+             * office configures [client, 3 November 2026: "matic kung sino nag
+             * approve sa inspection at nag approve ng permit"]. An office row
+             * naming the City Health Officer is the fallback for a permit with
+             * no issuing officer on record.
+             */
             $signatories = [
-                ['role' => 'Sanitary Inspector', 'name' => $named('inspector'), 'action' => 'Recommending Approval'],
-                ['role' => 'City Health Officer', 'name' => $named('health officer'), 'action' => 'Approved'],
+                ['role' => 'Sanitary Inspector', 'name' => $this->inspectorWhoPassed($permit) ?? $named('inspector'), 'action' => 'Recommending Approval'],
+                ['role' => 'City Health Officer', 'name' => ($permit->issuedBy?->fullName() ?: null) ?? $named('health officer'), 'action' => 'Approved'],
             ];
         }
 
@@ -1334,19 +1372,57 @@ class PermitController extends Controller
                     ->value('permit_number')
                 : null;
 
-            $profile = $application?->fee_profile ?? [];
-            $area = isset($profile['floor_area_sqm']) && $profile['floor_area_sqm'] !== null
-                ? rtrim(rtrim(number_format((float) $profile['floor_area_sqm'], 2), '0'), '.').' sq m'
+            /*
+             * The building's floor area and storeys (OccupancyChecklist::
+             * buildingOf): one figure for the AREA box and for deciding which
+             * lines the building needs.
+             */
+            $building = OccupancyChecklist::buildingOf($application, $permit->business);
+            $floorArea = $building['area'];
+            $storeys = $building['storeys'];
+            $area = $floorArea !== null
+                ? rtrim(rtrim(number_format((float) $floorArea, 2), '0'), '.').' sq m'
                 : null;
+
+            /*
+             * Which "Verified & complied" lines this building needs, each
+             * signed by the OBO's evaluator on file or marked N/A; and what
+             * "Others" and the use are for THIS business [client, 28 October
+             * 2026] — see OccupancyChecklist for the reading.
+             */
+            $checks = OccupancyChecklist::for(
+                $floorArea,
+                $storeys,
+                $face['line_of_business'] ?? null,
+                $answer('occupancy_type'),
+                collect($office)
+                    ->filter(fn (array $s) => str_starts_with($s['role'], 'Evaluator — '))
+                    ->mapWithKeys(fn (array $s) => [substr($s['role'], strlen('Evaluator — ')) => $s['name']])
+                    ->all(),
+            );
 
             $oboShare = collect($application?->feeAssessment?->line_items ?? [])
                 ->filter(fn ($l) => strtoupper((string) ($l['office'] ?? '')) === 'OBO')
                 ->sum(fn ($l) => (float) ($l['amount'] ?? 0));
 
+            /*
+             * The left page's own lines [client, 27 October 2026]: which
+             * documents were handed in, and who signed the Certificate of
+             * Completion — the licensed professional the owner hired. All
+             * from the OBO sheet (OfficeFormStep, section D).
+             */
+            $documents = array_values(array_filter(array_map('trim', explode(',', (string) ($sheet['completion_documents'] ?? '')))));
+
             $sheetFields = [
                 'date_submitted' => optional($application?->submitted_at)->format('F j, Y'),
+                'occ_submitted_by' => $answer('completion_submitted_by'),
+                'occ_professional' => $answer('completion_professional'),
+                'occ_documents' => $documents,
+                'occ_other_document' => $answer('completion_other_document'),
+                'occ_evaluators' => $checks['lines'],
+                'occ_other_requirement' => $checks['others'],
                 'occ_project' => $answer('project_name'),
-                'occ_use' => $answer('occupancy_type'),
+                'occ_use' => $checks['use'],
                 'occ_area' => $area,
                 'occ_completion' => $date($answer('completion_date')),
                 'occ_building_permit_no' => $answer('building_permit_no'),
@@ -1408,6 +1484,28 @@ class PermitController extends Controller
             'signatories' => $signatories,
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$permit->permit_number,
         ];
+    }
+
+    /**
+     * The inspector the office assigned to the visit that PASSED on this
+     * permit's filing — the latest passed visit by the permit's own office —
+     * or null when none is on record or none was named.
+     */
+    private function inspectorWhoPassed(Permit $permit): ?string
+    {
+        $departmentId = $permit->permitType?->issuing_department_id;
+        if ($permit->application_id === null || $departmentId === null) {
+            return null;
+        }
+
+        $name = Inspection::query()
+            ->where('application_id', $permit->application_id)
+            ->where('department_id', $departmentId)
+            ->where('result', 'passed')
+            ->orderByDesc('conducted_at')->orderByDesc('id')
+            ->value('inspector_name');
+
+        return trim((string) $name) ?: null;
     }
 
     /**
@@ -1517,7 +1615,8 @@ class PermitController extends Controller
              * listed at all — and when they are, they name the business and
              * say it is retired, which is what a reader asking for them wants.
              */
-            'business' => fn ($b) => $b->withTrashed()->select('id', 'name', 'ban', 'deleted_at'),
+            // owner_user_id: the Owner column links to the owner's profile.
+            'business' => fn ($b) => $b->withTrashed()->select('id', 'name', 'ban', 'owner_user_id', 'deleted_at'),
         ]);
     }
 }

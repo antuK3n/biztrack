@@ -265,6 +265,10 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'OCCUPANCY.building_storeys': 'No. of Storeys',
   'OCCUPANCY.building_units': 'No. of Units',
   'OCCUPANCY.completion_date': 'Date of Completion',
+  'OCCUPANCY.completion_documents': 'Documents Submitted',
+  'OCCUPANCY.completion_other_document': 'Other Document (specify)',
+  'OCCUPANCY.completion_submitted_by': 'Certificate of Completion — Submitted By',
+  'OCCUPANCY.completion_professional': 'Submitted By — Profession / Licence',
 
   /* CPDD · MCG-CPDD-FO-003 */
   'ZONING.application_type': 'Nature of Application',
@@ -387,8 +391,24 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
     'building_units',
     'total_floor_area_sqm',
     'completion_date',
+    'completion_documents',
+    'completion_other_document',
+    'completion_submitted_by',
+    'completion_professional',
   ],
 }
+
+/**
+ * What the Certificate of Occupancy's left page ticks as submitted (NBC Form
+ * B-13). Stored on the sheet as a comma-joined list in this spelling; the
+ * certificate ticks by the same words.
+ */
+export const COMPLETION_DOCUMENTS = [
+  'Certificate of Completion',
+  'As-built Plans/Specifications',
+  'Daily Construction Works Logbook',
+  'Others',
+] as const
 
 /**
  * Sort a sheet's answers into the order its paper asks them.
@@ -819,7 +839,9 @@ export function todayISO(): string {
 /**
  * Required-field check per office form. Returns the labels still missing (or
  * invalid) so the wizard can disable Next and list what is left. Counts and
- * reference numbers stay optional; only the core decisions are required.
+ * reference numbers stay optional — save those a certificate prints and
+ * nothing else can fill, such as the OBO's Building Permit No. — and only
+ * the core decisions are required.
  */
 export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): string[] {
   const has = (key: string) => typeof data[key] === 'string' && (data[key] as string).trim() !== ''
@@ -885,6 +907,26 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('building_units')) missing.push('No. of Units')
     if (!has('total_floor_area_sqm')) missing.push('Total Floor Area')
     // Date of Completion is not asked: the API sets it (see the field).
+    /*
+     * What NBC Form B-13 prints and nothing else answers [client, 3 November
+     * 2026: "kulang ang info … sa OP-2026-000007"]: the building permit the
+     * construction was done under, and the Certificate of Completion handed
+     * in. Left blank, the issued certificate carries the blanks. The FSEC No.
+     * stays optional: the FSIC on the same filing fills that line. The Date
+     * Issued is not the owner's: the OBO records it on its review sheet, and
+     * the API refuses a passed OBO visit until it has.
+     */
+    if (!has('building_permit_no')) missing.push('Building Permit No.')
+    const documents = has('completion_documents')
+      ? (data.completion_documents as string)
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      : []
+    if (documents.length === 0) missing.push('Documents Submitted')
+    if (documents.includes('Others') && !has('completion_other_document')) missing.push('Other Document (specify)')
+    if (!has('completion_submitted_by')) missing.push('Certificate of Completion — Submitted By')
+    if (!has('completion_professional')) missing.push('Profession / Licence')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
@@ -3256,7 +3298,7 @@ function OccupancyFields({
           </div>
           <ApplicationDateField data={data} className={formCell.quarter} />
           <div className={formCell.quarter}>
-            <FieldLabel optional>Building Permit No.</FieldLabel>
+            <FieldLabel required>Building Permit No.</FieldLabel>
             <input
               value={get(data, 'building_permit_no')}
               onChange={(e) => set('building_permit_no', e.target.value)}
@@ -3423,18 +3465,21 @@ function OccupancyFields({
             Building Official's books is often named for the structure rather
             than the trade in it, and only the applicant knows which it is.
           */}
-          <PermitAnswer field="project_name" label="Name of Project" data={data} className={formCell.quarter}>
-            <label className={formCell.quarter}>
-              <FieldLabel required>Name of Project</FieldLabel>
-              <input
-                value={get(data, 'project_name')}
-                onChange={(e) => set('project_name', e.target.value)}
-                readOnly={ro}
-                className={inputCls}
-              />
-              <CarriedTag field="project_name" />
-            </label>
-          </PermitAnswer>
+          {/*
+            Seeded from the business name and editable (client, 3 November
+            2026): the Certificate of Occupancy prints it, and a project is
+            often named for the building rather than the trade in it.
+          */}
+          <label className={formCell.quarter}>
+            <FieldLabel required>Name of Project</FieldLabel>
+            <input
+              value={get(data, 'project_name')}
+              onChange={(e) => set('project_name', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="project_name" />
+          </label>
           <PermitAnswer field="project_location" label="Location of Project" data={data} className={formCell.half}>
             <label className={formCell.half}>
               <FieldLabel required>Location of Project</FieldLabel>
@@ -3531,6 +3576,86 @@ function OccupancyFields({
               return raw === '' ? '' : formatDate(raw)
             })()}
           />
+        </div>
+      </section>
+
+      {/*
+        ── D. Certificate of Completion ──────────────────────────────────
+        What NBC Form B-13's left page asks before it recommends issuance
+        [client, 27 October 2026]: which documents were handed in, and the
+        licensed professional who signed the Certificate of Completion. The
+        certificate prints these; a blank here is a blank there.
+      */}
+      <section className="space-y-3">
+        <SectionMarker letter="D" label="Certificate of Completion" required />
+        <div>
+          <FieldLabel required>Documents Submitted</FieldLabel>
+          <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1.5">
+            {COMPLETION_DOCUMENTS.map((doc) => {
+              const chosen = get(data, 'completion_documents')
+                .split(',')
+                .map((d) => d.trim())
+                .filter(Boolean)
+              const on = chosen.includes(doc)
+              return (
+                <label key={doc} className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    readOnly={ro}
+                    onChange={() =>
+                      ro ||
+                      set(
+                        'completion_documents',
+                        (on ? chosen.filter((d) => d !== doc) : [...chosen, doc])
+                          .filter((d) => COMPLETION_DOCUMENTS.includes(d as (typeof COMPLETION_DOCUMENTS)[number]))
+                          .join(', '),
+                      )
+                    }
+                    className="h-4 w-4 accent-royal"
+                  />
+                  {doc}
+                </label>
+              )
+            })}
+          </div>
+          <CarriedTag field="completion_documents" />
+        </div>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div>
+            <FieldLabel required={get(data, 'completion_documents').includes('Others')}>
+              Other Document (specify)
+            </FieldLabel>
+            <input
+              value={get(data, 'completion_other_document')}
+              onChange={(e) => set('completion_other_document', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="completion_other_document" />
+          </div>
+          <div>
+            <FieldLabel required>Certificate of Completion — Submitted By</FieldLabel>
+            <input
+              value={get(data, 'completion_submitted_by')}
+              onChange={(e) => set('completion_submitted_by', e.target.value)}
+              readOnly={ro}
+              placeholder="Full name"
+              className={inputCls}
+            />
+            <CarriedTag field="completion_submitted_by" />
+          </div>
+          <div>
+            <FieldLabel required>Profession / Licence</FieldLabel>
+            <input
+              value={get(data, 'completion_professional')}
+              onChange={(e) => set('completion_professional', e.target.value)}
+              readOnly={ro}
+              placeholder="Civil Engineer, Architect…"
+              className={inputCls}
+            />
+            <CarriedTag field="completion_professional" />
+          </div>
         </div>
       </section>
     </div>

@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   AuditIcon,
+  BuildingIcon,
   ChartIcon,
   DraftsIcon,
   FileTextIcon,
@@ -138,6 +139,15 @@ const NAV_ITEMS: NavItem[] = [
    * and the super admin never had it.
    */
   /*
+   * The office's pool of inspectors [client, 27 October 2026]: who goes out,
+   * which barangays each covers, which days, and when they are away. Not the
+   * Inspections register above, which listed VISITS; this lists PEOPLE, and
+   * the booking on Track's For Inspection reads it to suggest one.
+   * `inspection.manage`, the five clearance offices' own, and the route in
+   * App.tsx carries the same.
+   */
+  { label: 'Inspectors', icon: UsersIcon, to: '/inspectors', permission: 'inspection.manage' },
+  /*
    * ── The applicant could not reach their own requirements ─────────────────
    *
    * Gated on `request.create` alone, which is an OFFICE's permission: a
@@ -273,10 +283,19 @@ const NAV_ITEMS: NavItem[] = [
    * narrow it to `user.manage` HERE and in App.tsx together.
    */
   /*
-   * Hidden from an office admin since 19 October 2026 (client: "Remove the
-   * button"): their Home draws this table under the office's analytics, and
-   * App.tsx sends this address there. The super admin keeps the entry — they
-   * have no such Home.
+   * Business Owners — the people behind the businesses, each opening onto a
+   * profile [client, 20 October 2026]. `permit.view_all`, like Permits below,
+   * whose Owner column links into it: every office has it, and the server
+   * narrows each office to the owners on its own caseload
+   * (OwnerProfileController), so this is not the whole-register browsing
+   * Records was kept from. Same permission in App.tsx.
+   */
+  { label: 'Business Owners', icon: BuildingIcon, to: '/admin/business-owners', permission: 'permit.view_all' },
+  /*
+   * Permits. Hidden from an office admin since 19 October 2026 (client: "Remove
+   * the button"): their Home draws this table under the office's analytics,
+   * and App.tsx sends this address there. The super admin keeps the entry —
+   * they have no such Home.
    */
   {
     label: 'Permits',

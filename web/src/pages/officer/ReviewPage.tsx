@@ -224,9 +224,19 @@ const TYPE_TITLES: Record<string, string> = {
  * document records them here during review, and they save straight back into
  * that permit type's office form.
  */
-const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string }[]> = {
+const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string; printed?: string }[]> = {
   OCCUPANCY: [
-    { key: 'building_permit_date', label: 'Building Permit Date Issued' },
+    /*
+     * `printed`: the certificate carries this date, so a blank is a blank on
+     * the issued Certificate of Occupancy — "BUILDING PERMIT NO. … ISSUED ON
+     * …" [client, 3 November 2026, on OP-2026-000007]. Said on the field
+     * until it is recorded.
+     */
+    {
+      key: 'building_permit_date',
+      label: 'Building Permit Date Issued',
+      printed: 'The Certificate of Occupancy prints this beside the Building Permit No.',
+    },
     { key: 'fsec_date', label: 'FSEC Date Issued' },
   ],
 }
@@ -7484,7 +7494,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   {group.fields.map((field) =>
                     editing ? (
                       <label key={field.key} className="block">
-                        <FieldLabel>{field.label}</FieldLabel>
+                        <FieldLabel required={Boolean(field.printed)}>{field.label}</FieldLabel>
                         <input
                           type="date"
                           max={todayISO()}
@@ -7497,13 +7507,21 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                             }))
                           }
                         />
+                        {field.printed && !field.value && (
+                          <span className="mt-1 block text-xs text-amber-800">
+                            Not recorded yet. {field.printed} Record it before passing the visit.
+                          </span>
+                        )}
                       </label>
                     ) : (
-                      <OfficeReadout
-                        key={field.key}
-                        label={field.label}
-                        value={field.value ? formatDate(field.value) : ''}
-                      />
+                      <div key={field.key}>
+                        <OfficeReadout label={field.label} value={field.value ? formatDate(field.value) : ''} />
+                        {field.printed && !field.value && (
+                          <p className="mt-1 text-xs text-amber-800">
+                            Not recorded yet. {field.printed} Edit the sheet to record it before passing the visit.
+                          </p>
+                        )}
+                      </div>
                     ),
                   )}
                   {editing && (

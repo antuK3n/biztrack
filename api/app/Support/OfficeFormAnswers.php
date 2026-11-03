@@ -367,9 +367,15 @@ final class OfficeFormAnswers
                 ? Carbon::parse($submitted)
                 : now())->toDateString();
 
+            /*
+             * Not the project's name: the Certificate of Occupancy prints it,
+             * and it often names the building rather than the trade ("Two-
+             * storey Commercial Building"). It starts as the business name and
+             * stays the applicant's to change (client, 3 November 2026).
+             */
             $derived += self::fromBusinessPermit(
                 $application,
-                ['project_name', 'occupancy_type', 'project_location', 'total_floor_area_sqm'],
+                ['occupancy_type', 'project_location', 'total_floor_area_sqm'],
             );
         }
 

@@ -148,19 +148,37 @@ function oaiAssignment(Application $app): int
     return (int) $app->assignments()->where('department_id', oaiOboDepartment())->value('id');
 }
 
+/**
+ * The body that records `$result` on a visit. A pass that releases a
+ * Certificate of Occupancy confirms its names first (mike-4); the yearly
+ * inspection prints nothing and confirms none (client, 3 November 2026).
+ *
+ * @return array<string, mixed>
+ */
+function oaiConduct(int $visitId, string $result): array
+{
+    $body = ['result' => $result, 'findings' => $result === 'failed' ? 'Fire exit blocked.' : null];
+    $names = test()->getJson("/api/v1/inspections/{$visitId}/certificate-names")->assertOk()->json('data');
+    if ($result === 'passed' && ($names['required'] ?? false)) {
+        $body['signatories'] = array_map(
+            fn (array $r) => ['role' => $r['role'], 'name' => $r['name'] ?: 'Engr. Test Signatory'],
+            $names['rows'],
+        );
+    }
+
+    return $body;
+}
+
 /** OBO books the first visit for today and records `$result`. Returns the visit id. */
 function oaiVisit(Application $app, string $result): int
 {
     authAs('obo@biztrack.local');
-    $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/OCCUPANCY/inspection", [
+    $visitId = (int) test()->postJson("/api/v1/applications/{$app->id}/permits/OCCUPANCY/inspection", [
         'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
-    test()->postJson("/api/v1/inspections/{$visitId}/conduct", [
-        'result' => $result,
-        'findings' => $result === 'failed' ? 'Fire exit blocked.' : null,
-    ])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", oaiConduct($visitId, $result))->assertOk();
 
-    return (int) $visitId;
+    return $visitId;
 }
 
 function oaiOccupancyStatus(Application $app): ClearanceStatus
@@ -235,6 +253,18 @@ it('does not open an inspection before the due date', function () {
     $this->artisan('biztrack:scan-permits')->assertSuccessful();
 
     expect(AnnualInspection::openEntryFor($occupancy))->toBeNull();
+});
+
+it('asks no certificate names on the yearly inspection, which prints no certificate', function () {
+    [$app] = oaiAnnualEntry();
+    authAs('obo@biztrack.local');
+    $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/OCCUPANCY/inspection", [
+        'scheduled_at' => now()->toDateTimeString(),
+    ])->assertCreated()->json('data.id');
+
+    test()->getJson("/api/v1/inspections/{$visitId}/certificate-names")
+        ->assertOk()->assertJsonPath('data.required', false);
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
 });
 
 it('lists the annual inspection under OBO For Inspection, labelled as one', function () {
@@ -316,7 +346,7 @@ it('a passing re-inspection after a failure reinstates the Business Permit', fun
     $visitId = $this->postJson("/api/v1/inspections/{$failed}/reinspect", [
         'scheduled_at' => now()->toDateTimeString(),
     ])->assertCreated()->json('data.id');
-    $this->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    $this->postJson("/api/v1/inspections/{$visitId}/conduct", oaiConduct((int) $visitId, 'passed'))->assertOk();
 
     expect(oaiOccupancyStatus($app))->toBe(ClearanceStatus::Approved)
         ->and($businessPermit->fresh()->status)->toBe(PermitStatus::Active);

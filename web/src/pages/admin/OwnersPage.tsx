@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, BuildingIcon } from '../../components/icons'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
@@ -10,6 +11,7 @@ import { admin } from '../../lib/resources'
 import { BUSINESS_STATUS } from '../../lib/status'
 import type { AdminOwner, AuditLog, BusinessStatus, OwnerHistoryEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
+import { ownerProfilePath } from './ownerProfilePath'
 import { RequiredReason } from './PermitStatusDialogs'
 
 /*
@@ -148,7 +150,13 @@ export function OwnersPage() {
                   return (
                     <tr key={owner.id} className="border-t border-line align-top">
                       <td className="px-5 py-4">
-                        <span className="block font-bold text-ink">{owner.name}</span>
+                        {/* The name opens the owner's profile [client, 20 October 2026]. */}
+                        <Link
+                          to={ownerProfilePath(owner.id)}
+                          className="block font-bold text-ink hover:text-royal hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+                        >
+                          {owner.name}
+                        </Link>
                         <span className="block text-xs text-ink-muted">{owner.email}</span>
                         {owner.status === 'blacklisted' && (
                           <span className="mt-1 block max-w-xs text-xs leading-snug text-s-red">
