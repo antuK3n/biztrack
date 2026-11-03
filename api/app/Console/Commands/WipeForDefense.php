@@ -76,7 +76,9 @@ class WipeForDefense extends Command
     /** Kept whole: reference and configuration data. */
     public const KEPT = [
         'barangay_zoning_classification', 'barangay_zoning_overlay', 'barangays', 'departments', 'document_types',
-        'fee_rules', 'migrations', 'office_signatories', 'permissions', 'permit_type_requirements', 'permit_types',
+        // The inspector pool is the office's staffing, kept as its accounts are.
+        'fee_rules', 'inspector_barangay', 'inspector_leaves', 'inspectors', 'migrations', 'office_signatories',
+        'permissions', 'permit_type_requirements', 'permit_types',
         'psic_codes', 'role_permissions', 'roles', 'settings', 'zoning_classifications', 'zoning_overlays',
         /*
          * Custom Report set-ups (19 October 2026). Staff-only: saving one needs

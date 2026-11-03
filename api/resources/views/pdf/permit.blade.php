@@ -359,16 +359,23 @@
         .occ-caption { text-align: center; font-size: 8px; letter-spacing: 0.4px; margin-top: 1px; }
         table.occ-checks { width: 100%; border-collapse: collapse; margin-top: 12px; }
         table.occ-checks td { font-size: 9px; padding: 3px 0; }
+        table.occ-signed-by { width: 100%; border-collapse: collapse; margin-top: 4px; }
+        table.occ-signed-by td { font-size: 9px; padding: 0 3px; vertical-align: bottom; }
+        td.occ-sb-value { width: 42%; white-space: nowrap; border-bottom: 1px solid #2b2b2b; text-align: center; font-weight: bold; height: 13px; }
+        td.occ-sb-gap { width: 16%; text-align: center; white-space: nowrap; }
+        td.occ-sb-caption { text-align: center; font-size: 7px; font-weight: bold; vertical-align: top; }
+        .occ-specify { display: inline-block; min-width: 110px; border-bottom: 1px solid #2b2b2b; font-size: 7.5px; white-space: nowrap; text-align: center; }
+        .occ-box-on { font-size: 9px; line-height: 9px; text-align: center; }
         .occ-box { display: inline-block; width: 8px; height: 8px; border: 1px solid #1a1a1a; margin-right: 5px; }
         .occ-blank { display: inline-block; border-bottom: 1px solid #2b2b2b; height: 9px; }
-        .occ-para { font-size: 9.2px; line-height: 1.8; text-align: justify; margin-top: 14px; }
+        .occ-para { font-size: 9.2px; line-height: 1.6; text-align: justify; margin-top: 10px; }
         .occ-indent { text-indent: 26px; }
         .occ-captioned { position: relative; }
         .occ-captioned span { position: absolute; top: -8px; left: 0; right: 0; text-align: center; font-size: 7px; font-weight: bold; text-indent: 0; }
-        .occ-verified { text-align: center; font-size: 10.5px; font-weight: bold; letter-spacing: 0; margin-top: 24px; white-space: nowrap; }
+        .occ-verified { text-align: center; font-size: 10.5px; font-weight: bold; letter-spacing: 0; margin-top: 16px; white-space: nowrap; }
         .occ-para.occ-left-align { text-align: left; }
         table.occ-reqs { width: 100%; border-collapse: collapse; margin-top: 8px; }
-        table.occ-reqs td { width: 33.33%; padding: 12px 7px 0; vertical-align: top; }
+        table.occ-reqs td { width: 33.33%; padding: 8px 7px 0; vertical-align: top; }
         .occ-req-line { border-bottom: 1px solid #2b2b2b; text-align: center; font-size: 8.5px; font-weight: bold; min-height: 12px; }
         .occ-req-label { text-align: center; font-size: 8px; font-weight: bold; margin-top: 2px; line-height: 1.25; }
         .occ-fill { display: inline-block; min-width: 95px; border-bottom: 1px solid #2b2b2b; text-align: center; font-weight: bold; text-indent: 0; }
@@ -396,7 +403,7 @@
         td.occ-f-label { width: 1%; white-space: nowrap; padding-right: 6px !important; }
         td.occ-f-value { border-bottom: 1px solid #2b2b2b; font-weight: bold; text-align: center; }
         td.occ-f-area { padding-left: 10px !important; }
-        td.occ-f-area-value { width: 90px; }
+        td.occ-f-area-value { width: 70px; white-space: nowrap; }
         .occ-small { font-size: 8.1px; line-height: 1.4; text-align: justify; margin-top: 8px; }
         .occ-sign { position: absolute; right: 26px; bottom: 16px; width: 230px; text-align: center; }
         .occ-sig-name { font-weight: bold; font-size: 10.5px; }

@@ -1113,6 +1113,60 @@ export interface InspectionParticulars {
   permit_types: { code: string; name: string }[]
 }
 
+/*
+ * ── An office's pool of inspectors (27 October 2026) ────────────────────────
+ *
+ * Who goes out for an office, the barangays each covers, the days they work,
+ * how many visits a day, and when they are away. Read by the Inspectors page
+ * and by the suggestion at booking.
+ */
+export interface PoolInspector {
+  id: number
+  name: string
+  mobile_number: string | null
+  is_active: boolean
+  /** ISO weekdays, 1 = Monday. */
+  works_days: number[]
+  max_visits_per_day: number
+  notes: string | null
+  user: { id: number; name: string } | null
+  barangays: { id: number; name: string }[]
+  leaves: { id: number; starts_on: string; ends_on: string; reason: string | null }[]
+  open_visits_count: number
+}
+
+export interface InspectorPoolMeta {
+  department: { id: number; code: string; name: string }
+  can_edit: boolean
+  barangays: { id: number; name: string; covered: boolean }[]
+}
+
+/** One inspector, as the booking suggestion ranks them. */
+export interface InspectorCandidate {
+  id: number
+  name: string
+  mobile_number: string | null
+  available: boolean
+  covers_barangay: boolean
+  distance_m: number | null
+  booked_that_day: number
+  max_visits_per_day: number
+  booked_that_week: number
+  barangays: string[]
+  reasons: string[]
+  /** Why they were, or were not, suggested — in words. */
+  why: string
+}
+
+export interface InspectorSuggestion {
+  suggested: InspectorCandidate | null
+  candidates: InspectorCandidate[]
+  /** When nobody is free on the asked day: the first working day somebody is. */
+  next_available: { date: string; inspector: InspectorCandidate } | null
+  barangay: { id: number; name: string } | null
+  pool_size: number
+}
+
 export interface Inspection {
   id: number
   status: string
@@ -1153,6 +1207,8 @@ export interface Inspection {
    * the record"). Null when blank, and always null for the applicant.
    */
   inspector_name?: string | null
+  /** Which pool inspector took it, when one was picked (27 October 2026). */
+  inspector_id?: number | null
   /** May the reader type or change `inspector_name` now? */
   can_name_inspector?: boolean
   /**
@@ -1218,7 +1274,8 @@ export interface Permit {
   /** `department_id` and `office`: the office that issued it, the one an owner writes to about it. */
   permit_type: { code: string; name: string; department_id?: number | null; office?: string | null }
   /** `ban`: the Business Account Number, shown beside the name on My Permits. */
-  business: { id: number; name: string; ban?: string | null }
+  /** `owner_user_id`: whose account holds it — the Permits table links the owner to their profile. */
+  business: { id: number; name: string; ban?: string | null; owner_user_id?: number | null }
   application: { id: number; tracking_id: string }
   verify_url: string
   /*
@@ -3129,6 +3186,136 @@ export interface OwnerHistoryEntry {
   label: string
   reason: string | null
   by: string | null
+}
+
+/** The names an office prints on its certificate (`GET/PUT /certificate-signatories`). */
+export interface CertificateSignatories {
+  office: { id: number; code: string; name: string }
+  certificate: string | null
+  rows: { role: string; name: string | null }[]
+  changed?: number
+}
+
+/**
+ * One row of the Business Owners list (`GET /owner-profiles`). Scoped to the
+ * reader: an office sees only the owners, and the businesses, on its caseload.
+ */
+export interface OwnerDirectoryRow {
+  id: number
+  name: string
+  email: string | null
+  mobile_number: string | null
+  status: 'active' | 'blacklisted'
+  status_label: string
+  active_permits: number
+  businesses: { id: number; name: string; ban: string | null; status: BusinessStatus; status_label: string }[]
+}
+
+/**
+ * One event on an owner's profile timeline: the account, a business, or a
+ * permit. A permit event names its office, certificate, number and business;
+ * `by_office` is the actor's office code, or "Super Admin".
+ */
+export interface OwnerProfileEvent {
+  id: number
+  at: string | null
+  scope: 'account' | 'business' | 'permit'
+  office_code: string | null
+  permit_type: string | null
+  permit_number: string | null
+  business_name: string | null
+  label: string
+  from: string | null
+  from_label: string | null
+  to: string | null
+  to_label: string | null
+  reason: string | null
+  by: string | null
+  by_office: string | null
+}
+
+/** An owner's profile as an office reads it (`GET /owner-profiles/{id}`). */
+export interface OwnerProfile {
+  /**
+   * As much of the account as the reader needs (OwnerProfileController::
+   * accountFor). Name, sex and standing go to every office; contact details
+   * and the registration date to BPLO and the super admin; the sign-in facts
+   * and the blacklisting's reason to the super admin alone. An absent key is
+   * one this reader is not sent — not a blank.
+   */
+  account: {
+    id: number
+    name: string
+    gender: string | null
+    status: 'active' | 'blacklisted'
+    status_label: string
+    blacklisted_at: string | null
+    email?: string | null
+    mobile_number?: string | null
+    created_at?: string | null
+    email_verified_at?: string | null
+    last_login_at?: string | null
+    is_active?: boolean
+    blacklist_reason?: string | null
+    blacklisted_by?: string | null
+  }
+  /** `needs_attention`: permits expired, suspended, revoked or rejected. */
+  summary: { businesses: number; active_permits: number; filings: number; needs_attention: number }
+  businesses: {
+    id: number
+    name: string
+    ban: string | null
+    status: BusinessStatus
+    status_label: string
+    address: string | null
+    registered_at: string | null
+    permits: {
+      id: number
+      permit_number: string
+      type_code: string | null
+      type_name: string | null
+      office_code: string | null
+      status: string
+      status_label: string
+      valid_from: string | null
+      valid_until: string | null
+    }[]
+  }[]
+  filings: {
+    id: number
+    tracking_id: string | null
+    business_name: string | null
+    type: string | null
+    type_label: string | null
+    status: string | null
+    status_label: string | null
+    submitted_at: string | null
+    decided_at: string | null
+  }[]
+  /** The whole bill's payments: BPLO's and the super admin's. Null for a clearance office. */
+  payments:
+    | {
+    id: number
+    reference_number: string | null
+    tracking_id: string | null
+    business_name: string | null
+    amount: number
+    method: string | null
+    method_label: string | null
+    status: string | null
+    status_label: string
+    paid_at: string | null
+    created_at: string | null
+    /** The Tax Order of Payment this payment settled, line by line. */
+    breakdown: { label: string; office: string | null; amount: number }[]
+    assessed_total: number | null
+  }[]
+    | null
+  /** A clearance office's own fee on each of its filings, and whether the bill was paid. Null for BPLO and the super admin. */
+  fees: { application_id: number; tracking_id: string | null; business_name: string | null; amount: number; paid: boolean; paid_at: string | null }[] | null
+  /** Whether the Message button shows: an office seat in Messages, never the super admin. */
+  can_message: boolean
+  history: OwnerProfileEvent[]
 }
 
 export interface AdminBusiness {

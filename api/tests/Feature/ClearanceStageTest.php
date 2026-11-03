@@ -284,7 +284,7 @@ function driveClearanceToApproved(Application $app, string $code): void
     test()->postJson("/api/v1/inspections/{$visit->id}/conduct", [
         'result' => 'passed',
         'findings' => 'Premises inspected and found compliant.',
-    ])->assertOk();
+    ] + oboNames($visit->id))->assertOk();
 
     authAs('owner@biztrack.local');
 }
@@ -1097,7 +1097,7 @@ it('reports a permit as approved only once its inspection has passed', function 
     $this->postJson("/api/v1/inspections/{$visit->id}/conduct", [
         'result' => 'passed',
         'findings' => 'Premises inspected and found compliant.',
-    ])->assertOk();
+    ] + oboNames($visit->id))->assertOk();
 
     expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::Approved->value)
         ->and(clearancePermitsIssued($app->id))->toBe(1);

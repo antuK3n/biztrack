@@ -237,7 +237,7 @@ it('lets each of the five offices see and close its own visit, releasing that pe
         test()->postJson("/api/v1/inspections/{$visitId}/conduct", [
             'result' => 'passed',
             'findings' => 'Premises inspected and found compliant.',
-        ])->assertOk();
+        ] + oboNames($visitId))->assertOk();
 
         /*
          * Rule 7: the permit is released the moment its OWN office passes it,
@@ -296,7 +296,7 @@ it('holds the business permit until the last of the five visits passes', functio
     foreach (array_slice($offices, 0, 4) as $officeCode) {
         $visitId = bookVisitFor($app, $officeCode);
         authAs(OFFICE_INSPECTOR[$officeCode][1]);
-        test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+        test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
         expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
     }
@@ -309,9 +309,93 @@ it('holds the business permit until the last of the five visits passes', functio
     $last = end($offices);
     $visitId = bookVisitFor($app, $last);
     authAs(OFFICE_INSPECTOR[$last][1]);
-    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     // The fifth pass issues the fifth clearance AND the business permit.
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
         ->and($app->permits()->count())->toBe(6);
+});
+
+/*
+ * The OBO confirms the Certificate of Occupancy's names after the visit and
+ * before the pass releases it [client, 3 November 2026]. A change there is
+ * for that permit alone; the office's own names stay as they are.
+ */
+it('lists the names the OBO confirms: the Building Official and only the lines this building needs', function () {
+    $app = filingWithEveryClearance();
+    $visit = bookVisitFor($app, 'OBO');
+
+    $data = test()->withHeaders(authAs('obo@biztrack.local'))
+        ->getJson("/api/v1/inspections/{$visit}/certificate-names")->assertOk()->json('data');
+    $roles = array_column($data['rows'], 'role');
+
+    expect($data['required'])->toBeTrue()
+        ->and($roles[0])->toBe('Building Official')
+        ->and($roles)->toContain('Evaluator — Architectural', 'Evaluator — Electrical')
+        // Every line is either asked or set apart as not needed, never both.
+        ->and(count($roles) - 1 + count($data['not_needed']))->toBe(count(\App\Support\OccupancyChecklist::LINES))
+        ->and(array_intersect($data['not_needed'], array_map(fn ($r) => substr($r, strlen('Evaluator — ')), $roles)))->toBe([]);
+
+    // Another office has nothing to confirm.
+    $fire = bookVisitFor($app, 'BFP');
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->getJson("/api/v1/inspections/{$fire}/certificate-names")->assertOk()->assertJsonPath('data.required', false);
+});
+
+it('prints the confirmed names on that permit only, and records who confirmed them', function () {
+    $app = filingWithEveryClearance();
+    $visit = bookVisitFor($app, 'OBO');
+    $obo = Department::where('code', 'OBO')->firstOrFail();
+    \App\Models\OfficeSignatory::updateOrCreate(
+        ['department_id' => $obo->id, 'role' => 'Building Official'],
+        ['name' => 'Engr. Office Default', 'is_active' => true, 'sort_order' => 0],
+    );
+
+    authAs('obo@biztrack.local');
+    // Every name the dialog offers, two of them changed for this permit.
+    $names = array_map(fn (array $r) => match ($r['role']) {
+        'Building Official' => ['role' => $r['role'], 'name' => 'Engr. Acting Official'],
+        'Evaluator — Electrical' => ['role' => $r['role'], 'name' => 'Engr. Stand-in Electrical'],
+        default => $r,
+    }, oboNames($visit)['signatories']);
+
+    // Short of a name the building needs: refused, nothing recorded.
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => array_slice($names, 0, 2)])
+        ->assertStatus(422)->assertJsonValidationErrors('signatories');
+    // No names at all: refused too.
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed'])
+        ->assertStatus(422)->assertJsonValidationErrors('signatories');
+
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => $names])->assertOk();
+
+    $permit = $app->permits()->whereHas('permitType', fn ($t) => $t->where('code', 'OCCUPANCY'))->sole();
+    $frozen = collect($permit->issued_details['office_signatories'])->pluck('name', 'role');
+    $audit = \App\Models\AuditLog::where('action', 'permit.signatories_confirmed')->latest('id')->first();
+
+    expect($frozen['Building Official'])->toBe('Engr. Acting Official')
+        ->and($frozen['Evaluator — Electrical'])->toBe('Engr. Stand-in Electrical')
+        // The office's own name is untouched: the next permit prints it.
+        ->and(\App\Models\OfficeSignatory::where('department_id', $obo->id)->where('role', 'Building Official')->value('name'))
+        ->toBe('Engr. Office Default')
+        ->and($audit)->not->toBeNull()
+        ->and(collect($audit->changes['changed_for_this_permit'] ?? [])->pluck('to')->all())
+        ->toContain('Engr. Acting Official');
+});
+
+it('refuses names on a visit that is not the OBO’s, and a blank name', function () {
+    $app = filingWithEveryClearance();
+    $fire = bookVisitFor($app, 'BFP');
+    test()->withHeaders(authAs('fire@biztrack.local'))->postJson("/api/v1/inspections/{$fire}/conduct", [
+        'result' => 'passed',
+        'signatories' => [['role' => 'Building Official', 'name' => 'Someone']],
+    ])->assertStatus(422);
+
+    $visit = bookVisitFor($app, 'OBO');
+    test()->withHeaders(authAs('obo@biztrack.local'))->postJson("/api/v1/inspections/{$visit}/conduct", [
+        'result' => 'passed',
+        'signatories' => [['role' => 'Building Official', 'name' => '']],
+    ])->assertStatus(422);
+
+    // Nothing was recorded on either visit.
+    expect(\App\Models\Inspection::whereIn('id', [$fire, $visit])->whereNotNull('conducted_at')->count())->toBe(0);
 });

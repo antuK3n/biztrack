@@ -211,7 +211,7 @@ it('closes the filing when the last ticked permit is issued', function () {
         ->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", ['scheduled_at' => now()->toDateTimeString()])
         ->assertCreated()->json('data.id');
     test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     $app = $app->fresh();
     expect($app->decided_at)->not->toBeNull()

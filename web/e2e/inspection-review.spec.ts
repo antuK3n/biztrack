@@ -1420,21 +1420,33 @@ test('the office that issues a permit books its first visit from the review scre
    */
   const dateField = page.getByLabel(`Date and time of the ${permitName} inspection`)
   const book = page.getByRole('button', { name: `Book the ${permitName} visit` })
-  await expect(dateField).toBeVisible()
+  const change = page.getByRole('button', { name: `Change the date or inspector of the ${permitName} visit` })
   await expect(book).toBeVisible()
+  await expect(change.or(dateField).first()).toBeVisible({ timeout: 30_000 })
 
-  /*
-   * Shut with `aria-disabled` while there is no date, never with `disabled`,
-   * and it says what is missing. Checked on the attribute itself: toBeDisabled()
-   * treats the two as the same thing and would pass either way.
-   */
-  await expect(book).not.toHaveAttribute('disabled', /.*/)
-  await expect(book).toHaveAttribute('aria-disabled', 'true')
-  const why = await book.getAttribute('aria-describedby')
-  expect(why, 'the shut booking button does not say what is missing').toBeTruthy()
-  // Attribute selector, not `#id`: React's useId mints ids like `:r1:`, which
-  // are legal HTML ids and illegal CSS identifiers.
-  await expect(page.locator(`[id="${why}"]`)).toContainText(/Choose a date/)
+  if (await change.isVisible()) {
+    /*
+     * The office has a pool: the earliest free day and its inspector are
+     * already taken (3 November 2026), shown folded, and bookable as they
+     * stand. "Change" opens the date for another choice.
+     */
+    await expect(book).toHaveAttribute('aria-disabled', 'false')
+    await change.click()
+    await expect(dateField).toBeVisible()
+  } else {
+    /*
+     * Shut with `aria-disabled` while there is no date, never with `disabled`,
+     * and it says what is missing. Checked on the attribute itself: toBeDisabled()
+     * treats the two as the same thing and would pass either way.
+     */
+    await expect(book).not.toHaveAttribute('disabled', /.*/)
+    await expect(book).toHaveAttribute('aria-disabled', 'true')
+    const why = await book.getAttribute('aria-describedby')
+    expect(why, 'the shut booking button does not say what is missing').toBeTruthy()
+    // Attribute selector, not `#id`: React's useId mints ids like `:r1:`, which
+    // are legal HTML ids and illegal CSS identifiers.
+    await expect(page.locator(`[id="${why}"]`)).toContainText(/Choose a date/)
+  }
 
   /*
    * A weekday three days out, at 10:00. Local time on purpose — the control is

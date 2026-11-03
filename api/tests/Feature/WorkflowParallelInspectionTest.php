@@ -158,7 +158,7 @@ function conductOfficeVisit(Application $app, string $code, int $visitId, string
     [, $email] = PARALLEL_OFFICE[$code];
 
     test()->withHeaders(authAs($email))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => $result, 'findings' => 'Seen.'])
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => $result, 'findings' => 'Seen.'] + ($result === 'passed' ? oboNames($visitId) : []))
         ->assertOk();
 }
 

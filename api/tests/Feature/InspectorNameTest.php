@@ -165,7 +165,7 @@ it('lets the officer in charge record the result with no inspector named', funct
     ['visit' => $visit] = filingWithSanitaryVisitBooked();
 
     authAs('sanitary@biztrack.local');
-    test()->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'passed'] + oboNames($visit->id))->assertOk();
 
     expect($visit->fresh()->result?->value)->toBe('passed')
         // conduct() used to adopt whoever pressed it as the inspector.
@@ -202,7 +202,7 @@ it('keeps the name editable after a failed visit, and closes it once the permit 
     $again = test()->postJson("/api/v1/inspections/{$visit->id}/reinspect", [
         'scheduled_at' => now()->toDateString(),
     ])->assertCreated()->json('data');
-    test()->postJson("/api/v1/inspections/{$again['id']}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$again['id']}/conduct", ['result' => 'passed'] + oboNames($again['id']))->assertOk();
 
     // Passed: the permit is issued and the clearance closed, on both visits.
     foreach ([$visit->id, $again['id']] as $id) {

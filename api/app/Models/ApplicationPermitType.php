@@ -62,6 +62,9 @@ class ApplicationPermitType extends Model
          * an untouched re-submission and could not get a value to stick.
          */
         'returned_state',
+        // The names the office confirmed for this certificate before release
+        // (CertificateSignatories::rowsAtIssue). Null: the office's own.
+        'confirmed_signatories',
     ];
 
     protected $casts = [
@@ -71,6 +74,7 @@ class ApplicationPermitType extends Model
         // Or `->toISOString()` on it throws: an uncast timestamp comes back a
         // string, and the resources format these for the wire.
         'returned_at' => 'datetime',
+        'confirmed_signatories' => 'array',
         'rejected_at' => 'datetime',
         /*
          * What each row this office asked about said when it sent the sheet

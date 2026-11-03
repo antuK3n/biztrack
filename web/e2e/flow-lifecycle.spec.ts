@@ -425,6 +425,14 @@ async function bookOwnVisit(page: Page, narrative: Narrative) {
   // A weekday: an office books visits Monday to Friday, 8:00 AM to 5:00 PM.
   while (when.getDay() === 0 || when.getDay() === 6) when.setDate(when.getDate() + 1)
   const pad = (n: number) => String(n).padStart(2, '0')
+  /*
+   * With a pool, the card has already taken the earliest free day and its
+   * inspector (3 November 2026) and shows them folded; "Change" opens the
+   * date. Without one, the date is open from the start.
+   */
+  const change = page.getByRole('button', { name: /^Change the date or inspector of the .+ visit$/ })
+  await expect(change.or(dateField).first()).toBeVisible({ timeout: 30_000 })
+  if (await change.isVisible()) await change.click()
   await dateField.fill(
     `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T10:00`,
   )
@@ -1235,7 +1243,8 @@ test('paying opens the clearance stage, and applying routes each office', async 
      * they are filled honestly rather than stubbed: the API trusts the `submit`
      * flag and has no PHP counterpart to re-check it, so a fixture that lied
      * here would hand in sheets a real applicant could not have handed in.
-     * SANITARY wants a classification, OCCUPANCY an application type, and CEC
+     * SANITARY wants a classification, OCCUPANCY what NBC Form B-13 prints (the
+     * project, the building permit, the Certificate of Completion), and CEC
      * both an owner's address — the one field on MCG-CENRO-FO-001 the register
      * does not hold anywhere — and the certification, which is an act rather
      * than a fact. FSIC and ZONING require nothing: FSIC derives every answer,
@@ -1244,7 +1253,19 @@ test('paying opens the clearance stage, and applying routes each office', async 
      */
     const sheets: Record<string, Record<string, string>> = {
       SANITARY: { sanitary_classification: 'Food Establishment' },
-      OCCUPANCY: { application_type: 'Full' },
+      OCCUPANCY: {
+        application_type: 'Full',
+        project_name: 'Playwright Store',
+        project_location: '3 Playwright St., Longos, Malabon City',
+        occupancy_type: 'Mercantile',
+        building_storeys: '1',
+        building_units: '1',
+        total_floor_area_sqm: '24',
+        building_permit_no: 'BP-MLB-2026-0101',
+        completion_documents: 'Certificate of Completion, As-built Plans/Specifications',
+        completion_submitted_by: 'Engr. Paolo R. Mendiola',
+        completion_professional: 'Civil Engineer',
+      },
       CEC: { owner_address: '3 Playwright St., Longos, Malabon City', certified: 'yes' },
       FSIC: {},
       ZONING: {},
@@ -2031,6 +2052,15 @@ test('every visit passing issues its clearance, and BPLO’s sign-off issues the
       ).toHaveCount(1)
 
       await approve.click()
+      /*
+       * Approve asks first: the OBO confirms its certificate's names
+       * (3 November 2026), every other office answers "Yes, approve".
+       */
+      await officePage
+        .getByRole('button', { name: 'Confirm names and approve' })
+        .or(officePage.getByRole('button', { name: 'Yes, approve' }))
+        .first()
+        .click()
       // The card flips to the passed state in place; nothing navigates.
       await expect(officePage.getByText('Inspection Passed').first()).toBeVisible({
         timeout: 30_000,

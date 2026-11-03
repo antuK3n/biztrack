@@ -994,9 +994,8 @@ class ChatbotResponder
      * January. Nothing dates a permit with that column any more: the business
      * permit ends on 31 December of the year it is issued and renews without
      * penalty from 1 to 20 January (RenewalSeason; Ken, 5 October 2026), a
-     * clearance's first issue on 31 December
-     * of its year, and a renewed clearance one year from the day it is
-     * renewed. Clearances renew on their own application (RenewalScope) from
+     * clearance one year from the day it is issued or renewed [client, 20
+     * October 2026]. Clearances renew on their own application (RenewalScope) from
      * RenewalWindow::opensDaysBefore() days before they expire.
      */
     private function renewal(?PermitType $type): string
@@ -1017,7 +1016,7 @@ class ChatbotResponder
         if ($type) {
             $opens = RenewalWindow::opensDaysBefore();
 
-            return "The {$type->name} expires on 31 December of the year it is first issued, and a renewal runs one year from the day it is renewed.\n"
+            return "The {$type->name} runs one year from the day it is issued, and a renewal runs one year from the day it is renewed.\n"
                 .($opens !== null ? "You can renew it from {$opens} days before it expires, on its own application. " : 'Renew it on its own application. ')
                 .$this->penaltyPhrase();
         }

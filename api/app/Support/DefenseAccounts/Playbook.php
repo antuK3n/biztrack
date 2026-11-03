@@ -250,10 +250,12 @@ final class Playbook
 
                 continue;
             }
+            $names = $this->confirmedNames($code, $visit);
+            $this->asOffice($code);
             $this->api->post("{$code} records a passed visit", "inspections/{$visit}/conduct", [
                 'result' => 'passed',
                 'findings' => $this->pick(['Compliant.', 'Premises inspected. No violations.', 'Ok. Clean and orderly.', 'Passed. Owner present during inspection.', 'No findings.']),
-            ]);
+            ] + $names);
         }
 
         $this->day(4, '14:00');
@@ -659,9 +661,25 @@ final class Playbook
 
     private function officeApproves(int $id, string $code): void
     {
+        if ($code === 'OCCUPANCY') {
+            $this->oboRecordsPermitDate($id);
+        }
         $assignment = $this->take($this->issuer[$code], $id);
         $this->api->post("{$code} approves the papers", "assignments/{$assignment}/approve", [
             'remarks' => $this->pick(['Requirements complete. For inspection.', 'Complete. Schedule inspection.', 'Papers ok, for site visit.', 'Checked. For ocular inspection.', 'Complete po. Inspection next.']),
+        ]);
+    }
+
+    /**
+     * The OBO writes the Building Permit Date Issued on the sheet: an
+     * issuance date is the office's to record, never the owner's
+     * (OfficeFormController OFFICER_KEYS), and a passed visit is refused
+     * without it, since the Certificate of Occupancy prints it.
+     */
+    private function oboRecordsPermitDate(int $id): void
+    {
+        $this->asOffice('OCCUPANCY')->put('OBO records the building permit date', "applications/{$id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_date' => CarbonImmutable::now()->subMonths(8)->toDateString()],
         ]);
     }
 
@@ -791,12 +809,52 @@ final class Playbook
                 'zoning_project_description' => $b['name'],
                 'project_location' => $this->addressLines()[0],
             ],
-            'OCCUPANCY', 'FSIC' => [
+            'FSIC' => [
                 'building_storeys' => 1,
                 'total_floor_area_sqm' => $b['floor_area'],
             ],
+            /*
+             * Every answer the wizard requires of the OBO sheet, and so every
+             * blank NBC Form B-13 prints: a trial filing that skipped them
+             * issued OP-2026-000007 with no building permit and no
+             * Certificate of Completion on its face [client, 3 November 2026].
+             */
+            'OCCUPANCY' => [
+                'application_type' => 'Full',
+                'project_name' => $b['name'],
+                'project_location' => $this->addressLines()[0],
+                'occupancy_type' => 'Commercial',
+                'building_storeys' => 1,
+                'building_units' => 1,
+                'total_floor_area_sqm' => $b['floor_area'],
+                'building_permit_no' => sprintf('BP-MLB-%s-%04d', CarbonImmutable::now()->subYear()->year, crc32($b['name']) % 10000),
+                'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+                'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
+                'completion_professional' => 'Civil Engineer',
+            ],
             default => [],
         };
+    }
+
+    /**
+     * What the OBO confirms before its pass releases the Certificate of
+     * Occupancy: the names its dialog offers (InspectionController::
+     * certificateNames), as they stand, and a stand-in for a caption the
+     * office has no name for yet. Nothing for any other office.
+     *
+     * @return array{signatories?: list<array{role: string, name: string}>}
+     */
+    private function confirmedNames(string $code, int $visit): array
+    {
+        if ($code !== 'OCCUPANCY') {
+            return [];
+        }
+        $rows = $this->asOffice('OCCUPANCY')->get('OBO reads the certificate names', "inspections/{$visit}/certificate-names")['data']['rows'];
+
+        return ['signatories' => array_map(
+            fn (array $r) => ['role' => $r['role'], 'name' => $r['name'] ?: self::INSPECTORS['OCCUPANCY']],
+            $rows,
+        )];
     }
 
     private function failedFindings(string $code): string

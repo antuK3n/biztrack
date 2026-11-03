@@ -95,6 +95,14 @@ it('builds the nine businesses, each in the state the spec names', function () {
         ->and($a->payments()->where('method', 'counter')->exists())->toBeTrue()
         ->and(OfficerRequest::where('application_id', $a->id)->where('status', '!=', OfficerRequestStatus::Fulfilled->value)->exists())->toBeFalse();
 
+    // A's Certificate of Occupancy has no blank the owner should have filled:
+    // the building permit and the Certificate of Completion are on its face.
+    $op = Permit::where('application_id', $a->id)->whereHas('permitType', fn ($t) => $t->where('code', 'OCCUPANCY'))->sole();
+    $cert = test()->withHeaders(authAs('admin@biztrack.local'))->getJson("/api/v1/permits/{$op->id}")->json('data.certificate');
+    foreach (['occ_project', 'occ_building_permit_no', 'occ_building_permit_date', 'occ_submitted_by', 'occ_professional', 'occ_documents'] as $key) {
+        expect($cert[$key] ?? null)->not->toBeEmpty("{$key} is blank on {$op->permit_number}");
+    }
+
     // B: paid; FSIC issued, Sanitary visit booked ahead, three offices untouched.
     [$b] = portfolioFilings($owner, 'KM Lutong Bahay Carinderia');
     $rows = $b->permitTypes->mapWithKeys(fn ($t) => [$t->code => $t->pivot->status]);
@@ -124,8 +132,13 @@ it('builds the nine businesses, each in the state the spec names', function () {
     expect($e->status)->toBe(ApplicationStatus::Returned)
         ->and(DB::table('application_return_notes')->where('application_id', $e->id)->value('target'))->toBe('form:tin');
 
-    // F: a 2025 permit, lapsed and not renewed.
-    $f = portfolioFilings($owner, "Ken's Hardware & Construction Supply");
+    // F: a 2025 permit, lapsed and not renewed. Its Occupancy Permit's
+    // yearly inspection is due, so the scan has opened one; that is not a
+    // filing of the owner's (client, 20 October 2026).
+    $f = array_values(array_filter(
+        portfolioFilings($owner, "Ken's Hardware & Construction Supply"),
+        fn ($a) => $a->application_type !== \App\Enums\ApplicationType::AnnualInspection,
+    ));
     $fPermit = Permit::where('application_id', $f[0]->id)->whereHas('permitType', fn ($t) => $t->where('code', PermitType::OUTCOME_CODE))->sole();
     expect($f)->toHaveCount(1)
         ->and($fPermit->status)->toBe(PermitStatus::Expired)
@@ -162,7 +175,10 @@ it('builds the nine businesses, each in the state the spec names', function () {
 
     // Every step in office hours; nothing after today but B's booked visit.
     $now = CarbonImmutable::now('Asia/Manila');
-    $ids = Application::whereIn('business_id', Business::where('owner_user_id', $owner->id)->pluck('id'))->pluck('id');
+    // The owner's filings: not the yearly inspection the scan opens itself.
+    $ids = Application::whereIn('business_id', Business::where('owner_user_id', $owner->id)->pluck('id'))
+        ->where('application_type', '!=', \App\Enums\ApplicationType::AnnualInspection->value)
+        ->pluck('id');
     $moments = DB::table('application_status_history')->whereIn('application_id', $ids)->pluck('created_at')
         ->merge(DB::table('application_assignments')->whereIn('application_id', $ids)->whereNotNull('completed_at')->pluck('completed_at'))
         ->merge(DB::table('payments')->whereIn('application_id', $ids)->pluck('paid_at'))

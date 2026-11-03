@@ -751,7 +751,7 @@ it('defers a move’s Zoning Clearance fee to the next Business Permit renewal',
         ->postJson("/api/v1/applications/{$appId}/permits/ZONING/inspection", ['scheduled_at' => now()->toDateTimeString()])
         ->assertCreated()->json('data.id');
     test()->withHeaders(authAs('zoning@biztrack.local'))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     $fee = UnbilledPermitFee::where('application_id', $appId)
         ->where('permit_type_id', $zoningType->id)
@@ -1679,7 +1679,7 @@ it('supersedes the old Zoning Clearance when the move’s new one is issued', fu
         ->postJson("/api/v1/applications/{$appId}/permits/ZONING/inspection", ['scheduled_at' => now()->toDateTimeString()])
         ->assertCreated()->json('data.id');
     test()->withHeaders(authAs('zoning@biztrack.local'))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     $new = Permit::where('application_id', $appId)->where('permit_type_id', $zoningType->id)->sole();
     expect($new->status->value)->toBe('active')

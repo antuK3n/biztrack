@@ -123,7 +123,7 @@ it('notifies the applicant when the application is approved', function () use ($
             ])->assertCreated()->json('data.id');
 
         $this->withHeaders($officer)
-            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'findings' => 'clean'])
+            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'findings' => 'clean'] + oboNames($visitId))
             ->assertOk();
     }
 

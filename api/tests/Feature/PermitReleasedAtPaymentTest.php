@@ -227,7 +227,7 @@ function reapplyAndGrant(Application $app, string $permitCode): void
         ])->assertCreated()->json('data.id');
 
     test()->withHeaders(authAs($office))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))
         ->assertOk();
 }
 
@@ -616,7 +616,7 @@ it('does not let an office un-issue a permit it has already granted', function (
         ])->assertCreated()->json('data.id');
 
     test()->withHeaders(authAs('cenro@biztrack.local'))
-        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))
         ->assertOk();
 
     $row = $app->fresh()->permitTypes->firstWhere('code', 'CEC');
@@ -768,7 +768,7 @@ it('completes the filing by itself when the last clearance is issued, category o
             ->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", ['scheduled_at' => now()->toDateTimeString()])
             ->assertCreated()->json('data.id');
         test()->withHeaders(authAs($email))
-            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
     }
 
     $app = $app->fresh();
