@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { CalendarIcon, PlusIcon, UsersIcon, XIcon } from '../../components/icons'
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
@@ -56,6 +57,22 @@ function localToday(): string {
 
 type Proposal = { id: number; name: string; barangay_ids: number[]; barangays: string[] }[]
 
+type Leave = PoolInspector['leaves'][number]
+
+/** A decision that waits on a second, considered press. */
+type Pending =
+  | { kind: 'remove'; inspector: PoolInspector }
+  | { kind: 'deactivate'; inspector: PoolInspector }
+  | { kind: 'leave'; inspector: PoolInspector; leave: Leave }
+
+function leaveWords(l: Leave): string {
+  const days =
+    l.ends_on === l.starts_on
+      ? formatCalendarDate(l.starts_on)
+      : `${formatCalendarDate(l.starts_on)} – ${formatCalendarDate(l.ends_on)}`
+  return l.reason ? `${days} (${l.reason})` : days
+}
+
 export function InspectorsPage() {
   const { data, loading, error, reload, setData } = useAsync(() => inspectorsApi.list(), [])
   const [editing, setEditing] = useState<PoolInspector | 'new' | null>(null)
@@ -64,6 +81,9 @@ export function InspectorsPage() {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [fail, setFail] = useState<string | null>(null)
+  const [pending, setPending] = useState<Pending | null>(null)
+  const [pendingBusy, setPendingBusy] = useState(false)
+  const [pendingFail, setPendingFail] = useState<string | null>(null)
 
   const rows = data?.data ?? []
   const meta = data?.meta
@@ -71,20 +91,59 @@ export function InspectorsPage() {
   const active = rows.filter((r) => r.is_active)
   const uncovered = (meta?.barangays ?? []).filter((b) => !b.covered)
 
+  /**
+   * Fetch the pool again and draw it before going on. useAsync's reload()
+   * only asks for a fetch and returns at once, so awaiting it closed a dialog
+   * and said "is now inactive" over a card still showing Deactivate.
+   */
+  async function refresh() {
+    setData(await inspectorsApi.list())
+  }
+
   async function run(work: () => Promise<unknown>, done: string) {
     setBusy(true)
     setFail(null)
     try {
       await work()
-      // The note after the list has caught up, so it never says "recorded"
-      // over a card that has not drawn the leave yet.
-      await reload()
+      // The note after the list has caught up (refresh), so it never says
+      // "recorded" over a card that has not drawn the leave yet.
+      await refresh()
       setNote(done || null)
     } catch (err) {
       setFail(toApiError(err).message)
     } finally {
       setBusy(false)
     }
+  }
+
+  function ask(next: Pending) {
+    setPendingFail(null)
+    setPending(next)
+  }
+
+  /** Carry out the confirmed decision; a failure stays in its dialog. */
+  async function settle(work: () => Promise<unknown>, done: string) {
+    setPendingBusy(true)
+    setPendingFail(null)
+    try {
+      await work()
+      await refresh()
+      setPending(null)
+      setFail(null)
+      setNote(done)
+    } catch (err) {
+      setPendingFail(toApiError(err).message)
+    } finally {
+      setPendingBusy(false)
+    }
+  }
+
+  /** The barangays only this inspector covers among the active ones — left to nobody once they go. */
+  function onlyCoveredBy(i: PoolInspector): string[] {
+    const others = new Set(
+      rows.filter((r) => r.is_active && r.id !== i.id).flatMap((r) => r.barangays.map((b) => b.id)),
+    )
+    return i.barangays.filter((b) => !others.has(b.id)).map((b) => b.name)
   }
 
   return (
@@ -163,26 +222,14 @@ export function InspectorsPage() {
               canEdit={canEdit}
               onEdit={() => setEditing(i)}
               onLeave={() => setLeaveFor(i)}
-              onRemoveLeave={(leaveId) =>
-                run(async () => {
-                  const next = await inspectorsApi.removeLeave(i.id, leaveId)
-                  setData((d) => ({
-                    data: (d?.data ?? []).map((r) => (r.id === next.id ? next : r)),
-                    meta: d?.meta ?? meta!,
-                  }))
-                }, 'Leave removed.')
-              }
+              onRemoveLeave={(leave) => ask({ kind: 'leave', inspector: i, leave })}
               onToggleActive={() =>
-                run(
-                  () => inspectorsApi.update(i.id, { is_active: !i.is_active }),
-                  i.is_active ? `${i.name} is now inactive and will not be suggested.` : `${i.name} is active again.`,
-                )
+                i.is_active
+                  ? ask({ kind: 'deactivate', inspector: i })
+                  : // Bringing someone back costs nothing and is undone as easily: no dialog.
+                    run(() => inspectorsApi.update(i.id, { is_active: true }), `${i.name} is active again.`)
               }
-              onRemove={() => {
-                if (window.confirm(`Remove ${i.name} from the pool? Past visits keep the name.`)) {
-                  run(() => inspectorsApi.remove(i.id), `${i.name} removed from the pool.`)
-                }
-              }}
+              onRemove={() => ask({ kind: 'remove', inspector: i })}
             />
           ))}
         </ul>
@@ -195,7 +242,7 @@ export function InspectorsPage() {
           onClose={() => setEditing(null)}
           onSaved={async (saved, created) => {
             setEditing(null)
-            await reload()
+            await refresh()
             setNote(created ? `${saved.name} added to the pool.` : `${saved.name} updated.`)
           }}
         />
@@ -208,11 +255,40 @@ export function InspectorsPage() {
           onSaved={async () => {
             const who = leaveFor.name
             setLeaveFor(null)
-            await reload()
+            await refresh()
             setNote(`Leave recorded for ${who}.`)
           }}
         />
       )}
+
+      <PendingDialog
+        pending={pending}
+        busy={pendingBusy}
+        error={pendingFail}
+        lonely={pending ? onlyCoveredBy(pending.inspector) : []}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return
+          const i = pending.inspector
+          if (pending.kind === 'remove') {
+            settle(() => inspectorsApi.remove(i.id), `${i.name} removed from the pool.`)
+          } else if (pending.kind === 'deactivate') {
+            settle(
+              () => inspectorsApi.update(i.id, { is_active: false }),
+              `${i.name} is now inactive and will not be suggested.`,
+            )
+          } else {
+            const leave = pending.leave
+            settle(async () => {
+              const next = await inspectorsApi.removeLeave(i.id, leave.id)
+              setData((d) => ({
+                data: (d?.data ?? []).map((r) => (r.id === next.id ? next : r)),
+                meta: d?.meta ?? meta!,
+              }))
+            }, `Leave removed for ${i.name}.`)
+          }
+        }}
+      />
 
       <Modal
         open={proposal !== null}
@@ -261,6 +337,123 @@ export function InspectorsPage() {
   )
 }
 
+/** The words for each decision that waits on a confirmation: what it does, and what follows. */
+function PendingDialog({
+  pending,
+  busy,
+  error,
+  lonely,
+  onCancel,
+  onConfirm,
+}: {
+  pending: Pending | null
+  busy: boolean
+  error: string | null
+  lonely: string[]
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const i = pending?.inspector
+  const open = i ? i.open_visits_count : 0
+  const openLine =
+    open > 0 ? (
+      <li>
+        Their{' '}
+        <b className="font-semibold text-ink">
+          {open} open visit{open === 1 ? '' : 's'}
+        </b>{' '}
+        {open === 1 ? 'stays' : 'stay'} booked under their name. Reschedule {open === 1 ? 'it' : 'them'} to another
+        inspector if they will not go.
+      </li>
+    ) : null
+  const lonelyLine =
+    lonely.length > 0 ? (
+      <li>
+        Nobody else covers <b className="font-semibold text-ink">{lonely.join(', ')}</b>. Divide the barangays again or
+        give {lonely.length === 1 ? 'it' : 'them'} to another inspector.
+      </li>
+    ) : null
+
+  const list = (items: ReactNode) => <ul className="list-disc space-y-1.5 pl-4">{items}</ul>
+
+  if (pending?.kind === 'remove' && i) {
+    return (
+      <ConfirmDialog
+        open
+        tone="danger"
+        title={`Remove ${i.name}?`}
+        description="This takes them out of your office's pool for good."
+        confirmLabel="Remove inspector"
+        busy={busy}
+        error={error}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      >
+        {list(
+          <>
+            <li>They will no longer be suggested for any visit.</li>
+            {openLine}
+            {lonelyLine}
+            <li>Past visits keep their name, and the removal is recorded in the audit log.</li>
+          </>,
+        )}
+        {i.is_active && (
+          <p className="mt-3 rounded-lg bg-canvas px-3 py-2 text-ink-secondary">
+            Only away for a while? <b className="font-semibold text-ink">Add leave</b> or{' '}
+            <b className="font-semibold text-ink">Deactivate</b> instead. Both can be undone.
+          </p>
+        )}
+      </ConfirmDialog>
+    )
+  }
+
+  if (pending?.kind === 'deactivate' && i) {
+    return (
+      <ConfirmDialog
+        open
+        title={`Deactivate ${i.name}?`}
+        description="They stay on your list, and you can make them active again at any time."
+        confirmLabel="Deactivate"
+        busy={busy}
+        error={error}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      >
+        {list(
+          <>
+            <li>They will not be suggested for new visits while inactive.</li>
+            {openLine}
+            {lonelyLine}
+          </>,
+        )}
+      </ConfirmDialog>
+    )
+  }
+
+  if (pending?.kind === 'leave' && i) {
+    return (
+      <ConfirmDialog
+        open
+        title="Remove this leave?"
+        description={
+          <>
+            {i.name}, away {leaveWords(pending.leave)}.
+          </>
+        }
+        confirmLabel="Remove leave"
+        busy={busy}
+        error={error}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      >
+        <p>They will be suggested again for visits on those days. You can add the leave back at any time.</p>
+      </ConfirmDialog>
+    )
+  }
+
+  return null
+}
+
 function InspectorCard({
   inspector: i,
   canEdit,
@@ -274,7 +467,7 @@ function InspectorCard({
   canEdit: boolean
   onEdit: () => void
   onLeave: () => void
-  onRemoveLeave: (leaveId: number) => void
+  onRemoveLeave: (leave: Leave) => void
   onToggleActive: () => void
   onRemove: () => void
 }) {
@@ -335,7 +528,7 @@ function InspectorCard({
                   {canEdit && (
                     <button
                       type="button"
-                      onClick={() => onRemoveLeave(l.id)}
+                      onClick={() => onRemoveLeave(l)}
                       aria-label={`Remove this leave of ${i.name}`}
                       className="ml-0.5 hover:text-s-red"
                     >
