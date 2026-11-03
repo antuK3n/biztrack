@@ -48,6 +48,12 @@ function dayWords(days: number[]): string {
     .join(', ')
 }
 
+/** Today as YYYY-MM-DD in the browser's own day, not UTC's — at 7 AM in Manila UTC is still yesterday. */
+function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 type Proposal = { id: number; name: string; barangay_ids: number[]; barangays: string[] }[]
 
 export function InspectorsPage() {
@@ -70,8 +76,10 @@ export function InspectorsPage() {
     setFail(null)
     try {
       await work()
-      setNote(done)
+      // The note after the list has caught up, so it never says "recorded"
+      // over a card that has not drawn the leave yet.
       await reload()
+      setNote(done || null)
     } catch (err) {
       setFail(toApiError(err).message)
     } finally {
@@ -88,10 +96,8 @@ export function InspectorsPage() {
               <button
                 type="button"
                 onClick={() =>
-                  run(
-                    async () => setProposal(await inspectorsApi.suggestAreas()),
-                    'Here is a proposed division. Apply it, or close.',
-                  )
+                  // The proposal speaks for itself in its modal; no banner to leave behind.
+                  run(async () => setProposal(await inspectorsApi.suggestAreas()), '')
                 }
                 aria-disabled={busy || active.length === 0}
                 className="rounded-full border border-line bg-white px-4 py-1.5 text-sm font-semibold text-ink hover:border-royal hover:text-royal aria-disabled:opacity-50"
@@ -187,10 +193,10 @@ export function InspectorsPage() {
           inspector={editing === 'new' ? null : editing}
           barangays={meta.barangays}
           onClose={() => setEditing(null)}
-          onSaved={(saved, created) => {
+          onSaved={async (saved, created) => {
             setEditing(null)
+            await reload()
             setNote(created ? `${saved.name} added to the pool.` : `${saved.name} updated.`)
-            reload()
           }}
         />
       )}
@@ -199,10 +205,11 @@ export function InspectorsPage() {
         <LeaveDialog
           inspector={leaveFor}
           onClose={() => setLeaveFor(null)}
-          onSaved={() => {
+          onSaved={async () => {
+            const who = leaveFor.name
             setLeaveFor(null)
-            setNote(`Leave recorded for ${leaveFor.name}.`)
-            reload()
+            await reload()
+            setNote(`Leave recorded for ${who}.`)
           }}
         />
       )}
@@ -271,7 +278,7 @@ function InspectorCard({
   onToggleActive: () => void
   onRemove: () => void
 }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localToday()
   const leaves = i.leaves.filter((l) => l.ends_on >= today)
 
   return (
@@ -595,7 +602,7 @@ function LeaveDialog({
   onClose: () => void
   onSaved: () => void
 }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localToday()
   const [from, setFrom] = useState(today)
   const [to, setTo] = useState(today)
   const [reason, setReason] = useState('')

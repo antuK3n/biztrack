@@ -188,8 +188,10 @@ class InspectorController extends Controller
     {
         $department = $this->ownDepartment($request);
 
+        // `name` is required to add; an edit may send only what changed (a
+        // Deactivate sends `is_active` alone), so it is `sometimes` there.
         return $request->validate([
-            'name' => ['required', 'string', 'max:120'],
+            'name' => [$editing ? 'sometimes' : 'required', 'string', 'max:120'],
             'mobile_number' => ['nullable', 'string', 'max:20'],
             'is_active' => ['sometimes', 'boolean'],
             'works_days' => ['nullable', 'array'],
