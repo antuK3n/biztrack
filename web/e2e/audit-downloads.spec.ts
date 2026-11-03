@@ -14,7 +14,7 @@ import { sessionFor } from './helpers'
 
 test.use({ storageState: sessionFor('admin') })
 
-test('a file downloaded through the app is on Audit Logs as "Downloaded a file"', async ({ page }) => {
+test('a file downloaded through the app is on Audit Logs as "Downloaded a file", under a "Downloaded file" column', async ({ page }) => {
   await page.goto('/admin/import')
   const served = page.waitForResponse(
     (res) => res.url().includes('/api/v1/admin/legacy-imports/template') && res.ok(),
@@ -37,8 +37,20 @@ test('a file downloaded through the app is on Audit Logs as "Downloaded a file"'
   await row.getByRole('button', { name: 'Details for Downloaded a file' }).click()
   await expect(page.getByText('biztrack-legacy-import-template.csv')).toBeVisible()
 
+  // The fourth column is headed for what it holds under this filter. Matched
+  // on the header's text, which CSS uppercases for display; the cells keep
+  // reading as before ("PaymentProof #3", "Permit #198").
+  const targetHeader = page.getByRole('columnheader').nth(3)
+  await expect(targetHeader).toHaveText('Downloaded file')
+
   await page.screenshot({
     path: `${process.env.E2E_SCREENSHOT_DIR ?? '/tmp'}/dl-audit.png`,
     fullPage: true,
   })
+
+  // Every other filter mixes subjects, so the header goes back to "Target".
+  const all = page.getByRole('button', { name: 'All actions', exact: true })
+  await all.click()
+  await expect(all).toHaveAttribute('aria-pressed', 'true')
+  await expect(targetHeader).toHaveText('Target')
 })

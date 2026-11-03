@@ -358,7 +358,14 @@ export function AuditLogsPage() {
                   <th className="px-5 py-3">When</th>
                   <th className="px-5 py-3">Action</th>
                   <th className="px-5 py-3">User</th>
-                  <th className="px-5 py-3">Target</th>
+                  {/*
+                    Under the downloads filter this column holds the record each
+                    file was served from (PaymentProof #3, Permit #198), so it is
+                    headed for that. The cells are the same under every filter;
+                    only the heading changes, and every other filter keeps
+                    "Target".
+                  */}
+                  <th className="px-5 py-3">{scope === 'downloads' ? 'Downloaded file' : 'Target'}</th>
                   <th className="px-5 py-3 text-right">Changes</th>
                 </tr>
               </thead>
