@@ -11,6 +11,7 @@ use App\Models\Application;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\PermitType;
+use App\Models\User;
 use App\Services\FeeCalculator;
 use App\Services\KwikPay\KwikPayGateway;
 use App\Services\PaymentGateway;
@@ -362,6 +363,16 @@ class PaymentController extends Controller
      * BPLO's assignment on this filing may — see `authorizeCaseHolder`. Every
      * use is audited with the officer, the time, the filing and the OR.
      *
+     * ── Not before the owner's receipt ──────────────────────────────────────
+     *
+     * Ken, 3 November 2026: Mark as paid needs the owner's receipt first, on
+     * screen and here. A filing with no pending proof — none sent, or only a
+     * superseded or rejected one — is refused with "The owner has not sent
+     * their receipt yet." The officer either marks it paid against the
+     * receipt or rejects the receipt (PaymentProofController::reject), and
+     * the owner sends another. Asked after the bill's own refusals, so a
+     * filing with nothing to pay still says that.
+     *
      * The guards are `FilingMover::pay()`'s — the Debug page's own simulated
      * "pay the bill" step, which already has to answer the same two questions
      * (is this filing billable, is anything actually owed) with the same
@@ -372,7 +383,7 @@ class PaymentController extends Controller
     public function counterPayment(Request $request, Application $application): JsonResponse
     {
         // Asked before the lock too, so nobody who may not mark it paid waits on the bill's lock.
-        $this->authorizeCaseHolder($request, $application);
+        self::authorizeCaseHolder($request->user(), $application);
 
         return $this->onePaymentAtATime($application, fn (Application $fresh) => $this->counterPaymentNow($request, $fresh));
     }
@@ -380,7 +391,7 @@ class PaymentController extends Controller
     /** `counterPayment()`, once it holds the bill's lock. */
     private function counterPaymentNow(Request $request, Application $application): JsonResponse
     {
-        $this->authorizeCaseHolder($request, $application);
+        self::authorizeCaseHolder($request->user(), $application);
 
         /*
          * Not for a business the super admin has suspended or blacklisted:
@@ -441,6 +452,11 @@ class PaymentController extends Controller
             ]);
         }
 
+        // The owner's receipt first (Ken, 3 November 2026); see the note above.
+        if (PaymentProof::pendingFor($application) === null) {
+            throw self::noReceiptYet();
+        }
+
         /*
          * An online KwikPay payment still waiting on this filing is set aside
          * — never refused, and never asked about first.
@@ -491,13 +507,22 @@ class PaymentController extends Controller
              */
             $owners = PaymentProof::pendingFor($application);
 
+            /*
+             * Asked again inside the transaction: rejected between the check
+             * above and here, there is no receipt to mark it paid against, and
+             * nothing is recorded.
+             */
+            if ($owners === null) {
+                throw self::noReceiptYet();
+            }
+
             $payment = $this->gateway->charge($fee, PaymentMethod::Counter, $balanceDue, [
                 'or_number' => trim((string) $data['or_number']),
                 'or_date' => $data['or_date'],
                 'recorded_by_user_id' => $officer->id,
             ]);
 
-            $owners?->update(['payment_id' => $payment->id]);
+            $owners->update(['payment_id' => $payment->id]);
 
             $officers = $stored === null ? null : PaymentProof::create([
                 'application_id' => $application->id,
@@ -521,7 +546,7 @@ class PaymentController extends Controller
                 'tracking_id' => $application->tracking_id,
                 'or_number' => $payment->or_number,
                 'or_date' => $payment->or_date->toDateString(),
-                'proof_ids' => array_values(array_filter([$owners?->id, $officers?->id])),
+                'proof_ids' => array_values(array_filter([$owners->id, $officers?->id])),
             ]);
 
             return $payment;
@@ -779,6 +804,14 @@ class PaymentController extends Controller
         );
     }
 
+    /** Mark as paid's refusal when no receipt is waiting (Ken, 3 November 2026). */
+    private static function noReceiptYet(): ValidationException
+    {
+        return ValidationException::withMessages([
+            'proof' => ['The owner has not sent their receipt yet.'],
+        ]);
+    }
+
     /**
      * The BPLO officer holding this filing, and nobody else (thesis panel,
      * matrix item 1: "Restricted 'Mark as paid' to the staff member assigned
@@ -795,11 +828,15 @@ class PaymentController extends Controller
      * clearance offices and the owner hold no BPLO assignment and get the same
      * one sentence; the route is outside the review group so the super admin
      * hears it too rather than a bare "no permission".
+     *
+     * Public and static since BPLO can reject the owner's receipt (Ken, 3
+     * November 2026): the same officer judges the receipt as marks the bill
+     * paid, so PaymentProofController::reject asks this same question and
+     * refuses with this same sentence.
      */
-    private function authorizeCaseHolder(Request $request, Application $application): void
+    public static function authorizeCaseHolder(User $user, Application $application): void
     {
-        $user = $request->user();
-        $bplo = $this->workflow->bploDepartmentId();
+        $bplo = app(WorkflowService::class)->bploDepartmentId();
 
         abort_unless(
             $bplo !== null

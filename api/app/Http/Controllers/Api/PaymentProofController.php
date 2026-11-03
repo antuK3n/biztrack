@@ -40,6 +40,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * `application.view_any_office` — BPLO, who marks the bill paid, and the super
  * admin, who audits. No clearance office: a receipt is BPLO's business, and
  * the Tax Order of Payment it settles was never theirs.
+ *
+ * BPLO judges it (Ken, 3 November 2026). Mark as paid needs a pending proof,
+ * and the officer holding the filing may instead reject it with a reason
+ * (`reject`). The owner is told in the bell and by e-mail, reads the reason
+ * on the Pay page (`latest`), and sends a new one, which tells BPLO again.
  */
 class PaymentProofController extends Controller
 {
@@ -150,6 +155,83 @@ class PaymentProofController extends Controller
         $proof = PaymentProof::pendingFor($application);
 
         return response()->json(['data' => $proof ? new PaymentProofResource($proof) : null]);
+    }
+
+    /**
+     * The owner's newest proof on this bill, waiting or rejected, or
+     * `data: null` (PaymentProof::latestFor).
+     *
+     * A second read beside `pending()` rather than a change to it: Mark as
+     * paid and Reject receipt must only ever be shown the proof that is
+     * waiting, while the owner's Pay page needs the rejected one too, with
+     * its reason, so it can say why and ask for another. Same readers.
+     */
+    public function latest(Request $request, Application $application): JsonResponse
+    {
+        abort_unless(self::mayRead($request->user(), $application), 403, 'You may not access this application.');
+
+        $proof = PaymentProof::latestFor($application);
+
+        return response()->json(['data' => $proof ? new PaymentProofResource($proof) : null]);
+    }
+
+    /**
+     * BPLO rejects the owner's receipt, with a reason (Ken, 3 November 2026).
+     *
+     * Who: the BPLO officer holding the filing, the same person and the same
+     * refusal as Mark as paid (PaymentController::authorizeCaseHolder). The
+     * super admin, a colleague at BPLO, a clearance office and the owner are
+     * all refused with that one sentence.
+     *
+     * What: only the proof that is waiting. One already superseded, rejected
+     * or linked to a payment is refused, so a dialog left open while the owner
+     * sent a newer receipt cannot reject the newer one by mistake.
+     *
+     * The row and its file are kept (PaymentProof), audited, and the owner is
+     * told — in the bell and by e-mail, once this commits.
+     */
+    public function reject(Request $request, PaymentProof $paymentProof): JsonResponse
+    {
+        $application = $paymentProof->application;
+        abort_if($application === null, 404, 'Application not found.');
+
+        PaymentController::authorizeCaseHolder($request->user(), $application);
+
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ], [
+            'reason.required' => 'Enter a reason.',
+        ]);
+        $reason = trim($data['reason']);
+
+        $proof = DB::transaction(function () use ($request, $application, $paymentProof, $reason) {
+            if (PaymentProof::pendingFor($application)?->id !== $paymentProof->id) {
+                throw ValidationException::withMessages([
+                    'proof' => ['This receipt is no longer waiting for BPLO.'],
+                ]);
+            }
+
+            $paymentProof->update([
+                'rejected_at' => now(),
+                'rejected_by_user_id' => $request->user()->id,
+                'rejection_reason' => $reason,
+            ]);
+
+            // Who and when are the row's own; which filing, which receipt, and why.
+            Audit::log('payment_proof.rejected', $paymentProof, [
+                'application_id' => $application->id,
+                'tracking_id' => $application->tracking_id,
+                'or_number' => $paymentProof->or_number,
+                'reason' => $reason,
+            ]);
+
+            // Written once this commits, and never able to undo or 500 the rejection.
+            $this->workflow->tellOwnerOfRejectedProof($application, $reason);
+
+            return $paymentProof;
+        });
+
+        return response()->json(['data' => new PaymentProofResource($proof->fresh())]);
     }
 
     /** The photo of the receipt, to the same readers as `pending()`. */

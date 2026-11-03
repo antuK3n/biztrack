@@ -507,3 +507,71 @@ it('tells the Pending Payment tab who holds each filing at BPLO, and only BPLO a
         ->firstWhere('id', $filing->id);
     expect($row)->not->toHaveKey('bplo_assignment');
 });
+
+/*
+ * ── Not before the owner's receipt (Ken, 3 November 2026) ───────────────────
+ *
+ * Mark as paid needs a pending proof: none sent, one replaced, or one BPLO
+ * rejected is no receipt to mark the bill paid against. One sentence, on its
+ * own key, and nothing recorded.
+ */
+
+const OTC_NO_RECEIPT = 'The owner has not sent their receipt yet.';
+
+/** Mark as paid as the holder, refused for want of a receipt, with nothing recorded. */
+function counterRefusedForWantOfReceipt(Application $filing): void
+{
+    authAs('bplo@biztrack.local');
+    test()->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr())
+        ->assertStatus(422)
+        ->assertJsonPath('errors.proof.0', OTC_NO_RECEIPT)
+        ->assertJsonMissingPath('errors.or_number');
+
+    expect(Payment::where('application_id', $filing->id)->count())->toBe(0)
+        ->and($filing->fresh()->status)->toBe(ApplicationStatus::PendingPayment)
+        ->and(AuditLog::where('action', 'payment.completed')->where('changes->application_id', $filing->id)->exists())->toBeFalse();
+}
+
+it('refuses Mark as paid when the owner has sent no receipt', function () {
+    $filing = filingAwaitingCounterPayment(receipt: false);
+
+    counterRefusedForWantOfReceipt($filing);
+});
+
+it('refuses Mark as paid when the only receipt was replaced', function () {
+    $filing = filingAwaitingCounterPayment(receipt: false);
+    $id = counterOwnerSendsReceipt($filing);
+    PaymentProof::findOrFail($id)->update(['superseded_at' => now()]);
+
+    counterRefusedForWantOfReceipt($filing);
+});
+
+it('refuses Mark as paid when the only receipt was rejected', function () {
+    $filing = filingAwaitingCounterPayment(receipt: false);
+    $id = counterOwnerSendsReceipt($filing);
+
+    authAs('bplo@biztrack.local');
+    test()->postJson("/api/v1/payment-proofs/{$id}/reject", ['reason' => 'The OR number is not on the receipt.'])->assertOk();
+
+    counterRefusedForWantOfReceipt($filing);
+});
+
+it('still says a filing BPLO has not approved has nothing to pay, before asking for the receipt', function () {
+    $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
+    $owner = authAs('owner@biztrack.local');
+    $draft = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $business->id,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
+    ])->assertCreated()->json('data');
+    attachRequiredDocuments($draft['id']);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$draft['id']}/submit")->assertOk();
+
+    authAs('bplo@biztrack.local');
+    test()->postJson('/api/v1/assignments/'.counterBploAssignment(Application::findOrFail($draft['id']))->id.'/claim')->assertOk();
+    test()->postJson("/api/v1/applications/{$draft['id']}/counter-payment", counterOr())
+        ->assertStatus(422)
+        ->assertJsonMissingPath('errors.proof')
+        ->assertJsonPath('errors.status.0', 'BPLO has not approved this application yet, so there is nothing to pay.');
+});

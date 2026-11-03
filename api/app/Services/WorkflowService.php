@@ -6719,6 +6719,31 @@ class WorkflowService
     }
 
     /**
+     * Tell the owner BPLO did not accept their counter receipt, and why.
+     *
+     * Ken, 3 November 2026: "Receipt not accepted", in the bell and by e-mail,
+     * the way every owner notice goes out (NotificationService::push mails a
+     * business owner's copy). Called inside the transaction that records the
+     * rejection (PaymentProofController::reject), and written once it commits,
+     * inside a try — the reason `tellOffice` gives: a rolled-back rejection
+     * tells nobody, and a notice that fails must not answer 500 over a
+     * rejection that is already recorded.
+     */
+    public function tellOwnerOfRejectedProof(Application $app, string $reason): void
+    {
+        DB::afterCommit(function () use ($app, $reason) {
+            try {
+                $this->notify->paymentProofRejected($app, $reason);
+            } catch (Throwable $e) {
+                Log::warning('The owner was not told their receipt was rejected', [
+                    'application_id' => $app->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
+    }
+
+    /**
      * Hand a notice about this filing to the office, once the change commits.
      *
      * ── Who hears it ────────────────────────────────────────────────────────

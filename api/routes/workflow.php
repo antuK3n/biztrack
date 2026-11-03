@@ -327,7 +327,16 @@ Route::middleware(['auth:sanctum', 'unrestricted'])->group(function () {
      * PaymentProofController::mayRead is the gate.
      */
     Route::get('applications/{application}/payment-proof', [PaymentProofController::class, 'pending']);
+    // The owner's newest proof, waiting or rejected with its reason, for the Pay page.
+    Route::get('applications/{application}/payment-proof/latest', [PaymentProofController::class, 'latest']);
     Route::get('payment-proofs/{paymentProof}/file', [PaymentProofController::class, 'file']);
+    /*
+     * BPLO rejects the owner's receipt, with a reason (Ken, 3 November 2026).
+     * Outside every permission group for the reason Mark as paid is: only the
+     * officer holding the filing may, and everyone else — the super admin
+     * included — hears that one sentence (PaymentController::authorizeCaseHolder).
+     */
+    Route::post('payment-proofs/{paymentProof}/reject', [PaymentProofController::class, 'reject']);
     /*
      * OR Records (thesis panel, matrix item 5): every payment carrying an
      * Official Receipt, searchable. BPLO and the super admin — the two

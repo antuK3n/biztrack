@@ -700,6 +700,37 @@ class NotificationService
         );
     }
 
+    /**
+     * BPLO did not accept the owner's counter receipt (Ken, 3 November 2026).
+     *
+     * Who and when is `WorkflowService::tellOwnerOfRejectedProof`; this is
+     * the notice the owner reads, in Ken's words — the title as given, and the
+     * body built the way BPLO's "Proof of payment received" is, with the
+     * officer's reason where that one says what happened. The owner's, so
+     * push() mails it too; no text, which is for the key moments only (see
+     * the note above fanOut).
+     *
+     * The link is the filing's Pay page, where the reason is shown again and
+     * the owner sends a new receipt — the address `feeAdjusted` uses.
+     */
+    public function paymentProofRejected(Application $app, string $reason): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $app->applicant,
+            'payment',
+            'Receipt not accepted',
+            "{$app->tracking_id} · {$business}: {$reason}",
+            "/applications/{$app->id}/pay",
+            $app,
+        );
+    }
+
     public function requestClosed(OfficerRequest $request, User $recipient): void
     {
         $app = $request->application;

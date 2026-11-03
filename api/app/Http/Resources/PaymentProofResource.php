@@ -24,6 +24,12 @@ class PaymentProofResource extends JsonResource
             'has_photo' => $this->resource->hasPhoto(),
             'photo_name' => $this->original_filename,
             'submitted_at' => optional($this->submitted_at)->toISOString(),
+            /*
+             * BPLO's refusal and why (Ken, 3 November 2026). The owner's Pay
+             * page prints the reason; who refused it stays in the audit trail.
+             */
+            'rejected_at' => optional($this->rejected_at)->toISOString(),
+            'rejection_reason' => $this->rejection_reason,
             'submitted_by' => $this->whenLoaded('submittedBy', fn () => $this->submittedBy ? [
                 'id' => $this->submittedBy->id,
                 'name' => $this->submittedBy->name,

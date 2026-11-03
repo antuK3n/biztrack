@@ -66,6 +66,19 @@ class ApplicationListResource extends JsonResource
                 ? new AssignmentResource($this->bploAssignment)
                 : null),
             /*
+             * The owner's counter receipt waiting on BPLO, or null (Ken, 3
+             * November 2026): the Pending Payment card reads "Receipt sent: OR
+             * …" or "Waiting for the owner's receipt.", and offers Mark as paid
+             * only once one is in. The OR alone — the card names it — and the
+             * id, which Reject receipt addresses. Set by
+             * ApplicationController::index for BPLO and the super admin only;
+             * absent for everyone else, like `bplo_assignment`.
+             */
+            'pending_proof' => $this->whenLoaded('pendingProof', fn () => [
+                'id' => $this->resource->getRelation('pendingProof')->id,
+                'or_number' => $this->resource->getRelation('pendingProof')->or_number,
+            ]),
+            /*
              * Each permit with its OWN status, not just its name.
              *
              * This sent `{ code, name }` and the tracking screen inferred the
