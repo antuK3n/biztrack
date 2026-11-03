@@ -70,6 +70,14 @@ final class Playbook
         'ZONING' => 'Engr. Lorna Bautista',
     ];
 
+    /**
+     * Where the generators' Official Receipt numbers start (nextOrNumber).
+     * biztrack:backfill-counter-ors puts the receipts of the counter payments
+     * made before the OR was asked for BELOW this, so the ones recorded from
+     * here on read as later in the booklet.
+     */
+    public const FIRST_OR_NUMBER = 4_200_001;
+
     private CarbonImmutable $start;
 
     private ?User $owner = null;
@@ -672,7 +680,7 @@ final class Playbook
      */
     public static function nextOrNumber(): string
     {
-        $n = 4_200_001 + Payment::whereNotNull('or_number')->count();
+        $n = self::FIRST_OR_NUMBER + Payment::whereNotNull('or_number')->count();
         while (Payment::withOrNumber((string) $n)->exists()) {
             $n++;
         }
