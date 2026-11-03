@@ -16,6 +16,7 @@ use App\Models\UnbilledPermitFee;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\BusinessDate;
+use App\Support\CertificateSignatories;
 use App\Support\OccupancyChecklist;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
@@ -973,13 +974,15 @@ class PermitController extends Controller
         $block = PermitFace::signatureBlock($face);
         $taken = array_map('strtolower', array_column($block, 'role'));
 
-        $office = $permit->permitType?->department?->signatories
-            ?->where('is_active', true)
-            ->sortBy([['sort_order', 'asc'], ['role', 'asc']])
-            ->map(fn ($s) => ['role' => $s->role, 'name' => $s->name])
-            ->reject(fn (array $s) => in_array(strtolower($s['role']), $taken, true))
-            ->values()
-            ->all() ?? [];
+        /*
+         * The office's names as frozen on THIS permit at issue, else live for
+         * a permit issued before freezing existed [client, 3 November 2026:
+         * an office's edit reaches only permits issued after it].
+         */
+        $office = array_values(array_filter(
+            CertificateSignatories::rowsFor($permit),
+            fn (array $s) => ! in_array(strtolower($s['role']), $taken, true),
+        ));
 
         $signatories = [...$block, ...$office];
 
@@ -1095,9 +1098,17 @@ class PermitController extends Controller
              * writes the name there). An office row naming an inspector is
              * the fallback for a permit issued without a visit on record.
              */
+            /*
+             * And "Approved" is WHO APPROVED: the officer who passed the visit
+             * and so issued this permit (`issued_by_user_id`), not a name the
+             * office configures [client, 3 November 2026: "matic kung sino nag
+             * approve sa inspection at nag approve ng permit"]. An office row
+             * naming the City Health Officer is the fallback for a permit with
+             * no issuing officer on record.
+             */
             $signatories = [
                 ['role' => 'Sanitary Inspector', 'name' => $this->inspectorWhoPassed($permit) ?? $named('inspector'), 'action' => 'Recommending Approval'],
-                ['role' => 'City Health Officer', 'name' => $named('health officer'), 'action' => 'Approved'],
+                ['role' => 'City Health Officer', 'name' => ($permit->issuedBy?->fullName() ?: null) ?? $named('health officer'), 'action' => 'Approved'],
             ];
         }
 

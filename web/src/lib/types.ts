@@ -3177,6 +3177,14 @@ export interface OwnerHistoryEntry {
   by: string | null
 }
 
+/** The names an office prints on its certificate (`GET/PUT /certificate-signatories`). */
+export interface CertificateSignatories {
+  office: { id: number; code: string; name: string }
+  certificate: string | null
+  rows: { role: string; name: string | null }[]
+  changed?: number
+}
+
 /**
  * One row of the Business Owners list (`GET /owner-profiles`). Scoped to the
  * reader: an office sees only the owners, and the businesses, on its caseload.
