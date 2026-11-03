@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { XIcon } from '../icons'
 
 interface ModalProps {
@@ -24,6 +24,12 @@ interface ModalProps {
    * the search box moves under the reader's hand.
    */
   fixedHeight?: boolean
+  /**
+   * What takes the focus when the modal opens; the panel itself if unset. A
+   * confirmation of something that cannot be undone hands it the Cancel
+   * button, so an Enter pressed out of habit backs away instead of deleting.
+   */
+  initialFocus?: RefObject<HTMLElement | null>
 }
 
 const SIZES = { md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' } as const
@@ -38,6 +44,7 @@ export function Modal({
   size = 'md',
   flush = false,
   fixedHeight = false,
+  initialFocus,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -49,12 +56,12 @@ export function Modal({
     document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    panelRef.current?.focus()
+    ;(initialFocus?.current ?? panelRef.current)?.focus()
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [open, onClose])
+  }, [open, onClose, initialFocus])
 
   if (!open) return null
 
