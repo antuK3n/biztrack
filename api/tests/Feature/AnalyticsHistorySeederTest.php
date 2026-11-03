@@ -1,10 +1,13 @@
 <?php
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Business;
 use App\Models\Department;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Support\Spc;
 use Database\Seeders\AnalyticsHistorySeeder;
 use Illuminate\Support\Carbon;
@@ -186,6 +189,7 @@ it('writes timestamps that agree with each other', function () {
 
     expect($applications)->not->toBeEmpty();
 
+    $gathering = 0;
     foreach ($applications as $app) {
         // Filed after the business was registered, never before it existed.
         expect($app->submitted_at)->not->toBeNull();
@@ -197,11 +201,60 @@ it('writes timestamps that agree with each other', function () {
             expect($app->decided_at->greaterThanOrEqualTo($app->submitted_at))->toBeTrue();
         }
 
-        // A decided application has a terminal transition in its history, and
-        // an undecided one does not — the two are never out of step.
-        $terminal = $app->statusHistory()->whereIn('to_status', ['approved', 'rejected'])->exists();
-        expect($terminal)->toBe($app->decided_at !== null);
+        /*
+         * ── The history, the status and `decided_at` are never out of step ──
+         *
+         * This asserted that a filing has an approved or rejected step in its
+         * history exactly when `decided_at` is set. That stopped being the
+         * rule on 4 October 2026, when Awaiting Other Permits was retired
+         * (3b4a3e65): a paid filing reaches Approved at payment, and
+         * `decided_at` stays null until its last other permit is granted.
+         * Every seeded filing caught between the two failed the old
+         * assertion on data the product writes on purpose. See
+         * `Application::isDecided()`.
+         *
+         * What holds now, for a status that means two things:
+         *
+         *   - the history ends on the status the filing holds;
+         *   - `decided_at` set means decided: a terminal step is in the
+         *     history and `isDecided()` agrees. A rejection is always
+         *     decided, as it was before;
+         *   - a terminal step with no `decided_at` is an Approved filing
+         *     still gathering, and on an Approved filing `decided_at` is null
+         *     exactly when one of its other permits is not granted yet.
+         *     `refreshReadiness()` closes it the moment the last one is.
+         *
+         * The count below is so the last rule is never checked against a
+         * history with no gathering filing in it, where it would pass on
+         * nothing.
+         */
+        $steps = $app->statusHistory()->orderBy('id')->pluck('to_status');
+        $terminal = $steps->intersect(['approved', 'rejected'])->isNotEmpty();
+
+        expect($steps->last())->toBe($app->status->value);
+
+        if ($app->decided_at !== null) {
+            expect($terminal)->toBeTrue();
+            expect($app->isDecided())->toBeTrue();
+        }
+
+        if ($app->status === ApplicationStatus::Rejected) {
+            expect($app->decided_at)->not->toBeNull();
+        }
+
+        if ($terminal && $app->decided_at === null) {
+            expect($app->status)->toBe(ApplicationStatus::Approved);
+        }
+
+        if ($app->status === ApplicationStatus::Approved) {
+            $notGranted = $app->permitTypes
+                ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
+                ->reject(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Approved);
+            expect($notGranted->isNotEmpty())->toBe($app->decided_at === null);
+            $gathering += (int) ($app->decided_at === null);
+        }
     }
+    expect($gathering)->toBeGreaterThan(0);
 
     foreach (ApplicationAssignment::whereIn('application_id', $applications->pluck('id'))->get() as $assignment) {
         expect($assignment->assigned_at)->not->toBeNull();
