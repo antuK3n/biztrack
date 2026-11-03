@@ -84,6 +84,8 @@ it('builds one owner per scenario, each in the state the scenario names', functi
         ->and($counter->recorded_by_user_id)->toBe($reviewing->bploAssignment->officer_user_id)
         ->and($counter->or_number)->toMatch('/^\d{7}$/')
         ->and($counter->or_date->toDateString())->toBe($counter->paid_at->toDateString())
+        // Against the owner's receipt, sent first with the same OR (Ken, 3 November 2026).
+        ->and($counter->proofs()->where('submitted_by_user_id', $reviewing->applicant_user_id)->value('or_number'))->toBe($counter->or_number)
         ->and(collect($rows)->contains(ClearanceStatus::ForInspection))->toBeTrue()
         ->and($reviewing->inspections()->where('status', 'scheduled')->count())->toBe(1);
 

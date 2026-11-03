@@ -34,7 +34,11 @@ use Laravel\Sanctum\Sanctum;
  *  - the officer enters the OR number and the date paid, both required, and
  *    may attach a photo of the receipt;
  *  - the payment records them and who recorded it, links the owner's pending
- *    proof, and is audited with the officer, the filing and the OR.
+ *    proof, and is audited with the officer, the filing and the OR;
+ *  - since 3 November 2026 (Ken) it needs that proof: a filing whose owner has
+ *    sent no receipt, or only one that was replaced or rejected, is refused.
+ *    So the filings below come with the owner's receipt already sent, unless
+ *    a test says otherwise.
  *
  * What did not change: the amount is the balance due, and every payment runs
  * through `WorkflowService::onPaymentCompleted`, the same as the owner's own
@@ -47,8 +51,12 @@ beforeEach(function () {
     Storage::fake('local');
 });
 
-/** A filing sitting on the bill, exactly as BPLO's approval leaves it. */
-function filingAwaitingCounterPayment(bool $taken = true): Application
+/**
+ * A filing sitting on the bill, exactly as BPLO's approval leaves it — and,
+ * unless `$receipt` is false, with the owner's receipt sent from the Pay page
+ * (the OR `counterOr()` types), which Mark as paid now waits for.
+ */
+function filingAwaitingCounterPayment(bool $taken = true, bool $receipt = true): Application
 {
     $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
     $businessPermit = PermitType::where('code', 'BUSINESS')->firstOrFail();
@@ -79,7 +87,23 @@ function filingAwaitingCounterPayment(bool $taken = true): Application
         test()->postJson('/api/v1/assignments/'.counterBploAssignment($filing)->id.'/claim')->assertOk();
     }
 
+    if ($receipt) {
+        counterOwnerSendsReceipt($filing);
+    }
+
     return $filing->fresh();
+}
+
+/** The owner sends their receipt from the Pay page; answers the proof's id. */
+function counterOwnerSendsReceipt(Application $filing, array $fields = []): int
+{
+    authAs('owner@biztrack.local');
+
+    return test()->post(
+        "/api/v1/applications/{$filing->id}/payment-proofs",
+        $fields ?: ['or_number' => '4200123', 'or_date' => now()->toDateString()],
+        ['Accept' => 'application/json'],
+    )->assertCreated()->json('data.id');
 }
 
 function counterBploAssignment(Application $filing): ApplicationAssignment
@@ -163,6 +187,7 @@ it('lets the BPLO officer holding the filing mark it paid at the counter, same a
 
 it('records the OR number, the date paid and the officer on the payment', function () {
     $filing = filingAwaitingCounterPayment();
+    $receipt = PaymentProof::pendingFor($filing)->id;
     $bploId = User::where('email', 'bplo@biztrack.local')->value('id');
     $paidOn = now()->subDays(2)->toDateString();
 
@@ -188,7 +213,8 @@ it('records the OR number, the date paid and the officer on the payment', functi
         ->and($audit->changes['tracking_id'])->toBe($filing->tracking_id)
         ->and($audit->changes['or_number'])->toBe('7012345')
         ->and($audit->changes['or_date'])->toBe($paidOn)
-        ->and($audit->changes['proof_ids'])->toBe([]);
+        // The owner's receipt it was marked paid against; Mark as paid needs one.
+        ->and($audit->changes['proof_ids'])->toBe([$receipt]);
 });
 
 it('requires the OR number and the date paid, and refuses a date in the future', function () {
@@ -209,13 +235,12 @@ it('requires the OR number and the date paid, and refuses a date in the future',
 });
 
 it('links the owner’s pending proof and the officer’s own photo to the payment', function () {
-    $filing = filingAwaitingCounterPayment();
+    $filing = filingAwaitingCounterPayment(receipt: false);
 
-    authAs('owner@biztrack.local');
-    $owners = test()->post("/api/v1/applications/{$filing->id}/payment-proofs", [
+    $owners = counterOwnerSendsReceipt($filing, [
         'or_number' => '7012346',
         'or_date' => now()->subDay()->toDateString(),
-    ], ['Accept' => 'application/json'])->assertCreated()->json('data.id');
+    ]);
 
     authAs('bplo@biztrack.local');
     test()->post("/api/v1/applications/{$filing->id}/counter-payment", counterOr([
@@ -241,7 +266,7 @@ it('links the owner’s pending proof and the officer’s own photo to the payme
 });
 
 it('refuses an OR number already recorded on another payment, whatever its case or spaces', function () {
-    $filing = filingAwaitingCounterPayment();
+    $filing = filingAwaitingCounterPayment(receipt: false);
 
     // Another filing's payment already carries this OR.
     Payment::where('application_id', '!=', $filing->id)->firstOrFail()
@@ -286,6 +311,8 @@ it('refuses another BPLO officer — the filing is with a colleague', function (
 it('refuses a filing nobody at BPLO has taken yet — it is taken first', function () {
     $filing = filingAwaitingCounterPayment(taken: false);
     expect(counterBploAssignment($filing)->officer_user_id)->toBeNull();
+    // The receipt is in, so what refuses it below is the holder rule alone.
+    expect(PaymentProof::pendingFor($filing))->not->toBeNull();
 
     authAs('bplo@biztrack.local');
     test()->postJson("/api/v1/applications/{$filing->id}/counter-payment", counterOr())

@@ -67,11 +67,13 @@ function opbFiling(): Application
 }
 
 /**
- * The demo BPLO officer takes the filing and marks it paid with its OR.
+ * The demo BPLO officer takes the filing, and the owner sends the receipt.
  *
  * Since the thesis panel's revisions Mark as paid is the case holder's alone
  * and asks for the OR number and the date paid, so the counter tests below
- * take the filing first and send both.
+ * take the filing first and send both. Since 3 November 2026 (Ken) it also
+ * waits for the owner's receipt, so the owner sends it from the Pay page
+ * first — before either press, so neither is refused for want of one.
  */
 function opbTakeAsBplo(Application $app): void
 {
@@ -82,6 +84,9 @@ function opbTakeAsBplo(Application $app): void
         'officer_user_id' => User::where('email', 'bplo@biztrack.local')->value('id'),
         'assigned_at' => now(),
     ])->save();
+
+    authAs('owner@biztrack.local');
+    test()->postJson("/api/v1/applications/{$app->id}/payment-proofs", OPB_OR)->assertCreated();
 }
 
 const OPB_OR = ['or_number' => '4200999', 'or_date' => '2026-10-01'];

@@ -99,7 +99,8 @@ it('builds the nine businesses, each in the state the spec names', function () {
     /*
      * Every counter payment was marked by the officer holding the filing at
      * BPLO, with an OR of seven digits, its own, dated the day of the step
-     * (thesis panel revisions: holder only, OR required).
+     * (thesis panel revisions: holder only, OR required), against the owner's
+     * receipt carrying the same OR (Ken, 3 November 2026: receipt first).
      */
     $counter = Payment::where('method', 'counter')
         ->whereIn('application_id', Application::whereIn('business_id', Business::where('owner_user_id', $owner->id)->pluck('id'))->pluck('id'))
@@ -109,7 +110,8 @@ it('builds the nine businesses, each in the state the spec names', function () {
         ->and($counter->pluck('or_number')->unique()->count())->toBe($counter->count());
     foreach ($counter as $payment) {
         expect($payment->recorded_by_user_id)->toBe($payment->application->bploAssignment->officer_user_id)
-            ->and($payment->or_date->toDateString())->toBe($payment->paid_at->toDateString());
+            ->and($payment->or_date->toDateString())->toBe($payment->paid_at->toDateString())
+            ->and($payment->proofs()->where('submitted_by_user_id', $owner->id)->value('or_number'))->toBe($payment->or_number);
     }
 
     // B: paid; FSIC issued, Sanitary visit booked ahead, three offices untouched.

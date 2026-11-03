@@ -24,8 +24,9 @@ beforeEach(function () {
 });
 
 /**
- * A business of the demo owner's, its filing billed, taken by the demo BPLO
- * officer and marked paid at the counter with this OR. Answers the filing.
+ * A business of the demo owner's, its filing billed, its receipt sent by the
+ * owner, taken by the demo BPLO officer and marked paid at the counter with
+ * this OR. Answers the filing.
  */
 function orRecordFiling(string $businessName, string $or, string $paidOn, ?UploadedFile $photo = null, ?UploadedFile $ownersPhoto = null): Application
 {
@@ -49,10 +50,16 @@ function orRecordFiling(string $businessName, string $or, string $paidOn, ?Uploa
     test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     bploApprovesForm($appId);
 
-    if ($ownersPhoto !== null) {
-        test()->post("/api/v1/applications/{$appId}/payment-proofs", ['photo' => $ownersPhoto], ['Accept' => 'application/json'])
-            ->assertCreated();
-    }
+    /*
+     * The owner's receipt, which Mark as paid waits for (Ken, 3 November
+     * 2026): their photo when the test gives one, else the OR and the date
+     * paid, which carry no photo for the record to point at.
+     */
+    test()->post(
+        "/api/v1/applications/{$appId}/payment-proofs",
+        $ownersPhoto !== null ? ['photo' => $ownersPhoto] : ['or_number' => $or, 'or_date' => $paidOn],
+        ['Accept' => 'application/json'],
+    )->assertCreated();
 
     authAs('bplo@biztrack.local');
     $assignment = ApplicationAssignment::where('application_id', $appId)

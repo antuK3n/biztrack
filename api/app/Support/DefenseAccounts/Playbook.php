@@ -646,14 +646,18 @@ final class Playbook
     }
 
     /**
-     * BPLO marks the bill paid at the counter, as the officer holding the
-     * filing and with the Official Receipt the owner paid against.
+     * The owner sends their receipt from the Pay page, then BPLO marks the
+     * bill paid at the counter against it, as the officer holding the filing
+     * and with the Official Receipt the owner paid against.
      *
-     * Both are the app's rules since the thesis panel's revisions: only the
-     * officer in charge of BPLO's assignment may mark a bill paid, and the OR
-     * number and the date paid are required. The holder is read the way the
-     * queue shows it ("Officer in charge"), never assumed. Shared with
-     * Portfolio, whose clicks are these.
+     * All three are the app's rules: since the thesis panel's revisions only
+     * the officer in charge of BPLO's assignment may mark a bill paid, and the
+     * OR number and the date paid are required; since 3 November 2026 (Ken)
+     * Mark as paid waits for the owner's receipt. So the owner sends the OR
+     * and the date first, and the officer records the same pair, as the
+     * dialog pre-fills it. The holder is read the way the queue shows it
+     * ("Officer in charge"), never assumed. Shared with Portfolio, whose
+     * clicks are these.
      */
     public static function payAtCounter(AppClient $api, int $id, CarbonImmutable $paidOn): void
     {
@@ -665,10 +669,15 @@ final class Playbook
             throw new StepRefused('find who holds the filing at BPLO', 404, "application {$id} has no officer in charge at BPLO");
         }
 
-        $api->as($holder)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment", [
+        $receipt = [
             'or_number' => self::nextOrNumber(),
             'or_date' => $paidOn->toDateString(),
-        ]);
+        ];
+
+        $api->as(Application::findOrFail($id)->applicant)
+            ->post('the owner sends the receipt', "applications/{$id}/payment-proofs", $receipt);
+
+        $api->as($holder)->post('BPLO marks the bill paid at the counter', "applications/{$id}/counter-payment", $receipt);
     }
 
     /**
