@@ -1452,7 +1452,7 @@ function QueueRow({
         * about (`pendingProof` undefined) draws nothing.
         */}
       {item.status === 'pending_payment' && item.pendingProof !== undefined && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-line px-5 py-3">
+        <div className="space-y-2.5 border-t border-line px-5 py-3">
           <p className="text-sm text-ink-secondary">
             {item.pendingProof === null ? (
               'Waiting for the owner’s receipt.'
@@ -1464,19 +1464,25 @@ function QueueRow({
               'Receipt sent.'
             )}
           </p>
+          {/*
+            * Side by side, the undo-styled one first, in two equal columns —
+            * which a three-across card at 1440px only just holds, so each
+            * column has a floor and the pair stacks on a card too narrow for
+            * both rather than squeezing a label.
+            */}
           {item.pendingProof && item.mine && onMarkPaid && onRejectReceipt && (
-            <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-2">
               <button
                 type="button"
                 onClick={() => onRejectReceipt(item)}
-                className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                className="whitespace-nowrap rounded-full border border-line px-2 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
               >
                 Reject receipt
               </button>
               <button
                 type="button"
                 onClick={() => onMarkPaid(item)}
-                className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                className="whitespace-nowrap rounded-full bg-royal px-2 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
               >
                 Mark as paid
               </button>
