@@ -49,6 +49,10 @@ it('lets an office add, edit, divide and remove its own inspectors, and nobody e
 
     test()->withHeaders($h)->putJson("/api/v1/inspectors/{$created['id']}", ['name' => 'Rico D. Peña', 'max_visits_per_day' => 5])
         ->assertOk()->assertJsonPath('data.max_visits_per_day', 5);
+    // An edit may send only what changed: Deactivate sends `is_active` alone.
+    test()->withHeaders($h)->putJson("/api/v1/inspectors/{$created['id']}", ['is_active' => false])
+        ->assertOk()->assertJsonPath('data.is_active', false)->assertJsonPath('data.name', 'Rico D. Peña');
+    test()->withHeaders($h)->putJson("/api/v1/inspectors/{$created['id']}", ['is_active' => true])->assertOk();
 
     // Another office neither reads nor edits this pool.
     test()->withHeaders(authAs('fire@biztrack.local'))->getJson('/api/v1/inspectors')
