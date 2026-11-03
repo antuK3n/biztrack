@@ -237,7 +237,7 @@ it('lets each of the five offices see and close its own visit, releasing that pe
         test()->postJson("/api/v1/inspections/{$visitId}/conduct", [
             'result' => 'passed',
             'findings' => 'Premises inspected and found compliant.',
-        ])->assertOk();
+        ] + oboNames($visitId))->assertOk();
 
         /*
          * Rule 7: the permit is released the moment its OWN office passes it,
@@ -296,7 +296,7 @@ it('holds the business permit until the last of the five visits passes', functio
     foreach (array_slice($offices, 0, 4) as $officeCode) {
         $visitId = bookVisitFor($app, $officeCode);
         authAs(OFFICE_INSPECTOR[$officeCode][1]);
-        test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+        test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
         expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
     }
@@ -309,7 +309,7 @@ it('holds the business permit until the last of the five visits passes', functio
     $last = end($offices);
     $visitId = bookVisitFor($app, $last);
     authAs(OFFICE_INSPECTOR[$last][1]);
-    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'] + oboNames($visitId))->assertOk();
 
     // The fifth pass issues the fifth clearance AND the business permit.
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
@@ -351,13 +351,22 @@ it('prints the confirmed names on that permit only, and records who confirmed th
         ['name' => 'Engr. Office Default', 'is_active' => true, 'sort_order' => 0],
     );
 
-    test()->withHeaders(authAs('obo@biztrack.local'))->postJson("/api/v1/inspections/{$visit}/conduct", [
-        'result' => 'passed',
-        'signatories' => [
-            ['role' => 'Building Official', 'name' => 'Engr. Acting Official'],
-            ['role' => 'Evaluator — Electrical', 'name' => 'Engr. Stand-in Electrical'],
-        ],
-    ])->assertOk();
+    authAs('obo@biztrack.local');
+    // Every name the dialog offers, two of them changed for this permit.
+    $names = array_map(fn (array $r) => match ($r['role']) {
+        'Building Official' => ['role' => $r['role'], 'name' => 'Engr. Acting Official'],
+        'Evaluator — Electrical' => ['role' => $r['role'], 'name' => 'Engr. Stand-in Electrical'],
+        default => $r,
+    }, oboNames($visit)['signatories']);
+
+    // Short of a name the building needs: refused, nothing recorded.
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => array_slice($names, 0, 2)])
+        ->assertStatus(422)->assertJsonValidationErrors('signatories');
+    // No names at all: refused too.
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed'])
+        ->assertStatus(422)->assertJsonValidationErrors('signatories');
+
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => $names])->assertOk();
 
     $permit = $app->permits()->whereHas('permitType', fn ($t) => $t->where('code', 'OCCUPANCY'))->sole();
     $frozen = collect($permit->issued_details['office_signatories'])->pluck('name', 'role');

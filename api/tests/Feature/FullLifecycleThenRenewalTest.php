@@ -196,7 +196,7 @@ function clearanceOfficeHalf(int $appId, string $code): void
     test()->postJson("/api/v1/inspections/{$inspectionId}/conduct", [
         'result' => 'passed',
         'findings' => 'Premises inspected and found compliant.',
-    ])->assertOk();
+    ] + oboNames($inspectionId))->assertOk();
 }
 
 /** Both halves, which is the whole of a NEW filing's clearance stage. */

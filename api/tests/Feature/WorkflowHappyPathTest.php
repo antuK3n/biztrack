@@ -181,7 +181,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
             ])->assertCreated()->json('data.id');
 
         $this->withHeaders($officer)
-            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'findings' => 'clean'])
+            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'findings' => 'clean'] + oboNames($visitId))
             ->assertOk();
 
         $issued++;

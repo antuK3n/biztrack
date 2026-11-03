@@ -403,7 +403,28 @@ final class Portfolio
         $this->asOffice($code)->post("{$code} records the visit", "inspections/{$visit}/conduct", [
             'result' => $event['result'],
             'findings' => $event['findings'],
-        ]);
+        ] + ($event['result'] === 'passed' ? $this->confirmedNames($code, (int) $visit) : []));
+    }
+
+    /**
+     * What the OBO confirms before its pass releases the Certificate of
+     * Occupancy: the names its dialog offers (InspectionController::
+     * certificateNames), as they stand, and a stand-in for a caption the
+     * office has no name for yet. Nothing for any other office.
+     *
+     * @return array{signatories?: list<array{role: string, name: string}>}
+     */
+    private function confirmedNames(string $code, int $visit): array
+    {
+        if ($code !== 'OCCUPANCY') {
+            return [];
+        }
+        $rows = $this->asOffice('OCCUPANCY')->get('OBO reads the certificate names', "inspections/{$visit}/certificate-names")['data']['rows'];
+
+        return ['signatories' => array_map(
+            fn (array $r) => ['role' => $r['role'], 'name' => $r['name'] ?: Playbook::INSPECTORS['OCCUPANCY']],
+            $rows,
+        )];
     }
 
     /** The owner uploads each DENR paper the CEC raised (DenrRequirements). */

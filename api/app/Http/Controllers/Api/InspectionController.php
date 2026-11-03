@@ -23,6 +23,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Inspection scheduling + results, scoped to the caller's department (or own
@@ -140,9 +141,34 @@ class InspectionController extends Controller
 
         $confirmed = $data['signatories'] ?? null;
         $occupancy = $this->occupancyTypeFor($inspection);
+        $passes = InspectionResult::from($data['result'])->progresses();
         if ($confirmed !== null) {
             abort_if($occupancy === null, 422, 'Only the Certificate of Occupancy has its names confirmed at the visit.');
-            abort_unless(InspectionResult::from($data['result'])->progresses(), 422, 'Names are confirmed only on a passed visit.');
+            abort_unless($passes, 422, 'Names are confirmed only on a passed visit.');
+        }
+
+        /*
+         * ── Always confirmed, never assumed ─────────────────────────────────
+         *
+         * [Client, 3 November 2026: "laging may confirmation lalo na sa
+         * pagpasa na names sa obo … before makuha yung permit".] A pass on the
+         * OBO's visit releases the Certificate of Occupancy, so it is refused
+         * here — not only in the dialog — until every name the certificate
+         * needs has been confirmed: the Building Official and the evaluator of
+         * each line this building needs (namesToConfirm).
+         */
+        if ($occupancy !== null && $passes) {
+            $given = collect($confirmed ?? [])->pluck('name', 'role')
+                ->map(fn ($n) => trim((string) $n))->filter(fn ($n) => $n !== '');
+            $missing = collect($this->namesToConfirm($inspection, $occupancy)['rows'])
+                ->pluck('role')->reject(fn (string $role) => $given->has($role))->values()->all();
+            if ($missing !== []) {
+                throw ValidationException::withMessages(['signatories' => [
+                    $confirmed === null
+                        ? 'Confirm the names on the Certificate of Occupancy before approving this inspection.'
+                        : 'Confirm every name on the Certificate of Occupancy: '.implode(', ', $missing).'.',
+                ]]);
+            }
         }
 
         // One act: the confirmed names stand only if the pass is recorded.
@@ -183,6 +209,18 @@ class InspectionController extends Controller
             return response()->json(['data' => ['required' => false, 'rows' => [], 'not_needed' => []]]);
         }
 
+        return response()->json(['data' => ['required' => true, 'certificate' => CertificateSignatories::CERTIFICATE['OBO']]
+            + $this->namesToConfirm($inspection, $type)]);
+    }
+
+    /**
+     * The captions the OBO must confirm for this filing, each with its name
+     * as it stands, and the lines this building does not need.
+     *
+     * @return array{rows: list<array{role: string, name: string|null}>, not_needed: list<string>}
+     */
+    private function namesToConfirm(Inspection $inspection, PermitType $type): array
+    {
         $application = $inspection->application()->with(['officeForms', 'business'])->first();
         $business = $application?->business?->loadMissing(['address.barangay', 'owner', 'owners', 'lines.psicCode']);
         $current = collect(CertificateSignatories::currentFor($inspection->department))->pluck('name', 'role');
@@ -212,12 +250,7 @@ class InspectionController extends Controller
             $rows[] = ['role' => $role, 'name' => $nameOf($role)];
         }
 
-        return response()->json(['data' => [
-            'required' => true,
-            'certificate' => CertificateSignatories::CERTIFICATE['OBO'],
-            'rows' => $rows,
-            'not_needed' => $notNeeded,
-        ]]);
+        return ['rows' => $rows, 'not_needed' => $notNeeded];
     }
 
     /** The Certificate of Occupancy, if this visit is the OBO's. */
@@ -309,7 +342,7 @@ class InspectionController extends Controller
             ->where('permit_type_id', $type->id)
             ->firstOrFail();
 
-        $pool = $this->poolInspectorFor($type->issuing_department_id, $data['inspector_id'] ?? null);
+        $pool = $this->poolInspectorFor($type->issuing_department_id, $data['inspector_id'] ?? null, $data['scheduled_at']);
 
         $visit = $this->workflow->scheduleClearanceInspection($row, $data['scheduled_at']);
 
@@ -331,13 +364,25 @@ class InspectionController extends Controller
             'inspector_name' => ['sometimes', 'nullable', 'string', 'max:120'],
         ]);
 
+        /*
+         * Whoever takes the moved visit must be free on the new day — the one
+         * named here, or the pool inspector who keeps it. Asked before the
+         * move is written; the visit's own slot is left out of the count.
+         */
+        $handsOver = array_key_exists('inspector_id', $data) || array_key_exists('inspector_name', $data);
+        $pool = $handsOver
+            ? $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null, $data['scheduled_at'], $inspection->id)
+            : null;
+        if (! $handsOver && $inspection->inspector_id !== null) {
+            $this->poolInspectorFor($inspection->department_id, $inspection->inspector_id, $data['scheduled_at'], $inspection->id);
+        }
+
         // In the service since 5 October 2026, so the move refuses a past
         // date and tells the applicant, as the first booking does.
         $inspection = $this->workflow->rescheduleInspection($inspection, $data['scheduled_at']);
 
         // A moved visit may change hands: the day changed, and so may who is free.
-        if (array_key_exists('inspector_id', $data) || array_key_exists('inspector_name', $data)) {
-            $pool = $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null);
+        if ($handsOver) {
             $this->assignInspector($inspection, $pool, $data['inspector_name'] ?? null);
         }
 
@@ -380,7 +425,7 @@ class InspectionController extends Controller
                 .'while the application is still for inspection.'
         );
 
-        $pool = $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null);
+        $pool = $this->poolInspectorFor($inspection->department_id, $data['inspector_id'] ?? null, $data['scheduled_at']);
         $visit = $this->workflow->scheduleReinspection($inspection, $data['scheduled_at']);
         $this->assignInspector($visit, $pool, $data['inspector_name'] ?? null);
 
@@ -459,13 +504,18 @@ class InspectionController extends Controller
      * The pool inspector a request names, checked to be the office's own and
      * active, or null when none is named.
      */
-    private function poolInspectorFor(?int $departmentId, ?int $inspectorId): ?Inspector
+    private function poolInspectorFor(?int $departmentId, ?int $inspectorId, ?string $scheduledAt = null, ?int $except = null): ?Inspector
     {
         if ($inspectorId === null) {
             return null;
         }
         $inspector = Inspector::query()->whereKey($inspectorId)->where('is_active', true)->first();
         abort_unless($inspector !== null && $inspector->department_id === $departmentId, 422, 'That inspector is not in this office’s pool.');
+
+        // Free that day: works it, not on leave, has room (InspectorSuggestion::whyNotFree).
+        if ($scheduledAt !== null && ($why = InspectorSuggestion::whyNotFree($inspector, CarbonImmutable::parse($scheduledAt), $except)) !== null) {
+            throw ValidationException::withMessages(['inspector_id' => [$why]]);
+        }
 
         return $inspector;
     }

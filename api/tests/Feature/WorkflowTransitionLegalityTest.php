@@ -347,7 +347,7 @@ it('will not issue a second set of permits for a filing already approved', funct
             ])->assertCreated()->json('data.id');
 
         test()->withHeaders(authAs($email))
-            ->postJson("/api/v1/inspections/{$lastVisit}/conduct", ['result' => 'passed'])
+            ->postJson("/api/v1/inspections/{$lastVisit}/conduct", ['result' => 'passed'] + oboNames($lastVisit))
             ->assertOk();
     }
 

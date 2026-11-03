@@ -303,7 +303,7 @@ it('refuses a passing visit on a held filing and issues nothing, but still recor
     expect($permit->status)->toBe(PermitStatus::Suspended);
 
     authAs('sanitary@biztrack.local');
-    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed'])
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed'] + oboNames($visit))
         ->assertStatus(422)
         ->assertJsonPath('message', HOLD_SUSPENDED);
 
