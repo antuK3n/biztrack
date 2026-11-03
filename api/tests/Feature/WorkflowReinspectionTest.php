@@ -252,7 +252,7 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     foreach (['CHO', 'CPDO', 'OBO', 'CENRO'] as $deptCode) {
         $visit = $visits->firstWhere('department.code', $deptCode);
         test()->withHeaders(authAs($deptEmail[$deptCode]))
-            ->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'passed'])
+            ->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'passed'] + oboNames($visit->id))
             ->assertOk();
     }
     expect(clearancePermitsIssued($appId))->toBe(4);
@@ -277,7 +277,7 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     // On the day it was booked for: a result cannot predate its visit.
     test()->travelTo(now()->addWeekdays(5)->setTime(9, 0));
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$reinspectionId}/conduct", ['result' => 'passed', 'findings' => 'extinguisher installed'])
+        ->postJson("/api/v1/inspections/{$reinspectionId}/conduct", ['result' => 'passed', 'findings' => 'extinguisher installed'] + oboNames($reinspectionId))
         ->assertOk();
 
     /*
@@ -323,7 +323,7 @@ it('refuses a re-inspection on a visit that passed', function () use ($deptEmail
     $fire = $visits->firstWhere('department.code', 'BFP');
     $officer = authAs($deptEmail['BFP']);
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'] + oboNames($fire->id))
         ->assertOk();
 
     test()->withHeaders($officer)
@@ -452,7 +452,7 @@ it('refuses to conduct, and never issues, once the filing has been decided', fun
         ->postJson("/api/v1/inspections/{$fire->id}/conduct", [
             'result' => 'passed',
             'findings' => 'all clear',
-        ])->assertStatus(422);
+        ] + oboNames($fire->id))->assertStatus(422);
 
     expect(clearancePermitsIssued($appId))->toBe(0);
     expect($fire->fresh()->conducted_at)->toBeNull();
@@ -622,7 +622,7 @@ it('refuses a result recorded before the day the visit is booked for', function 
         ->assertOk();
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'] + oboNames($fire->id))
         ->assertStatus(422)
         ->assertJsonPath('errors.scheduled_at.0', 'The visit is booked for '.$booked->format('F j, Y').'.');
     expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
@@ -630,7 +630,7 @@ it('refuses a result recorded before the day the visit is booked for', function 
     // On the morning of the booked day it can be recorded, before the hour.
     test()->travelTo($booked->copy()->setTime(8, 0));
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed'] + oboNames($fire->id))
         ->assertOk();
 });
 
@@ -705,7 +705,7 @@ it('reinstates the Mayor’s Permit once the re-inspection passes', function () 
     expect(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$again}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$again}/conduct", ['result' => 'passed'] + oboNames($again))
         ->assertOk();
 
     $permit = mayorsPermitOf($appId);
@@ -730,7 +730,7 @@ it('keeps the Mayor’s Permit suspended while another office passes and the fai
 
     $cho = $visits->firstWhere('department.code', 'CHO');
     test()->withHeaders(authAs($deptEmail['CHO']))
-        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'] + oboNames($cho->id))
         ->assertOk();
 
     expect(clearanceStatusOf($appId, 'SANITARY'))->toBe('approved')
@@ -753,13 +753,13 @@ it('refuses a second result on a visit that already has one', function () use ($
     $officer = authAs($deptEmail['BFP']);
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'First write-up.'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'First write-up.'] + oboNames($fire->id))
         ->assertOk();
     $first = Inspection::findOrFail($fire->id);
 
     test()->travel(2)->hours();
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Second write-up.'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Second write-up.'] + oboNames($fire->id))
         ->assertStatus(422)
         ->assertJsonPath('message', 'This visit already has a result.');
 
@@ -780,7 +780,7 @@ it('keeps a failed visit failed: it cannot be recorded again as passed', functio
         ->assertOk();
 
     test()->withHeaders($officer)
-        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Fine now.'])
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'passed', 'findings' => 'Fine now.'] + oboNames($fire->id))
         ->assertStatus(422)
         ->assertJsonPath('message', 'This visit already has a result.');
 
@@ -817,7 +817,7 @@ it('refuses to move a visit that already has a result; the failure is answered b
     // And the standing failure still holds the Mayor's Permit when another office passes.
     $cho = $visits->firstWhere('department.code', 'CHO');
     test()->withHeaders(authAs($deptEmail['CHO']))
-        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'])
+        ->postJson("/api/v1/inspections/{$cho->id}/conduct", ['result' => 'passed'] + oboNames($cho->id))
         ->assertOk();
     expect(mayorsPermitOf($appId)->status->value)->toBe('suspended');
 });

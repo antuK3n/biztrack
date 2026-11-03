@@ -543,3 +543,26 @@ function attachRequiredDocuments(Application|int $application): ?Application
 
     return $application->fresh();
 }
+
+/**
+ * The confirmed names an OBO pass must carry (InspectionController::conduct
+ * refuses one without them), or nothing for any other office's visit. Read
+ * from the same endpoint the dialog reads, as the signed-in office; a caption
+ * with no name on file is confirmed with a stand-in, as an officer types one.
+ *
+ * @return array{signatories?: list<array{role: string, name: string}>}
+ */
+function oboNames(int $inspectionId): array
+{
+    $visit = \App\Models\Inspection::with('department')->find($inspectionId);
+    if ($visit?->department?->code !== 'OBO') {
+        return [];
+    }
+
+    $rows = test()->getJson("/api/v1/inspections/{$inspectionId}/certificate-names")->assertOk()->json('data.rows');
+
+    return ['signatories' => array_map(
+        fn (array $r) => ['role' => $r['role'], 'name' => $r['name'] ?: 'Engr. Test Signatory'],
+        $rows,
+    )];
+}
