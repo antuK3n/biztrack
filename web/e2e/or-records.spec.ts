@@ -7,10 +7,10 @@ import { makeBilledApplication } from './payments'
  * paid, amount, and linked application are stored, and the records can be
  * searched and viewed."
  *
- * BPLO marks a billed filing paid at the counter with its OR (through the API
- * — the dialog has its own spec, counter-payment.spec.ts), then finds it on
- * OR Records by searching. The super admin reaches the same page on its own
- * site.
+ * The owner sends the receipt and BPLO marks a billed filing paid at the
+ * counter with its OR (through the API — the dialog has its own spec,
+ * counter-payment.spec.ts), then finds it on OR Records by searching. The
+ * super admin reaches the same page on its own site.
  */
 test.describe.configure({ timeout: 180_000 })
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
@@ -26,6 +26,15 @@ test('BPLO finds a counter payment on OR Records by its OR number', async ({ pag
     async ([id, or]) => {
       const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.staff')}` }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
+
+      // The owner's receipt first, which Mark as paid waits for (Ken, 3 November 2026).
+      const owner = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.public')}` }
+      const receipt = new FormData()
+      receipt.append('or_number', or)
+      receipt.append('or_date', today)
+      const sent = await fetch(`/api/v1/applications/${id}/payment-proofs`, { method: 'POST', headers: owner, body: receipt })
+      if (!sent.ok) throw new Error(`payment-proofs answered ${sent.status}: ${await sent.text()}`)
+
       const body = new FormData()
       body.append('or_number', or)
       body.append('or_date', today)

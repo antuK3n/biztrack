@@ -13,6 +13,10 @@ import { makeBilledApplication } from './payments'
  * and the date paid, pre-filled from it; and a filing nobody holds is taken
  * with Assign to Me first. The row still leaves the tab once paid, and the
  * owner's Payment History shows the OR No. and the date paid.
+ *
+ * Since 3 November 2026 (Ken) Mark as paid also waits for the owner's
+ * receipt, so both filings here have one; what happens without one, and when
+ * BPLO rejects it, is receipt-review.spec.ts.
  */
 test.describe.configure({ timeout: 180_000 })
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
@@ -122,8 +126,16 @@ test('a filing nobody at BPLO holds offers Assign to Me and no Mark as paid unti
   const appId = await makeBilledApplication(page)
   const filing = await filingOf(page, appId)
 
-  // Put back to the office, as "Unassign from me" does.
+  // The owner sends the receipt, which Mark as paid waits for (Ken, 3 November 2026),
+  // and the filing is put back to the office, as "Unassign from me" does.
   await page.evaluate(async (id) => {
+    const owner = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.public')}` }
+    const receipt = new FormData()
+    receipt.append('or_number', String(Date.now() % 10_000_000).padStart(7, '0'))
+    receipt.append('or_date', new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }))
+    const sent = await fetch(`/api/v1/applications/${id}/payment-proofs`, { method: 'POST', headers: owner, body: receipt })
+    if (!sent.ok) throw new Error(`payment-proofs answered ${sent.status}: ${await sent.text()}`)
+
     const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.staff')}` }
     const list = (await (await fetch('/api/v1/applications?status=pending_payment&per_page=200', { headers })).json())
       .data as { id: number; bplo_assignment?: { id: number } | null }[]
