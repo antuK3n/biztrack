@@ -908,7 +908,11 @@ export interface OrRecord {
   amount: string
   /** When BPLO recorded it. */
   recorded_at: string | null
-  application: { id: number; tracking_id: string } | null
+  /**
+   * `review_id` is BPLO's review of the filing, which the tracking ID opens on
+   * the staff site; null for a reader who cannot open it (the super admin).
+   */
+  application: { id: number; tracking_id: string; review_id: number | null } | null
   /** Null when the business has been removed from the register. */
   business: { id: number; name: string } | null
   recorded_by: { id: number; name: string } | null

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mergedStorageState, sessionFor } from './helpers'
 import { makeBilledApplication } from './payments'
 
@@ -17,12 +17,12 @@ test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
 
 const SHOTS = process.env.E2E_SHOTS_DIR
 
-test('BPLO finds a counter payment on OR Records by its OR number', async ({ page }) => {
-  const appId = await makeBilledApplication(page)
-
-  // Seven digits of its own, so a second run finds only this one.
-  const orNumber = String(Date.now() % 10_000_000).padStart(7, '0')
-  const paid = await page.evaluate(
+/**
+ * The owner sends the receipt and the BPLO officer holding the filing marks it
+ * paid at the counter with this OR, through the API. Answers the filing.
+ */
+async function paidAtCounter(page: Page, appId: number, orNumber: string): Promise<{ tracking: string; business: string }> {
+  return page.evaluate(
     async ([id, or]) => {
       const headers = { Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('biztrack.token.staff')}` }
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
@@ -45,6 +45,14 @@ test('BPLO finds a counter payment on OR Records by its OR number', async ({ pag
     },
     [appId, orNumber] as const,
   )
+}
+
+test('BPLO finds a counter payment on OR Records by its OR number', async ({ page }) => {
+  const appId = await makeBilledApplication(page)
+
+  // Seven digits of its own, so a second run finds only this one.
+  const orNumber = String(Date.now() % 10_000_000).padStart(7, '0')
+  const paid = await paidAtCounter(page, appId, orNumber)
 
   await page.goto('/staff/admin/or-records')
   await expect(page.getByRole('heading', { name: 'OR Records' })).toBeVisible({ timeout: 30_000 })
@@ -77,6 +85,38 @@ test('BPLO finds a counter payment on OR Records by its OR number', async ({ pag
   await search.fill('no such receipt anywhere')
   await expect(page.getByText('No OR records match your search.')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('No OR records yet.')).toHaveCount(0)
+})
+
+test('the tracking ID opens BPLO’s review of the filing, and the super admin’s rows carry no link', async ({ page, browser }) => {
+  const appId = await makeBilledApplication(page)
+  const orNumber = String((Date.now() + 7) % 10_000_000).padStart(7, '0')
+  const paid = await paidAtCounter(page, appId, orNumber)
+
+  await page.goto('/staff/admin/or-records')
+  await page.getByRole('searchbox', { name: 'Search OR no., tracking ID or business' }).fill(orNumber)
+  const row = page.getByRole('table').getByRole('row').filter({ hasText: orNumber })
+  await expect(row).toHaveCount(1, { timeout: 15_000 })
+
+  // One link a row, named by the tracking ID; it opens the filing on the staff site.
+  const link = row.getByRole('link', { name: paid.tracking, exact: true })
+  await expect(link).toHaveAttribute('href', /^\/staff\/queue\/\d+$/)
+  await expect(row.getByRole('link')).toHaveCount(1)
+  await link.click()
+  await expect(page).toHaveURL(/\/staff\/queue\/\d+$/)
+  // BPLO's review of this filing, loaded and headed by its business.
+  await expect(page.getByRole('heading', { level: 1, name: paid.business })).toBeVisible({ timeout: 30_000 })
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/or-records-opened.png` })
+
+  // The super admin's site has no screen for a filing: the same row, no link.
+  const admin = await browser.newContext({ storageState: sessionFor('admin') })
+  const adminPage = await admin.newPage()
+  await adminPage.goto('/admin/or-records')
+  await adminPage.getByRole('searchbox', { name: 'Search OR no., tracking ID or business' }).fill(orNumber)
+  const adminRow = adminPage.getByRole('table').getByRole('row').filter({ hasText: orNumber })
+  await expect(adminRow).toHaveCount(1, { timeout: 30_000 })
+  await expect(adminRow).toContainText(paid.tracking)
+  await expect(adminRow.getByRole('link')).toHaveCount(0)
+  await admin.close()
 })
 
 test('says "No OR records yet." only when nothing is searched for', async ({ page }) => {

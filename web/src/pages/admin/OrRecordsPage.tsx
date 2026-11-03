@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ClipboardIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoCard } from '../../components/ui/Proto'
@@ -18,6 +19,9 @@ import type { OrRecord } from '../../lib/types'
  * the rail entry in nav.ts and the endpoint all ask for
  * `application.view_any_office`, so none of the three can admit someone the
  * others refuse.
+ *
+ * Each tracking ID opens BPLO's review of the filing, for BPLO (Ken, 3
+ * November 2026); the super admin's site has no screen for a filing.
  *
  * The table language is Audit Logs' and Permits': a white ProtoCard, uppercase
  * muted headers, a search box beside the title, a pager underneath. Search and
@@ -137,7 +141,22 @@ export function OrRecordsPage() {
                     <td className="whitespace-nowrap px-5 py-3.5 text-ink-secondary">{formatCalendarDate(row.or_date)}</td>
                     <td className="tnum whitespace-nowrap px-5 py-3.5 text-right text-ink">{formatMoney(row.amount)}</td>
                     <td className="tnum whitespace-nowrap px-5 py-3.5 text-ink-secondary">
-                      {row.application?.tracking_id ?? '—'}
+                      {/*
+                        * The tracking ID opens the filing (Ken, 3 November
+                        * 2026): BPLO's own review of it, the one screen the
+                        * staff site has for a filing. The super admin's site
+                        * has none, so there the ID stays text.
+                        */}
+                      {row.application?.review_id ? (
+                        <Link
+                          to={`/staff/queue/${row.application.review_id}`}
+                          className="font-semibold text-royal underline underline-offset-2 hover:no-underline"
+                        >
+                          {row.application.tracking_id}
+                        </Link>
+                      ) : (
+                        (row.application?.tracking_id ?? '—')
+                      )}
                     </td>
                     <td className="px-5 py-3.5 font-medium text-ink">{row.business?.name ?? '—'}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">{row.recorded_by?.name ?? '—'}</td>

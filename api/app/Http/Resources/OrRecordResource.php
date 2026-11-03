@@ -30,6 +30,15 @@ class OrRecordResource extends JsonResource
             'application' => $application ? [
                 'id' => $application->id,
                 'tracking_id' => $application->tracking_id,
+                /*
+                 * BPLO's review of the filing, which the tracking ID opens on
+                 * the staff site (`/staff/queue/{review_id}`). Null for a
+                 * reader who cannot open it, the super admin; see
+                 * OrRecordController::index.
+                 */
+                'review_id' => $application->relationLoaded('bploAssignment')
+                    ? $application->bploAssignment?->id
+                    : null,
             ] : null,
             // Null when the business has been removed from the register.
             'business' => $application?->business ? [

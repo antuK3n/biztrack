@@ -94,7 +94,11 @@ it('lists each OR with its date paid, amount, filing, business and who recorded 
     $row = $body['data'][0];
     expect($row['or_date'])->toBe(now()->subDay()->toDateString())
         ->and((float) $row['amount'])->toBe((float) $newer->payments()->sole()->amount)
-        ->and($row['application'])->toBe(['id' => $newer->id, 'tracking_id' => $newer->tracking_id])
+        ->and($row['application'])->toBe([
+            'id' => $newer->id,
+            'tracking_id' => $newer->tracking_id,
+            'review_id' => $newer->bploAssignment->id,
+        ])
         ->and($row['business']['name'])->toBe('Receipt Hardware')
         ->and($row['recorded_by'])->toBe(['id' => $bplo->id, 'name' => $bplo->name])
         ->and($row['proof'])->toBeNull();
@@ -187,4 +191,22 @@ it('is BPLO’s and the super admin’s alone', function () {
         authAs($refused);
         test()->getJson('/api/v1/or-records')->assertForbidden();
     }
+});
+
+it('gives BPLO each filing’s review to open from the tracking ID, and the super admin none', function () {
+    $filing = orRecordFiling('Receipt Linked Store', '4300061', now()->toDateString());
+
+    // BPLO opens its own review of the filing, the screen the staff site has for it.
+    authAs('bplo@biztrack.local');
+    $row = collect(orRecords()['data'])->firstWhere('or_number', '4300061');
+    expect($row['application']['review_id'])->toBe($filing->bploAssignment->id);
+    test()->getJson("/api/v1/assignments/{$row['application']['review_id']}")
+        ->assertOk()
+        ->assertJsonPath('data.application.tracking_id', $filing->tracking_id);
+
+    // The super admin's site has no screen for a filing, so no link.
+    authAs('admin@biztrack.local');
+    $row = collect(orRecords()['data'])->firstWhere('or_number', '4300061');
+    expect($row['application'])->toHaveKey('review_id')
+        ->and($row['application']['review_id'])->toBeNull();
 });

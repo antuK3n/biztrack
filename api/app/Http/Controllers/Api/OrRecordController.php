@@ -45,6 +45,18 @@ class OrRecordController extends Controller
                 'proofs' => fn ($proofs) => $proofs->whereNotNull('file_path'),
             ]);
 
+        /*
+         * BPLO's review of each filing, so the tracking ID opens it (Ken, 3
+         * November 2026: "Add clickable hyperlinks so officers can view the
+         * application upon clicking"). Only for a reader who can open the
+         * review — `application.review`, what the staff route asks for —
+         * which of OR Records' two readers is BPLO. The super admin's site
+         * has no screen for a filing, so its rows carry no link.
+         */
+        if ($request->user()->hasPermission('application.review')) {
+            $query->with('application.bploAssignment:id,application_id,department_id');
+        }
+
         // The three things the search box names: OR no., tracking ID, business.
         if ($q = trim((string) $request->query('q', ''))) {
             $query->where(function ($sub) use ($q) {
