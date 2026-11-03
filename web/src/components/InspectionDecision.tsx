@@ -3,7 +3,7 @@ import { CalendarIcon, CheckCircleFilledIcon, XCircleIcon, XIcon } from './icons
 import { InspectorNameField } from './InspectorNameField'
 import { ProtoModal } from './ui/Proto'
 import { toApiError } from '../lib/api'
-import { formatCalendarDate, formatDate } from '../lib/format'
+import { formatCalendarDate, formatDate, formatDateTime } from '../lib/format'
 import { inspections as inspectionsApi } from '../lib/resources'
 import { useAuth } from '../stores/auth'
 import type { Inspection, InspectorSuggestion } from '../lib/types'
@@ -132,6 +132,25 @@ function localTodayMin(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`
 }
 
+/**
+ * What is wrong with a visit's date and time, in the API's own words
+ * (InspectionController::visitRules), or null. Asked as the officer types
+ * [client, 3 November 2026: "kung sa manually may validations … day and
+ * time"], so the refusal comes before the press, not after it.
+ */
+function visitTimeProblem(value: string): string | null {
+  if (!value) return 'Choose a date and time.'
+  const when = new Date(value)
+  if (Number.isNaN(when.getTime())) return 'Choose a date and time.'
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  if (when < startOfToday) return 'Pick today or a later day.'
+  if (when.getDay() === 0 || when.getDay() === 6) return 'Pick a weekday.'
+  const minutes = when.getHours() * 60 + when.getMinutes()
+  if (minutes < 8 * 60 || minutes > 17 * 60) return 'Pick a time between 8:00 AM and 5:00 PM.'
+  return null
+}
+
 function InspectionDateInput({
   label,
   value,
@@ -141,15 +160,29 @@ function InspectionDateInput({
   value: string
   onChange: (value: string) => void
 }) {
+  const problemId = useId()
+  // Only once something is typed: an empty field is a question, not a mistake.
+  const problem = value ? visitTimeProblem(value) : null
   return (
-    <input
-      type="datetime-local"
-      min={localTodayMin()}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={label}
-      className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-    />
+    <span className="inline-flex flex-col">
+      <input
+        type="datetime-local"
+        min={localTodayMin()}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? problemId : undefined}
+        className={`rounded-lg border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal ${
+          problem ? 'border-s-red' : 'border-input-border'
+        }`}
+      />
+      {problem && (
+        <span id={problemId} className="mt-1 text-xs font-medium text-s-red">
+          {problem}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -904,6 +937,8 @@ function InspectorPicker({
   onTypedChange,
   onPickDay,
   otherLabel = 'Someone else (type a name)',
+  onProblemChange,
+  onChosenNameChange,
 }: {
   source: PickerSource
   /** YYYY-MM-DD of the date picked, or '' before one is. */
@@ -916,6 +951,10 @@ function InspectorPicker({
   /** Pressed on "Next free day": the caller moves its date to this day. */
   onPickDay: (ymd: string) => void
   otherLabel?: string
+  /** What stops this inspector going that day, or null — for the caller's button. */
+  onProblemChange?: (problem: string | null) => void
+  /** The chosen pool inspector's name, for a caller that shows the choice. */
+  onChosenNameChange?: (name: string | null) => void
 }) {
   const pickId = useId()
   const nameId = useId()
@@ -975,19 +1014,22 @@ function InspectorPicker({
   }, [day, sourceKey])
 
   /*
-   * ── Before a date is picked: the earliest day somebody can go ────────────
+   * ── Before a date is picked: the earliest day somebody can go, taken ─────
    *
    * [Client, 28 October 2026: "make sure yung automation sa mga bagong
-   * applications".] The card used to wait for a date before it could say who
-   * was free. It now asks the pool straight away for the next working day,
-   * and offers that day with its inspector as one press — the officer still
-   * presses "Book this visit", so nothing is promised to the applicant until
-   * somebody at the office has looked at it.
+   * applications"; 3 November 2026: "wag na ilagay suggestion matic na ayon
+   * na mapipili".] The pool is asked straight away for the next working day
+   * and the answer is simply TAKEN — the date at 9:00 AM and its inspector —
+   * rather than offered in a "Suggested" box to be accepted. The officer
+   * still presses "Book this visit", so nothing reaches the applicant until
+   * somebody at the office has looked at it, and "Change" opens the date and
+   * the pool for a different choice.
    */
-  const [quick, setQuick] = useState<{ date: string; name: string; id: number; why: string } | null>(null)
+  const [autoState, setAutoState] = useState<'asking' | 'taken' | 'none'>('asking')
   useEffect(() => {
     if (day) return
     let live = true
+    setAutoState('asking')
     const first = nextWorkingDay()
     const ask =
       source.kind === 'first'
@@ -996,18 +1038,18 @@ function InspectorPicker({
     ask
       .then((next) => {
         if (!live) return
-        if (next.suggested)
-          setQuick({ date: first, name: next.suggested.name, id: next.suggested.id, why: next.suggested.why })
-        else if (next.next_available)
-          setQuick({
-            date: next.next_available.date,
-            name: next.next_available.inspector.name,
-            id: next.next_available.inspector.id,
-            why: next.next_available.inspector.why,
-          })
-        else setQuick(null)
+        const pick = next.suggested
+          ? { date: first, id: next.suggested.id }
+          : next.next_available
+            ? { date: next.next_available.date, id: next.next_available.inspector.id }
+            : null
+        if (pick) {
+          onInspectorIdChange(pick.id)
+          onPickDay(pick.date)
+          setAutoState('taken')
+        } else setAutoState('none')
       })
-      .catch(() => live && setQuick(null))
+      .catch(() => live && setAutoState('none'))
     return () => {
       live = false
     }
@@ -1016,6 +1058,30 @@ function InspectorPicker({
 
   const chosen = suggestion?.candidates.find((c) => c.id === inspectorId) ?? null
   const hasPool = (suggestion?.pool_size ?? 0) > 0
+
+  /*
+   * What stops the visit going ahead with this inspector on this day, said
+   * here and handed up so the caller's button can refuse with the reason
+   * [client, 3 November 2026: "validation sa … availability"]. A typed name
+   * cannot be checked against a pool it is not in, so it is taken as given.
+   */
+  const problem =
+    !day || suggesting || !suggestion || !hasPool
+      ? null
+      : chosen
+        ? chosen.available
+          ? null
+          : `${chosen.name} cannot go on ${formatCalendarDate(day)}: ${chosen.reasons.join('; ') || chosen.why}.`
+        : inspectorId === null && !(typed ?? '').trim()
+          ? 'Choose who goes, or type a name.'
+          : null
+  useEffect(() => {
+    onProblemChange?.(problem)
+  }, [problem, onProblemChange])
+  const chosenName = chosen?.name ?? null
+  useEffect(() => {
+    onChosenNameChange?.(chosenName)
+  }, [chosenName, onChosenNameChange])
   const typedField =
     onTypedChange !== undefined ? (
       <>
@@ -1040,27 +1106,8 @@ function InspectorPicker({
       </>
     ) : null
 
-  if (!day && quick) {
-    return (
-      <div className="mt-3 rounded-lg border border-royal/30 bg-royal-tint/40 px-3.5 py-2.5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-royal">Suggested</p>
-        <p className="mt-0.5 text-sm text-ink">
-          <b>{formatCalendarDate(quick.date)}, 9:00 AM</b> — {quick.name}
-        </p>
-        <p className="text-xs text-ink-secondary">{quick.why}</p>
-        <button
-          type="button"
-          onClick={() => {
-            onInspectorIdChange(quick.id)
-            onPickDay(quick.date)
-          }}
-          className="mt-2 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-        >
-          Use this date and inspector
-        </button>
-        <span className="ml-2 text-xs text-ink-muted">or pick a date above</span>
-      </div>
-    )
+  if (!day && autoState === 'asking') {
+    return <p className="mt-3 text-sm text-ink-muted">Finding the earliest day an inspector is free…</p>
   }
 
   if (!day || !hasPool) return typedField
@@ -1080,8 +1127,8 @@ function InspectorPicker({
         {suggestion?.candidates.map((c) => (
           <option key={c.id} value={c.id} disabled={!c.available}>
             {c.name}
-            {suggestion.suggested?.id === c.id ? ' — suggested' : ''}
-            {c.available ? '' : ' — not available'}
+            {suggestion.suggested?.id === c.id ? ' — best fit' : ''}
+            {c.available ? '' : ` — ${c.reasons[0] ?? 'not available'}`}
           </option>
         ))}
         <option value="">{otherLabel}</option>
@@ -1113,6 +1160,11 @@ function InspectorPicker({
           )}
         </p>
       ) : null}
+      {problem && (
+        <p role="alert" className="mt-1 text-xs font-medium text-s-red">
+          {problem}
+        </p>
+      )}
       {inspectorId === null && typedField}
     </div>
   )
@@ -1167,6 +1219,13 @@ function FirstInspectionCard({
   code: string
   onBook: () => void
 }) {
+  const [changing, setChanging] = useState(false)
+  const [inspectorProblem, setInspectorProblem] = useState<string | null>(null)
+  const [chosenName, setChosenName] = useState<string | null>(null)
+  const timeProblem = visitTimeProblem(value)
+  const problem = timeProblem ?? inspectorProblem
+  const who = inspectorId !== null ? chosenName : inspector.trim() || null
+
   return (
     <li className="overflow-hidden rounded-2xl bg-white shadow-card" aria-label={`${permit} inspection booking`}>
       {/*
@@ -1186,25 +1245,62 @@ function FirstInspectionCard({
           permit cannot be issued until a visit passes.
         </p>
 
-        <div className="mt-4 flex flex-wrap items-end gap-2.5">
-          <InspectionDateInput label={`Date and time of the ${permit} inspection`} value={value} onChange={onChange} />
+        {/*
+          The visit as chosen for the office — the earliest day somebody in its
+          pool is free, and who — with "Change" to choose another date or
+          inspector from the pool, or by hand. The picker stays mounted while
+          folded, so it keeps the choice checked against who is free.
+        */}
+        {!changing && value && (
+          <div className="mt-4 rounded-lg border border-line bg-canvas px-4 py-3">
+            <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+              <dt className="text-ink-muted">Date and time</dt>
+              <dd className="font-semibold text-ink">{formatDateTime(new Date(value).toISOString())}</dd>
+              <dt className="text-ink-muted">Inspector</dt>
+              <dd className="font-semibold text-ink">{who ?? 'Not named yet'}</dd>
+            </dl>
+            <button
+              type="button"
+              onClick={() => setChanging(true)}
+              aria-label={`Change the date or inspector of the ${permit} visit`}
+              className="mt-2 text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
+            >
+              Change date or inspector
+            </button>
+          </div>
+        )}
+
+        <div className={changing || !value ? '' : 'hidden'}>
+          <div className="mt-4 flex flex-wrap items-end gap-2.5">
+            <InspectionDateInput label={`Date and time of the ${permit} inspection`} value={value} onChange={onChange} />
+          </div>
+          <InspectorPicker
+            source={{ kind: 'first', applicationId, code }}
+            day={dayOf(value)}
+            inspectorId={inspectorId}
+            onInspectorIdChange={onInspectorIdChange}
+            typed={inspector}
+            onTypedChange={onInspectorChange}
+            onPickDay={(ymd) => onChange(nineOn(ymd))}
+            onProblemChange={setInspectorProblem}
+            onChosenNameChange={setChosenName}
+          />
         </div>
 
         {/*
-          Who goes: suggested from the office's pool for the day picked, or a
-          name typed for the record (client, 6 October 2026). Optional either
-          way — the officer in charge still decides the visit, and the name
-          stays editable on the card afterwards (InspectorNameField).
+          Said once on screen: folded, here; open, under the field it is about
+          (kept here for the button's aria-describedby, out of sight).
         */}
-        <InspectorPicker
-          source={{ kind: 'first', applicationId, code }}
-          day={dayOf(value)}
-          inspectorId={inspectorId}
-          onInspectorIdChange={onInspectorIdChange}
-          typed={inspector}
-          onTypedChange={onInspectorChange}
-          onPickDay={(ymd) => onChange(nineOn(ymd))}
-        />
+        {problem && value && (
+          <p
+            id={`${hintId}-problem`}
+            role={changing ? undefined : 'alert'}
+            className={changing ? 'sr-only' : 'mt-3 text-sm font-medium text-s-red'}
+          >
+            {problem}
+            {!changing && ' Press "Change date or inspector" to fix it.'}
+          </p>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           {/*
@@ -1218,9 +1314,9 @@ function FirstInspectionCard({
           <button
             type="button"
             aria-label={`Book the ${permit} visit`}
-            aria-disabled={busy || !value}
-            aria-describedby={value ? undefined : hintId}
-            onClick={() => busy || !value || onBook()}
+            aria-disabled={busy || !value || problem !== null}
+            aria-describedby={!value ? hintId : problem ? `${hintId}-problem` : undefined}
+            onClick={() => busy || !value || problem !== null || onBook()}
             className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover aria-disabled:opacity-60"
           >
             {busy ? 'Booking…' : 'Book this visit'}

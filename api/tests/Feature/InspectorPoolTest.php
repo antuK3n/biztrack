@@ -197,3 +197,33 @@ it('books a visit to a pool inspector and writes the name beside the link', func
     test()->withHeaders($h)->patchJson("/api/v1/inspections/{$visit['id']}/inspector", ['inspector_name' => 'Somebody Else'])
         ->assertOk()->assertJsonPath('data.inspector_id', null)->assertJsonPath('data.inspector_name', 'Somebody Else');
 });
+
+it('refuses a hand-picked inspector who is away, off that weekday, or full, saying why', function () {
+    $app = filingForSanitaryInspection();
+    $appId = $app->id;
+    $day = nextWednesday();
+    $h = authAs('sanitary@biztrack.local');
+    $book = fn (Inspector $i, ?CarbonImmutable $at = null) => test()->withHeaders($h)
+        ->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+            'scheduled_at' => ($at ?? $day)->toIso8601String(), 'inspector_id' => $i->id,
+        ]);
+
+    $away = poolInspector('Away Inspector');
+    $away->leaves()->create(['starts_on' => $day->toDateString(), 'ends_on' => $day->toDateString(), 'reason' => 'Seminar']);
+    $book($away)->assertStatus(422)->assertJsonValidationErrors('inspector_id')
+        ->assertJsonPath('errors.inspector_id.0', fn (string $m) => str_contains($m, 'on leave') && str_contains($m, 'Seminar'));
+
+    $mondays = poolInspector('Monday Only', [], ['works_days' => [1]]);
+    $book($mondays)->assertStatus(422)
+        ->assertJsonPath('errors.inspector_id.0', fn (string $m) => str_contains($m, 'does not inspect on Wednesdays'));
+
+    $full = poolInspector('One A Day', [], ['max_visits_per_day' => 1]);
+    $book($full)->assertCreated();
+    // The same inspector, the same day, for a re-booking elsewhere: refused as full.
+    expect(\App\Support\InspectorSuggestion::whyNotFree($full, $day))->toContain('already has 1 of 1');
+
+    // Not a weekday, and not office hours: refused by the date rules.
+    test()->withHeaders($h)->postJson("/api/v1/applications/{$appId}/permits/SANITARY/inspection", [
+        'scheduled_at' => $day->next(CarbonImmutable::SATURDAY)->setTime(10, 0)->toIso8601String(),
+    ])->assertStatus(422);
+});

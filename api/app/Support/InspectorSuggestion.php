@@ -151,6 +151,36 @@ class InspectorSuggestion
     }
 
     /** @return Collection<int, Inspector> */
+    /**
+     * Why this inspector cannot take a visit on that day, in words, or null
+     * when they can: the same three tests the ranking above applies (works
+     * that weekday, not on leave, has room), asked of one inspector so a
+     * date or an inspector picked by hand is held to them too [client,
+     * 3 November 2026: "kung sa manually may validations … day and time and
+     * availability"]. `$except` leaves the visit being moved out of the count.
+     */
+    public static function whyNotFree(Inspector $inspector, CarbonInterface $day, ?int $except = null): ?string
+    {
+        $day = CarbonImmutable::instance($day)->setTimezone(config('app.timezone'))->startOfDay();
+        $inspector->loadMissing('leaves');
+        $label = $day->format('l, F j');
+
+        if (! $inspector->worksOn($day)) {
+            return "{$inspector->name} does not inspect on {$day->format('l')}s. Pick another day or another inspector.";
+        }
+        if ($leave = $inspector->onLeave($day)) {
+            return "{$inspector->name} is on leave on {$label}"
+                .($leave->reason ? " ({$leave->reason})" : '').'. Pick another day or another inspector.';
+        }
+        $booked = self::loads(collect([$inspector]), $day, $day, $except)[$inspector->id] ?? 0;
+        if ($booked >= $inspector->max_visits_per_day) {
+            return "{$inspector->name} already has {$booked} of {$inspector->max_visits_per_day} visits on {$label}. "
+                .'Pick another day or another inspector.';
+        }
+
+        return null;
+    }
+
     private static function pool(int $departmentId): Collection
     {
         return Inspector::query()

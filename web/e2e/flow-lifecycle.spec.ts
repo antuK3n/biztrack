@@ -425,6 +425,14 @@ async function bookOwnVisit(page: Page, narrative: Narrative) {
   // A weekday: an office books visits Monday to Friday, 8:00 AM to 5:00 PM.
   while (when.getDay() === 0 || when.getDay() === 6) when.setDate(when.getDate() + 1)
   const pad = (n: number) => String(n).padStart(2, '0')
+  /*
+   * With a pool, the card has already taken the earliest free day and its
+   * inspector (3 November 2026) and shows them folded; "Change" opens the
+   * date. Without one, the date is open from the start.
+   */
+  const change = page.getByRole('button', { name: /^Change the date or inspector of the .+ visit$/ })
+  await expect(change.or(dateField).first()).toBeVisible({ timeout: 30_000 })
+  if (await change.isVisible()) await change.click()
   await dateField.fill(
     `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T10:00`,
   )
@@ -2034,6 +2042,15 @@ test('every visit passing issues its clearance, and BPLO’s sign-off issues the
       ).toHaveCount(1)
 
       await approve.click()
+      /*
+       * Approve asks first: the OBO confirms its certificate's names
+       * (3 November 2026), every other office answers "Yes, approve".
+       */
+      await officePage
+        .getByRole('button', { name: 'Confirm names and approve' })
+        .or(officePage.getByRole('button', { name: 'Yes, approve' }))
+        .first()
+        .click()
       // The card flips to the passed state in place; nothing navigates.
       await expect(officePage.getByText('Inspection Passed').first()).toBeVisible({
         timeout: 30_000,
