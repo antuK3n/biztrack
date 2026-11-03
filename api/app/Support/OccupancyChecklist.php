@@ -2,6 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\Application;
+use App\Models\Business;
+use App\Models\PermitType;
+
 /**
  * Which "Verified & complied" lines of NBC Form B-13 a building actually
  * needs, and what its use is called [client, 28 October 2026: "Others
@@ -92,6 +96,37 @@ class OccupancyChecklist
             'lines' => $lines,
             'others' => $others,
             'use' => self::useOf($declaredUse, $lineOfBusiness, $food),
+        ];
+    }
+
+    /**
+     * The building's floor area and storeys, best source first: the OBO
+     * sheet's own answers, then the business record and the fee profile, then
+     * the BFP sheet's storeys. One reading for the certificate's AREA box,
+     * for the lines it verifies, and for the names the OBO confirms before
+     * release (InspectionController::certificateNames).
+     *
+     * @return array{area: float|null, storeys: int|null, sheet: array<string, mixed>}
+     */
+    public static function buildingOf(?Application $application, ?Business $business): array
+    {
+        $typeId = fn (string $code) => PermitType::where('code', $code)->value('id');
+        $saved = $application?->officeForms?->firstWhere('permit_type_id', $typeId('OCCUPANCY'));
+        $sheet = $application
+            ? OfficeFormAnswers::derive($application, 'OCCUPANCY', is_array($saved?->form_data) ? $saved->form_data : [])
+            : [];
+        $profile = $application?->fee_profile ?? [];
+
+        $area = collect([$sheet['total_floor_area_sqm'] ?? null, $business?->business_area_sqm, $profile['floor_area_sqm'] ?? null])
+            ->first(fn ($v) => is_numeric($v) && (float) $v > 0);
+        $fsicSheet = $application?->officeForms?->firstWhere('permit_type_id', $typeId('FSIC'))?->form_data ?? [];
+        $storeys = collect([$sheet['building_storeys'] ?? null, $fsicSheet['building_storeys'] ?? null])
+            ->first(fn ($v) => is_numeric($v) && (int) $v > 0);
+
+        return [
+            'area' => $area !== null ? (float) $area : null,
+            'storeys' => $storeys !== null ? (int) $storeys : null,
+            'sheet' => $sheet,
         ];
     }
 

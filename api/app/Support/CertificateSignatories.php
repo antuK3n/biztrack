@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Application;
+use App\Models\ApplicationPermitType;
 use App\Models\Department;
 use App\Models\OfficeSignatory;
 use App\Models\Permit;
@@ -101,6 +103,45 @@ class CertificateSignatories
             ->map(fn (OfficeSignatory $s) => ['role' => $s->role, 'name' => $s->name])
             ->values()
             ->all();
+    }
+
+    /**
+     * The rows to freeze on a permit issued now: the office's own, with the
+     * names it confirmed for THIS filing laid over them [client, 3 November
+     * 2026: the OBO confirms the names after the inspection, before the
+     * permit is released, and a change there is for that permit only]. A
+     * confirmed caption the office no longer keeps is added, so what was
+     * confirmed is what prints.
+     *
+     * @return list<array{role: string, name: string|null}>
+     */
+    public static function rowsAtIssue(Application $app, PermitType $type): array
+    {
+        $rows = self::liveRowsFor($type);
+        $confirmed = ApplicationPermitType::where('application_id', $app->id)
+            ->where('permit_type_id', $type->id)
+            ->value('confirmed_signatories');
+        if (is_string($confirmed)) {
+            $confirmed = json_decode($confirmed, true);
+        }
+        if (! is_array($confirmed) || $confirmed === []) {
+            return $rows;
+        }
+
+        $byRole = collect($confirmed)->filter(fn ($r) => is_array($r) && isset($r['role']))
+            ->mapWithKeys(fn (array $r) => [$r['role'] => $r['name'] ?? null]);
+        $rows = array_map(
+            fn (array $r) => $byRole->has($r['role']) ? ['role' => $r['role'], 'name' => $byRole[$r['role']]] : $r,
+            $rows,
+        );
+        $held = array_column($rows, 'role');
+        foreach ($byRole as $role => $name) {
+            if (! in_array($role, $held, true)) {
+                $rows[] = ['role' => $role, 'name' => $name];
+            }
+        }
+
+        return $rows;
     }
 
     /**

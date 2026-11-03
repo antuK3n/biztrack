@@ -5362,7 +5362,7 @@ class WorkflowService
                 $app->business?->fresh()?->load(['address.barangay', 'owner', 'owners', 'lines.psicCode'])
             ) + [
                 // The office's names as they stand now; see CertificateSignatories.
-                CertificateSignatories::FROZEN_KEY => CertificateSignatories::liveRowsFor($type),
+                CertificateSignatories::FROZEN_KEY => CertificateSignatories::rowsAtIssue($app, $type),
             ],
         ]);
 
@@ -6541,7 +6541,7 @@ class WorkflowService
                      * [client, 3 November 2026]: an office editing them later
                      * changes only the permits issued after the edit.
                      */
-                    CertificateSignatories::FROZEN_KEY => CertificateSignatories::liveRowsFor($type),
+                    CertificateSignatories::FROZEN_KEY => CertificateSignatories::rowsAtIssue($app, $type),
                 ],
             ],
         );
