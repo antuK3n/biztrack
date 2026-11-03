@@ -1,17 +1,24 @@
 <?php
 
+use App\Enums\PaymentMethod;
+use App\Enums\PaymentStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Business;
+use App\Models\Department;
 use App\Models\OfficeSignatory;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Support\Numbering;
 use App\Support\PermitFace;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Smalot\PdfParser\Parser;
 
 /*
@@ -558,18 +565,193 @@ it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function (
     expect([(int) round($box[2]), (int) round($box[3])])->toBe([792, 612]);
 });
 
-it('leaves the OR number blank, because only the City Treasurer issues an Official Receipt', function () {
-    /*
-     * 6 October 2026: "The system should not be able to generate an OR." The
-     * certificate printed BizTrack's payment reference on its OR line, which
-     * made the system the issuer of an Official Receipt. The line stays on
-     * the paper; the Treasurer writes the number in.
-     */
-    $permit = ownersPermit();
-    authAs('owner@biztrack.local');
+/*
+ * ── The Official Receipt on the paper ───────────────────────────────────────
+ *
+ * Four sheets print an OR line with a date beside it: the Mayor's Permit, the
+ * CENRO certificate, the FSIC and the Certificate of Occupancy. On 6 October
+ * 2026 the line was made always blank ("The system should not be able to
+ * generate an OR"), because the only number BizTrack then held was its own
+ * payment reference, and printing it made the system the issuer of an OR.
+ *
+ * Mark as paid now records the OR the City Treasurer actually issued, so a
+ * counter payment prints it and an online payment, which has none, leaves the
+ * line blank (Ken, 3 November 2026). The test that held the old rule ("leaves
+ * the OR number blank, because only the City Treasurer issues an Official
+ * Receipt") was rewritten into the online case below.
+ */
 
+/** A new filing BPLO marked paid at the counter under `$or`, dated `$orDate`; answers its Mayor's Permit. */
+function counterPaidMayorsPermit(string $or, string $orDate): Permit
+{
+    $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
+    $owner = authAs('owner@biztrack.local');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $business->id,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => [PermitType::where('code', PermitType::OUTCOME_CODE)->value('id')],
+    ])->assertCreated()->json('data.id');
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    // BPLO takes the filing, the owner sends the receipt, BPLO marks it paid against it.
+    authAs('bplo@biztrack.local');
+    $held = ApplicationAssignment::where('application_id', $appId)
+        ->where('department_id', Department::where('code', 'BPLO')->value('id'))
+        ->firstOrFail();
+    test()->postJson("/api/v1/assignments/{$held->id}/claim")->assertOk();
+
+    $receipt = ['or_number' => $or, 'or_date' => $orDate];
+    authAs('owner@biztrack.local');
+    test()->post("/api/v1/applications/{$appId}/payment-proofs", $receipt, ['Accept' => 'application/json'])
+        ->assertCreated();
+    authAs('bplo@biztrack.local');
+    test()->postJson("/api/v1/applications/{$appId}/counter-payment", $receipt)->assertCreated();
+
+    // A new filing's Mayor's Permit is released at payment.
+    return Permit::where('application_id', $appId)
+        ->whereHas('permitType', fn ($t) => $t->where('code', PermitType::OUTCOME_CODE))
+        ->firstOrFail();
+}
+
+/** Another of the filing's certificates, as its office would issue it. */
+function counterPaidSibling(Permit $mayors, string $code): Permit
+{
+    return Permit::create([
+        'permit_number' => $code.'-OR-'.random_int(100000, 999999),
+        'application_id' => $mayors->application_id,
+        'business_id' => $mayors->business_id,
+        'permit_type_id' => PermitType::where('code', $code)->value('id'),
+        'status' => $mayors->status,
+        'valid_from' => now()->toDateString(),
+        'valid_until' => now()->addYear()->toDateString(),
+        'issued_at' => now(),
+    ]);
+}
+
+it('prints the OR and the date on the receipt on the Mayor’s Permit of a filing paid at the counter', function () {
+    Storage::fake('local');
+    $orDate = now()->subDays(3)->toDateString();
+    $permit = counterPaidMayorsPermit('7031415', $orDate);
+    $onReceipt = Carbon::parse($orDate)->format('F j, Y');
+
+    authAs('owner@biztrack.local');
     $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
 
-    expect($cert)->toHaveKey('or_number')
-        ->and($cert['or_number'])->toBeNull();
+    // The date on the receipt, which BPLO typed in; not the day it pressed Mark as paid.
+    expect($cert['or_number'])->toBe('7031415')
+        ->and($cert['date_paid'])->toBe($onReceipt)
+        ->and($onReceipt)->not->toBe(now()->format('F j, Y'));
+
+    authAs('owner@biztrack.local');
+    $text = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent())->getText();
+
+    expect($text)->toContain('7031415')
+        ->and($text)->toContain($onReceipt);
+});
+
+it('prints the same OR on the filing’s CENRO certificate, FSIC and Certificate of Occupancy', function () {
+    Storage::fake('local');
+    $orDate = now()->subDay()->toDateString();
+    $mayors = counterPaidMayorsPermit('7031416', $orDate);
+    $onReceipt = Carbon::parse($orDate)->format('F j, Y');
+
+    foreach (['CEC', 'FSIC', 'OCCUPANCY'] as $code) {
+        $permit = counterPaidSibling($mayors, $code);
+
+        authAs('owner@biztrack.local');
+        $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+        expect($cert['or_number'])->toBe('7031416', $code)
+            ->and($cert['date_paid'])->toBe($onReceipt, $code);
+
+        authAs('owner@biztrack.local');
+        $text = (new Parser)->parseContent($this->get("/api/v1/permits/{$permit->id}/pdf")->assertOk()->getContent())->getText();
+        expect($text)->toContain('7031416');
+    }
+});
+
+it('leaves the OR blank on a permit paid online, which no Official Receipt was issued for', function () {
+    Storage::fake('local');
+    $filing = certificateFiling();
+    $permit = Permit::where('application_id', $filing->id)
+        ->whereHas('permitType', fn ($t) => $t->where('code', PermitType::OUTCOME_CODE))
+        ->firstOrFail();
+    $paid = Payment::where('application_id', $filing->id)->sole();
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($paid->method)->toBe(PaymentMethod::Gcash)
+        ->and($cert)->toHaveKey('or_number')
+        ->and($cert['or_number'])->toBeNull()
+        // The line beside it still says when the money landed.
+        ->and($cert['date_paid'])->toBe($paid->paid_at->format('F j, Y'));
+});
+
+it('prints the OR of the payment that settled the bill, not an online order that went through after it', function () {
+    Storage::fake('local');
+    $orDate = now()->subDays(2)->toDateString();
+    $permit = counterPaidMayorsPermit('7031417', $orDate);
+    $counter = Payment::where('application_id', $permit->application_id)->sole();
+
+    /*
+     * The KwikPay order Mark as paid set aside, paid by the owner anyway an
+     * hour later: `catchDoublePayment` books it Completed and flags it for a
+     * refund. It paid for nothing the bill still owed.
+     */
+    Payment::create([
+        'application_id' => $permit->application_id,
+        'fee_assessment_id' => $counter->fee_assessment_id,
+        'reference_number' => Numbering::paymentReference(),
+        'amount' => $counter->amount,
+        'method' => PaymentMethod::Qrph,
+        'status' => PaymentStatus::Completed,
+        'gateway' => Payment::GATEWAY_KWIKPAY,
+        'paid_at' => now()->addHour(),
+        'abandoned_at' => now(),
+        'refund_review_at' => now()->addHour(),
+    ]);
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['or_number'])->toBe('7031417')
+        ->and($cert['date_paid'])->toBe(Carbon::parse($orDate)->format('F j, Y'))
+        ->and($cert['amount_paid'])->toBe('₱'.number_format((float) $counter->amount, 2));
+});
+
+it('prints the first OR alone when a later counter payment settled a balance on the same bill', function () {
+    Storage::fake('local');
+    $firstDate = now()->subDays(5)->toDateString();
+    $permit = counterPaidMayorsPermit('7031418', $firstDate);
+    $first = Payment::where('application_id', $permit->application_id)->sole();
+
+    /*
+     * Nothing raises a balance after payment today — one bill covers every
+     * permit on the filing — but the old two-payment design did, and the
+     * payments ledger allows it. The later receipt paid for fees added after
+     * the Mayor's Permit was released under the first.
+     */
+    Payment::create([
+        'application_id' => $permit->application_id,
+        'fee_assessment_id' => $first->fee_assessment_id,
+        'reference_number' => Numbering::paymentReference(),
+        'amount' => 500,
+        'method' => PaymentMethod::Counter,
+        'status' => PaymentStatus::Completed,
+        'paid_at' => now()->addDay(),
+        'or_number' => '7031420',
+        'or_date' => now()->subDay()->toDateString(),
+    ]);
+
+    authAs('owner@biztrack.local');
+    $cert = $this->getJson("/api/v1/permits/{$permit->id}")->assertOk()->json('data.certificate');
+
+    expect($cert['or_number'])->toBe('7031418')
+        ->and($cert['date_paid'])->toBe(Carbon::parse($firstDate)->format('F j, Y'))
+        ->and($cert['amount_paid'])->toBe('₱'.number_format((float) $first->amount, 2));
 });
